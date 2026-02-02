@@ -4,9 +4,11 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/dmitrymomot/forge/internal"
+	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
 )
@@ -53,6 +55,9 @@ type (
 	// ContextExtractor extracts a slog attribute from context.
 	// Used with WithLogger to add request-scoped values to logs.
 	ContextExtractor = logger.ContextExtractor
+
+	// CookieOption configures the cookie manager.
+	CookieOption = cookie.Option
 )
 
 // Constructors
@@ -182,6 +187,20 @@ func WithCustomLogger(l *slog.Logger) Option {
 	return internal.WithCustomLogger(l)
 }
 
+// WithCookieOptions configures the cookie manager.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithCookieOptions(
+//	        forge.WithCookieSecret(os.Getenv("COOKIE_SECRET")),
+//	        forge.WithCookieSecure(true),
+//	    ),
+//	)
+func WithCookieOptions(opts ...CookieOption) Option {
+	return internal.WithCookieOptions(opts...)
+}
+
 // Health check options
 
 // WithLivenessPath sets a custom liveness endpoint path.
@@ -285,3 +304,45 @@ func ContextValue[T any](c Context, key any) T {
 	var zero T
 	return zero
 }
+
+// Cookie options
+
+// WithCookieSecret sets the secret for signing and encryption.
+// Must be at least 32 bytes.
+func WithCookieSecret(secret string) CookieOption {
+	return cookie.WithSecret(secret)
+}
+
+// WithCookieDomain sets the cookie domain.
+func WithCookieDomain(domain string) CookieOption {
+	return cookie.WithDomain(domain)
+}
+
+// WithCookiePath sets the cookie path.
+func WithCookiePath(path string) CookieOption {
+	return cookie.WithPath(path)
+}
+
+// WithCookieSecure sets the Secure flag.
+func WithCookieSecure(secure bool) CookieOption {
+	return cookie.WithSecure(secure)
+}
+
+// WithCookieHTTPOnly sets the HttpOnly flag.
+func WithCookieHTTPOnly(httpOnly bool) CookieOption {
+	return cookie.WithHTTPOnly(httpOnly)
+}
+
+// WithCookieSameSite sets the SameSite attribute.
+func WithCookieSameSite(ss http.SameSite) CookieOption {
+	return cookie.WithSameSite(ss)
+}
+
+// Cookie errors for checking return values.
+var (
+	ErrCookieNotFound  = cookie.ErrNotFound
+	ErrCookieNoSecret  = cookie.ErrNoSecret
+	ErrCookieBadSecret = cookie.ErrBadSecret
+	ErrCookieBadSig    = cookie.ErrBadSig
+	ErrCookieDecrypt   = cookie.ErrDecrypt
+)
