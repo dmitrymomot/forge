@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/go-chi/chi/v5"
@@ -42,6 +43,9 @@ type App struct {
 
 	// Logging
 	logger *slog.Logger
+
+	// Cookie management
+	cookieManager *cookie.Manager
 }
 
 // staticRoute represents a static file handler mount point.
@@ -64,8 +68,9 @@ type staticRoute struct {
 //	)
 func New(opts ...Option) *App {
 	a := &App{
-		router: chi.NewRouter(),
-		logger: logger.NewNope(), // Default: noop logger (before options)
+		router:        chi.NewRouter(),
+		logger:        logger.NewNope(), // Default: noop logger (before options)
+		cookieManager: cookie.New(),     // Default: cookie manager (no secret)
 	}
 
 	for _, opt := range opts {
@@ -139,7 +144,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger)
+		c := newContext(w, r, a.logger, a.cookieManager)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
