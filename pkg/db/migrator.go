@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,7 +13,16 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, migrationTable string, log *slog.Logger) error {
+// Default migration settings.
+const (
+	defaultMigrationsDir   = "migrations"
+	defaultMigrationsTable = "schema_migrations"
+)
+
+// Migrate runs database migrations using the embedded SQL files.
+// Uses hardcoded defaults: "migrations" directory and "schema_migrations" table.
+// Pass nil for log to disable migration logging.
+func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, log *slog.Logger) error {
 	// Bridge pgx connection pool to database/sql interface required by goose.
 	// This creates a wrapper that shares the underlying connections but provides
 	// the standard library interface that goose migration tool expects.
@@ -21,14 +31,19 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, migra
 	db := stdlib.OpenDBFromPool(pool)
 
 	goose.SetBaseFS(migrations)
+	goose.SetTableName(defaultMigrationsTable)
+
+	// Use discard logger if nil
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	goose.SetLogger(&gooseLoggerAdapter{log})
-	goose.SetTableName(migrationTable)
 
 	if err := goose.SetDialect("postgres"); err != nil {
 		return errors.Join(ErrSetDialect, err)
 	}
 
-	if err := goose.UpContext(ctx, db, "."); err != nil {
+	if err := goose.UpContext(ctx, db, defaultMigrationsDir); err != nil {
 		return errors.Join(ErrApplyMigrations, err)
 	}
 
