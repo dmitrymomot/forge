@@ -1,0 +1,107 @@
+version: "3"
+
+dotenv: [".env"]
+
+tasks:
+  db:
+    desc: Start PostgreSQL
+    cmds:
+      - docker compose up -d postgres
+
+  db:stop:
+    desc: Stop PostgreSQL
+    cmds:
+      - docker compose down
+
+  db:logs:
+    desc: Show PostgreSQL logs
+    cmds:
+      - docker compose logs -f postgres
+
+  sqlc:
+    desc: Generate sqlc code
+    cmds:
+      - sqlc generate
+
+  templ:
+    desc: Generate templ files
+    cmds:
+      - for f in views/*.templ; do templ generate -f "$f"; done
+
+  generate:
+    desc: Generate templ and sqlc files
+    aliases:
+      - gen
+      - g
+    cmds:
+      - sqlc generate
+      - templ generate
+
+  start:
+    desc: Start postgres (if needed) and run the app
+    cmds:
+      - |
+        # Check if our docker compose postgres is running
+        if docker compose ps postgres --status running -q 2>/dev/null | grep -q .; then
+          echo "Postgres container is already running."
+        # Check if port 5432 is in use (another postgres instance)
+        elif lsof -i :5432 >/dev/null 2>&1; then
+          echo "Port 5432 is already in use (external postgres assumed)."
+        else
+          echo "Starting postgres..."
+          docker compose up -d postgres
+          echo "Waiting for postgres to be ready..."
+          until docker compose exec -T postgres pg_isready -U forge -d forge_example >/dev/null 2>&1; do
+            sleep 1
+          done
+          echo "Postgres is ready!"
+        fi
+      - task: run
+
+  stop:
+    desc: Stop the app and postgres
+    cmds:
+      - |
+        # Kill app process (by name or port)
+        pkill -f "_example" 2>/dev/null || true
+        pkill -f "go run ." 2>/dev/null || true
+        # Kill anything on port 8080
+        lsof -ti :8080 | xargs kill 2>/dev/null || true
+        echo "App stopped."
+      - |
+        # Stop postgres if running via docker compose
+        if docker compose ps postgres --status running -q 2>/dev/null | grep -q .; then
+          docker compose down
+          echo "Postgres stopped."
+        else
+          echo "Postgres was not running."
+        fi
+
+  run:
+    desc: Run the example app
+    deps: [generate]
+    cmds:
+      - go run .
+
+  dev:
+    desc: Run with hot reload (requires air)
+    deps: [generate]
+    cmds:
+      - air
+
+  build:
+    desc: Build the example
+    deps: [generate]
+    cmds:
+      - go build -o bin/example .
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf bin/
+      - rm -rf views/*_templ.go
