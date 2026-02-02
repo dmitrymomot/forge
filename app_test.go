@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/dmitrymomot/forge"
+	"github.com/dmitrymomot/forge/pkg/logger"
 )
 
 // testHandler is a simple handler for testing.
@@ -360,8 +362,9 @@ func (m *mockRouter) Mount(pattern string, h http.Handler) {
 
 // mockContext implements forge.Context for testing.
 type mockContext struct {
-	w http.ResponseWriter
-	r *http.Request
+	w      http.ResponseWriter
+	r      *http.Request
+	logger *slog.Logger
 }
 
 func (c *mockContext) Request() *http.Request        { return c.r }
@@ -421,6 +424,24 @@ func (c *mockContext) Bind(v any) (forge.ValidationErrors, error)      { return 
 func (c *mockContext) BindQuery(v any) (forge.ValidationErrors, error) { return nil, nil }
 func (c *mockContext) BindJSON(v any) (forge.ValidationErrors, error)  { return nil, nil }
 func (c *mockContext) Written() bool                                   { return false }
+func (c *mockContext) Logger() *slog.Logger {
+	if c.logger == nil {
+		c.logger = logger.NewNope()
+	}
+	return c.logger
+}
+func (c *mockContext) LogDebug(msg string, attrs ...any) {
+	c.Logger().DebugContext(c.r.Context(), msg, attrs...)
+}
+func (c *mockContext) LogInfo(msg string, attrs ...any) {
+	c.Logger().InfoContext(c.r.Context(), msg, attrs...)
+}
+func (c *mockContext) LogWarn(msg string, attrs ...any) {
+	c.Logger().WarnContext(c.r.Context(), msg, attrs...)
+}
+func (c *mockContext) LogError(msg string, attrs ...any) {
+	c.Logger().ErrorContext(c.r.Context(), msg, attrs...)
+}
 
 // Integration tests using httptest.NewServer
 
@@ -525,4 +546,98 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("status = %q, want %q", data["status"], "healthy")
 		}
 	})
+}
+
+func TestContextLogging(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := &mockContext{w: w, r: r}
+
+	// Test that logging methods don't panic with noop logger
+	c.LogDebug("debug message", "key", "value")
+	c.LogInfo("info message", "key", "value")
+	c.LogWarn("warn message", "key", "value")
+	c.LogError("error message", "key", "value")
+
+	// Test Logger() returns a valid logger
+	if c.Logger() == nil {
+		t.Error("Logger() returned nil")
+	}
+}
+
+func TestWithLogger(t *testing.T) {
+	app := forge.New(
+		forge.WithLogger("test-component"),
+		forge.WithHandlers(&testHandler{message: "hello"}),
+	)
+
+	if app == nil {
+		t.Fatal("New() returned nil")
+	}
+}
+
+func TestWithCustomLogger(t *testing.T) {
+	customLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	app := forge.New(
+		forge.WithCustomLogger(customLogger),
+		forge.WithHandlers(&testHandler{message: "hello"}),
+	)
+
+	if app == nil {
+		t.Fatal("New() returned nil")
+	}
+}
+
+func TestWithCustomLoggerNil(t *testing.T) {
+	// Nil logger should be ignored (keep noop default)
+	app := forge.New(
+		forge.WithCustomLogger(nil),
+		forge.WithHandlers(&testHandler{message: "hello"}),
+	)
+
+	if app == nil {
+		t.Fatal("New() returned nil")
+	}
+}
+
+// loggingHandler tests that context logging works in handlers.
+type loggingHandler struct {
+	logged bool
+}
+
+func (h *loggingHandler) Routes(r forge.Router) {
+	r.GET("/log", h.logTest)
+}
+
+func (h *loggingHandler) logTest(c forge.Context) error {
+	c.LogInfo("test log message", "key", "value")
+	h.logged = true
+	return c.String(http.StatusOK, "logged")
+}
+
+func TestIntegrationWithLogging(t *testing.T) {
+	handler := &loggingHandler{}
+
+	app := forge.New(
+		forge.WithLogger("test"),
+		forge.WithHandlers(handler),
+	)
+
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/log")
+	if err != nil {
+		t.Fatalf("GET /log error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if !handler.logged {
+		t.Error("handler did not log")
+	}
 }
