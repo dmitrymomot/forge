@@ -458,6 +458,18 @@ func (c *mockContext) CookieEncrypted(name string) (string, error)             {
 func (c *mockContext) SetCookieEncrypted(name, value string, maxAge int) error { return nil }
 func (c *mockContext) Flash(key string, dest any) error                        { return nil }
 func (c *mockContext) SetFlash(key string, value any) error                    { return nil }
+func (c *mockContext) Session() (*forge.Session, error)                        { return nil, forge.ErrSessionNotConfigured }
+func (c *mockContext) InitSession() error                                      { return forge.ErrSessionNotConfigured }
+func (c *mockContext) AuthenticateSession(userID string) error                 { return forge.ErrSessionNotConfigured }
+func (c *mockContext) SessionValue(key string) (any, error) {
+	return nil, forge.ErrSessionNotConfigured
+}
+func (c *mockContext) SetSessionValue(key string, val any) error {
+	return forge.ErrSessionNotConfigured
+}
+func (c *mockContext) DeleteSessionValue(key string) error   { return forge.ErrSessionNotConfigured }
+func (c *mockContext) DestroySession() error                 { return forge.ErrSessionNotConfigured }
+func (c *mockContext) ResponseWriter() *forge.ResponseWriter { return nil }
 
 // Integration tests using httptest.NewServer
 
