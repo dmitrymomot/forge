@@ -8,13 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/dmitrymomot/forge/pkg/binder"
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/htmx"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/validator"
-	"github.com/go-chi/chi/v5"
 )
 
 // ValidationErrors is a collection of validation errors.
@@ -540,7 +541,10 @@ func (c *requestContext) AuthenticateSession(userID string) error {
 	}
 
 	// Get or create session
-	sess, _ := c.Session()
+	sess, err := c.Session()
+	if err != nil {
+		c.logger.WarnContext(c.Context(), "failed to load session", "error", err)
+	}
 	if sess == nil {
 		if err := c.InitSession(); err != nil {
 			return err

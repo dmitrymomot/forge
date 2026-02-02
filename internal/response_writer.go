@@ -12,12 +12,12 @@ import (
 // status codes for HTMX requests.
 type ResponseWriter struct {
 	http.ResponseWriter
+	beforeWrite []func()
 	status      int
 	size        int64
+	mu          sync.Mutex
 	written     bool
 	isHTMX      bool
-	beforeWrite []func()
-	mu          sync.Mutex
 }
 
 // NewResponseWriter creates a new ResponseWriter.
@@ -35,14 +35,6 @@ func (w *ResponseWriter) OnBeforeWrite(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.beforeWrite = append(w.beforeWrite, fn)
-}
-
-// runHooks executes all beforeWrite hooks once.
-func (w *ResponseWriter) runHooks() {
-	for _, fn := range w.beforeWrite {
-		fn()
-	}
-	w.beforeWrite = nil // Clear to prevent double execution
 }
 
 // WriteHeader sends an HTTP response header with the provided status code.

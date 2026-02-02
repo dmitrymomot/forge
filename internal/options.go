@@ -64,7 +64,7 @@ func WithStaticFiles(pattern string, fsys fs.FS, subDir string) Option {
 			fileServer.ServeHTTP(w, r)
 		})
 
-		a.staticRoutes = append(a.staticRoutes, staticRoute{pattern, handler})
+		a.staticRoutes = append(a.staticRoutes, staticRoute{handler, pattern})
 	}
 }
 
