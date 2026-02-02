@@ -49,7 +49,7 @@ func (ve ValidationErrors) Has(field string) bool {
 }
 
 func (ve ValidationErrors) Get(field string) []string {
-	var messages []string
+	messages := make([]string, 0)
 	for _, err := range ve {
 		if err.Field == field {
 			messages = append(messages, err.Message)
@@ -59,7 +59,7 @@ func (ve ValidationErrors) Get(field string) []string {
 }
 
 func (ve ValidationErrors) GetErrors(field string) []ValidationError {
-	var errors []ValidationError
+	errors := make([]ValidationError, 0)
 	for _, err := range ve {
 		if err.Field == field {
 			errors = append(errors, err)
@@ -69,7 +69,7 @@ func (ve ValidationErrors) GetErrors(field string) []ValidationError {
 }
 
 func (ve ValidationErrors) Fields() []string {
-	var fields []string
+	fields := make([]string, 0)
 	seen := make(map[string]bool)
 	for _, err := range ve {
 		if !seen[err.Field] {
