@@ -111,6 +111,14 @@ type Context interface {
 
 	// LogError logs an error message with optional attributes.
 	LogError(msg string, attrs ...any)
+
+	// Set stores a value in the request context.
+	// The value can be retrieved using Get or from c.Context().Value(key).
+	Set(key any, value any)
+
+	// Get retrieves a value from the request context.
+	// Returns nil if the key is not found.
+	Get(key any) any
 }
 
 // requestContext implements the Context interface.
@@ -320,4 +328,15 @@ func (c *requestContext) LogWarn(msg string, attrs ...any) {
 // LogError logs an error message with optional attributes.
 func (c *requestContext) LogError(msg string, attrs ...any) {
 	c.logger.ErrorContext(c.request.Context(), msg, attrs...)
+}
+
+// Set stores a value in the request context.
+func (c *requestContext) Set(key, value any) {
+	ctx := context.WithValue(c.request.Context(), key, value)
+	c.request = c.request.WithContext(ctx)
+}
+
+// Get retrieves a value from the request context.
+func (c *requestContext) Get(key any) any {
+	return c.request.Context().Value(key)
 }
