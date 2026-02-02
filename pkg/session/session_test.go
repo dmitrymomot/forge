@@ -3,208 +3,491 @@ package session
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSession_New(t *testing.T) {
-	expiresAt := time.Now().Add(24 * time.Hour)
-	sess := New("test-id", "test-token", expiresAt)
+	t.Parallel()
 
-	if sess.ID != "test-id" {
-		t.Errorf("ID = %q, want %q", sess.ID, "test-id")
-	}
-	if sess.Token != "test-token" {
-		t.Errorf("Token = %q, want %q", sess.Token, "test-token")
-	}
-	if !sess.IsNew() {
-		t.Error("IsNew() = false, want true")
-	}
-	if !sess.IsDirty() {
-		t.Error("IsDirty() = false, want true")
-	}
-	if sess.Values == nil {
-		t.Error("Values is nil")
-	}
+	t.Run("creates session with all fields initialized", func(t *testing.T) {
+		t.Parallel()
+
+		expiresAt := time.Now().Add(24 * time.Hour)
+		sess := New("test-id", "test-token", expiresAt)
+
+		assert.Equal(t, "test-id", sess.ID)
+		assert.Equal(t, "test-token", sess.Token)
+		assert.True(t, sess.IsNew())
+		assert.True(t, sess.IsDirty())
+		assert.NotNil(t, sess.Values)
+		assert.Empty(t, sess.Values)
+		assert.False(t, sess.CreatedAt.IsZero())
+		assert.False(t, sess.LastActiveAt.IsZero())
+		assert.Equal(t, expiresAt, sess.ExpiresAt)
+	})
+
+	t.Run("creates session with empty strings", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("", "", time.Time{})
+
+		assert.Equal(t, "", sess.ID)
+		assert.Equal(t, "", sess.Token)
+		assert.True(t, sess.IsNew())
+		assert.NotNil(t, sess.Values)
+	})
 }
 
 func TestSession_IsAuthenticated(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
+	t.Parallel()
 
-	if sess.IsAuthenticated() {
-		t.Error("IsAuthenticated() = true for new session, want false")
-	}
+	t.Run("returns false for new session", func(t *testing.T) {
+		t.Parallel()
 
-	userID := "user-123"
-	sess.UserID = &userID
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		assert.False(t, sess.IsAuthenticated())
+	})
 
-	if !sess.IsAuthenticated() {
-		t.Error("IsAuthenticated() = false after setting UserID, want true")
-	}
+	t.Run("returns true when UserID is set", func(t *testing.T) {
+		t.Parallel()
 
-	empty := ""
-	sess.UserID = &empty
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		userID := "user-123"
+		sess.UserID = &userID
 
-	if sess.IsAuthenticated() {
-		t.Error("IsAuthenticated() = true for empty UserID, want false")
-	}
+		assert.True(t, sess.IsAuthenticated())
+	})
+
+	t.Run("returns false for empty UserID string", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		empty := ""
+		sess.UserID = &empty
+
+		assert.False(t, sess.IsAuthenticated())
+	})
+
+	t.Run("returns false when UserID is nil", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.UserID = nil
+
+		assert.False(t, sess.IsAuthenticated())
+	})
 }
 
-func TestSession_Values(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
-	sess.ClearDirty() // Reset dirty state
+func TestSession_SetValue(t *testing.T) {
+	t.Parallel()
 
-	sess.SetValue("key", "value")
+	t.Run("sets value and marks as dirty", func(t *testing.T) {
+		t.Parallel()
 
-	if !sess.IsDirty() {
-		t.Error("SetValue should mark session as dirty")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.ClearDirty()
 
-	val, ok := sess.GetValue("key")
-	if !ok {
-		t.Error("GetValue returned ok=false for existing key")
-	}
-	if val != "value" {
-		t.Errorf("GetValue = %v, want %v", val, "value")
-	}
+		sess.SetValue("key", "value")
 
-	_, ok = sess.GetValue("nonexistent")
-	if ok {
-		t.Error("GetValue returned ok=true for nonexistent key")
-	}
+		assert.True(t, sess.IsDirty())
+		val, ok := sess.GetValue("key")
+		require.True(t, ok)
+		assert.Equal(t, "value", val)
+	})
+
+	t.Run("initializes Values map if nil", func(t *testing.T) {
+		t.Parallel()
+
+		sess := &Session{Values: nil}
+		sess.SetValue("key", "value")
+
+		require.NotNil(t, sess.Values)
+		val, ok := sess.GetValue("key")
+		require.True(t, ok)
+		assert.Equal(t, "value", val)
+	})
+
+	t.Run("overwrites existing value", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("key", "first")
+		sess.SetValue("key", "second")
+
+		val, ok := sess.GetValue("key")
+		require.True(t, ok)
+		assert.Equal(t, "second", val)
+	})
+
+	t.Run("stores nil value", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("key", nil)
+
+		val, ok := sess.GetValue("key")
+		require.True(t, ok)
+		assert.Nil(t, val)
+	})
+
+	t.Run("stores complex types", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+
+		type testStruct struct {
+			Name  string
+			Count int
+		}
+
+		expected := testStruct{Name: "test", Count: 42}
+		sess.SetValue("struct", expected)
+
+		val, ok := sess.GetValue("struct")
+		require.True(t, ok)
+		assert.Equal(t, expected, val)
+	})
+}
+
+func TestSession_GetValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns value and true for existing key", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("key", "value")
+
+		val, ok := sess.GetValue("key")
+		require.True(t, ok)
+		assert.Equal(t, "value", val)
+	})
+
+	t.Run("returns nil and false for nonexistent key", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+
+		val, ok := sess.GetValue("nonexistent")
+		assert.False(t, ok)
+		assert.Nil(t, val)
+	})
+
+	t.Run("returns nil and false when Values is nil", func(t *testing.T) {
+		t.Parallel()
+
+		sess := &Session{Values: nil}
+
+		val, ok := sess.GetValue("key")
+		assert.False(t, ok)
+		assert.Nil(t, val)
+	})
 }
 
 func TestSession_DeleteValue(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
-	sess.SetValue("key", "value")
-	sess.ClearDirty()
+	t.Parallel()
 
-	sess.DeleteValue("key")
+	t.Run("deletes value and marks as dirty", func(t *testing.T) {
+		t.Parallel()
 
-	if !sess.IsDirty() {
-		t.Error("DeleteValue should mark session as dirty")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("key", "value")
+		sess.ClearDirty()
 
-	_, ok := sess.GetValue("key")
-	if ok {
-		t.Error("GetValue returned ok=true after DeleteValue")
-	}
+		sess.DeleteValue("key")
+
+		assert.True(t, sess.IsDirty())
+		_, ok := sess.GetValue("key")
+		assert.False(t, ok)
+	})
+
+	t.Run("does nothing when Values is nil", func(t *testing.T) {
+		t.Parallel()
+
+		sess := &Session{Values: nil}
+		sess.DeleteValue("key")
+
+		assert.False(t, sess.IsDirty())
+	})
+
+	t.Run("does not mark dirty for nonexistent key", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.ClearDirty()
+
+		sess.DeleteValue("nonexistent")
+
+		assert.False(t, sess.IsDirty())
+	})
 }
 
 func TestSession_DirtyFlag(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
+	t.Parallel()
 
-	if !sess.IsDirty() {
-		t.Error("new session should be dirty")
-	}
+	t.Run("new session is dirty", func(t *testing.T) {
+		t.Parallel()
 
-	sess.ClearDirty()
-	if sess.IsDirty() {
-		t.Error("ClearDirty() should clear dirty flag")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		assert.True(t, sess.IsDirty())
+	})
 
-	sess.MarkDirty()
-	if !sess.IsDirty() {
-		t.Error("MarkDirty() should set dirty flag")
-	}
+	t.Run("ClearDirty clears flag", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.ClearDirty()
+
+		assert.False(t, sess.IsDirty())
+	})
+
+	t.Run("MarkDirty sets flag", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.ClearDirty()
+		sess.MarkDirty()
+
+		assert.True(t, sess.IsDirty())
+	})
 }
 
 func TestSession_NewFlag(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
+	t.Parallel()
 
-	if !sess.IsNew() {
-		t.Error("new session should have IsNew() = true")
-	}
+	t.Run("new session has IsNew true", func(t *testing.T) {
+		t.Parallel()
 
-	sess.ClearNew()
-	if sess.IsNew() {
-		t.Error("ClearNew() should clear new flag")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		assert.True(t, sess.IsNew())
+	})
+
+	t.Run("ClearNew clears flag", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.ClearNew()
+
+		assert.False(t, sess.IsNew())
+	})
 }
 
 func TestSession_IsExpired(t *testing.T) {
-	// Not expired
-	sess := New("id", "token", time.Now().Add(time.Hour))
-	if sess.IsExpired() {
-		t.Error("future expiry should not be expired")
-	}
+	t.Parallel()
 
-	// Expired
-	sess.ExpiresAt = time.Now().Add(-time.Hour)
-	if !sess.IsExpired() {
-		t.Error("past expiry should be expired")
-	}
+	t.Run("returns false for future expiry", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		assert.False(t, sess.IsExpired())
+	})
+
+	t.Run("returns true for past expiry", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(-time.Hour))
+		assert.True(t, sess.IsExpired())
+	})
+
+	t.Run("returns true for expiry exactly now", func(t *testing.T) {
+		t.Parallel()
+
+		// Set expiry slightly in the past to ensure it's expired
+		sess := New("id", "token", time.Now().Add(-time.Millisecond))
+		time.Sleep(2 * time.Millisecond)
+
+		assert.True(t, sess.IsExpired())
+	})
+
+	t.Run("returns false for very short future expiry", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Millisecond))
+		assert.False(t, sess.IsExpired())
+	})
 }
 
 func TestValue_TypedHelper(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
-	sess.SetValue("string", "hello")
-	sess.SetValue("int", 42)
-	sess.SetValue("bool", true)
+	t.Parallel()
 
-	// Test string
-	strVal, err := Value[string](sess, "string")
-	if err != nil {
-		t.Errorf("Value[string] error: %v", err)
-	}
-	if strVal != "hello" {
-		t.Errorf("Value[string] = %q, want %q", strVal, "hello")
-	}
+	t.Run("retrieves string value", func(t *testing.T) {
+		t.Parallel()
 
-	// Test int
-	intVal, err := Value[int](sess, "int")
-	if err != nil {
-		t.Errorf("Value[int] error: %v", err)
-	}
-	if intVal != 42 {
-		t.Errorf("Value[int] = %d, want %d", intVal, 42)
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("string", "hello")
 
-	// Test bool
-	boolVal, err := Value[bool](sess, "bool")
-	if err != nil {
-		t.Errorf("Value[bool] error: %v", err)
-	}
-	if !boolVal {
-		t.Error("Value[bool] = false, want true")
-	}
+		val, err := Value[string](sess, "string")
+		require.NoError(t, err)
+		assert.Equal(t, "hello", val)
+	})
 
-	// Test type mismatch
-	_, err = Value[int](sess, "string")
-	if err == nil {
-		t.Error("Value[int] on string should return error")
-	}
+	t.Run("retrieves int value", func(t *testing.T) {
+		t.Parallel()
 
-	// Test nonexistent key
-	_, err = Value[string](sess, "nonexistent")
-	if err == nil {
-		t.Error("Value on nonexistent key should return error")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("int", 42)
 
-	// Test nil session
-	_, err = Value[string](nil, "key")
-	if err != ErrNotFound {
-		t.Errorf("Value on nil session should return ErrNotFound, got %v", err)
-	}
+		val, err := Value[int](sess, "int")
+		require.NoError(t, err)
+		assert.Equal(t, 42, val)
+	})
+
+	t.Run("retrieves bool value", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("bool", true)
+
+		val, err := Value[bool](sess, "bool")
+		require.NoError(t, err)
+		assert.True(t, val)
+	})
+
+	t.Run("returns error for type mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("string", "hello")
+
+		_, err := Value[int](sess, "string")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "type mismatch")
+	})
+
+	t.Run("returns ErrNotFound for nonexistent key", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+
+		_, err := Value[string](sess, "nonexistent")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("returns ErrNotFound for nil session", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Value[string](nil, "key")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("retrieves complex struct type", func(t *testing.T) {
+		t.Parallel()
+
+		type User struct {
+			ID    string
+			Email string
+		}
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		expected := User{ID: "123", Email: "test@example.com"}
+		sess.SetValue("user", expected)
+
+		val, err := Value[User](sess, "user")
+		require.NoError(t, err)
+		assert.Equal(t, expected, val)
+	})
+
+	t.Run("retrieves slice type", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		expected := []string{"a", "b", "c"}
+		sess.SetValue("slice", expected)
+
+		val, err := Value[[]string](sess, "slice")
+		require.NoError(t, err)
+		assert.Equal(t, expected, val)
+	})
+
+	t.Run("retrieves map type", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		expected := map[string]int{"a": 1, "b": 2}
+		sess.SetValue("map", expected)
+
+		val, err := Value[map[string]int](sess, "map")
+		require.NoError(t, err)
+		assert.Equal(t, expected, val)
+	})
+
+	t.Run("handles nil stored value", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("nil", nil)
+
+		// This should fail type assertion since nil cannot be asserted to string
+		_, err := Value[string](sess, "nil")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "type mismatch")
+	})
 }
 
 func TestValueOr_TypedHelper(t *testing.T) {
-	sess := New("id", "token", time.Now().Add(time.Hour))
-	sess.SetValue("exists", "value")
+	t.Parallel()
 
-	// Existing key
-	val := ValueOr(sess, "exists", "default")
-	if val != "value" {
-		t.Errorf("ValueOr = %q, want %q", val, "value")
-	}
+	t.Run("returns existing value", func(t *testing.T) {
+		t.Parallel()
 
-	// Nonexistent key
-	val = ValueOr(sess, "nonexistent", "default")
-	if val != "default" {
-		t.Errorf("ValueOr for nonexistent = %q, want %q", val, "default")
-	}
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("exists", "value")
 
-	// Type mismatch
-	intVal := ValueOr(sess, "exists", 42)
-	if intVal != 42 {
-		t.Errorf("ValueOr for type mismatch = %d, want %d", intVal, 42)
-	}
+		val := ValueOr(sess, "exists", "default")
+		assert.Equal(t, "value", val)
+	})
+
+	t.Run("returns default for nonexistent key", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+
+		val := ValueOr(sess, "nonexistent", "default")
+		assert.Equal(t, "default", val)
+	})
+
+	t.Run("returns default for type mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		sess.SetValue("exists", "string value")
+
+		val := ValueOr(sess, "exists", 42)
+		assert.Equal(t, 42, val)
+	})
+
+	t.Run("returns default for nil session", func(t *testing.T) {
+		t.Parallel()
+
+		val := ValueOr[string](nil, "key", "default")
+		assert.Equal(t, "default", val)
+	})
+
+	t.Run("returns zero value as default", func(t *testing.T) {
+		t.Parallel()
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+
+		val := ValueOr(sess, "nonexistent", 0)
+		assert.Equal(t, 0, val)
+	})
+
+	t.Run("works with complex types", func(t *testing.T) {
+		t.Parallel()
+
+		type Config struct {
+			Enabled bool
+		}
+
+		sess := New("id", "token", time.Now().Add(time.Hour))
+		expected := Config{Enabled: true}
+		sess.SetValue("config", expected)
+
+		val := ValueOr(sess, "config", Config{Enabled: false})
+		assert.Equal(t, expected, val)
+	})
 }
