@@ -11,13 +11,13 @@ type RunOption func(*runConfig)
 
 // runConfig holds runtime configuration for the server.
 type runConfig struct {
-	address         string
+	baseCtx         context.Context
 	logger          *slog.Logger
-	shutdownTimeout time.Duration
-	shutdownHooks   []func(context.Context) error
 	domains         map[string]*App
 	fallback        *App
-	baseCtx         context.Context
+	address         string
+	shutdownHooks   []func(context.Context) error
+	shutdownTimeout time.Duration
 }
 
 // buildRunConfig creates a runConfig from the provided options.

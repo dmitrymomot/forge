@@ -5,10 +5,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
-	"github.com/go-chi/chi/v5"
 )
 
 // Default server timeouts (hardcoded, opinionated).
@@ -26,9 +27,6 @@ const (
 // App is immutable after creation - all configuration is done via New().
 type App struct {
 	router                  chi.Router
-	middlewares             []Middleware
-	handlers                []Handler
-	staticRoutes            []staticRoute
 	errorHandler            ErrorHandler
 	notFoundHandler         HandlerFunc
 	methodNotAllowedHandler HandlerFunc
@@ -36,12 +34,15 @@ type App struct {
 	logger                  *slog.Logger
 	cookieManager           *cookie.Manager
 	sessionManager          *SessionManager
+	middlewares             []Middleware
+	handlers                []Handler
+	staticRoutes            []staticRoute
 }
 
 // staticRoute represents a static file handler mount point.
 type staticRoute struct {
-	pattern string
 	handler http.Handler
+	pattern string
 }
 
 // New creates a new application with the given options.
@@ -156,9 +157,9 @@ func (a *App) handleError(c Context, err error) {
 
 // healthConfig holds health check endpoint configuration.
 type healthConfig struct {
+	checks        health.Checks
 	livenessPath  string
 	readinessPath string
-	checks        health.Checks
 }
 
 // Default health check paths.

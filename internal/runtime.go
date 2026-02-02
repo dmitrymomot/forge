@@ -16,11 +16,11 @@ import (
 // runtimeConfig holds configuration for running the HTTP server.
 type runtimeConfig struct {
 	handler         http.Handler
-	address         string
-	logger          *slog.Logger
-	shutdownTimeout time.Duration
-	shutdownHooks   []func(context.Context) error
 	baseCtx         context.Context
+	logger          *slog.Logger
+	address         string
+	shutdownHooks   []func(context.Context) error
+	shutdownTimeout time.Duration
 }
 
 // runServer starts the HTTP server and blocks until shutdown.

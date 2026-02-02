@@ -2,6 +2,7 @@ package internal
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -104,8 +105,9 @@ func (r *routerAdapter) Mount(pattern string, h http.Handler) {
 
 func (r *routerAdapter) wrap(h HandlerFunc, mw ...Middleware) http.HandlerFunc {
 	// Apply route-specific middleware in reverse order (last registered = first executed)
-	for i := len(mw) - 1; i >= 0; i-- {
-		h = mw[i](h)
+	slices.Reverse(mw)
+	for _, m := range mw {
+		h = m(h)
 	}
 	return r.adaptHandler(h)
 }
