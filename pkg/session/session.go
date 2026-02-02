@@ -7,16 +7,17 @@ import (
 
 // Session represents a user session with metadata and arbitrary values.
 type Session struct {
-	ID           string         // Unique identifier (typically UUID)
-	Token        string         // Cookie token (different from ID for security)
-	UserID       *string        // nil = anonymous session
-	IP           string         // Client IP address
-	UserAgent    string         // Raw User-Agent header
-	Device       string         // Parsed device info (e.g., "Chrome on macOS")
-	Values       map[string]any // Arbitrary session data
 	CreatedAt    time.Time
 	LastActiveAt time.Time
 	ExpiresAt    time.Time
+
+	UserID    *string        // nil = anonymous session
+	Values    map[string]any // Arbitrary session data
+	ID        string         // Unique identifier (typically UUID)
+	Token     string         // Cookie token (different from ID for security)
+	IP        string         // Client IP address
+	UserAgent string         // Raw User-Agent header
+	Device    string         // Parsed device info (e.g., "Chrome on macOS")
 
 	dirty bool // tracks if session needs saving
 	isNew bool // tracks if session was just created
@@ -62,9 +63,12 @@ func (s *Session) GetValue(key string) (any, bool) {
 }
 
 // DeleteValue removes a value from the session.
-// Marks the session as dirty for automatic saving.
+// Marks the session as dirty only if the key existed.
 func (s *Session) DeleteValue(key string) {
-	if s.Values != nil {
+	if s.Values == nil {
+		return
+	}
+	if _, exists := s.Values[key]; exists {
 		delete(s.Values, key)
 		s.dirty = true
 	}
@@ -112,7 +116,7 @@ func Value[T any](s *Session, key string) (T, error) {
 
 	val, ok := s.GetValue(key)
 	if !ok {
-		return zero, errors.New("session: key not found: " + key)
+		return zero, ErrNotFound
 	}
 
 	typed, ok := val.(T)
