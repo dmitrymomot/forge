@@ -8,6 +8,7 @@ import (
 
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/logger"
 )
 
 // Type aliases - public API
@@ -48,6 +49,10 @@ type (
 
 	// HealthOption configures health check endpoints.
 	HealthOption = internal.HealthOption
+
+	// ContextExtractor extracts a slog attribute from context.
+	// Used with WithLogger to add request-scoped values to logs.
+	ContextExtractor = logger.ContextExtractor
 )
 
 // Constructors
@@ -149,6 +154,32 @@ func WithMethodNotAllowedHandler(h HandlerFunc) Option {
 //	)
 func WithHealthChecks(opts ...HealthOption) Option {
 	return internal.WithHealthChecks(opts...)
+}
+
+// WithLogger creates a logger with a component name and optional extractors.
+// The component name is added to every log entry for easy filtering.
+// Extractors pull values from context (e.g., request_id, user_id).
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithLogger("api", requestIDExtractor, userIDExtractor),
+//	)
+func WithLogger(component string, extractors ...ContextExtractor) Option {
+	return internal.WithLogger(component, extractors...)
+}
+
+// WithCustomLogger sets a fully custom logger.
+// Use this when you need complete control over logging configuration.
+//
+// Example:
+//
+//	customLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+//	forge.New(
+//	    forge.WithCustomLogger(customLogger),
+//	)
+func WithCustomLogger(l *slog.Logger) Option {
+	return internal.WithCustomLogger(l)
 }
 
 // Health check options
