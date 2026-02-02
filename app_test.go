@@ -5,12 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/dmitrymomot/forge"
 )
@@ -70,11 +67,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewWithOptions(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	app := forge.New(
-		forge.WithLogger(logger),
-		forge.WithAddress(":9090"),
-		forge.WithShutdownTimeout(10*time.Second),
+		forge.WithHandlers(&testHandler{message: "test"}),
+		forge.WithMiddleware(testMiddleware("X-Test", "value")),
 	)
 	if app == nil {
 		t.Fatal("New() returned nil")
@@ -129,47 +124,6 @@ func TestMiddleware(t *testing.T) {
 	}
 	if !called {
 		t.Error("middleware was not called")
-	}
-}
-
-func TestShutdownHook(t *testing.T) {
-	var hookCalled atomic.Bool
-
-	app := forge.New(
-		forge.WithAddress(":0"), // random port
-		forge.WithShutdownHook(func(ctx context.Context) error {
-			hookCalled.Store(true)
-			return nil
-		}),
-		forge.WithShutdownTimeout(1*time.Second),
-	)
-
-	// Start the app in a goroutine
-	done := make(chan error, 1)
-	go func() {
-		done <- app.Run()
-	}()
-
-	// Give it time to start
-	time.Sleep(50 * time.Millisecond)
-
-	// Stop it
-	if err := app.Stop(); err != nil {
-		t.Fatalf("Stop() error: %v", err)
-	}
-
-	// Wait for Run to return
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run() error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for Run to complete")
-	}
-
-	if !hookCalled.Load() {
-		t.Error("shutdown hook was not called")
 	}
 }
 
@@ -468,24 +422,19 @@ func (c *mockContext) BindQuery(v any) (forge.ValidationErrors, error) { return 
 func (c *mockContext) BindJSON(v any) (forge.ValidationErrors, error)  { return nil, nil }
 func (c *mockContext) Written() bool                                   { return false }
 
-// Integration tests
+// Integration tests using httptest.NewServer
 
 func TestIntegration(t *testing.T) {
 	app := forge.New(
-		forge.WithAddress(":0"), // random port
 		forge.WithHandlers(&testHandler{message: "hello"}),
 		forge.WithMiddleware(testMiddleware("X-Test", "test-value")),
 	)
 
-	// Start the app
-	done := make(chan error, 1)
-	go func() {
-		done <- app.Run()
-	}()
+	// Use httptest.NewServer with the app's router for testing
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
 
-	// Wait for server to start and get address
-	time.Sleep(50 * time.Millisecond)
-	baseURL := "http://" + app.Addr()
+	baseURL := ts.URL
 
 	// Make requests
 	t.Run("GET /", func(t *testing.T) {
@@ -576,19 +525,4 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("status = %q, want %q", data["status"], "healthy")
 		}
 	})
-
-	// Stop the app
-	if err := app.Stop(); err != nil {
-		t.Fatalf("Stop() error: %v", err)
-	}
-
-	// Wait for Run to return
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run() error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for Run to complete")
-	}
 }
