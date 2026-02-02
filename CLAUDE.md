@@ -8,6 +8,15 @@ Forge is a Go framework and template repository for building B2B micro-SaaS appl
 
 **Status:** Concept stage — architecture documented, implementation pending.
 
+## Commands
+
+```bash
+make test    # Run tests with race detection and coverage
+make bench   # Run benchmarks
+make lint    # Run all linters (vet, golangci-lint, nilaway, betteralign, modernize)
+make fmt     # Format code and organize imports
+```
+
 ## Tech Stack
 
 - Go 1.25+
@@ -19,23 +28,23 @@ Forge is a Go framework and template repository for building B2B micro-SaaS appl
 - templ or html/template for SSR
 - Tailwind CSS
 
-## Planned Architecture
+## Architecture
 
 ```
-forge/                          # This repository (framework + template)
+forge/
 ├── pkg/                        # Importable runtime packages
-│   ├── app/                    # Bootstrap, config, lifecycle
-│   ├── web/                    # Router, context, middleware types
-│   ├── db/                     # Connection, transactions
-│   ├── mail/                   # Mailer interface + SMTP
-│   ├── task/                   # Queue + scheduled (both via River)
-│   ├── auth/                   # Password hashing, tokens
-│   └── validate/               # Validation helpers
-├── cmd/app/                    # Application entry point
-├── config/                     # Configuration
-├── db/                         # Migrations and queries
-├── internal/                   # Application code (handlers, tasks, etc.)
-└── web/                        # Templates and static assets
+│   ├── binder/                 # Request binding (form, JSON, query)
+│   ├── cookie/                 # Cookie helpers
+│   ├── db/                     # Database connection, transactions
+│   ├── health/                 # Health check endpoints
+│   ├── hostrouter/             # Multi-domain routing
+│   ├── htmx/                   # HTMX response helpers
+│   ├── id/                     # ID generation (UUID, etc.)
+│   ├── logger/                 # Structured logging with slog
+│   ├── sanitizer/              # HTML sanitization
+│   ├── session/                # Session management
+│   └── validator/              # Input validation
+└── examples/                   # Usage examples
 ```
 
 ## Design Principles
@@ -59,3 +68,20 @@ Background tasks use River with type-safe payloads. Scheduled tasks use cron syn
 ### Middleware Pattern
 
 Standard `func(next) next` pattern using repo types directly.
+
+## Go Tools
+
+Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
+
+- `golangci-lint` — linter aggregator
+- `nilaway` — nil safety analysis
+- `betteralign` — struct field alignment
+- `goimports` — import organization
+- `modernize` — Go idiom updates
+- `mockery` — mock generation
+
+## Gotchas
+
+- **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
+- **Struct alignment:** `betteralign` may reorder struct fields for memory efficiency
+- **Examples excluded:** `make lint` excludes `examples/` from modernize checks
