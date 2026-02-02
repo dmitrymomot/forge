@@ -1,60 +1,39 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	"github.com/dmitrymomot/forge"
-	"github.com/dmitrymomot/forge/examples/multi-domain/handlers"
-	"github.com/dmitrymomot/forge/examples/multi-domain/middleware"
 	"github.com/dmitrymomot/forge/pkg/logger"
 )
 
 func main() {
-	slog := logger.New()
+	slog := logger.New().With("app", "multi-domain-example")
 
-	// Create API app (for api.lvh.me)
-	api := forge.New(
-		forge.WithMiddleware(jsonContentType),
-		forge.WithHandlers(handlers.NewAPIHandler()),
-	)
-
-	// Create tenant app (for *.lvh.me wildcard)
-	tenant := forge.New(
-		forge.WithMiddleware(middleware.TenantExtractor),
-		forge.WithHandlers(handlers.NewTenantHandler()),
-	)
-
-	// Create landing app (fallback for unmatched hosts)
 	landing := forge.New(
-		forge.WithHandlers(handlers.NewLandingHandler()),
+		forge.WithCustomLogger(slog.With("service", "landing")),
+		forge.WithHandlers(&landingHandler{}),
 	)
 
-	// Run the multi-domain server
+	api := forge.New(
+		forge.WithCustomLogger(slog.With("service", "api")),
+		forge.WithHandlers(&apiHandler{}),
+	)
+
+	tenant := forge.New(
+		forge.WithCustomLogger(slog.With("service", "tenant")),
+		forge.WithMiddleware(tenantMiddleware),
+		forge.WithHandlers(&tenantHandler{}),
+	)
+
 	if err := forge.Run(
 		forge.Domain("api.lvh.me", api),
 		forge.Domain("*.lvh.me", tenant),
 		forge.Fallback(landing),
-		forge.Address(getEnv("ADDRESS", ":8081")),
-		forge.Logger(slog),
+		forge.Address(":8081"),
+		forge.Logger(slog.With("service", "forge")),
 	); err != nil {
-		log.Printf("application error: %v", err)
+		slog.Error("for example app running is failed", "err", err)
 		os.Exit(1)
 	}
-}
-
-// jsonContentType is middleware that sets Content-Type to application/json.
-func jsonContentType(next forge.HandlerFunc) forge.HandlerFunc {
-	return func(c forge.Context) error {
-		c.SetHeader("Content-Type", "application/json")
-		return next(c)
-	}
-}
-
-// getEnv returns environment variable value or default if not set.
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
