@@ -21,7 +21,6 @@ make fmt     # Format code and organize imports
 
 - Go 1.25+
 - PostgreSQL with pgx/v5
-- sqlc for type-safe SQL queries
 - Goose for migrations
 - chi/v5 router
 - River for background/scheduled tasks (Postgres-native queue)
@@ -32,25 +31,28 @@ make fmt     # Format code and organize imports
 
 ```
 forge/
-├── pkg/                        # Importable runtime packages
-│   ├── binder/                 # Request binding (form, JSON, query)
+├── forge.go                    # Public API entry point (re-exports internal types)
+├── internal/                   # Core framework types (App, Context, Router, Handler)
+├── pkg/                        # Importable utility packages
+│   ├── binder/                 # Request binding (form, JSON, query, path)
 │   ├── cookie/                 # Cookie helpers
-│   ├── db/                     # Database connection, transactions
+│   ├── db/                     # Database connection, transactions, migrations
 │   ├── health/                 # Health check endpoints
 │   ├── hostrouter/             # Multi-domain routing
 │   ├── htmx/                   # HTMX response helpers
 │   ├── id/                     # ID generation (UUID, etc.)
 │   ├── logger/                 # Structured logging with slog
-│   ├── sanitizer/              # HTML sanitization
+│   ├── sanitizer/              # Input sanitization (strings, HTML, collections)
 │   ├── session/                # Session management
-│   └── validator/              # Input validation
-└── examples/                   # Usage examples
+│   └── validator/              # Input validation with struct tags
+└── examples/                   # Usage examples (full-app, multi-domain, simple)
 ```
+
+**Type aliasing pattern:** `forge.go` re-exports types from `internal/` as the public API. Import `github.com/dmitrymomot/forge` for `App`, `Context`, `Router`, `Handler`, etc.
 
 ## Design Principles
 
 - **No magic:** Explicit code, no reflection, no service containers
-- **SQL-first:** Use sqlc-generated types directly (no internal/models layer)
 - **Flat handlers:** Business logic lives in handlers, extract to services only when shared between handlers and tasks
 - **Constructor injection:** Explicit wiring in main.go, all dependencies visible
 - **Explicit over implicit:** Favor clear, readable code over clever abstractions
@@ -80,6 +82,22 @@ Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
 - `modernize` — Go idiom updates
 - `mockery` — mock generation
 
+## Testing
+
+```bash
+go test -v ./pkg/validator/...              # Test specific package
+go test -v -run TestValidate ./pkg/...      # Run tests matching pattern
+go test -race -cover ./...                  # Full test suite (same as make test)
+```
+
+For integration tests, use `httptest.NewServer` with `app.Router()`:
+
+```go
+app := forge.New(forge.WithHandlers(myHandler))
+ts := httptest.NewServer(app.Router())
+defer ts.Close()
+```
+
 ## Gotchas
 
 - **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
@@ -87,4 +105,5 @@ Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
 - **Examples excluded:** `make lint` excludes `examples/` from modernize checks
 - **Build to /dev/null:** Never `go build` into repo; use `go build -o /dev/null ./...` to verify compilation
 - **Validator tags:** Use semicolons as separators, colons for params: `validate:"required;max:100"` (not commas)
+- **Sanitizer tags:** Use semicolons as separators: `sanitize:"trim;lowercase"` (same pattern as validator)
 - **Framework, not template:** Forge is an importable library; template repos are separate and unknown to this codebase
