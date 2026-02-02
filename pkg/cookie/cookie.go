@@ -25,12 +25,12 @@ var (
 
 // Manager handles cookie operations.
 type Manager struct {
-	secret   []byte // nil = no encryption/signing
 	domain   string
 	path     string
+	secret   []byte // nil = no encryption/signing
+	sameSite http.SameSite
 	secure   bool
 	httpOnly bool
-	sameSite http.SameSite
 }
 
 // Option configures the Manager.
