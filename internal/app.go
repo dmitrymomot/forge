@@ -46,6 +46,9 @@ type App struct {
 
 	// Cookie management
 	cookieManager *cookie.Manager
+
+	// Session management (optional)
+	sessionManager *SessionManager
 }
 
 // staticRoute represents a static file handler mount point.
@@ -144,7 +147,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger, a.cookieManager)
+		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}

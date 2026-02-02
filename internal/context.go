@@ -12,6 +12,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/htmx"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
+	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/validator"
 	"github.com/go-chi/chi/v5"
 )
@@ -153,24 +154,72 @@ type Context interface {
 	// SetFlash sets a flash message.
 	// Returns cookie.ErrNoSecret if no secret is configured.
 	SetFlash(key string, value any) error
+
+	// Session returns the current session, loading or creating it as needed.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Returns nil, nil if no session exists and lazy loading is disabled.
+	Session() (*session.Session, error)
+
+	// InitSession creates a new session for this request.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	InitSession() error
+
+	// AuthenticateSession associates a user with the session and rotates the token.
+	// Creates a new session if one doesn't exist.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	AuthenticateSession(userID string) error
+
+	// SessionValue retrieves a typed value from the session.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Returns session.ErrNotFound if no session exists.
+	SessionValue(key string) (any, error)
+
+	// SetSessionValue stores a value in the session.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Returns session.ErrNotFound if no session exists.
+	SetSessionValue(key string, val any) error
+
+	// DeleteSessionValue removes a value from the session.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Returns session.ErrNotFound if no session exists.
+	DeleteSessionValue(key string) error
+
+	// DestroySession removes the session and clears the cookie.
+	// Returns session.ErrNotConfigured if WithSession was not called.
+	DestroySession() error
+
+	// ResponseWriter returns the underlying ResponseWriter for advanced usage.
+	// Returns nil if not using the wrapped response writer.
+	ResponseWriter() *ResponseWriter
 }
 
 // requestContext implements the Context interface.
 type requestContext struct {
-	request       *http.Request
-	response      http.ResponseWriter
-	written       bool
-	logger        *slog.Logger
-	cookieManager *cookie.Manager
+	request        *http.Request
+	response       http.ResponseWriter
+	responseWriter *ResponseWriter
+	logger         *slog.Logger
+	cookieManager  *cookie.Manager
+
+	// Session management
+	sessionManager        *SessionManager
+	session               *session.Session
+	sessionLoaded         bool
+	sessionHookRegistered bool
 }
 
-// newContext creates a new context.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager) *requestContext {
+// newContext creates a new context with the response wrapper.
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager) *requestContext {
+	// Create response wrapper
+	rw := NewResponseWriter(w, htmx.IsHTMX(r))
+
 	return &requestContext{
-		request:       r,
-		response:      w,
-		logger:        logger,
-		cookieManager: cm,
+		request:        r,
+		response:       rw,
+		responseWriter: rw,
+		logger:         logger,
+		cookieManager:  cm,
+		sessionManager: sm,
 	}
 }
 
@@ -222,7 +271,6 @@ func (c *requestContext) SetHeader(name, value string) {
 func (c *requestContext) JSON(code int, v any) error {
 	c.response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.response.WriteHeader(code)
-	c.written = true
 	return json.NewEncoder(c.response).Encode(v)
 }
 
@@ -230,7 +278,6 @@ func (c *requestContext) JSON(code int, v any) error {
 func (c *requestContext) String(code int, s string) error {
 	c.response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.response.WriteHeader(code)
-	c.written = true
 	_, err := c.response.Write([]byte(s))
 	return err
 }
@@ -238,21 +285,18 @@ func (c *requestContext) String(code int, s string) error {
 // NoContent writes a response with no body.
 func (c *requestContext) NoContent(code int) error {
 	c.response.WriteHeader(code)
-	c.written = true
 	return nil
 }
 
 // Redirect redirects to the given URL with the given status code.
 // Handles both regular HTTP redirects and HTMX requests.
 func (c *requestContext) Redirect(code int, url string) error {
-	c.written = true
 	htmx.RedirectWithStatus(c.response, c.request, url, code)
 	return nil
 }
 
 // Error writes an error response.
 func (c *requestContext) Error(code int, message string) error {
-	c.written = true
 	http.Error(c.response, message, code)
 	return nil
 }
@@ -263,15 +307,11 @@ func (c *requestContext) IsHTMX() bool {
 }
 
 // Render renders a component with the given status code.
-// For HTMX requests: always uses HTTP 200 (HTMX requires 2xx for swapping).
+// For HTMX requests: the ResponseWriter transforms non-200 to 200.
 // For regular requests: uses the provided status code.
 func (c *requestContext) Render(code int, component Component) error {
 	c.response.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if htmx.IsHTMX(c.request) {
-		code = http.StatusOK
-	}
 	c.response.WriteHeader(code)
-	c.written = true
 	return component.Render(c.request.Context(), c.response)
 }
 
@@ -338,7 +378,7 @@ func (c *requestContext) BindJSON(v any) (ValidationErrors, error) {
 
 // Written returns true if a response has already been written.
 func (c *requestContext) Written() bool {
-	return c.written
+	return c.responseWriter.Written()
 }
 
 // Logger returns the logger for advanced usage.
@@ -420,4 +460,181 @@ func (c *requestContext) Flash(key string, dest any) error {
 // SetFlash sets a flash message.
 func (c *requestContext) SetFlash(key string, value any) error {
 	return c.cookieManager.SetFlash(c.response, key, value)
+}
+
+// registerSessionHook ensures the session flush hook is registered once.
+// This is called lazily when the session is first accessed.
+func (c *requestContext) registerSessionHook() {
+	if c.sessionHookRegistered || c.sessionManager == nil || c.responseWriter == nil {
+		return
+	}
+	c.sessionHookRegistered = true
+	c.responseWriter.OnBeforeWrite(func() {
+		if c.session != nil && c.session.IsDirty() {
+			// Best-effort save; errors are logged but not propagated
+			if err := c.sessionManager.Store().Update(c.Context(), c.session); err != nil {
+				c.logger.ErrorContext(c.Context(), "failed to save session", "error", err)
+				return
+			}
+			c.session.ClearDirty()
+		}
+	})
+}
+
+// Session returns the current session, loading it from the store if needed.
+// Returns session.ErrNotConfigured if WithSession was not called.
+func (c *requestContext) Session() (*session.Session, error) {
+	if c.sessionManager == nil {
+		return nil, session.ErrNotConfigured
+	}
+
+	// Register flush hook (lazy, only once)
+	c.registerSessionHook()
+
+	// Return cached session if already loaded
+	if c.sessionLoaded {
+		return c.session, nil
+	}
+
+	// Load from store
+	sess, err := c.sessionManager.LoadSession(c.Context(), c.request)
+	if err != nil {
+		return nil, err
+	}
+
+	c.session = sess
+	c.sessionLoaded = true
+	return c.session, nil
+}
+
+// InitSession creates a new session for this request.
+// Returns session.ErrNotConfigured if WithSession was not called.
+func (c *requestContext) InitSession() error {
+	if c.sessionManager == nil {
+		return session.ErrNotConfigured
+	}
+
+	// Register flush hook (lazy, only once)
+	c.registerSessionHook()
+
+	sess, err := c.sessionManager.CreateSession(c.Context(), c.request)
+	if err != nil {
+		return err
+	}
+
+	c.session = sess
+	c.sessionLoaded = true
+	c.sessionManager.SaveSession(c.response, sess)
+	return nil
+}
+
+// AuthenticateSession associates a user with the session and rotates the token.
+// Creates a new session if one doesn't exist.
+// Returns session.ErrNotConfigured if WithSession was not called.
+func (c *requestContext) AuthenticateSession(userID string) error {
+	if c.sessionManager == nil {
+		return session.ErrNotConfigured
+	}
+
+	// Get or create session
+	sess, _ := c.Session()
+	if sess == nil {
+		if err := c.InitSession(); err != nil {
+			return err
+		}
+		sess = c.session
+	}
+
+	// Set user ID
+	sess.UserID = &userID
+	sess.MarkDirty()
+
+	// CRITICAL: Rotate token to prevent session fixation attacks
+	if err := c.sessionManager.RotateToken(c.Context(), sess); err != nil {
+		return err
+	}
+
+	// Update cookie with new token
+	c.sessionManager.SaveSession(c.response, sess)
+	return nil
+}
+
+// SessionValue retrieves a value from the session.
+// Returns session.ErrNotConfigured if WithSession was not called.
+// Returns session.ErrNotFound if no session exists.
+func (c *requestContext) SessionValue(key string) (any, error) {
+	sess, err := c.Session()
+	if err != nil {
+		return nil, err
+	}
+	if sess == nil {
+		return nil, session.ErrNotFound
+	}
+
+	val, ok := sess.GetValue(key)
+	if !ok {
+		return nil, nil
+	}
+	return val, nil
+}
+
+// SetSessionValue stores a value in the session.
+// Returns session.ErrNotConfigured if WithSession was not called.
+// Returns session.ErrNotFound if no session exists.
+func (c *requestContext) SetSessionValue(key string, val any) error {
+	sess, err := c.Session()
+	if err != nil {
+		return err
+	}
+	if sess == nil {
+		return session.ErrNotFound
+	}
+
+	sess.SetValue(key, val)
+	return nil
+}
+
+// DeleteSessionValue removes a value from the session.
+// Returns session.ErrNotConfigured if WithSession was not called.
+// Returns session.ErrNotFound if no session exists.
+func (c *requestContext) DeleteSessionValue(key string) error {
+	sess, err := c.Session()
+	if err != nil {
+		return err
+	}
+	if sess == nil {
+		return session.ErrNotFound
+	}
+
+	sess.DeleteValue(key)
+	return nil
+}
+
+// DestroySession removes the session and clears the cookie.
+// Returns session.ErrNotConfigured if WithSession was not called.
+func (c *requestContext) DestroySession() error {
+	if c.sessionManager == nil {
+		return session.ErrNotConfigured
+	}
+
+	// Delete from store if we have a session
+	if c.session != nil {
+		if err := c.sessionManager.Store().Delete(c.Context(), c.session.ID); err != nil {
+			return err
+		}
+	}
+
+	// Clear cookie
+	c.sessionManager.DeleteSession(c.response)
+
+	// Clear cached session
+	c.session = nil
+	c.sessionLoaded = true // Mark as loaded (with nil) to prevent reload
+
+	return nil
+}
+
+// ResponseWriter returns the underlying ResponseWriter for advanced usage.
+func (c *requestContext) ResponseWriter() *ResponseWriter {
+	return c.responseWriter
 }

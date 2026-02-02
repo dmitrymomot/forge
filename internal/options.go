@@ -9,6 +9,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
+	"github.com/dmitrymomot/forge/pkg/session"
 )
 
 // Option configures the application.
@@ -179,5 +180,25 @@ func WithCustomLogger(l *slog.Logger) Option {
 func WithCookieOptions(opts ...cookie.Option) Option {
 	return func(a *App) {
 		a.cookieManager = cookie.New(opts...)
+	}
+}
+
+// WithSession enables server-side session management.
+// A session.Store implementation must be provided (e.g., PostgresStore).
+// Sessions are loaded lazily and saved automatically before the response is written.
+//
+// Example:
+//
+//	pgStore := postgres.NewSessionStore(pool)
+//	forge.New(
+//	    forge.WithSession(pgStore,
+//	        forge.WithSessionCookieName("__sid"),
+//	        forge.WithSessionMaxAge(86400 * 30),
+//	        forge.WithSessionSecure(true),
+//	    ),
+//	)
+func WithSession(store session.Store, opts ...SessionOption) Option {
+	return func(a *App) {
+		a.sessionManager = NewSessionManager(store, opts...)
 	}
 }
