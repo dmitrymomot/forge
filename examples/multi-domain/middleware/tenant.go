@@ -34,8 +34,7 @@ func TenantExtractor(next forge.HandlerFunc) forge.HandlerFunc {
 		}
 
 		// Store subdomain in context
-		ctx := context.WithValue(c.Context(), tenantKey{}, subdomain)
-		*c.Request() = *c.Request().WithContext(ctx)
+		c.Set(tenantKey{}, subdomain)
 
 		return next(c)
 	}
