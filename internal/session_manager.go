@@ -165,8 +165,9 @@ func (sm *SessionManager) SaveSession(w http.ResponseWriter, sess *session.Sessi
 	http.SetCookie(w, cookie)
 }
 
-// RotateToken generates a new token for the session (for security after login).
-// This prevents session fixation attacks.
+// RotateToken generates a new token for the session.
+// Called after authentication to prevent session fixation attacks by invalidating
+// the old token and requiring a fresh one from the attacker.
 func (sm *SessionManager) RotateToken(ctx context.Context, sess *session.Session) error {
 	oldToken := sess.Token
 	sess.Token = generateToken()
@@ -211,9 +212,10 @@ func generateToken() string {
 }
 
 // extractIP extracts the client IP from the request.
-// Checks X-Forwarded-For and X-Real-IP headers first.
+// Checks X-Forwarded-For and X-Real-IP headers first (set by proxies).
+// Falls back to RemoteAddr from the TCP connection.
 func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For (comma-separated, first is client)
+	// Check X-Forwarded-For (comma-separated, first is original client)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		if len(parts) > 0 {
@@ -221,12 +223,12 @@ func extractIP(r *http.Request) string {
 		}
 	}
 
-	// Check X-Real-IP
+	// Check X-Real-IP (single IP, often set by reverse proxies)
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		return xri
 	}
 
-	// Fall back to RemoteAddr (strip port)
+	// Fall back to RemoteAddr (direct connection; includes port)
 	addr := r.RemoteAddr
 	if idx := strings.LastIndex(addr, ":"); idx != -1 {
 		return addr[:idx]

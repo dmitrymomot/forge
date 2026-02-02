@@ -66,6 +66,8 @@ func (w *ResponseWriter) WriteHeader(code int) {
 	}
 
 	// HTMX transformation: non-200 → 200
+	// HTMX requires 2xx status to trigger swaps; transform errors to 200
+	// and rely on response body to indicate the actual error state
 	if w.isHTMX && code != http.StatusOK {
 		code = http.StatusOK
 	}

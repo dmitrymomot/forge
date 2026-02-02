@@ -1,7 +1,6 @@
 package internal
 
 // Handler declares routes on a router.
-// Implemented by user handlers to register their endpoints.
 //
 // Example:
 //
