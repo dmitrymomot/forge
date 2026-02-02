@@ -11,15 +11,35 @@
 // and call Run() to start the HTTP server:
 //
 //	app := forge.New(
-//	    forge.WithLogger(logger),
-//	    forge.WithAddress(":8080"),
 //	    forge.WithHandlers(
 //	        handlers.NewAuth(repo),
 //	        handlers.NewPages(repo),
 //	    ),
 //	)
 //
-//	if err := app.Run(); err != nil {
+//	if err := app.Run(":8080", forge.Logger(logger)); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// # Multi-Domain Routing
+//
+// For applications that need host-based routing, compose multiple Apps
+// with forge.Run():
+//
+//	api := forge.New(
+//	    forge.WithHandlers(handlers.NewAPIHandler()),
+//	)
+//
+//	website := forge.New(
+//	    forge.WithHandlers(handlers.NewLandingHandler()),
+//	)
+//
+//	if err := forge.Run(
+//	    forge.Domain("api.acme.com", api),
+//	    forge.Domain("*.acme.com", website),
+//	    forge.Address(":8080"),
+//	    forge.Logger(logger),
+//	); err != nil {
 //	    log.Fatal(err)
 //	}
 //
@@ -67,20 +87,21 @@
 // # Shutdown
 //
 // The application handles SIGINT/SIGTERM for graceful shutdown.
-// Register cleanup functions with WithShutdownHook:
+// Register cleanup functions with ShutdownHook:
 //
-//	app := forge.New(
-//	    forge.WithShutdownHook(func(ctx context.Context) error {
+//	app.Run(":8080",
+//	    forge.ShutdownHook(func(ctx context.Context) error {
 //	        return pool.Close()
 //	    }),
 //	)
 //
-// # Escape Hatch
+// # Testing
 //
-// For advanced use cases requiring raw chi router access, use the
-// [github.com/dmitrymomot/forge/pkg/httpserver] package directly:
+// For testing, use httptest.NewServer with the app's Router():
 //
-//	router := chi.NewRouter()
-//	router.Mount("/legacy", legacyHandler)
-//	httpserver.Run(ctx, cfg, router, logger)
+//	app := forge.New(forge.WithHandlers(myHandler))
+//	ts := httptest.NewServer(app.Router())
+//	defer ts.Close()
+//
+//	resp, err := http.Get(ts.URL + "/path")
 package forge
