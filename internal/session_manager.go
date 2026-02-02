@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/dmitrymomot/forge/pkg/id"
 	"github.com/dmitrymomot/forge/pkg/session"
-	"github.com/google/uuid"
 )
 
 // Default session configuration.
@@ -22,12 +23,12 @@ const (
 type SessionManager struct {
 	store      session.Store
 	cookieName string
-	maxAge     int
 	domain     string
 	path       string
+	maxAge     int
+	sameSite   http.SameSite
 	secure     bool
 	httpOnly   bool
-	sameSite   http.SameSite
 }
 
 // SessionOption configures the SessionManager.
@@ -131,11 +132,14 @@ func (sm *SessionManager) LoadSession(ctx context.Context, r *http.Request) (*se
 
 // CreateSession creates a new session with metadata extracted from the request.
 func (sm *SessionManager) CreateSession(ctx context.Context, r *http.Request) (*session.Session, error) {
-	id := uuid.New().String()
-	token := generateToken()
+	sessionID := id.NewULID()
+	token, err := generateToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate session token: %w", err)
+	}
 	expiresAt := time.Now().Add(time.Duration(sm.maxAge) * time.Second)
 
-	sess := session.New(id, token, expiresAt)
+	sess := session.New(sessionID, token, expiresAt)
 	sess.IP = extractIP(r)
 	sess.UserAgent = r.UserAgent()
 	sess.Device = parseDevice(r.UserAgent())
@@ -170,7 +174,11 @@ func (sm *SessionManager) SaveSession(w http.ResponseWriter, sess *session.Sessi
 // the old token and requiring a fresh one from the attacker.
 func (sm *SessionManager) RotateToken(ctx context.Context, sess *session.Session) error {
 	oldToken := sess.Token
-	sess.Token = generateToken()
+	newToken, err := generateToken()
+	if err != nil {
+		return fmt.Errorf("generate session token: %w", err)
+	}
+	sess.Token = newToken
 	sess.MarkDirty()
 
 	// Update in store with new token
@@ -203,12 +211,12 @@ func (sm *SessionManager) Store() session.Store {
 }
 
 // generateToken creates a cryptographically secure random token.
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		panic("session: failed to generate token: " + err.Error())
+		return "", fmt.Errorf("read random bytes: %w", err)
 	}
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.URLEncoding.EncodeToString(b), nil
 }
 
 // extractIP extracts the client IP from the request.
