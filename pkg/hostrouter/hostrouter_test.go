@@ -6,8 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dmitrymomot/forge/pkg/hostrouter"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/pkg/hostrouter"
 )
 
 func TestRouter_ExactHost(t *testing.T) {
