@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/forge/pkg/binder"
@@ -95,6 +96,21 @@ type Context interface {
 
 	// Written returns true if a response has already been written.
 	Written() bool
+
+	// Logger returns the logger for advanced usage.
+	Logger() *slog.Logger
+
+	// LogDebug logs a debug message with optional attributes.
+	LogDebug(msg string, attrs ...any)
+
+	// LogInfo logs an info message with optional attributes.
+	LogInfo(msg string, attrs ...any)
+
+	// LogWarn logs a warning message with optional attributes.
+	LogWarn(msg string, attrs ...any)
+
+	// LogError logs an error message with optional attributes.
+	LogError(msg string, attrs ...any)
 }
 
 // requestContext implements the Context interface.
@@ -102,13 +118,15 @@ type requestContext struct {
 	request  *http.Request
 	response http.ResponseWriter
 	written  bool
+	logger   *slog.Logger
 }
 
 // newContext creates a new context.
-func newContext(w http.ResponseWriter, r *http.Request) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger) *requestContext {
 	return &requestContext{
 		request:  r,
 		response: w,
+		logger:   logger,
 	}
 }
 
@@ -277,4 +295,29 @@ func (c *requestContext) BindJSON(v any) (ValidationErrors, error) {
 // Written returns true if a response has already been written.
 func (c *requestContext) Written() bool {
 	return c.written
+}
+
+// Logger returns the logger for advanced usage.
+func (c *requestContext) Logger() *slog.Logger {
+	return c.logger
+}
+
+// LogDebug logs a debug message with optional attributes.
+func (c *requestContext) LogDebug(msg string, attrs ...any) {
+	c.logger.DebugContext(c.request.Context(), msg, attrs...)
+}
+
+// LogInfo logs an info message with optional attributes.
+func (c *requestContext) LogInfo(msg string, attrs ...any) {
+	c.logger.InfoContext(c.request.Context(), msg, attrs...)
+}
+
+// LogWarn logs a warning message with optional attributes.
+func (c *requestContext) LogWarn(msg string, attrs ...any) {
+	c.logger.WarnContext(c.request.Context(), msg, attrs...)
+}
+
+// LogError logs an error message with optional attributes.
+func (c *requestContext) LogError(msg string, attrs ...any) {
+	c.logger.ErrorContext(c.request.Context(), msg, attrs...)
 }
