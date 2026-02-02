@@ -125,7 +125,7 @@ func (r *routerAdapter) wrap(h HandlerFunc, mw ...Middleware) http.HandlerFunc {
 // adaptHandler converts a forge HandlerFunc to http.HandlerFunc.
 func (r *routerAdapter) adaptHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		c := newContext(w, req, r.app.logger, r.app.cookieManager)
+		c := newContext(w, req, r.app.logger, r.app.cookieManager, r.app.sessionManager)
 		if err := h(c); err != nil {
 			r.app.handleError(c, err)
 		}
@@ -144,7 +144,7 @@ func (a *App) adaptMiddleware(mw Middleware) func(http.Handler) http.Handler {
 			// Apply the forge middleware
 			wrapped := mw(nextFunc)
 			// Execute with a new context
-			c := newContext(w, r, a.logger, a.cookieManager)
+			c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager)
 			if err := wrapped(c); err != nil {
 				a.handleError(c, err)
 			}

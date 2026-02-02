@@ -11,6 +11,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
+	"github.com/dmitrymomot/forge/pkg/session"
 )
 
 // Type aliases - public API
@@ -58,6 +59,18 @@ type (
 
 	// CookieOption configures the cookie manager.
 	CookieOption = cookie.Option
+
+	// SessionOption configures the session manager.
+	SessionOption = internal.SessionOption
+
+	// Session represents a user session.
+	Session = session.Session
+
+	// SessionStore defines the interface for session persistence.
+	SessionStore = session.Store
+
+	// ResponseWriter wraps http.ResponseWriter with hooks and HTMX support.
+	ResponseWriter = internal.ResponseWriter
 )
 
 // Constructors
@@ -346,3 +359,91 @@ var (
 	ErrCookieBadSig    = cookie.ErrBadSig
 	ErrCookieDecrypt   = cookie.ErrDecrypt
 )
+
+// Session options
+
+// WithSession enables server-side session management.
+// A SessionStore implementation must be provided (e.g., PostgresStore).
+// Sessions are loaded lazily and saved automatically before the response is written.
+//
+// Example:
+//
+//	pgStore := postgres.NewSessionStore(pool)
+//	forge.New(
+//	    forge.WithSession(pgStore,
+//	        forge.WithSessionCookieName("__sid"),
+//	        forge.WithSessionMaxAge(86400 * 30),
+//	    ),
+//	)
+func WithSession(store SessionStore, opts ...SessionOption) Option {
+	return internal.WithSession(store, opts...)
+}
+
+// WithSessionCookieName sets the session cookie name.
+// Defaults to "__sid".
+func WithSessionCookieName(name string) SessionOption {
+	return internal.WithSessionCookieName(name)
+}
+
+// WithSessionMaxAge sets the session max age in seconds.
+// Defaults to 30 days.
+func WithSessionMaxAge(seconds int) SessionOption {
+	return internal.WithSessionMaxAge(seconds)
+}
+
+// WithSessionDomain sets the session cookie domain.
+func WithSessionDomain(domain string) SessionOption {
+	return internal.WithSessionDomain(domain)
+}
+
+// WithSessionPath sets the session cookie path.
+// Defaults to "/".
+func WithSessionPath(path string) SessionOption {
+	return internal.WithSessionPath(path)
+}
+
+// WithSessionSecure sets the session cookie Secure flag.
+// Defaults to false (should be true in production with HTTPS).
+func WithSessionSecure(secure bool) SessionOption {
+	return internal.WithSessionSecure(secure)
+}
+
+// WithSessionHTTPOnly sets the session cookie HttpOnly flag.
+// Defaults to true (recommended for security).
+func WithSessionHTTPOnly(httpOnly bool) SessionOption {
+	return internal.WithSessionHTTPOnly(httpOnly)
+}
+
+// WithSessionSameSite sets the session cookie SameSite attribute.
+// Defaults to SameSiteLaxMode.
+func WithSessionSameSite(sameSite http.SameSite) SessionOption {
+	return internal.WithSessionSameSite(sameSite)
+}
+
+// Session errors for checking return values.
+var (
+	ErrSessionNotConfigured = session.ErrNotConfigured
+	ErrSessionNotFound      = session.ErrNotFound
+	ErrSessionExpired       = session.ErrExpired
+	ErrSessionInvalidToken  = session.ErrInvalidToken
+)
+
+// SessionValue is a typed helper to retrieve session values with type safety.
+// Returns an error if the key doesn't exist or type assertion fails.
+//
+// Example:
+//
+//	theme, err := forge.SessionValue[string](sess, "theme")
+func SessionValue[T any](sess *Session, key string) (T, error) {
+	return session.Value[T](sess, key)
+}
+
+// SessionValueOr is a typed helper that returns a default value if the key
+// doesn't exist or type assertion fails.
+//
+// Example:
+//
+//	theme := forge.SessionValueOr(sess, "theme", "light")
+func SessionValueOr[T any](sess *Session, key string, defaultVal T) T {
+	return session.ValueOr(sess, key, defaultVal)
+}
