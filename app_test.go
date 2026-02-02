@@ -449,6 +449,15 @@ func (c *mockContext) Set(key, value any) {
 func (c *mockContext) Get(key any) any {
 	return c.r.Context().Value(key)
 }
+func (c *mockContext) Cookie(name string) (string, error)                      { return "", nil }
+func (c *mockContext) SetCookie(name, value string, maxAge int)                {}
+func (c *mockContext) DeleteCookie(name string)                                {}
+func (c *mockContext) CookieSigned(name string) (string, error)                { return "", nil }
+func (c *mockContext) SetCookieSigned(name, value string, maxAge int) error    { return nil }
+func (c *mockContext) CookieEncrypted(name string) (string, error)             { return "", nil }
+func (c *mockContext) SetCookieEncrypted(name, value string, maxAge int) error { return nil }
+func (c *mockContext) Flash(key string, dest any) error                        { return nil }
+func (c *mockContext) SetFlash(key string, value any) error                    { return nil }
 
 // Integration tests using httptest.NewServer
 
