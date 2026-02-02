@@ -1,0 +1,120 @@
+package views
+
+// HomePage renders the main landing page.
+templ HomePage() {
+	@Layout("Home") {
+		@PageHeader("/")
+		<main class="max-w-6xl mx-auto px-4 py-12">
+			<div class="text-center mb-12">
+				<h1 class="text-4xl font-bold text-gray-900 mb-4">Multi-Domain Routing Demo</h1>
+				<p class="text-xl text-gray-600 max-w-2xl mx-auto">
+					This example demonstrates Forge's host-based routing with multiple domains
+					using <code class="bg-gray-100 px-2 py-1 rounded">lvh.me</code> (resolves to 127.0.0.1).
+				</p>
+			</div>
+			<div class="grid md:grid-cols-3 gap-6 mb-12">
+				@DomainCard(
+					"Main Site",
+					"app.lvh.me:8081",
+					"The fallback handler serves the main marketing site. Routes: /, /features, /pricing",
+					"http://app.lvh.me:8081",
+					"indigo",
+				)
+				@DomainCard(
+					"API Domain",
+					"api.lvh.me:8081",
+					"Exact host match for JSON API. Endpoints: /health, /tenants, /tenants/{slug}",
+					"http://api.lvh.me:8081/health",
+					"green",
+				)
+				@DomainCard(
+					"Tenant Subdomains",
+					"*.lvh.me:8081",
+					"Wildcard match for tenant dashboards. Try: acme.lvh.me, demo.lvh.me, test.lvh.me",
+					"http://acme.lvh.me:8081",
+					"purple",
+				)
+			</div>
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-xl font-semibold text-gray-900 mb-4">Try Different Tenants</h2>
+				<div class="flex flex-wrap gap-3">
+					<a href="http://acme.lvh.me:8081" class="inline-flex items-center px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition">
+						acme.lvh.me
+					</a>
+					<a href="http://demo.lvh.me:8081" class="inline-flex items-center px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition">
+						demo.lvh.me
+					</a>
+					<a href="http://test.lvh.me:8081" class="inline-flex items-center px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition">
+						test.lvh.me
+					</a>
+					<a href="http://anything.lvh.me:8081" class="inline-flex items-center px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition">
+						anything.lvh.me
+					</a>
+				</div>
+			</div>
+		</main>
+	}
+}
+
+// DomainCard renders a card for each domain type.
+templ DomainCard(title, domain, description, url, color string) {
+	<div class={ "bg-white rounded-lg shadow p-6 border-t-4", templ.KV("border-indigo-500", color == "indigo"), templ.KV("border-green-500", color == "green"), templ.KV("border-purple-500", color == "purple") }>
+		<h3 class="text-lg font-semibold text-gray-900 mb-2">{ title }</h3>
+		<code class="block bg-gray-100 px-2 py-1 rounded text-sm mb-3">{ domain }</code>
+		<p class="text-gray-600 text-sm mb-4">{ description }</p>
+		<a
+			href={ templ.SafeURL(url) }
+			class={ "inline-flex items-center text-sm font-medium", templ.KV("text-indigo-600 hover:text-indigo-800", color == "indigo"), templ.KV("text-green-600 hover:text-green-800", color == "green"), templ.KV("text-purple-600 hover:text-purple-800", color == "purple") }
+		>
+			Visit &rarr;
+		</a>
+	</div>
+}
+
+// FeaturesPage renders the features page.
+templ FeaturesPage() {
+	@Layout("Features") {
+		@PageHeader("/features")
+		<main class="max-w-6xl mx-auto px-4 py-12">
+			<h1 class="text-3xl font-bold text-gray-900 mb-8">Features</h1>
+			<div class="grid md:grid-cols-2 gap-6">
+				<div class="bg-white rounded-lg shadow p-6">
+					<h3 class="text-lg font-semibold text-gray-900 mb-2">Host-Based Routing</h3>
+					<p class="text-gray-600">Route requests based on the Host header with exact matches and wildcards.</p>
+				</div>
+				<div class="bg-white rounded-lg shadow p-6">
+					<h3 class="text-lg font-semibold text-gray-900 mb-2">Mixed Handler Styles</h3>
+					<p class="text-gray-600">Use forge.Handler for the fallback and raw http.Handler for domain-specific routers.</p>
+				</div>
+				<div class="bg-white rounded-lg shadow p-6">
+					<h3 class="text-lg font-semibold text-gray-900 mb-2">Scoped Middleware</h3>
+					<p class="text-gray-600">Apply middleware only to specific domains (JSON content-type for API, tenant extraction for subdomains).</p>
+				</div>
+				<div class="bg-white rounded-lg shadow p-6">
+					<h3 class="text-lg font-semibold text-gray-900 mb-2">No Config Required</h3>
+					<p class="text-gray-600">Uses lvh.me which resolves to 127.0.0.1 - no /etc/hosts editing needed.</p>
+				</div>
+			</div>
+		</main>
+	}
+}
+
+// PricingPage renders the pricing page.
+templ PricingPage() {
+	@Layout("Pricing") {
+		@PageHeader("/pricing")
+		<main class="max-w-6xl mx-auto px-4 py-12">
+			<h1 class="text-3xl font-bold text-gray-900 mb-8">Pricing</h1>
+			<div class="bg-white rounded-lg shadow p-6 max-w-md">
+				<h3 class="text-2xl font-bold text-gray-900 mb-2">Free & Open Source</h3>
+				<p class="text-gray-600 mb-4">Forge is MIT licensed. Use it for any project.</p>
+				<a
+					href="https://github.com/dmitrymomot/forge"
+					class="inline-flex items-center px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition"
+				>
+					View on GitHub
+				</a>
+			</div>
+		</main>
+	}
+}

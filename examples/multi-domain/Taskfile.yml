@@ -1,0 +1,31 @@
+version: "3"
+
+tasks:
+  templ:
+    desc: Generate templ files
+    cmds:
+      - templ generate
+
+  run:
+    desc: Run the example app
+    deps: [templ]
+    cmds:
+      - go run .
+
+  dev:
+    desc: Run with hot reload (requires air)
+    deps: [templ]
+    cmds:
+      - air
+
+  build:
+    desc: Build the example
+    deps: [templ]
+    cmds:
+      - go build -o bin/multi-domain .
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf bin/
+      - rm -rf views/*_templ.go

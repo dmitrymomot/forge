@@ -1,0 +1,130 @@
+package views
+
+import "strings"
+
+// TenantLayout provides the layout for tenant pages.
+templ TenantLayout(title, tenant string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ title } - { strings.Title(tenant) }</title>
+			<!-- Tailwind CSS CDN for demo -->
+			<script src="https://cdn.tailwindcss.com"></script>
+		</head>
+		<body class="bg-gray-900 min-h-screen text-white">
+			<nav class="bg-gray-800 border-b border-gray-700">
+				<div class="max-w-6xl mx-auto px-4 py-3">
+					<div class="flex items-center justify-between">
+						<div class="flex items-center gap-4">
+							<span class="text-xl font-bold text-purple-400">{ strings.Title(tenant) }</span>
+							<span class="text-sm text-gray-400">Tenant Dashboard</span>
+						</div>
+						<div class="flex gap-4">
+							<a href="/" class="text-sm text-gray-300 hover:text-white">Dashboard</a>
+							<a href="/settings" class="text-sm text-gray-300 hover:text-white">Settings</a>
+						</div>
+					</div>
+				</div>
+			</nav>
+			<main class="max-w-6xl mx-auto px-4 py-8">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+// TenantDashboardPage renders the tenant dashboard.
+templ TenantDashboardPage(tenant string) {
+	@TenantLayout("Dashboard", tenant) {
+		<div class="mb-8">
+			<h1 class="text-3xl font-bold mb-2">Welcome, { strings.Title(tenant) }!</h1>
+			<p class="text-gray-400">This is your tenant dashboard at <code class="bg-gray-800 px-2 py-1 rounded">{ tenant }.lvh.me:8081</code></p>
+		</div>
+		<div class="grid md:grid-cols-3 gap-6 mb-8">
+			@StatCard("Users", "128", "text-blue-400")
+			@StatCard("Projects", "24", "text-green-400")
+			@StatCard("API Calls", "45.2K", "text-purple-400")
+		</div>
+		<div class="bg-gray-800 rounded-lg p-6 mb-8">
+			<h2 class="text-xl font-semibold mb-4">Try Other Tenants</h2>
+			<p class="text-gray-400 mb-4">Click to switch between different tenant subdomains:</p>
+			<div class="flex flex-wrap gap-3">
+				@TenantLink("acme", tenant)
+				@TenantLink("demo", tenant)
+				@TenantLink("test", tenant)
+				@TenantLink("anything", tenant)
+			</div>
+		</div>
+		<div class="bg-gray-800 rounded-lg p-6">
+			<h2 class="text-xl font-semibold mb-4">Navigation</h2>
+			<div class="flex flex-wrap gap-3">
+				<a href="http://app.lvh.me:8081" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+					Main Site
+				</a>
+				<a href="http://api.lvh.me:8081/health" class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+					API Health
+				</a>
+				<a href="http://api.lvh.me:8081/tenants" class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+					List Tenants API
+				</a>
+			</div>
+		</div>
+	}
+}
+
+// StatCard renders a statistics card.
+templ StatCard(label, value, colorClass string) {
+	<div class="bg-gray-800 rounded-lg p-6">
+		<p class="text-gray-400 text-sm mb-1">{ label }</p>
+		<p class={ "text-3xl font-bold", colorClass }>{ value }</p>
+	</div>
+}
+
+// TenantLink renders a link to another tenant subdomain.
+templ TenantLink(targetTenant, currentTenant string) {
+	if targetTenant == currentTenant {
+		<span class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg">
+			{ targetTenant }.lvh.me (current)
+		</span>
+	} else {
+		<a href={ templ.SafeURL("http://" + targetTenant + ".lvh.me:8081") } class="inline-flex items-center px-4 py-2 bg-gray-700 text-gray-200 rounded-lg hover:bg-gray-600 transition">
+			{ targetTenant }.lvh.me
+		</a>
+	}
+}
+
+// TenantSettingsPage renders the tenant settings page.
+templ TenantSettingsPage(tenant string) {
+	@TenantLayout("Settings", tenant) {
+		<div class="mb-8">
+			<h1 class="text-3xl font-bold mb-2">Settings</h1>
+			<p class="text-gray-400">Manage settings for <code class="bg-gray-800 px-2 py-1 rounded">{ tenant }</code></p>
+		</div>
+		<div class="bg-gray-800 rounded-lg p-6 mb-6">
+			<h2 class="text-xl font-semibold mb-4">Tenant Information</h2>
+			<div class="space-y-4">
+				<div>
+					<label class="block text-sm text-gray-400 mb-1">Tenant Slug</label>
+					<input type="text" value={ tenant } disabled class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 text-gray-300"/>
+				</div>
+				<div>
+					<label class="block text-sm text-gray-400 mb-1">Subdomain URL</label>
+					<input type="text" value={ tenant + ".lvh.me:8081" } disabled class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 text-gray-300"/>
+				</div>
+			</div>
+		</div>
+		<div class="bg-gray-800 rounded-lg p-6">
+			<h2 class="text-xl font-semibold mb-4">How It Works</h2>
+			<p class="text-gray-400 mb-4">
+				The subdomain is extracted from the Host header by the tenant middleware
+				and stored in the request context. Handlers can retrieve it using
+				<code class="bg-gray-700 px-2 py-1 rounded">middleware.TenantFromContext(ctx)</code>.
+			</p>
+			<p class="text-gray-400">
+				Reserved subdomains (api, app, www) are rejected with a 400 error.
+			</p>
+		</div>
+	}
+}
