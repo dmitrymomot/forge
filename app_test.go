@@ -442,6 +442,13 @@ func (c *mockContext) LogWarn(msg string, attrs ...any) {
 func (c *mockContext) LogError(msg string, attrs ...any) {
 	c.Logger().ErrorContext(c.r.Context(), msg, attrs...)
 }
+func (c *mockContext) Set(key, value any) {
+	ctx := context.WithValue(c.r.Context(), key, value)
+	c.r = c.r.WithContext(ctx)
+}
+func (c *mockContext) Get(key any) any {
+	return c.r.Context().Value(key)
+}
 
 // Integration tests using httptest.NewServer
 
