@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
 )
@@ -162,5 +163,21 @@ func WithCustomLogger(l *slog.Logger) Option {
 		if l != nil {
 			a.logger = l
 		}
+	}
+}
+
+// WithCookieOptions configures the cookie manager.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithCookieOptions(
+//	        forge.WithCookieSecret(os.Getenv("COOKIE_SECRET")),
+//	        forge.WithCookieSecure(true),
+//	    ),
+//	)
+func WithCookieOptions(opts ...cookie.Option) Option {
+	return func(a *App) {
+		a.cookieManager = cookie.New(opts...)
 	}
 }

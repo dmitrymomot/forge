@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/dmitrymomot/forge/pkg/binder"
+	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/htmx"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 	"github.com/dmitrymomot/forge/pkg/validator"
@@ -119,22 +120,57 @@ type Context interface {
 	// Get retrieves a value from the request context.
 	// Returns nil if the key is not found.
 	Get(key any) any
+
+	// Cookie returns a plain cookie value.
+	Cookie(name string) (string, error)
+
+	// SetCookie sets a plain cookie.
+	SetCookie(name, value string, maxAge int)
+
+	// DeleteCookie removes a cookie.
+	DeleteCookie(name string)
+
+	// CookieSigned returns a signed cookie value.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	CookieSigned(name string) (string, error)
+
+	// SetCookieSigned sets a signed cookie.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	SetCookieSigned(name, value string, maxAge int) error
+
+	// CookieEncrypted returns an encrypted cookie value.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	CookieEncrypted(name string) (string, error)
+
+	// SetCookieEncrypted sets an encrypted cookie.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	SetCookieEncrypted(name, value string, maxAge int) error
+
+	// Flash reads and deletes a flash message.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	Flash(key string, dest any) error
+
+	// SetFlash sets a flash message.
+	// Returns cookie.ErrNoSecret if no secret is configured.
+	SetFlash(key string, value any) error
 }
 
 // requestContext implements the Context interface.
 type requestContext struct {
-	request  *http.Request
-	response http.ResponseWriter
-	written  bool
-	logger   *slog.Logger
+	request       *http.Request
+	response      http.ResponseWriter
+	written       bool
+	logger        *slog.Logger
+	cookieManager *cookie.Manager
 }
 
 // newContext creates a new context.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager) *requestContext {
 	return &requestContext{
-		request:  r,
-		response: w,
-		logger:   logger,
+		request:       r,
+		response:      w,
+		logger:        logger,
+		cookieManager: cm,
 	}
 }
 
@@ -339,4 +375,49 @@ func (c *requestContext) Set(key, value any) {
 // Get retrieves a value from the request context.
 func (c *requestContext) Get(key any) any {
 	return c.request.Context().Value(key)
+}
+
+// Cookie returns a plain cookie value.
+func (c *requestContext) Cookie(name string) (string, error) {
+	return c.cookieManager.Get(c.request, name)
+}
+
+// SetCookie sets a plain cookie.
+func (c *requestContext) SetCookie(name, value string, maxAge int) {
+	c.cookieManager.Set(c.response, name, value, maxAge)
+}
+
+// DeleteCookie removes a cookie.
+func (c *requestContext) DeleteCookie(name string) {
+	c.cookieManager.Delete(c.response, name)
+}
+
+// CookieSigned returns a signed cookie value.
+func (c *requestContext) CookieSigned(name string) (string, error) {
+	return c.cookieManager.GetSigned(c.request, name)
+}
+
+// SetCookieSigned sets a signed cookie.
+func (c *requestContext) SetCookieSigned(name, value string, maxAge int) error {
+	return c.cookieManager.SetSigned(c.response, name, value, maxAge)
+}
+
+// CookieEncrypted returns an encrypted cookie value.
+func (c *requestContext) CookieEncrypted(name string) (string, error) {
+	return c.cookieManager.GetEncrypted(c.request, name)
+}
+
+// SetCookieEncrypted sets an encrypted cookie.
+func (c *requestContext) SetCookieEncrypted(name, value string, maxAge int) error {
+	return c.cookieManager.SetEncrypted(c.response, name, value, maxAge)
+}
+
+// Flash reads and deletes a flash message.
+func (c *requestContext) Flash(key string, dest any) error {
+	return c.cookieManager.Flash(c.response, c.request, key, dest)
+}
+
+// SetFlash sets a flash message.
+func (c *requestContext) SetFlash(key string, value any) error {
+	return c.cookieManager.SetFlash(c.response, key, value)
 }
