@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -37,6 +39,9 @@ type App struct {
 
 	// Health checks
 	healthConfig *healthConfig
+
+	// Logging
+	logger *slog.Logger
 }
 
 // staticRoute represents a static file handler mount point.
@@ -60,6 +65,7 @@ type staticRoute struct {
 func New(opts ...Option) *App {
 	a := &App{
 		router: chi.NewRouter(),
+		logger: logger.NewNope(), // Default: noop logger (before options)
 	}
 
 	for _, opt := range opts {
@@ -133,7 +139,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r)
+		c := newContext(w, r, a.logger)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
