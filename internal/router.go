@@ -52,77 +52,64 @@ type routerAdapter struct {
 	app    *App
 }
 
-// GET registers a handler for GET requests.
 func (r *routerAdapter) GET(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Get(path, r.wrap(h, mw...))
 }
 
-// POST registers a handler for POST requests.
 func (r *routerAdapter) POST(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Post(path, r.wrap(h, mw...))
 }
 
-// PUT registers a handler for PUT requests.
 func (r *routerAdapter) PUT(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Put(path, r.wrap(h, mw...))
 }
 
-// PATCH registers a handler for PATCH requests.
 func (r *routerAdapter) PATCH(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Patch(path, r.wrap(h, mw...))
 }
 
-// DELETE registers a handler for DELETE requests.
 func (r *routerAdapter) DELETE(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Delete(path, r.wrap(h, mw...))
 }
 
-// HEAD registers a handler for HEAD requests.
 func (r *routerAdapter) HEAD(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Head(path, r.wrap(h, mw...))
 }
 
-// OPTIONS registers a handler for OPTIONS requests.
 func (r *routerAdapter) OPTIONS(path string, h HandlerFunc, mw ...Middleware) {
 	r.router.Options(path, r.wrap(h, mw...))
 }
 
-// Group creates an inline route group.
 func (r *routerAdapter) Group(fn func(Router)) {
 	r.router.Group(func(cr chi.Router) {
 		fn(&routerAdapter{router: cr, app: r.app})
 	})
 }
 
-// Route creates a route group with a pattern prefix.
 func (r *routerAdapter) Route(pattern string, fn func(Router)) {
 	r.router.Route(pattern, func(cr chi.Router) {
 		fn(&routerAdapter{router: cr, app: r.app})
 	})
 }
 
-// Use appends middleware to the router's middleware stack.
 func (r *routerAdapter) Use(mw ...Middleware) {
 	for _, m := range mw {
 		r.router.Use(r.app.adaptMiddleware(m))
 	}
 }
 
-// Mount attaches an http.Handler at the given pattern.
 func (r *routerAdapter) Mount(pattern string, h http.Handler) {
 	r.router.Mount(pattern, h)
 }
 
-// wrap converts a HandlerFunc with optional middleware to http.HandlerFunc.
 func (r *routerAdapter) wrap(h HandlerFunc, mw ...Middleware) http.HandlerFunc {
-	// Apply route-specific middleware in reverse order
+	// Apply route-specific middleware in reverse order (last registered = first executed)
 	for i := len(mw) - 1; i >= 0; i-- {
 		h = mw[i](h)
 	}
 	return r.adaptHandler(h)
 }
 
-// adaptHandler converts a forge HandlerFunc to http.HandlerFunc.
 func (r *routerAdapter) adaptHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		c := newContext(w, req, r.app.logger, r.app.cookieManager, r.app.sessionManager)
@@ -133,6 +120,8 @@ func (r *routerAdapter) adaptHandler(h HandlerFunc) http.HandlerFunc {
 }
 
 // adaptMiddleware converts a forge Middleware to chi middleware.
+// This adapter allows middleware to be written using the forge Context interface
+// while satisfying chi's http.Handler-based middleware signature.
 func (a *App) adaptMiddleware(mw Middleware) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

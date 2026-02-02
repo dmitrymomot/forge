@@ -25,30 +25,17 @@ const (
 // It manages HTTP routing, middleware, and graceful shutdown.
 // App is immutable after creation - all configuration is done via New().
 type App struct {
-	// chi router (internal)
-	router chi.Router
-
-	// Route registration
-	middlewares  []Middleware
-	handlers     []Handler
-	staticRoutes []staticRoute
-
-	// Error handling
+	router                  chi.Router
+	middlewares             []Middleware
+	handlers                []Handler
+	staticRoutes            []staticRoute
 	errorHandler            ErrorHandler
 	notFoundHandler         HandlerFunc
 	methodNotAllowedHandler HandlerFunc
-
-	// Health checks
-	healthConfig *healthConfig
-
-	// Logging
-	logger *slog.Logger
-
-	// Cookie management
-	cookieManager *cookie.Manager
-
-	// Session management (optional)
-	sessionManager *SessionManager
+	healthConfig            *healthConfig
+	logger                  *slog.Logger
+	cookieManager           *cookie.Manager
+	sessionManager          *SessionManager
 }
 
 // staticRoute represents a static file handler mount point.

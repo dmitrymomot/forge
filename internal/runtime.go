@@ -26,7 +26,6 @@ type runtimeConfig struct {
 // runServer starts the HTTP server and blocks until shutdown.
 // This is the shared implementation for both app.Run() and forge.Run().
 func runServer(cfg runtimeConfig) error {
-	// Set defaults
 	if cfg.address == "" {
 		cfg.address = ":8080"
 	}
@@ -39,7 +38,6 @@ func runServer(cfg runtimeConfig) error {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
-	// Create server with sensible defaults
 	server := &http.Server{
 		Addr:              cfg.address,
 		Handler:           cfg.handler,
@@ -50,7 +48,6 @@ func runServer(cfg runtimeConfig) error {
 		MaxHeaderBytes:    defaultMaxHeaderBytes,
 	}
 
-	// Create signal-aware context
 	baseCtx := cfg.baseCtx
 	if baseCtx == nil {
 		baseCtx = context.Background()
@@ -58,13 +55,11 @@ func runServer(cfg runtimeConfig) error {
 	ctx, cancel := signal.NotifyContext(baseCtx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Listen first to get actual address
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err
 	}
 
-	// Start HTTP server
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("server starting", slog.String("address", ln.Addr().String()))
@@ -74,26 +69,22 @@ func runServer(cfg runtimeConfig) error {
 		close(errCh)
 	}()
 
-	// Wait for shutdown signal or error
 	select {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
 	}
 
-	// Graceful shutdown
 	logger.Info("shutting down server")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.shutdownTimeout)
 	defer shutdownCancel()
 
 	var errs []error
 
-	// 1. Stop HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		errs = append(errs, err)
 	}
 
-	// 2. Run shutdown hooks (close DB, etc.)
 	for _, hook := range cfg.shutdownHooks {
 		if err := hook(shutdownCtx); err != nil {
 			errs = append(errs, err)
