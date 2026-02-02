@@ -3,12 +3,16 @@ package hostrouter_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/dmitrymomot/forge/pkg/hostrouter"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRouter_ExactHost(t *testing.T) {
+	t.Parallel()
+
 	routes := hostrouter.Routes{
 		"example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("example"))
@@ -39,23 +43,23 @@ func TestRouter_ExactHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			req := httptest.NewRequest("GET", "/", nil)
 			req.Host = tt.host
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantCode {
-				t.Errorf("got status %d, want %d", rec.Code, tt.wantCode)
-			}
-			if rec.Body.String() != tt.wantBody {
-				t.Errorf("got body %q, want %q", rec.Body.String(), tt.wantBody)
-			}
+			require.Equal(t, tt.wantCode, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
 		})
 	}
 }
 
 func TestRouter_WildcardHost(t *testing.T) {
+	t.Parallel()
+
 	routes := hostrouter.Routes{
 		"*.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("wildcard"))
@@ -87,23 +91,80 @@ func TestRouter_WildcardHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			req := httptest.NewRequest("GET", "/", nil)
 			req.Host = tt.host
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantCode {
-				t.Errorf("got status %d, want %d", rec.Code, tt.wantCode)
-			}
-			if rec.Body.String() != tt.wantBody {
-				t.Errorf("got body %q, want %q", rec.Body.String(), tt.wantBody)
-			}
+			require.Equal(t, tt.wantCode, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
+		})
+	}
+}
+
+func TestRouter_WildcardMultiLevelSubdomains(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"*.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("wildcard"))
+		}),
+	}
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	router := hostrouter.New(routes, fallback)
+
+	tests := []struct {
+		name     string
+		host     string
+		wantBody string
+		wantCode int
+	}{
+		{
+			name:     "single level subdomain matches",
+			host:     "foo.example.com",
+			wantBody: "wildcard",
+			wantCode: 200,
+		},
+		{
+			name:     "multi level subdomain does not match",
+			host:     "foo.bar.example.com",
+			wantBody: "404 page not found\n",
+			wantCode: 404,
+		},
+		{
+			name:     "root domain does not match",
+			host:     "example.com",
+			wantBody: "404 page not found\n",
+			wantCode: 404,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantCode, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
 		})
 	}
 }
 
 func TestRouter_FallbackToDefault(t *testing.T) {
+	t.Parallel()
+
 	routes := hostrouter.Routes{
 		"api.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("api"))
@@ -124,24 +185,27 @@ func TestRouter_FallbackToDefault(t *testing.T) {
 		{"api host", "api.example.com", "api"},
 		{"other host uses fallback", "www.example.com", "default"},
 		{"unknown host uses fallback", "unknown.com", "default"},
+		{"empty host uses fallback", "", "default"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			req := httptest.NewRequest("GET", "/", nil)
 			req.Host = tt.host
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
 
-			if rec.Body.String() != tt.wantBody {
-				t.Errorf("got body %q, want %q", rec.Body.String(), tt.wantBody)
-			}
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
 		})
 	}
 }
 
 func TestRouter_EmptyRoutes(t *testing.T) {
+	t.Parallel()
+
 	routes := hostrouter.Routes{}
 
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,12 +220,85 @@ func TestRouter_EmptyRoutes(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	if rec.Body.String() != "fallback" {
-		t.Errorf("got body %q, want fallback", rec.Body.String())
-	}
+	require.Equal(t, "fallback", rec.Body.String(), "unexpected response body")
+}
+
+func TestRouter_PatternNormalization(t *testing.T) {
+	t.Parallel()
+
+	t.Run("whitespace in patterns is trimmed", func(t *testing.T) {
+		t.Parallel()
+
+		routes := hostrouter.Routes{
+			"  example.com  ": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("trimmed"))
+			}),
+		}
+
+		fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+
+		router := hostrouter.New(routes, fallback)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "example.com"
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, 200, rec.Code, "should match trimmed pattern")
+		require.Equal(t, "trimmed", rec.Body.String())
+	})
+
+	t.Run("empty patterns are ignored", func(t *testing.T) {
+		t.Parallel()
+
+		routes := hostrouter.Routes{
+			"":              http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+			"   ":           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+			"example.com":   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+			"*.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		}
+
+		fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+
+		// Should not panic
+		router := hostrouter.New(routes, fallback)
+		require.NotNil(t, router)
+	})
+
+	t.Run("wildcard pattern normalization", func(t *testing.T) {
+		t.Parallel()
+
+		routes := hostrouter.Routes{
+			"  *.example.com  ": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("wildcard"))
+			}),
+		}
+
+		fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+
+		router := hostrouter.New(routes, fallback)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "foo.example.com"
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, 200, rec.Code, "should match trimmed wildcard pattern")
+		require.Equal(t, "wildcard", rec.Body.String())
+	})
 }
 
 func TestRouter_IPv6Host(t *testing.T) {
+	t.Parallel()
+
 	routes := hostrouter.Routes{
 		"[::1]": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ipv6"))
@@ -174,14 +311,233 @@ func TestRouter_IPv6Host(t *testing.T) {
 
 	router := hostrouter.New(routes, fallback)
 
-	// IPv6 addresses with port keep the brackets
+	tests := []struct {
+		name     string
+		host     string
+		wantBody string
+		wantCode int
+	}{
+		{
+			name:     "ipv6 without port",
+			host:     "[::1]",
+			wantBody: "ipv6",
+			wantCode: 200,
+		},
+		{
+			name:     "ipv6 with port",
+			host:     "[::1]:8080",
+			wantBody: "ipv6",
+			wantCode: 200,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantCode, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
+		})
+	}
+}
+
+func TestRouter_PortStripping(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("matched"))
+		}),
+	}
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	router := hostrouter.New(routes, fallback)
+
+	tests := []struct {
+		name     string
+		host     string
+		wantBody string
+		wantCode int
+	}{
+		{
+			name:     "no port",
+			host:     "example.com",
+			wantBody: "matched",
+			wantCode: 200,
+		},
+		{
+			name:     "standard http port",
+			host:     "example.com:80",
+			wantBody: "matched",
+			wantCode: 200,
+		},
+		{
+			name:     "standard https port",
+			host:     "example.com:443",
+			wantBody: "matched",
+			wantCode: 200,
+		},
+		{
+			name:     "custom port",
+			host:     "example.com:3000",
+			wantBody: "matched",
+			wantCode: 200,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantCode, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
+		})
+	}
+}
+
+func TestRouter_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("example"))
+		}),
+		"*.wildcard.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("wildcard"))
+		}),
+	}
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fallback"))
+	})
+
+	router := hostrouter.New(routes, fallback)
+
+	// Simulate concurrent requests
+	const numGoroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	hosts := []string{
+		"example.com",
+		"foo.wildcard.com",
+		"bar.wildcard.com",
+		"unknown.com",
+	}
+
+	for i := range numGoroutines {
+		go func(idx int) {
+			defer wg.Done()
+
+			host := hosts[idx%len(hosts)]
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = host
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			// Verify we got a response (no panic)
+			require.NotEmpty(t, rec.Body.String(), "should receive a response")
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestRouter_HandlerPanicPropagation(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"panic.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("intentional panic")
+		}),
+	}
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fallback"))
+	})
+
+	router := hostrouter.New(routes, fallback)
+
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "[::1]"
+	req.Host = "panic.com"
 	rec := httptest.NewRecorder()
 
-	router.ServeHTTP(rec, req)
+	// Verify panic propagates (standard Go HTTP behavior)
+	require.Panics(t, func() {
+		router.ServeHTTP(rec, req)
+	}, "handler panic should propagate")
+}
 
-	if rec.Body.String() != "ipv6" {
-		t.Errorf("got body %q, want ipv6", rec.Body.String())
+func TestRouter_CaseSensitivityAndPriority(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"Example.COM":          http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("exact")) }),
+		"*.Example.COM":        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("wildcard")) }),
+		"specific.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("specific")) }),
+	}
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	router := hostrouter.New(routes, fallback)
+
+	tests := []struct {
+		name     string
+		host     string
+		wantBody string
+	}{
+		{
+			name:     "exact match case insensitive",
+			host:     "example.com",
+			wantBody: "exact",
+		},
+		{
+			name:     "exact match different case",
+			host:     "EXAMPLE.COM",
+			wantBody: "exact",
+		},
+		{
+			name:     "specific exact takes priority over wildcard",
+			host:     "specific.example.com",
+			wantBody: "specific",
+		},
+		{
+			name:     "wildcard match",
+			host:     "foo.example.com",
+			wantBody: "wildcard",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, 200, rec.Code, "unexpected status code")
+			require.Equal(t, tt.wantBody, rec.Body.String(), "unexpected response body")
+		})
 	}
 }
