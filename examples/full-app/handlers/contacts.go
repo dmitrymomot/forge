@@ -3,11 +3,12 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/dmitrymomot/forge"
 	"github.com/dmitrymomot/forge/examples/full-app/repository"
 	"github.com/dmitrymomot/forge/examples/full-app/requests"
 	"github.com/dmitrymomot/forge/examples/full-app/views"
-	"github.com/google/uuid"
 )
 
 // ContactHandler handles contact-related HTTP requests.
