@@ -32,4 +32,6 @@ go.work.sum
 # .vscode/
 
 #_example/
-simple
+
+# Built binaries at root
+/simple
