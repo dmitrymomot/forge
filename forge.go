@@ -266,3 +266,22 @@ func Fallback(app *App) RunOption {
 func WithContext(ctx context.Context) RunOption {
 	return internal.WithContext(ctx)
 }
+
+// Context helpers
+
+// ContextValue retrieves a typed value from the context.
+// Returns the zero value of T if the key is not found or type assertion fails.
+//
+// Example:
+//
+//	type tenantKey struct{}
+//
+//	tenant := forge.ContextValue[string](c, tenantKey{})
+//	user := forge.ContextValue[*User](c, userKey{})
+func ContextValue[T any](c Context, key any) T {
+	if v, ok := c.Get(key).(T); ok {
+		return v
+	}
+	var zero T
+	return zero
+}
