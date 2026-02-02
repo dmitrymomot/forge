@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Forge is a Go framework and template repository for building B2B micro-SaaS applications. It provides production-ready code with pre-built features (auth, multi-tenancy, billing, background jobs) that you clone and own completely.
+Forge is a Go framework for building B2B micro-SaaS applications. It provides importable packages with pre-built features (auth, multi-tenancy, billing, background jobs).
 
 **Status:** Concept stage — architecture documented, implementation pending.
 
@@ -53,7 +53,7 @@ forge/
 - **SQL-first:** Use sqlc-generated types directly (no internal/models layer)
 - **Flat handlers:** Business logic lives in handlers, extract to services only when shared between handlers and tasks
 - **Constructor injection:** Explicit wiring in main.go, all dependencies visible
-- **Your code:** Users clone the template and own all code completely
+- **Explicit over implicit:** Favor clear, readable code over clever abstractions
 
 ## Key Patterns
 
@@ -87,3 +87,4 @@ Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
 - **Examples excluded:** `make lint` excludes `examples/` from modernize checks
 - **Build to /dev/null:** Never `go build` into repo; use `go build -o /dev/null ./...` to verify compilation
 - **Validator tags:** Use semicolons as separators, colons for params: `validate:"required;max:100"` (not commas)
+- **Framework, not template:** Forge is an importable library; template repos are separate and unknown to this codebase
