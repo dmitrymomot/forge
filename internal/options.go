@@ -2,10 +2,12 @@ package internal
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/logger"
 )
 
 // Option configures the application.
@@ -128,5 +130,37 @@ func WithHealthChecks(opts ...HealthOption) Option {
 			opt(cfg)
 		}
 		a.healthConfig = cfg
+	}
+}
+
+// WithLogger creates a logger with a component name and optional extractors.
+// The component name is added to every log entry for easy filtering.
+// Extractors pull values from context (e.g., request_id, user_id).
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithLogger("api", requestIDExtractor, userIDExtractor),
+//	)
+func WithLogger(component string, extractors ...logger.ContextExtractor) Option {
+	return func(a *App) {
+		a.logger = logger.New(extractors...).With("component", component)
+	}
+}
+
+// WithCustomLogger sets a fully custom logger.
+// Use this when you need complete control over logging configuration.
+//
+// Example:
+//
+//	customLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+//	forge.New(
+//	    forge.WithCustomLogger(customLogger),
+//	)
+func WithCustomLogger(l *slog.Logger) Option {
+	return func(a *App) {
+		if l != nil {
+			a.logger = l
+		}
 	}
 }
