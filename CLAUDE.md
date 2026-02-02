@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Forge is a Go framework and CLI tool for generating B2B micro-SaaS applications. It scaffolds production-ready code with pre-built features (auth, multi-tenancy, billing, background jobs) while keeping all generated code in the user's project and fully modifiable.
+Forge is a Go framework and template repository for building B2B micro-SaaS applications. It provides production-ready code with pre-built features (auth, multi-tenancy, billing, background jobs) that you clone and own completely.
 
 **Status:** Concept stage — architecture documented, implementation pending.
 
@@ -22,8 +22,7 @@ Forge is a Go framework and CLI tool for generating B2B micro-SaaS applications.
 ## Planned Architecture
 
 ```
-forge/                          # This repository (framework + CLI)
-├── cmd/forge/                  # CLI tool (generator)
+forge/                          # This repository (framework + template)
 ├── pkg/                        # Importable runtime packages
 │   ├── app/                    # Bootstrap, config, lifecycle
 │   ├── web/                    # Router, context, middleware types
@@ -32,16 +31,20 @@ forge/                          # This repository (framework + CLI)
 │   ├── task/                   # Queue + scheduled (both via River)
 │   ├── auth/                   # Password hashing, tokens
 │   └── validate/               # Validation helpers
-└── templates/                  # Code generation templates
+├── cmd/app/                    # Application entry point
+├── config/                     # Configuration
+├── db/                         # Migrations and queries
+├── internal/                   # Application code (handlers, tasks, etc.)
+└── web/                        # Templates and static assets
 ```
 
 ## Design Principles
 
-- **No magic:** Generate explicit code, no reflection, no service containers
+- **No magic:** Explicit code, no reflection, no service containers
 - **SQL-first:** Use sqlc-generated types directly (no internal/models layer)
 - **Flat handlers:** Business logic lives in handlers, extract to services only when shared between handlers and tasks
 - **Constructor injection:** Explicit wiring in main.go, all dependencies visible
-- **Generated code is yours:** Users own and can modify all generated code
+- **Your code:** Users clone the template and own all code completely
 
 ## Key Patterns
 
