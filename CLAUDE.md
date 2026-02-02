@@ -85,3 +85,5 @@ Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
 - **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
 - **Struct alignment:** `betteralign` may reorder struct fields for memory efficiency
 - **Examples excluded:** `make lint` excludes `examples/` from modernize checks
+- **Build to /dev/null:** Never `go build` into repo; use `go build -o /dev/null ./...` to verify compilation
+- **Validator tags:** Use semicolons as separators, colons for params: `validate:"required;max:100"` (not commas)
