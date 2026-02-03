@@ -16,43 +16,6 @@ This document outlines planned features for the Forge framework.
 
 ## High Priority
 
-### [ ] HTMX Render Options
-
-**Package:** `pkg/htmx/`
-
-Extend `Render()` with options for HTMX response control:
-
-```go
-type RenderOption func(*renderConfig)
-
-// OOB Swaps - component must include id and hx-swap-oob attributes
-WithOOB(components ...Component) RenderOption
-
-// Retargeting - change where response is swapped
-WithRetarget(cssSelector string) RenderOption     // HX-Retarget header
-WithReswap(strategy SwapStrategy) RenderOption    // HX-Reswap header
-WithReselect(cssSelector string) RenderOption     // HX-Reselect header
-
-// URL manipulation
-WithPushURL(url string) RenderOption              // HX-Push-Url header
-WithReplaceURL(url string) RenderOption           // HX-Replace-Url header
-
-// Client-side events
-WithTrigger(events ...string) RenderOption              // HX-Trigger header
-WithTriggerAfterSwap(events ...string) RenderOption     // HX-Trigger-After-Swap
-WithTriggerAfterSettle(events ...string) RenderOption   // HX-Trigger-After-Settle
-
-// Page refresh
-WithRefresh() RenderOption                        // HX-Refresh: true
-```
-
-**OOB Prerequisites (component responsibility):**
-
-- Component must include `id` attribute
-- Component must include `hx-swap-oob` attribute with swap strategy
-
----
-
 ### [ ] Jobs/Queue
 
 **Package:** `pkg/jobs/`
