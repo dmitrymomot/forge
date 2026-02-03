@@ -13,6 +13,7 @@ import (
 
 	"github.com/dmitrymomot/forge/pkg/binder"
 	"github.com/dmitrymomot/forge/pkg/cookie"
+	"github.com/dmitrymomot/forge/pkg/hostrouter"
 	"github.com/dmitrymomot/forge/pkg/htmx"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
@@ -50,6 +51,15 @@ type Context interface {
 
 	// QueryDefault returns the query parameter value or a default.
 	QueryDefault(name, defaultValue string) string
+
+	// Domain returns the normalized domain from the request Host header.
+	// Strips port, handles IPv6, and converts to lowercase.
+	Domain() string
+
+	// Subdomain extracts the subdomain from the request.
+	// Uses the base domain configured via WithBaseDomain.
+	// Returns empty string if no base domain configured or host doesn't match.
+	Subdomain() string
 
 	// Header returns the request header value by name.
 	Header(name string) string
@@ -222,13 +232,15 @@ type requestContext struct {
 	session        *session.Session
 
 	// Job management
-	jobEnqueuer           *JobEnqueuer
+	jobEnqueuer *JobEnqueuer
+	baseDomain  string
+
 	sessionLoaded         bool
 	sessionHookRegistered bool
 }
 
 // newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer, baseDomain string) *requestContext {
 	// Create response wrapper
 	rw := NewResponseWriter(w, htmx.IsHTMX(r))
 
@@ -240,6 +252,7 @@ func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm 
 		cookieManager:  cm,
 		sessionManager: sm,
 		jobEnqueuer:    je,
+		baseDomain:     baseDomain,
 	}
 }
 
@@ -275,6 +288,19 @@ func (c *requestContext) QueryDefault(name, defaultValue string) string {
 		return defaultValue
 	}
 	return v
+}
+
+// Domain returns the normalized domain from the request Host header.
+func (c *requestContext) Domain() string {
+	return hostrouter.GetDomain(c.request)
+}
+
+// Subdomain extracts the subdomain from the request.
+func (c *requestContext) Subdomain() string {
+	if c.baseDomain == "" {
+		return ""
+	}
+	return hostrouter.GetSubdomain(c.request, c.baseDomain)
 }
 
 // Header returns the request header value by name.
