@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
 )
@@ -71,6 +74,15 @@ type (
 
 	// ResponseWriter wraps http.ResponseWriter with hooks and HTMX support.
 	ResponseWriter = internal.ResponseWriter
+
+	// JobOption configures the job manager.
+	JobOption = job.Option
+
+	// EnqueueOption configures job enqueueing.
+	EnqueueOption = job.EnqueueOption
+
+	// JobManager handles background job processing.
+	JobManager = job.Manager
 )
 
 // Constructors
@@ -427,6 +439,115 @@ var (
 	ErrSessionExpired       = session.ErrExpired
 	ErrSessionInvalidToken  = session.ErrInvalidToken
 )
+
+// Job options
+
+// WithJobs enables background job processing using River.
+// A pgxpool.Pool is required for the job queue. Jobs are started automatically
+// when the app runs and stopped gracefully during shutdown.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithJobs(pool,
+//	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
+//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
+//	        job.WithQueue("email", 10),
+//	    ),
+//	)
+func WithJobs(pool *pgxpool.Pool, opts ...JobOption) Option {
+	return internal.WithJobs(pool, opts...)
+}
+
+// Job registration options - re-exported from pkg/job
+
+// WithTask registers a task handler using structural typing.
+// The task must implement Name() and Handle(ctx, P) methods.
+func WithTask[P any, T interface {
+	Name() string
+	Handle(context.Context, P) error
+}](task T) JobOption {
+	return job.WithTask[P, T](task)
+}
+
+// WithScheduledTask registers a periodic task.
+// The task must implement Schedule() and Handle(ctx) methods.
+func WithScheduledTask[T interface {
+	Schedule() string
+	Handle(context.Context) error
+}](task T, name string) JobOption {
+	return job.WithScheduledTask[T](task, name)
+}
+
+// WithJobQueue configures a named queue with the specified number of workers.
+func WithJobQueue(name string, workers int) JobOption {
+	return job.WithQueue(name, workers)
+}
+
+// WithJobLogger sets the logger for job processing.
+func WithJobLogger(l *slog.Logger) JobOption {
+	return job.WithLogger(l)
+}
+
+// WithJobMaxWorkers sets the default maximum number of workers.
+func WithJobMaxWorkers(n int) JobOption {
+	return job.WithMaxWorkers(n)
+}
+
+// Enqueue options - re-exported from pkg/job
+
+// InQueue specifies which queue to use for the job.
+func InQueue(name string) EnqueueOption {
+	return job.InQueue(name)
+}
+
+// ScheduledAt schedules the job to run at a specific time.
+func ScheduledAt(t time.Time) EnqueueOption {
+	return job.ScheduledAt(t)
+}
+
+// ScheduledIn schedules the job to run after a duration.
+func ScheduledIn(d time.Duration) EnqueueOption {
+	return job.ScheduledIn(d)
+}
+
+// MaxAttempts sets the maximum number of retry attempts for the job.
+func MaxAttempts(n int) EnqueueOption {
+	return job.MaxAttempts(n)
+}
+
+// UniqueFor ensures only one job with this key exists for the specified duration.
+func UniqueFor(d time.Duration) EnqueueOption {
+	return job.UniqueFor(d)
+}
+
+// UniqueKey sets a custom unique key for deduplication.
+func UniqueKey(key string) EnqueueOption {
+	return job.UniqueKey(key)
+}
+
+// JobPriority sets the job priority (lower numbers = higher priority).
+func JobPriority(p int) EnqueueOption {
+	return job.Priority(p)
+}
+
+// JobTags adds metadata tags to the job.
+func JobTags(tags ...string) EnqueueOption {
+	return job.Tags(tags...)
+}
+
+// Job errors for checking return values.
+var (
+	ErrJobNotConfigured     = job.ErrNotConfigured
+	ErrJobUnknownTask       = job.ErrUnknownTask
+	ErrJobInvalidPayload    = job.ErrInvalidPayload
+	ErrJobHealthcheckFailed = job.ErrHealthcheckFailed
+)
+
+// JobHealthcheck returns a health check function for the job manager.
+func JobHealthcheck(m *JobManager) health.CheckFunc {
+	return job.Healthcheck(m)
+}
 
 // SessionValue is a typed helper to retrieve session values with type safety.
 // Returns an error if the key doesn't exist or type assertion fails.
