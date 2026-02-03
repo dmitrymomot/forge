@@ -39,6 +39,7 @@ type scheduledTestTask struct {
 	schedule string
 }
 
+func (t *scheduledTestTask) Name() string     { return "scheduled_test" }
 func (t *scheduledTestTask) Schedule() string { return t.schedule }
 
 func (t *scheduledTestTask) Handle(ctx context.Context) error {
@@ -51,7 +52,7 @@ func TestWithScheduledTask(t *testing.T) {
 	cfg := newConfig()
 
 	task := &scheduledTestTask{schedule: "0 * * * *"}
-	opt := WithScheduledTask[*scheduledTestTask](task, "scheduled_test")
+	opt := WithScheduledTask[*scheduledTestTask](task)
 	opt(cfg)
 
 	// Verify schedule was added

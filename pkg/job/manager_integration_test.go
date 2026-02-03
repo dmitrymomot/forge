@@ -9,17 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestManager_buildJobArgs(t *testing.T) {
+func TestBuildJobArgs(t *testing.T) {
 	t.Parallel()
-
-	manager := &Manager{
-		registry: newTaskRegistry(),
-	}
 
 	t.Run("nil payload", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil)
+		args, opts, err := buildJobArgs("test", nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Empty(t, args.Payload)
@@ -30,7 +26,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 		t.Parallel()
 
 		payload := testPayload{Message: "hello", Count: 42}
-		args, opts, err := manager.buildJobArgs("test", payload)
+		args, opts, err := buildJobArgs("test", payload)
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 
@@ -44,7 +40,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 	t.Run("with queue option", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil, InQueue("email"))
+		args, opts, err := buildJobArgs("test", nil, InQueue("email"))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, "email", opts.Queue)
@@ -54,7 +50,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 		t.Parallel()
 
 		scheduledTime := time.Now().Add(time.Hour)
-		args, opts, err := manager.buildJobArgs("test", nil, ScheduledAt(scheduledTime))
+		args, opts, err := buildJobArgs("test", nil, ScheduledAt(scheduledTime))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, scheduledTime, opts.ScheduledAt)
@@ -63,7 +59,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 	t.Run("with max attempts", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil, MaxAttempts(5))
+		args, opts, err := buildJobArgs("test", nil, MaxAttempts(5))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, 5, opts.MaxAttempts)
@@ -72,7 +68,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 	t.Run("with priority", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil, Priority(10))
+		args, opts, err := buildJobArgs("test", nil, Priority(10))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, 10, opts.Priority)
@@ -81,7 +77,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 	t.Run("with tags", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil, Tags("tag1", "tag2"))
+		args, opts, err := buildJobArgs("test", nil, Tags("tag1", "tag2"))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, []string{"tag1", "tag2"}, opts.Tags)
@@ -90,7 +86,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 	t.Run("with unique options", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := manager.buildJobArgs("test", nil,
+		args, opts, err := buildJobArgs("test", nil,
 			UniqueFor(time.Hour),
 			UniqueKey("custom-key"),
 		)
@@ -104,7 +100,7 @@ func TestManager_buildJobArgs(t *testing.T) {
 		t.Parallel()
 
 		payload := testPayload{Message: "test", Count: 1}
-		args, opts, err := manager.buildJobArgs("test", payload,
+		args, opts, err := buildJobArgs("test", payload,
 			InQueue("email"),
 			MaxAttempts(3),
 			Priority(5),
