@@ -30,20 +30,17 @@ func Recipient(name, email string) string {
 
 // Email represents a fully-prepared email message ready for sending.
 type Email struct {
-	Headers map[string]string // Custom headers
-	Tags    Tags              // Provider-specific tags/categories
-	Subject string            // Email subject
-	HTML    string            // HTML body content
-
-	// Optional fields
-	Text    string // Plain text alternative
-	From    string // Override default sender (if provider allows)
-	ReplyTo string // Reply-to address
-	// Required fields
-	To          []string     // Recipients (at least one required)
-	CC          []string     // Carbon copy recipients
-	BCC         []string     // Blind carbon copy recipients
-	Attachments []Attachment // File attachments
+	Headers     map[string]string // Custom headers
+	Tags        Tags              // Provider-specific tags/categories
+	Subject     string            // Email subject
+	HTML        string            // HTML body content
+	Text        string            // Plain text alternative
+	From        string            // Override default sender (if provider allows)
+	ReplyTo     string            // Reply-to address
+	To          []string          // Recipients (at least one required)
+	CC          []string          // Carbon copy recipients
+	BCC         []string          // Blind carbon copy recipients
+	Attachments []Attachment      // File attachments
 }
 
 // Attachment represents an email attachment.
