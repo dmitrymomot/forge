@@ -1,13 +1,17 @@
 package internal
 
 import (
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
 )
@@ -200,5 +204,29 @@ func WithCookieOptions(opts ...cookie.Option) Option {
 func WithSession(store session.Store, opts ...SessionOption) Option {
 	return func(a *App) {
 		a.sessionManager = NewSessionManager(store, opts...)
+	}
+}
+
+// WithJobs enables background job processing using River.
+// A pgxpool.Pool is required for the job queue. Jobs are started automatically
+// when the app runs and stopped gracefully during shutdown.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithJobs(pool,
+//	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
+//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
+//	        job.WithQueue("email", 10),
+//	        job.WithLogger(slog.Default()),
+//	    ),
+//	)
+func WithJobs(pool *pgxpool.Pool, opts ...job.Option) Option {
+	return func(a *App) {
+		jm, err := NewJobManager(pool, opts...)
+		if err != nil {
+			panic(fmt.Sprintf("job manager: %v", err))
+		}
+		a.jobManager = jm
 	}
 }
