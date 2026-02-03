@@ -8,8 +8,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/job"
 )
 
-// JobManager wraps the pkg/job.Manager for internal use.
-// It provides the integration between the framework and the job package.
+// JobManager wraps the pkg/job.Manager for internal use in the framework.
 type JobManager struct {
 	manager *job.Manager
 }

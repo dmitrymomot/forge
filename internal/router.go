@@ -104,7 +104,7 @@ func (r *routerAdapter) Mount(pattern string, h http.Handler) {
 }
 
 func (r *routerAdapter) wrap(h HandlerFunc, mw ...Middleware) http.HandlerFunc {
-	// Apply route-specific middleware in reverse order (last registered = first executed)
+	// Middleware wraps from last to first, so reverse to execute in registration order
 	slices.Reverse(mw)
 	for _, m := range mw {
 		h = m(h)

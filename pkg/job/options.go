@@ -24,7 +24,7 @@ func newConfig() *config {
 
 // scheduleConfig holds scheduled task configuration.
 //
-//nolint:betteralign // all fields contain pointers, no optimization possible
+//nolint:betteralign
 type scheduleConfig struct {
 	handler  scheduledHandler
 	name     string

@@ -512,9 +512,7 @@ func (c *requestContext) SetFlash(key string, value any) error {
 }
 
 // registerSessionHook ensures the session flush hook is registered once.
-// This is called lazily when the session is first accessed.
-// We use a hook that runs before write to persist changes without blocking response writes
-// or requiring explicit Flush() calls from handler code.
+// It runs before the response is written to persist any session changes.
 func (c *requestContext) registerSessionHook() {
 	if c.sessionHookRegistered || c.sessionManager == nil || c.responseWriter == nil {
 		return
