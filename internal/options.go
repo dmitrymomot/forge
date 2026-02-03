@@ -207,16 +207,17 @@ func WithSession(store session.Store, opts ...SessionOption) Option {
 	}
 }
 
-// WithJobs enables background job processing using River.
-// A pgxpool.Pool is required for the job queue. Jobs are started automatically
+// WithJobs enables both job enqueueing and worker processing using River.
+// A pgxpool.Pool is required for the job queue. Workers are started automatically
 // when the app runs and stopped gracefully during shutdown.
+// Use this for monolith deployments or workers that need to enqueue follow-up tasks.
 //
 // Example:
 //
 //	forge.New(
 //	    forge.WithJobs(pool,
 //	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
-//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
+//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo)),
 //	        job.WithQueue("email", 10),
 //	        job.WithLogger(slog.Default()),
 //	    ),
@@ -227,6 +228,56 @@ func WithJobs(pool *pgxpool.Pool, opts ...job.Option) Option {
 		if err != nil {
 			panic(fmt.Sprintf("job manager: %v", err))
 		}
-		a.jobManager = jm
+		a.jobEnqueuer = &JobEnqueuer{enqueuer: jm.Manager().Enqueuer}
+		a.jobWorker = jm
+	}
+}
+
+// WithJobEnqueuer enables job enqueueing without worker processing.
+// Use this for web servers that dispatch work to separate worker processes.
+// Workers must be running elsewhere to process the enqueued jobs.
+//
+// Example:
+//
+//	// Web server - only enqueues jobs
+//	forge.New(
+//	    forge.WithJobEnqueuer(pool),
+//	)
+//	// c.Enqueue("send_email", payload) works
+func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
+	return func(a *App) {
+		je, err := NewJobEnqueuer(pool, opts...)
+		if err != nil {
+			panic(fmt.Sprintf("job enqueuer: %v", err))
+		}
+		a.jobEnqueuer = je
+	}
+}
+
+// WithJobWorker enables job processing without enqueueing capability.
+// Use this for dedicated background worker processes that don't need
+// to dispatch additional jobs. Workers are started automatically when
+// the app runs and stopped gracefully during shutdown.
+//
+// If workers need to enqueue follow-up tasks, use WithJobs instead.
+//
+// Example:
+//
+//	// Dedicated worker process
+//	forge.New(
+//	    forge.WithJobWorker(pool,
+//	        job.WithTask(tasks.NewSendEmail(mailer)),
+//	        job.WithScheduledTask(tasks.NewCleanup(repo)),
+//	    ),
+//	)
+//	// c.Enqueue() returns job.ErrNotConfigured
+func WithJobWorker(pool *pgxpool.Pool, opts ...job.Option) Option {
+	return func(a *App) {
+		jm, err := NewJobManager(pool, opts...)
+		if err != nil {
+			panic(fmt.Sprintf("job worker: %v", err))
+		}
+		a.jobWorker = jm
+		// Note: jobEnqueuer stays nil - c.Enqueue() returns ErrNotConfigured
 	}
 }
