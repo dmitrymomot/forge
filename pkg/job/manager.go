@@ -17,7 +17,6 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// Default configuration values.
 const (
 	defaultMaxWorkers = 100
 	defaultQueue      = river.QueueDefault
@@ -56,7 +55,6 @@ func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 		cfg.maxWorkers = defaultMaxWorkers
 	}
 
-	// Build queue configuration
 	queues := map[string]river.QueueConfig{
 		defaultQueue: {MaxWorkers: cfg.maxWorkers},
 	}
@@ -64,7 +62,6 @@ func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 		queues[name] = river.QueueConfig{MaxWorkers: workers}
 	}
 
-	// Build periodic job configuration
 	var periodicJobs []*river.PeriodicJob
 	for _, sched := range cfg.schedules {
 		cronSchedule, err := parseCronSchedule(sched.schedule)
@@ -85,20 +82,20 @@ func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 			},
 		))
 
-		// Register a task executor for the scheduled task
 		cfg.registry.register(sched.name, &scheduledTaskExecutor{
 			handler: sched.handler,
 		})
 	}
 
-	// Create River workers
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &forgeTaskWorker{
 		registry: cfg.registry,
 		logger:   cfg.logger,
 	})
 
-	// Create River client (but don't start workers yet)
+	// Client created immediately, allowing enqueue() before Start().
+	// This supports initialization patterns where jobs are enqueued
+	// during app setup and processed after Start() is called.
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:       queues,
 		Workers:      workers,
@@ -164,7 +161,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 // Jobs can be enqueued before Start() is called; they will be processed
 // once the manager starts.
 func (m *Manager) Enqueue(ctx context.Context, name string, payload any, opts ...EnqueueOption) error {
-	// Verify task is registered
 	if _, ok := m.registry.get(name); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
 	}
@@ -188,7 +184,6 @@ func (m *Manager) Enqueue(ctx context.Context, name string, payload any, opts ..
 // Jobs can be enqueued before Start() is called; they will be processed
 // once the manager starts.
 func (m *Manager) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload any, opts ...EnqueueOption) error {
-	// Verify task is registered
 	if _, ok := m.registry.get(name); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
 	}
@@ -207,6 +202,7 @@ func (m *Manager) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload
 }
 
 // buildJobArgs creates River job arguments from the task name and payload.
+// It bridges the high-level EnqueueOption API to River's InsertOpts contract.
 func (m *Manager) buildJobArgs(name string, payload any, opts ...EnqueueOption) (*forgeTaskArgs, *river.InsertOpts, error) {
 	var payloadBytes json.RawMessage
 	if payload != nil {
@@ -222,7 +218,6 @@ func (m *Manager) buildJobArgs(name string, payload any, opts ...EnqueueOption) 
 		Payload:  payloadBytes,
 	}
 
-	// Apply enqueue options
 	enqCfg := &enqueueConfig{}
 	for _, opt := range opts {
 		opt(enqCfg)
@@ -264,7 +259,6 @@ type forgeTaskArgs struct {
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }
 
-// Kind returns the job kind for River.
 func (forgeTaskArgs) Kind() string {
 	return "forge:task"
 }
@@ -276,7 +270,6 @@ type forgeTaskWorker struct {
 	logger   *slog.Logger
 }
 
-// Work executes the task by looking up the handler in the registry.
 func (w *forgeTaskWorker) Work(ctx context.Context, job *river.Job[forgeTaskArgs]) error {
 	executor, ok := w.registry.get(job.Args.TaskName)
 	if !ok || executor == nil {
@@ -307,27 +300,22 @@ func (w *forgeTaskWorker) Work(ctx context.Context, job *river.Job[forgeTaskArgs
 	return nil
 }
 
-// scheduledTaskExecutor wraps a scheduled task handler.
 type scheduledTaskExecutor struct {
 	handler scheduledHandler
 }
 
-// Execute runs the scheduled task handler.
 func (e *scheduledTaskExecutor) Execute(ctx context.Context, _ json.RawMessage) error {
 	return e.handler(ctx)
 }
 
-// cronScheduleAdapter adapts robfig/cron to River's PeriodicSchedule interface.
 type cronScheduleAdapter struct {
 	schedule cron.Schedule
 }
 
-// Next returns the next time the job should run.
 func (a *cronScheduleAdapter) Next(current time.Time) time.Time {
 	return a.schedule.Next(current)
 }
 
-// parseCronSchedule parses a cron expression and returns a River PeriodicSchedule.
 func parseCronSchedule(expr string) (river.PeriodicSchedule, error) {
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	schedule, err := parser.Parse(expr)
@@ -337,15 +325,12 @@ func parseCronSchedule(expr string) (river.PeriodicSchedule, error) {
 	return &cronScheduleAdapter{schedule: schedule}, nil
 }
 
-// Shutdown returns a shutdown function compatible with forge.ShutdownHook.
 func (m *Manager) Shutdown() func(context.Context) error {
 	return func(ctx context.Context) error {
 		return m.Stop(ctx)
 	}
 }
 
-// StartFunc returns a function that starts the manager.
-// This is useful for deferred startup patterns.
 func (m *Manager) StartFunc() func(context.Context) error {
 	return func(ctx context.Context) error {
 		return m.Start(ctx)

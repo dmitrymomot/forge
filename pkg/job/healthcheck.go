@@ -8,7 +8,6 @@ import (
 // ErrHealthcheckFailed is returned when the job manager health check fails.
 var ErrHealthcheckFailed = errors.New("job: healthcheck failed")
 
-// Sentinel errors for specific healthcheck failure conditions.
 var (
 	errManagerNil        = errors.New("manager is nil")
 	errManagerNotStarted = errors.New("manager not started")
@@ -37,7 +36,8 @@ func Healthcheck(m *Manager) func(ctx context.Context) error {
 			return errors.Join(ErrHealthcheckFailed, errManagerNotStarted)
 		}
 
-		// Verify database connectivity through the pool
+		// Pool.Ping verifies both database connectivity and River's ability
+		// to access required tables, since River uses the same pool.
 		if err := m.pool.Ping(ctx); err != nil {
 			return errors.Join(ErrHealthcheckFailed, err)
 		}

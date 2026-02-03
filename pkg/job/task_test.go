@@ -10,13 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testPayload is a test payload type.
 type testPayload struct {
 	Message string `json:"message"`
 	Count   int    `json:"count"`
 }
 
-// testTask implements the task interface for testing.
 type testTask struct {
 	name     string
 	executed bool
@@ -35,17 +33,14 @@ func (t *testTask) Handle(ctx context.Context, p testPayload) error {
 func TestTaskRegistry_RegisterAndGet(t *testing.T) {
 	registry := newTaskRegistry()
 
-	// Register a task
 	task := &testTask{name: "test_task"}
 	wrapper := newTaskWrapper[testPayload, *testTask](task)
 	registry.register("test_task", wrapper)
 
-	// Get the task
 	executor, ok := registry.get("test_task")
 	assert.True(t, ok)
 	assert.NotNil(t, executor)
 
-	// Try to get non-existent task
 	executor, ok = registry.get("nonexistent")
 	assert.False(t, ok)
 	assert.Nil(t, executor)
@@ -54,11 +49,9 @@ func TestTaskRegistry_RegisterAndGet(t *testing.T) {
 func TestTaskRegistry_Names(t *testing.T) {
 	registry := newTaskRegistry()
 
-	// Empty registry
 	names := registry.names()
 	assert.Empty(t, names)
 
-	// Add tasks
 	task1 := &testTask{name: "task1"}
 	task2 := &testTask{name: "task2"}
 	registry.register("task1", newTaskWrapper[testPayload, *testTask](task1))
@@ -115,7 +108,6 @@ func TestTaskWrapper_Execute(t *testing.T) {
 	})
 }
 
-// emptyPayloadTask uses an empty struct as payload.
 type emptyPayloadTask struct {
 	executed bool
 }
