@@ -31,6 +31,8 @@ func (t *testTask) Handle(ctx context.Context, p testPayload) error {
 }
 
 func TestTaskRegistry_RegisterAndGet(t *testing.T) {
+	t.Parallel()
+
 	registry := newTaskRegistry()
 
 	task := &testTask{name: "test_task"}
@@ -47,6 +49,8 @@ func TestTaskRegistry_RegisterAndGet(t *testing.T) {
 }
 
 func TestTaskRegistry_Names(t *testing.T) {
+	t.Parallel()
+
 	registry := newTaskRegistry()
 
 	names := registry.names()
@@ -58,13 +62,17 @@ func TestTaskRegistry_Names(t *testing.T) {
 	registry.register("task2", newTaskWrapper[testPayload, *testTask](task2))
 
 	names = registry.names()
-	assert.Len(t, names, 2)
+	require.Len(t, names, 2)
 	assert.Contains(t, names, "task1")
 	assert.Contains(t, names, "task2")
 }
 
 func TestTaskWrapper_Execute(t *testing.T) {
+	t.Parallel()
+
 	t.Run("successful execution", func(t *testing.T) {
+		t.Parallel()
+
 		task := &testTask{name: "test_task"}
 		wrapper := newTaskWrapper[testPayload, *testTask](task)
 
@@ -73,37 +81,44 @@ func TestTaskWrapper_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		err = wrapper.Execute(context.Background(), rawPayload)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, task.executed)
 		assert.Equal(t, "hello", task.payload.Message)
 		assert.Equal(t, 42, task.payload.Count)
 	})
 
 	t.Run("empty payload", func(t *testing.T) {
+		t.Parallel()
+
 		task := &testTask{name: "test_task"}
 		wrapper := newTaskWrapper[testPayload, *testTask](task)
 
 		err := wrapper.Execute(context.Background(), nil)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, task.executed)
 		assert.Equal(t, testPayload{}, task.payload)
 	})
 
 	t.Run("invalid payload", func(t *testing.T) {
+		t.Parallel()
+
 		task := &testTask{name: "test_task"}
 		wrapper := newTaskWrapper[testPayload, *testTask](task)
 
 		err := wrapper.Execute(context.Background(), []byte("invalid json"))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrInvalidPayload))
 	})
 
 	t.Run("task returns error", func(t *testing.T) {
+		t.Parallel()
+
 		taskErr := errors.New("task failed")
 		task := &testTask{name: "test_task", err: taskErr}
 		wrapper := newTaskWrapper[testPayload, *testTask](task)
 
 		err := wrapper.Execute(context.Background(), nil)
+		require.Error(t, err)
 		assert.ErrorIs(t, err, taskErr)
 	})
 }
@@ -120,10 +135,12 @@ func (t *emptyPayloadTask) Handle(ctx context.Context, p struct{}) error {
 }
 
 func TestTaskWrapper_EmptyPayload(t *testing.T) {
+	t.Parallel()
+
 	task := &emptyPayloadTask{}
 	wrapper := newTaskWrapper[struct{}, *emptyPayloadTask](task)
 
 	err := wrapper.Execute(context.Background(), nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, task.executed)
 }

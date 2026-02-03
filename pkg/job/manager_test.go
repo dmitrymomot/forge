@@ -9,12 +9,16 @@ import (
 )
 
 func TestNewManager_NilPool(t *testing.T) {
+	t.Parallel()
+
 	_, err := NewManager(nil)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pool is required")
 }
 
 func TestParseCronSchedule_Valid(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		expr     string
@@ -48,6 +52,8 @@ func TestParseCronSchedule_Valid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			schedule, err := parseCronSchedule(tt.expr)
 			require.NoError(t, err)
 			assert.NotNil(t, schedule)
@@ -61,6 +67,8 @@ func TestParseCronSchedule_Valid(t *testing.T) {
 }
 
 func TestParseCronSchedule_Invalid(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		expr string
@@ -78,13 +86,17 @@ func TestParseCronSchedule_Invalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := parseCronSchedule(tt.expr)
-			assert.Error(t, err)
+			require.Error(t, err)
 		})
 	}
 }
 
 func TestCronScheduleAdapter_Next(t *testing.T) {
+	t.Parallel()
+
 	schedule, err := parseCronSchedule("0 * * * *") // Every hour
 	require.NoError(t, err)
 
@@ -102,6 +114,8 @@ func TestCronScheduleAdapter_Next(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
+	t.Parallel()
+
 	// Verify error messages
 	assert.Contains(t, ErrNotConfigured.Error(), "not configured")
 	assert.Contains(t, ErrUnknownTask.Error(), "unknown task")
