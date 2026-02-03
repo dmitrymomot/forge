@@ -56,6 +56,8 @@ forge/
 - **Flat handlers:** Business logic lives in handlers, extract to services only when shared between handlers and tasks
 - **Constructor injection:** Explicit wiring in main.go, all dependencies visible
 - **Explicit over implicit:** Favor clear, readable code over clever abstractions
+- **No redundant accessors:** Don't expose fields users already have (e.g., `Pool()` when they passed the pool to constructor)
+- **No unexported returns:** Public methods must not return unexported types
 
 ## Key Patterns
 
@@ -100,6 +102,7 @@ defer ts.Close()
 
 ## Gotchas
 
+- **Loop variables (Go 1.22+):** No need for `v := v` captures in closures; remove if found during review
 - **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
 - **Struct alignment:** `betteralign` may reorder struct fields for memory efficiency
 - **Examples excluded:** `make lint` excludes `examples/` from modernize checks
