@@ -26,4 +26,16 @@
 //
 // IPv6 addresses are supported. The router correctly handles addresses with ports
 // like "[::1]:8080" by preserving the brackets during normalization.
+//
+// # Helper Functions
+//
+// The package provides helper functions for extracting domain information:
+//
+//	// Get the normalized domain from a request
+//	domain := hostrouter.GetDomain(r)  // "example.com:8080" -> "example.com"
+//
+//	// Extract subdomain given a base domain
+//	subdomain := hostrouter.GetSubdomain(r, "example.com")  // "foo.example.com" -> "foo"
+//
+// These helpers are used internally by forge.Context.Domain() and forge.Context.Subdomain().
 package hostrouter
