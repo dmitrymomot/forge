@@ -5,12 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/dmitrymomot/forge/pkg/clientip"
+	"github.com/dmitrymomot/forge/pkg/fingerprint"
 	"github.com/dmitrymomot/forge/pkg/id"
 	"github.com/dmitrymomot/forge/pkg/session"
+	"github.com/dmitrymomot/forge/pkg/useragent"
 )
 
 // Default session configuration.
@@ -19,16 +22,48 @@ const (
 	defaultSessionMaxAge     = 86400 * 30 // 30 days
 )
 
+// FingerprintMode determines which fingerprint generation algorithm to use.
+type FingerprintMode int
+
+const (
+	// FingerprintDisabled disables fingerprint generation and validation.
+	FingerprintDisabled FingerprintMode = iota
+	// FingerprintCookie uses default settings, excludes IP. Best for most web apps.
+	FingerprintCookie
+	// FingerprintJWT uses minimal fingerprint (User-Agent + header set), excludes Accept headers.
+	FingerprintJWT
+	// FingerprintHTMX uses only User-Agent, avoids HTMX header variations.
+	FingerprintHTMX
+	// FingerprintStrict includes IP address. Use for high-security scenarios.
+	// WARNING: Will cause false positives for mobile users, VPN users, and dynamic proxies.
+	FingerprintStrict
+)
+
+// FingerprintStrictness determines behavior on fingerprint mismatch.
+type FingerprintStrictness int
+
+const (
+	// FingerprintWarn logs a warning but allows the session to continue.
+	// Use when you want visibility without disrupting users.
+	FingerprintWarn FingerprintStrictness = iota
+	// FingerprintReject invalidates the session on fingerprint mismatch.
+	// Returns ErrFingerprintMismatch from LoadSession.
+	FingerprintReject
+)
+
 // SessionManager handles session lifecycle and cookie management.
 type SessionManager struct {
-	store      session.Store
-	cookieName string
-	domain     string
-	path       string
-	maxAge     int
-	sameSite   http.SameSite
-	secure     bool
-	httpOnly   bool
+	store                 session.Store
+	logger                *slog.Logger
+	cookieName            string
+	domain                string
+	path                  string
+	maxAge                int
+	sameSite              http.SameSite
+	fingerprintMode       FingerprintMode
+	fingerprintStrictness FingerprintStrictness
+	secure                bool
+	httpOnly              bool
 }
 
 // SessionOption configures the SessionManager.
@@ -107,10 +142,35 @@ func WithSessionSameSite(sameSite http.SameSite) SessionOption {
 	}
 }
 
+// WithSessionFingerprint enables device fingerprinting for session hijacking detection.
+// Mode determines which components are included in the fingerprint:
+//   - FingerprintCookie: Default, excludes IP (recommended for most apps)
+//   - FingerprintJWT: Minimal, excludes Accept headers (for JWT apps)
+//   - FingerprintHTMX: User-Agent only (for HTMX apps)
+//   - FingerprintStrict: Includes IP (high-security, causes false positives)
+//
+// Strictness determines behavior on mismatch:
+//   - FingerprintWarn: Log warning but allow session (visibility without disruption)
+//   - FingerprintReject: Invalidate session (strict security)
+func WithSessionFingerprint(mode FingerprintMode, strictness FingerprintStrictness) SessionOption {
+	return func(sm *SessionManager) {
+		sm.fingerprintMode = mode
+		sm.fingerprintStrictness = strictness
+	}
+}
+
+// SetLogger sets the logger for session events. Called by App after initialization.
+func (sm *SessionManager) SetLogger(l *slog.Logger) {
+	if l != nil {
+		sm.logger = l
+	}
+}
+
 // LoadSession loads an existing session from the request cookie.
 // Returns nil, nil if no session cookie exists.
 // Returns ErrNotFound if the session doesn't exist in the store.
 // Returns ErrExpired if the session has expired.
+// Returns ErrFingerprintMismatch if fingerprint validation fails (when strictness is FingerprintReject).
 func (sm *SessionManager) LoadSession(ctx context.Context, r *http.Request) (*session.Session, error) {
 	cookie, err := r.Cookie(sm.cookieName)
 	if err != nil {
@@ -127,6 +187,21 @@ func (sm *SessionManager) LoadSession(ctx context.Context, r *http.Request) (*se
 		return nil, err
 	}
 
+	// Validate fingerprint if enabled
+	if sm.fingerprintMode != FingerprintDisabled && sess.Fingerprint != "" {
+		if err := sm.validateFingerprint(r, sess); err != nil {
+			if sm.fingerprintStrictness == FingerprintReject {
+				return nil, session.ErrFingerprintMismatch
+			}
+			// FingerprintWarn: log and continue
+			sm.logger.Warn("session fingerprint mismatch",
+				slog.String("session_id", sess.ID),
+				slog.String("ip", clientip.GetIP(r)),
+				slog.String("user_agent", r.UserAgent()),
+			)
+		}
+	}
+
 	return sess, nil
 }
 
@@ -140,9 +215,10 @@ func (sm *SessionManager) CreateSession(ctx context.Context, r *http.Request) (*
 	expiresAt := time.Now().Add(time.Duration(sm.maxAge) * time.Second)
 
 	sess := session.New(sessionID, token, expiresAt)
-	sess.IP = extractIP(r)
+	sess.IP = clientip.GetIP(r)
 	sess.UserAgent = r.UserAgent()
 	sess.Device = parseDevice(r.UserAgent())
+	sess.Fingerprint = sm.generateFingerprint(r)
 
 	if err := sm.store.Create(ctx, sess); err != nil {
 		return nil, err
@@ -219,71 +295,49 @@ func generateToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-// extractIP extracts the client IP from the request.
-// Checks X-Forwarded-For and X-Real-IP headers first (set by proxies).
-// Falls back to RemoteAddr from the TCP connection.
-func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For (comma-separated, first is original client)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-
-	// Check X-Real-IP (single IP, often set by reverse proxies)
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr (direct connection; includes port)
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
-	}
-	return addr
-}
-
-// parseDevice extracts a simple device description from User-Agent.
-// Returns something like "Chrome on macOS" or "Safari on iOS".
+// parseDevice extracts device information from User-Agent using the useragent package.
+// Returns a short identifier like "Chrome/128 (macOS, desktop)" or "Bot: Googlebot".
 func parseDevice(ua string) string {
 	if ua == "" {
 		return "Unknown"
 	}
 
-	// Simple browser detection
-	var browser string
-	switch {
-	case strings.Contains(ua, "Firefox"):
-		browser = "Firefox"
-	case strings.Contains(ua, "Edg"):
-		browser = "Edge"
-	case strings.Contains(ua, "Chrome"):
-		browser = "Chrome"
-	case strings.Contains(ua, "Safari"):
-		browser = "Safari"
-	case strings.Contains(ua, "Opera") || strings.Contains(ua, "OPR"):
-		browser = "Opera"
-	default:
-		browser = "Unknown Browser"
+	parsed, err := useragent.Parse(ua)
+	if err != nil {
+		return "Unknown"
 	}
 
-	// Simple OS detection
-	var os string
-	switch {
-	case strings.Contains(ua, "iPhone") || strings.Contains(ua, "iPad"):
-		os = "iOS"
-	case strings.Contains(ua, "Android"):
-		os = "Android"
-	case strings.Contains(ua, "Mac OS"):
-		os = "macOS"
-	case strings.Contains(ua, "Windows"):
-		os = "Windows"
-	case strings.Contains(ua, "Linux"):
-		os = "Linux"
-	default:
-		os = "Unknown OS"
-	}
+	return parsed.GetShortIdentifier()
+}
 
-	return browser + " on " + os
+// generateFingerprint creates a device fingerprint based on the configured mode.
+func (sm *SessionManager) generateFingerprint(r *http.Request) string {
+	switch sm.fingerprintMode {
+	case FingerprintCookie:
+		return fingerprint.Cookie(r)
+	case FingerprintJWT:
+		return fingerprint.JWT(r)
+	case FingerprintHTMX:
+		return fingerprint.HTMX(r)
+	case FingerprintStrict:
+		return fingerprint.Strict(r)
+	default:
+		return ""
+	}
+}
+
+// validateFingerprint checks the stored fingerprint against the current request.
+func (sm *SessionManager) validateFingerprint(r *http.Request, sess *session.Session) error {
+	switch sm.fingerprintMode {
+	case FingerprintCookie:
+		return fingerprint.ValidateCookie(r, sess.Fingerprint)
+	case FingerprintJWT:
+		return fingerprint.ValidateJWT(r, sess.Fingerprint)
+	case FingerprintHTMX:
+		return fingerprint.ValidateHTMX(r, sess.Fingerprint)
+	case FingerprintStrict:
+		return fingerprint.ValidateStrict(r, sess.Fingerprint)
+	default:
+		return nil
+	}
 }

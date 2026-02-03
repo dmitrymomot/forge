@@ -16,4 +16,8 @@ var (
 
 	// ErrInvalidToken is returned when a session token is invalid.
 	ErrInvalidToken = errors.New("session: invalid token")
+
+	// ErrFingerprintMismatch is returned when session fingerprint validation fails.
+	// This may indicate a session hijacking attempt.
+	ErrFingerprintMismatch = errors.New("session: fingerprint mismatch")
 )
