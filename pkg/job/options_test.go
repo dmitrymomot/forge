@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // optionsTestTask implements the task interface.
@@ -19,6 +20,8 @@ func (t *optionsTestTask) Handle(ctx context.Context, p struct{}) error {
 }
 
 func TestWithTask(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	task := &optionsTestTask{}
@@ -43,6 +46,8 @@ func (t *scheduledTestTask) Handle(ctx context.Context) error {
 }
 
 func TestWithScheduledTask(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	task := &scheduledTestTask{schedule: "0 * * * *"}
@@ -50,12 +55,15 @@ func TestWithScheduledTask(t *testing.T) {
 	opt(cfg)
 
 	// Verify schedule was added
-	assert.Len(t, cfg.schedules, 1)
+	require.Len(t, cfg.schedules, 1)
 	assert.Equal(t, "scheduled_test", cfg.schedules[0].name)
 	assert.Equal(t, "0 * * * *", cfg.schedules[0].schedule)
+	assert.NotNil(t, cfg.schedules[0].handler)
 }
 
 func TestWithQueue(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	opt := WithQueue("email", 10)
@@ -65,6 +73,8 @@ func TestWithQueue(t *testing.T) {
 }
 
 func TestWithQueue_ZeroWorkers(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	opt := WithQueue("email", 0)
@@ -74,7 +84,21 @@ func TestWithQueue_ZeroWorkers(t *testing.T) {
 	assert.False(t, ok, "queue with 0 workers should not be added")
 }
 
+func TestWithQueue_NegativeWorkers(t *testing.T) {
+	t.Parallel()
+
+	cfg := newConfig()
+
+	opt := WithQueue("email", -5)
+	opt(cfg)
+
+	_, ok := cfg.queues["email"]
+	assert.False(t, ok, "queue with negative workers should not be added")
+}
+
 func TestWithLogger(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -85,6 +109,8 @@ func TestWithLogger(t *testing.T) {
 }
 
 func TestWithLogger_Nil(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 	cfg.logger = slog.Default()
 
@@ -96,6 +122,8 @@ func TestWithLogger_Nil(t *testing.T) {
 }
 
 func TestWithMaxWorkers(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	opt := WithMaxWorkers(50)
@@ -105,6 +133,8 @@ func TestWithMaxWorkers(t *testing.T) {
 }
 
 func TestWithMaxWorkers_Zero(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 	cfg.maxWorkers = 100
 
@@ -115,7 +145,22 @@ func TestWithMaxWorkers_Zero(t *testing.T) {
 	assert.Equal(t, 100, cfg.maxWorkers)
 }
 
+func TestWithMaxWorkers_Negative(t *testing.T) {
+	t.Parallel()
+
+	cfg := newConfig()
+	cfg.maxWorkers = 100
+
+	opt := WithMaxWorkers(-10)
+	opt(cfg)
+
+	// Should not change if negative
+	assert.Equal(t, 100, cfg.maxWorkers)
+}
+
 func TestNewConfig(t *testing.T) {
+	t.Parallel()
+
 	cfg := newConfig()
 
 	assert.NotNil(t, cfg.registry)

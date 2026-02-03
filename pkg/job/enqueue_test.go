@@ -8,6 +8,8 @@ import (
 )
 
 func TestInQueue(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := InQueue("email")
@@ -17,6 +19,8 @@ func TestInQueue(t *testing.T) {
 }
 
 func TestInQueue_Empty(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{queue: "existing"}
 
 	opt := InQueue("")
@@ -27,6 +31,8 @@ func TestInQueue_Empty(t *testing.T) {
 }
 
 func TestScheduledAt(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	future := time.Now().Add(24 * time.Hour)
@@ -38,6 +44,8 @@ func TestScheduledAt(t *testing.T) {
 }
 
 func TestScheduledIn(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	before := time.Now()
@@ -51,6 +59,8 @@ func TestScheduledIn(t *testing.T) {
 }
 
 func TestMaxAttempts(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := MaxAttempts(5)
@@ -60,6 +70,8 @@ func TestMaxAttempts(t *testing.T) {
 }
 
 func TestMaxAttempts_Zero(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{maxAttempts: 10}
 
 	opt := MaxAttempts(0)
@@ -69,7 +81,21 @@ func TestMaxAttempts_Zero(t *testing.T) {
 	assert.Equal(t, 10, cfg.maxAttempts)
 }
 
+func TestMaxAttempts_Negative(t *testing.T) {
+	t.Parallel()
+
+	cfg := &enqueueConfig{maxAttempts: 10}
+
+	opt := MaxAttempts(-1)
+	opt(cfg)
+
+	// Should not change if negative
+	assert.Equal(t, 10, cfg.maxAttempts)
+}
+
 func TestUniqueFor(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := UniqueFor(time.Hour)
@@ -79,6 +105,8 @@ func TestUniqueFor(t *testing.T) {
 }
 
 func TestUniqueKey(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := UniqueKey("user:123")
@@ -88,6 +116,8 @@ func TestUniqueKey(t *testing.T) {
 }
 
 func TestPriority(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := Priority(5)
@@ -97,6 +127,8 @@ func TestPriority(t *testing.T) {
 }
 
 func TestTags(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opt := Tags("email", "marketing")
@@ -106,6 +138,8 @@ func TestTags(t *testing.T) {
 }
 
 func TestTags_Append(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{tags: []string{"existing"}}
 
 	opt := Tags("new")
@@ -114,7 +148,20 @@ func TestTags_Append(t *testing.T) {
 	assert.Equal(t, []string{"existing", "new"}, cfg.tags)
 }
 
+func TestTags_Empty(t *testing.T) {
+	t.Parallel()
+
+	cfg := &enqueueConfig{}
+
+	opt := Tags()
+	opt(cfg)
+
+	assert.Empty(t, cfg.tags)
+}
+
 func TestCombinedOptions(t *testing.T) {
+	t.Parallel()
+
 	cfg := &enqueueConfig{}
 
 	opts := []EnqueueOption{
