@@ -92,6 +92,13 @@ go test -v -run TestValidate ./pkg/...      # Run tests matching pattern
 go test -race -cover ./...                  # Full test suite (same as make test)
 ```
 
+### Test Style Requirements
+
+- **Parallel execution:** All tests must use `t.Parallel()` at function and subtest level
+- **Assertions:** Use `require` (not `assert`) for critical checks that should fail fast
+- **Test cases:** Use `t.Run("descriptive name", ...)` subtests; table-driven tests only for simple functions
+- **Integration tests:** Code requiring River/pgxpool is tested via integration tests, not unit tests
+
 For integration tests, use `httptest.NewServer` with `app.Router()`:
 
 ```go
