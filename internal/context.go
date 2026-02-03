@@ -9,10 +9,12 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/dmitrymomot/forge/pkg/binder"
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/htmx"
+	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/validator"
@@ -194,25 +196,39 @@ type Context interface {
 	// ResponseWriter returns the underlying ResponseWriter for advanced usage.
 	// Returns nil if not using the wrapped response writer.
 	ResponseWriter() *ResponseWriter
+
+	// Enqueue adds a job to the queue for background processing.
+	// Returns job.ErrNotConfigured if WithJobs was not called.
+	// Returns job.ErrUnknownTask if the task name is not registered.
+	Enqueue(name string, payload any, opts ...job.EnqueueOption) error
+
+	// EnqueueTx adds a job to the queue within a transaction.
+	// The job is only visible after the transaction commits.
+	// Returns job.ErrNotConfigured if WithJobs was not called.
+	// Returns job.ErrUnknownTask if the task name is not registered.
+	EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error
 }
 
 // requestContext implements the Context interface.
 type requestContext struct {
-	request        *http.Request
 	response       http.ResponseWriter
+	request        *http.Request
 	responseWriter *ResponseWriter
 	logger         *slog.Logger
 	cookieManager  *cookie.Manager
 
 	// Session management
-	sessionManager        *SessionManager
-	session               *session.Session
+	sessionManager *SessionManager
+	session        *session.Session
+
+	// Job management
+	jobManager            *JobManager
 	sessionLoaded         bool
 	sessionHookRegistered bool
 }
 
 // newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, jm *JobManager) *requestContext {
 	// Create response wrapper
 	rw := NewResponseWriter(w, htmx.IsHTMX(r))
 
@@ -223,6 +239,7 @@ func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm 
 		logger:         logger,
 		cookieManager:  cm,
 		sessionManager: sm,
+		jobManager:     jm,
 	}
 }
 
@@ -675,4 +692,23 @@ func (c *requestContext) DestroySession() error {
 // ResponseWriter returns the underlying ResponseWriter for advanced usage.
 func (c *requestContext) ResponseWriter() *ResponseWriter {
 	return c.responseWriter
+}
+
+// Enqueue adds a job to the queue for background processing.
+// Returns job.ErrNotConfigured if WithJobs was not called.
+func (c *requestContext) Enqueue(name string, payload any, opts ...job.EnqueueOption) error {
+	if c.jobManager == nil {
+		return job.ErrNotConfigured
+	}
+	return c.jobManager.Enqueue(c.Context(), name, payload, opts...)
+}
+
+// EnqueueTx adds a job to the queue within a transaction.
+// The job is only visible after the transaction commits.
+// Returns job.ErrNotConfigured if WithJobs was not called.
+func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
+	if c.jobManager == nil {
+		return job.ErrNotConfigured
+	}
+	return c.jobManager.EnqueueTx(c.Context(), tx, name, payload, opts...)
 }

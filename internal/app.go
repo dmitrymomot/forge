@@ -34,6 +34,7 @@ type App struct {
 	logger                  *slog.Logger
 	cookieManager           *cookie.Manager
 	sessionManager          *SessionManager
+	jobManager              *JobManager
 	middlewares             []Middleware
 	handlers                []Handler
 	staticRoutes            []staticRoute
@@ -135,7 +136,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager)
+		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobManager)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
