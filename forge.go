@@ -218,6 +218,18 @@ func WithCustomLogger(l *slog.Logger) Option {
 	return internal.WithCustomLogger(l)
 }
 
+// WithBaseDomain configures the base domain for subdomain extraction.
+// This enables c.Subdomain() to work without parameters.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithBaseDomain("example.com"),
+//	)
+func WithBaseDomain(domain string) Option {
+	return internal.WithBaseDomain(domain)
+}
+
 // WithCookieOptions configures the cookie manager.
 //
 // Example:

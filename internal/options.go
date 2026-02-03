@@ -19,6 +19,20 @@ import (
 // Option configures the application.
 type Option func(*App)
 
+// WithBaseDomain configures the base domain for subdomain extraction.
+// This enables c.Subdomain() to work without parameters.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithBaseDomain("example.com"),
+//	)
+func WithBaseDomain(domain string) Option {
+	return func(a *App) {
+		a.baseDomain = domain
+	}
+}
+
 // WithMiddleware adds global middleware to the application.
 // Middleware is applied in the order provided.
 func WithMiddleware(mw ...Middleware) Option {
