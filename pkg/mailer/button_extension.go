@@ -27,6 +27,10 @@ var KindButton = ast.NewNodeKind("Button")
 // buttonPrefix is the syntax prefix that triggers button parsing.
 const buttonPrefix = "[!button|"
 
+// buttonExtensionPriority determines the order in which the button parser/renderer
+// runs relative to other goldmark extensions. Lower values run earlier.
+const buttonExtensionPriority = 50
+
 func (n *ButtonNode) Kind() ast.NodeKind {
 	return KindButton
 }
@@ -136,10 +140,10 @@ type ButtonExtension struct{}
 
 func (e *ButtonExtension) Extend(m goldmark.Markdown) {
 	m.Parser().AddOptions(parser.WithInlineParsers(
-		util.Prioritized(NewButtonParser(), 50),
+		util.Prioritized(NewButtonParser(), buttonExtensionPriority),
 	))
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
-		util.Prioritized(NewButtonRenderer(), 50),
+		util.Prioritized(NewButtonRenderer(), buttonExtensionPriority),
 	))
 }
 

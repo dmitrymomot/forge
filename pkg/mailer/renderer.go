@@ -2,6 +2,7 @@ package mailer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -83,7 +84,7 @@ func (r *Renderer) Render(layout, templateName string, data any) (*RenderResult,
 	// Execute template with fresh data
 	var processedMarkdown bytes.Buffer
 	if err := cached.tmpl.Execute(&processedMarkdown, data); err != nil {
-		return nil, fmt.Errorf("%w: failed to execute template: %v", ErrRenderFailed, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("failed to execute template: %w", err))
 	}
 
 	// Plain text = processed markdown (before HTML conversion)
@@ -92,7 +93,7 @@ func (r *Renderer) Render(layout, templateName string, data any) (*RenderResult,
 	// Convert to HTML
 	var htmlContent bytes.Buffer
 	if err := r.md.Convert(processedMarkdown.Bytes(), &htmlContent); err != nil {
-		return nil, fmt.Errorf("%w: failed to convert markdown: %v", ErrRenderFailed, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("failed to convert markdown: %w", err))
 	}
 
 	// Get cached layout (or parse and cache)
@@ -109,7 +110,7 @@ func (r *Renderer) Render(layout, templateName string, data any) (*RenderResult,
 	}
 
 	if err := layoutTmpl.Execute(&finalHTML, layoutData); err != nil {
-		return nil, fmt.Errorf("%w: failed to execute layout: %v", ErrRenderFailed, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("failed to execute layout: %w", err))
 	}
 
 	return &RenderResult{
@@ -140,17 +141,17 @@ func (r *Renderer) getTemplate(name string) (*cachedTemplate, error) {
 	path := filepath.Join(r.templateDir, name)
 	content, err := fs.ReadFile(r.fs, path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrTemplateNotFound, name, err)
+		return nil, errors.Join(ErrTemplateNotFound, fmt.Errorf("%s: %w", name, err))
 	}
 
 	parsed, err := ParseTemplate(content)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrRenderFailed, name, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("%s: %w", name, err))
 	}
 
 	tmpl, err := texttemplate.New(name).Parse(parsed.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to parse template body: %v", ErrRenderFailed, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("failed to parse template body: %w", err))
 	}
 
 	cached := &cachedTemplate{metadata: parsed.Metadata, tmpl: tmpl}
@@ -179,12 +180,12 @@ func (r *Renderer) getLayout(name string) (*template.Template, error) {
 	path := filepath.Join(r.layoutDir, name)
 	content, err := fs.ReadFile(r.fs, path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrLayoutNotFound, name, err)
+		return nil, errors.Join(ErrLayoutNotFound, fmt.Errorf("%s: %w", name, err))
 	}
 
 	layoutTmpl, err := template.New(name).Parse(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to parse layout: %v", ErrRenderFailed, err)
+		return nil, errors.Join(ErrRenderFailed, fmt.Errorf("failed to parse layout: %w", err))
 	}
 
 	r.layoutCache[name] = layoutTmpl
