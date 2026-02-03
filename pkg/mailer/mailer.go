@@ -75,6 +75,7 @@ func (m *Mailer) Send(ctx context.Context, params SendParams) error {
 		To:          []string{params.To},
 		Subject:     processedSubject,
 		HTML:        result.HTML,
+		Text:        result.Text,
 		From:        params.From,
 		ReplyTo:     params.ReplyTo,
 		CC:          params.CC,

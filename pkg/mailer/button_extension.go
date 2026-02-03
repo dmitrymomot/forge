@@ -17,7 +17,6 @@ type ButtonNode struct {
 	Label []byte
 }
 
-// Dump implements ast.Node.
 func (n *ButtonNode) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
@@ -28,7 +27,6 @@ var KindButton = ast.NewNodeKind("Button")
 // buttonPrefix is the syntax prefix that triggers button parsing.
 const buttonPrefix = "[!button|"
 
-// Kind implements ast.Node.
 func (n *ButtonNode) Kind() ast.NodeKind {
 	return KindButton
 }
@@ -41,12 +39,10 @@ func NewButtonParser() parser.InlineParser {
 	return &buttonParser{}
 }
 
-// Trigger returns the trigger characters for the parser.
 func (s *buttonParser) Trigger() []byte {
 	return []byte{'['}
 }
 
-// Parse parses the button syntax and returns a ButtonNode.
 func (s *buttonParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
 	line, _ := block.PeekLine()
 	if line == nil {
@@ -75,6 +71,7 @@ func (s *buttonParser) Parse(parent ast.Node, block text.Reader, pc parser.Conte
 		return nil
 	}
 
+	// Extract URL from parentheses
 	urlStart := textEnd + 2
 	urlEnd := -1
 	for i := urlStart; i < len(line); i++ {
@@ -114,7 +111,6 @@ func NewButtonRenderer(opts ...html.Option) renderer.NodeRenderer {
 	return r
 }
 
-// RegisterFuncs registers the button renderer function.
 func (r *buttonRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(KindButton, r.renderButton)
 }
@@ -138,7 +134,6 @@ func (r *buttonRenderer) renderButton(w util.BufWriter, source []byte, node ast.
 // ButtonExtension is a goldmark extension for button links.
 type ButtonExtension struct{}
 
-// Extend implements goldmark.Extender.
 func (e *ButtonExtension) Extend(m goldmark.Markdown) {
 	m.Parser().AddOptions(parser.WithInlineParsers(
 		util.Prioritized(NewButtonParser(), 50),
