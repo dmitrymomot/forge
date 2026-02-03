@@ -16,6 +16,7 @@ type runConfig struct {
 	domains         map[string]*App
 	fallback        *App
 	address         string
+	startupHooks    []func(context.Context) error
 	shutdownHooks   []func(context.Context) error
 	shutdownTimeout time.Duration
 }
@@ -59,6 +60,22 @@ func ShutdownTimeout(d time.Duration) RunOption {
 	return func(c *runConfig) {
 		if d > 0 {
 			c.shutdownTimeout = d
+		}
+	}
+}
+
+// StartupHook registers a function to run during server startup.
+// Hooks are called in the order they were registered, after the port is bound
+// but before serving requests. If any hook fails, the server stops and
+// returns the error.
+//
+// Example:
+//
+//	forge.StartupHook(worker.Start)
+func StartupHook(fn func(context.Context) error) RunOption {
+	return func(c *runConfig) {
+		if fn != nil {
+			c.startupHooks = append(c.startupHooks, fn)
 		}
 	}
 }
