@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -34,7 +35,8 @@ type App struct {
 	logger                  *slog.Logger
 	cookieManager           *cookie.Manager
 	sessionManager          *SessionManager
-	jobManager              *JobManager
+	jobEnqueuer             *JobEnqueuer
+	jobWorker               *JobManager
 	middlewares             []Middleware
 	handlers                []Handler
 	staticRoutes            []staticRoute
@@ -79,8 +81,16 @@ func (a *App) Router() chi.Router {
 	return a.router
 }
 
+// JobWorker returns the job worker if configured, nil otherwise.
+// This is used internally for multi-domain routing to collect workers.
+func (a *App) JobWorker() *JobManager {
+	return a.jobWorker
+}
+
 // Run starts a single-domain HTTP server and blocks until shutdown.
 // This is a convenience method for the common single-app case.
+// If job workers are configured, they start automatically before serving
+// requests and stop gracefully during shutdown.
 //
 // Example:
 //
@@ -90,12 +100,23 @@ func (a *App) Router() chi.Router {
 //	err := app.Run(":8080", forge.Logger(slog))
 func (a *App) Run(addr string, opts ...RunOption) error {
 	cfg := buildRunConfig(opts...)
+
+	startupHooks := cfg.startupHooks
+	shutdownHooks := cfg.shutdownHooks
+
+	// Auto-register worker hooks if configured
+	if a.jobWorker != nil {
+		startupHooks = append([]func(context.Context) error{a.jobWorker.Manager().StartFunc()}, startupHooks...)
+		shutdownHooks = append(shutdownHooks, a.jobWorker.Shutdown())
+	}
+
 	return runServer(runtimeConfig{
 		handler:         a.router,
 		address:         addr,
 		logger:          cfg.logger,
 		shutdownTimeout: cfg.shutdownTimeout,
-		shutdownHooks:   cfg.shutdownHooks,
+		startupHooks:    startupHooks,
+		shutdownHooks:   shutdownHooks,
 		baseCtx:         cfg.baseCtx,
 	})
 }
@@ -136,7 +157,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobManager)
+		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobEnqueuer)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
