@@ -48,6 +48,48 @@ func TestParseCronSchedule_Valid(t *testing.T) {
 			name: "specific time",
 			expr: "30 14 * * *",
 		},
+		// Predefined schedule descriptors
+		{
+			name: "@yearly",
+			expr: "@yearly",
+		},
+		{
+			name: "@annually",
+			expr: "@annually",
+		},
+		{
+			name: "@monthly",
+			expr: "@monthly",
+		},
+		{
+			name: "@weekly",
+			expr: "@weekly",
+		},
+		{
+			name: "@daily",
+			expr: "@daily",
+		},
+		{
+			name: "@midnight",
+			expr: "@midnight",
+		},
+		{
+			name: "@hourly",
+			expr: "@hourly",
+		},
+		// Interval syntax
+		{
+			name: "@every 1h",
+			expr: "@every 1h",
+		},
+		{
+			name: "@every 30m",
+			expr: "@every 30m",
+		},
+		{
+			name: "@every 1h30m",
+			expr: "@every 1h30m",
+		},
 	}
 
 	for _, tt := range tests {

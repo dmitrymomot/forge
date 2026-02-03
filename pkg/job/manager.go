@@ -247,7 +247,7 @@ func (a *cronScheduleAdapter) Next(current time.Time) time.Time {
 }
 
 func parseCronSchedule(expr string) (river.PeriodicSchedule, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	schedule, err := parser.Parse(expr)
 	if err != nil {
 		return nil, err
