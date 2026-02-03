@@ -57,6 +57,38 @@
 //	    return t.repo.DeleteExpiredSessions(ctx)
 //	}
 //
+// # Schedule Format
+//
+// Schedules support standard 5-field cron expressions and predefined descriptors:
+//
+// Standard cron format (5 fields):
+//
+//	┌───────────── minute (0-59)
+//	│ ┌───────────── hour (0-23)
+//	│ │ ┌───────────── day of month (1-31)
+//	│ │ │ ┌───────────── month (1-12)
+//	│ │ │ │ ┌───────────── day of week (0-6, Sunday=0)
+//	│ │ │ │ │
+//	* * * * *
+//
+// Predefined schedule descriptors:
+//
+//	@yearly (or @annually)  - Run once a year at midnight on Jan 1st (0 0 1 1 *)
+//	@monthly                - Run once a month at midnight on the 1st (0 0 1 * *)
+//	@weekly                 - Run once a week at midnight on Sunday (0 0 * * 0)
+//	@daily (or @midnight)   - Run once a day at midnight (0 0 * * *)
+//	@hourly                 - Run once an hour at the beginning (0 * * * *)
+//
+// Interval syntax for fixed-interval execution:
+//
+//	@every <duration>       - Run at fixed intervals (e.g., @every 1h, @every 30m, @every 1h30m)
+//
+// Examples:
+//
+//	func (t *DailyReport) Schedule() string { return "@daily" }
+//	func (t *HourlySync) Schedule() string { return "@hourly" }
+//	func (t *FrequentCheck) Schedule() string { return "@every 5m" }
+//
 // # App Integration
 //
 // Jobs integrate with Forge through the WithJobs option:
