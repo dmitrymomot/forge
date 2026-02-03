@@ -3,7 +3,6 @@ package job
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,11 +22,12 @@ const (
 )
 
 // Manager handles background job processing using River.
-// It wraps River's client and provides a simplified API for the Forge framework.
+// It combines enqueueing and worker processing capabilities.
+// Manager embeds Enqueuer for job enqueueing methods.
 type Manager struct {
-	pool     *pgxpool.Pool
-	client   *river.Client[pgx.Tx]
+	*Enqueuer
 	registry *taskRegistry
+	workers  *river.Workers
 	logger   *slog.Logger
 
 	mu      sync.Mutex
@@ -39,7 +39,7 @@ type Manager struct {
 // before Start() is called. Call Start() to begin processing jobs.
 func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 	if pool == nil {
-		return nil, errors.New("job: pool is required")
+		return nil, ErrPoolRequired
 	}
 
 	cfg := newConfig()
@@ -94,8 +94,6 @@ func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 	})
 
 	// Client created immediately, allowing enqueue() before Start().
-	// This supports initialization patterns where jobs are enqueued
-	// during app setup and processed after Start() is called.
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:       queues,
 		Workers:      workers,
@@ -107,9 +105,13 @@ func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
 	}
 
 	return &Manager{
-		pool:     pool,
-		client:   client,
+		Enqueuer: &Enqueuer{
+			pool:   pool,
+			client: client,
+			logger: cfg.logger,
+		},
 		registry: cfg.registry,
+		workers:  workers,
 		logger:   cfg.logger,
 	}, nil
 }
@@ -164,18 +166,7 @@ func (m *Manager) Enqueue(ctx context.Context, name string, payload any, opts ..
 	if _, ok := m.registry.get(name); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
 	}
-
-	args, insertOpts, err := m.buildJobArgs(name, payload, opts...)
-	if err != nil {
-		return err
-	}
-
-	_, err = m.client.Insert(ctx, args, insertOpts)
-	if err != nil {
-		return fmt.Errorf("job: enqueue: %w", err)
-	}
-
-	return nil
+	return m.Enqueuer.Enqueue(ctx, name, payload, opts...)
 }
 
 // EnqueueTx adds a job to the queue within a transaction.
@@ -187,68 +178,7 @@ func (m *Manager) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload
 	if _, ok := m.registry.get(name); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
 	}
-
-	args, insertOpts, err := m.buildJobArgs(name, payload, opts...)
-	if err != nil {
-		return err
-	}
-
-	_, err = m.client.InsertTx(ctx, tx, args, insertOpts)
-	if err != nil {
-		return fmt.Errorf("job: enqueue tx: %w", err)
-	}
-
-	return nil
-}
-
-// buildJobArgs creates River job arguments from the task name and payload.
-// It bridges the high-level EnqueueOption API to River's InsertOpts contract.
-func (m *Manager) buildJobArgs(name string, payload any, opts ...EnqueueOption) (*forgeTaskArgs, *river.InsertOpts, error) {
-	var payloadBytes json.RawMessage
-	if payload != nil {
-		var err error
-		payloadBytes, err = json.Marshal(payload)
-		if err != nil {
-			return nil, nil, fmt.Errorf("job: marshal payload: %w", err)
-		}
-	}
-
-	args := &forgeTaskArgs{
-		TaskName: name,
-		Payload:  payloadBytes,
-	}
-
-	enqCfg := &enqueueConfig{}
-	for _, opt := range opts {
-		opt(enqCfg)
-	}
-
-	insertOpts := &river.InsertOpts{}
-	if enqCfg.queue != "" {
-		insertOpts.Queue = enqCfg.queue
-	}
-	if enqCfg.scheduledAt != nil {
-		insertOpts.ScheduledAt = *enqCfg.scheduledAt
-	}
-	if enqCfg.maxAttempts > 0 {
-		insertOpts.MaxAttempts = enqCfg.maxAttempts
-	}
-	if enqCfg.priority > 0 {
-		insertOpts.Priority = enqCfg.priority
-	}
-	if len(enqCfg.tags) > 0 {
-		insertOpts.Tags = enqCfg.tags
-	}
-	if enqCfg.uniqueFor > 0 {
-		insertOpts.UniqueOpts = river.UniqueOpts{
-			ByPeriod: enqCfg.uniqueFor,
-		}
-		if enqCfg.uniqueKey != "" {
-			args.UniqueKey = enqCfg.uniqueKey
-		}
-	}
-
-	return args, insertOpts, nil
+	return m.Enqueuer.EnqueueTx(ctx, tx, name, payload, opts...)
 }
 
 // forgeTaskArgs is the River job arguments type for all Forge tasks.
@@ -325,12 +255,14 @@ func parseCronSchedule(expr string) (river.PeriodicSchedule, error) {
 	return &cronScheduleAdapter{schedule: schedule}, nil
 }
 
+// Shutdown returns a shutdown function for the job manager.
 func (m *Manager) Shutdown() func(context.Context) error {
 	return func(ctx context.Context) error {
 		return m.Stop(ctx)
 	}
 }
 
+// StartFunc returns a startup function for the job manager.
 func (m *Manager) StartFunc() func(context.Context) error {
 	return func(ctx context.Context) error {
 		return m.Start(ctx)
