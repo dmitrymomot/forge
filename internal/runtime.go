@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +20,7 @@ type runtimeConfig struct {
 	baseCtx         context.Context
 	logger          *slog.Logger
 	address         string
+	startupHooks    []func(context.Context) error
 	shutdownHooks   []func(context.Context) error
 	shutdownTimeout time.Duration
 }
@@ -58,6 +60,14 @@ func runServer(cfg runtimeConfig) error {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err
+	}
+
+	// Execute startup hooks before serving requests
+	for _, hook := range cfg.startupHooks {
+		if err := hook(ctx); err != nil {
+			ln.Close()
+			return fmt.Errorf("startup hook failed: %w", err)
+		}
 	}
 
 	errCh := make(chan error, 1)
