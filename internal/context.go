@@ -233,7 +233,8 @@ type requestContext struct {
 
 	// Job management
 	jobEnqueuer *JobEnqueuer
-	baseDomain  string
+
+	baseDomain string
 
 	sessionLoaded         bool
 	sessionHookRegistered bool
