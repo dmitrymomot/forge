@@ -450,12 +450,68 @@ func WithSessionSameSite(sameSite http.SameSite) SessionOption {
 	return internal.WithSessionSameSite(sameSite)
 }
 
+// WithSessionFingerprint enables device fingerprinting for session hijacking detection.
+// The session manager automatically uses the app's logger for warnings.
+//
+// Mode determines which components are included in the fingerprint:
+//   - FingerprintCookie: Default, excludes IP (recommended for most apps)
+//   - FingerprintJWT: Minimal, excludes Accept headers (for JWT apps)
+//   - FingerprintHTMX: User-Agent only (for HTMX apps)
+//   - FingerprintStrict: Includes IP (high-security, causes false positives)
+//
+// Strictness determines behavior on mismatch:
+//   - FingerprintWarn: Log warning but allow session (visibility without disruption)
+//   - FingerprintReject: Invalidate session (strict security)
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithSession(store,
+//	        forge.WithSessionFingerprint(forge.FingerprintCookie, forge.FingerprintReject),
+//	    ),
+//	)
+func WithSessionFingerprint(mode FingerprintMode, strictness FingerprintStrictness) SessionOption {
+	return internal.WithSessionFingerprint(mode, strictness)
+}
+
+// Fingerprint types for session configuration.
+type (
+	// FingerprintMode determines which fingerprint generation algorithm to use.
+	FingerprintMode = internal.FingerprintMode
+
+	// FingerprintStrictness determines behavior on fingerprint mismatch.
+	FingerprintStrictness = internal.FingerprintStrictness
+)
+
+// Fingerprint mode constants.
+const (
+	// FingerprintDisabled disables fingerprint generation and validation.
+	FingerprintDisabled = internal.FingerprintDisabled
+	// FingerprintCookie uses default settings, excludes IP. Best for most web apps.
+	FingerprintCookie = internal.FingerprintCookie
+	// FingerprintJWT uses minimal fingerprint, excludes Accept headers.
+	FingerprintJWT = internal.FingerprintJWT
+	// FingerprintHTMX uses only User-Agent, avoids HTMX header variations.
+	FingerprintHTMX = internal.FingerprintHTMX
+	// FingerprintStrict includes IP address. WARNING: causes false positives.
+	FingerprintStrict = internal.FingerprintStrict
+)
+
+// Fingerprint strictness constants.
+const (
+	// FingerprintWarn logs a warning but allows the session to continue.
+	FingerprintWarn = internal.FingerprintWarn
+	// FingerprintReject invalidates the session on fingerprint mismatch.
+	FingerprintReject = internal.FingerprintReject
+)
+
 // Session errors for checking return values.
 var (
-	ErrSessionNotConfigured = session.ErrNotConfigured
-	ErrSessionNotFound      = session.ErrNotFound
-	ErrSessionExpired       = session.ErrExpired
-	ErrSessionInvalidToken  = session.ErrInvalidToken
+	ErrSessionNotConfigured       = session.ErrNotConfigured
+	ErrSessionNotFound            = session.ErrNotFound
+	ErrSessionExpired             = session.ErrExpired
+	ErrSessionInvalidToken        = session.ErrInvalidToken
+	ErrSessionFingerprintMismatch = session.ErrFingerprintMismatch
 )
 
 // Job options

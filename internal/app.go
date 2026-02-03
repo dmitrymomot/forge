@@ -71,6 +71,11 @@ func New(opts ...Option) *App {
 		opt(a)
 	}
 
+	// Inject app's logger into session manager
+	if a.sessionManager != nil {
+		a.sessionManager.SetLogger(a.logger)
+	}
+
 	a.setupRoutes()
 	return a
 }

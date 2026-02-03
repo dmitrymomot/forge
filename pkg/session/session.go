@@ -11,13 +11,14 @@ type Session struct {
 	LastActiveAt time.Time
 	ExpiresAt    time.Time
 
-	UserID    *string        // nil = anonymous session
-	Values    map[string]any // Arbitrary session data
-	ID        string         // Unique identifier (typically UUID)
-	Token     string         // Cookie token (different from ID for security)
-	IP        string         // Client IP address
-	UserAgent string         // Raw User-Agent header
-	Device    string         // Parsed device info (e.g., "Chrome on macOS")
+	UserID      *string        // nil = anonymous session
+	Values      map[string]any // Arbitrary session data
+	ID          string         // Unique identifier (typically UUID)
+	Token       string         // Cookie token (different from ID for security)
+	IP          string         // Client IP address
+	UserAgent   string         // Raw User-Agent header
+	Device      string         // Parsed device info (e.g., "Chrome/128 (macOS, desktop)")
+	Fingerprint string         // Device fingerprint for hijacking detection
 
 	dirty bool // tracks if session needs saving
 	isNew bool // tracks if session was just created
