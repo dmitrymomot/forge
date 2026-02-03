@@ -78,12 +78,14 @@ type Context interface {
 	// For HTMX requests: always uses HTTP 200 (HTMX requires 2xx for swapping).
 	// For regular requests: uses the provided status code.
 	// Compatible with templ.Component.
-	Render(code int, component Component) error
+	// Optional render options configure HTMX response headers.
+	Render(code int, component Component, opts ...htmx.RenderOption) error
 
 	// RenderPartial renders different components based on request type.
 	// For HTMX requests: renders partial with HTTP 200.
 	// For regular requests: renders fullPage with the provided status code.
-	RenderPartial(code int, fullPage, partial Component) error
+	// Optional render options configure HTMX response headers (only applied for HTMX requests).
+	RenderPartial(code int, fullPage, partial Component, opts ...htmx.RenderOption) error
 
 	// Bind binds form data, sanitizes, and validates into a struct.
 	// Returns validation errors separately from system errors.
@@ -310,20 +312,49 @@ func (c *requestContext) IsHTMX() bool {
 // Render renders a component with the given status code.
 // For HTMX requests: the ResponseWriter transforms non-200 to 200.
 // For regular requests: uses the provided status code.
-func (c *requestContext) Render(code int, component Component) error {
+// Optional render options configure HTMX response headers.
+func (c *requestContext) Render(code int, component Component, opts ...htmx.RenderOption) error {
 	c.response.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Build config from options
+	var cfg *htmx.Config
+	if len(opts) > 0 {
+		cfg = htmx.NewConfig(opts...)
+	}
+
+	// Apply HTMX headers only for HTMX requests
+	if cfg != nil && htmx.IsHTMX(c.request) {
+		cfg.ApplyHeaders(c.response)
+	}
+
 	c.response.WriteHeader(code)
-	return component.Render(c.request.Context(), c.response)
+
+	// Render main component
+	if err := component.Render(c.request.Context(), c.response); err != nil {
+		return err
+	}
+
+	// Render OOB components only for HTMX requests
+	if cfg != nil && htmx.IsHTMX(c.request) {
+		for _, oob := range cfg.OOBComponents {
+			if err := oob.Render(c.request.Context(), c.response); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // RenderPartial renders different components based on request type.
 // For HTMX requests: renders partial with HTTP 200.
 // For regular requests: renders fullPage with the provided status code.
-func (c *requestContext) RenderPartial(code int, fullPage, partial Component) error {
+// Optional render options are passed through (only applied for HTMX requests).
+func (c *requestContext) RenderPartial(code int, fullPage, partial Component, opts ...htmx.RenderOption) error {
 	if htmx.IsHTMX(c.request) {
-		return c.Render(code, partial)
+		return c.Render(code, partial, opts...)
 	}
-	return c.Render(code, fullPage)
+	return c.Render(code, fullPage) // opts ignored for non-HTMX (graceful degradation)
 }
 
 // Bind binds form data, sanitizes, and validates into a struct.
