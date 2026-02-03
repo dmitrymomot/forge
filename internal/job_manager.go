@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/pkg/job"
@@ -32,16 +31,6 @@ func (jm *JobManager) Start(ctx context.Context) error {
 // Stop gracefully shuts down job processing.
 func (jm *JobManager) Stop(ctx context.Context) error {
 	return jm.manager.Stop(ctx)
-}
-
-// Enqueue adds a job to the queue.
-func (jm *JobManager) Enqueue(ctx context.Context, name string, payload any, opts ...job.EnqueueOption) error {
-	return jm.manager.Enqueue(ctx, name, payload, opts...)
-}
-
-// EnqueueTx adds a job to the queue within a transaction.
-func (jm *JobManager) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
-	return jm.manager.EnqueueTx(ctx, tx, name, payload, opts...)
 }
 
 // Manager returns the underlying job.Manager.
