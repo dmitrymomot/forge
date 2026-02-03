@@ -81,8 +81,14 @@ type (
 	// EnqueueOption configures job enqueueing.
 	EnqueueOption = job.EnqueueOption
 
+	// EnqueuerOption configures the job enqueuer.
+	EnqueuerOption = job.EnqueuerOption
+
 	// JobManager handles background job processing.
 	JobManager = job.Manager
+
+	// JobEnqueuer provides job enqueueing without worker processing.
+	JobEnqueuer = job.Enqueuer
 )
 
 // Constructors
@@ -267,6 +273,18 @@ func ShutdownTimeout(d time.Duration) RunOption {
 	return internal.ShutdownTimeout(d)
 }
 
+// StartupHook registers a function to run during server startup.
+// Hooks are called in the order they were registered, after the port is bound
+// but before serving requests. If any hook fails, the server stops and
+// returns the error.
+//
+// Example:
+//
+//	forge.StartupHook(worker.Start)
+func StartupHook(fn func(context.Context) error) RunOption {
+	return internal.StartupHook(fn)
+}
+
 // ShutdownHook registers a cleanup function to run during shutdown.
 // Hooks are called in the order they were registered.
 // Each hook receives a context with the shutdown timeout.
@@ -442,21 +460,58 @@ var (
 
 // Job options
 
-// WithJobs enables background job processing using River.
-// A pgxpool.Pool is required for the job queue. Jobs are started automatically
+// WithJobs enables both job enqueueing and worker processing using River.
+// A pgxpool.Pool is required for the job queue. Workers are started automatically
 // when the app runs and stopped gracefully during shutdown.
+// Use this for monolith deployments or workers that need to enqueue follow-up tasks.
 //
 // Example:
 //
 //	forge.New(
 //	    forge.WithJobs(pool,
 //	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
-//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
+//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo)),
 //	        job.WithQueue("email", 10),
 //	    ),
 //	)
 func WithJobs(pool *pgxpool.Pool, opts ...JobOption) Option {
 	return internal.WithJobs(pool, opts...)
+}
+
+// WithJobEnqueuer enables job enqueueing without worker processing.
+// Use this for web servers that dispatch work to separate worker processes.
+// Workers must be running elsewhere to process the enqueued jobs.
+//
+// Example:
+//
+//	// Web server - only enqueues jobs
+//	forge.New(
+//	    forge.WithJobEnqueuer(pool),
+//	)
+//	// c.Enqueue("send_email", payload) works
+func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
+	return internal.WithJobEnqueuer(pool, opts...)
+}
+
+// WithJobWorker enables job processing without enqueueing capability.
+// Use this for dedicated background worker processes that don't need
+// to dispatch additional jobs. Workers are started automatically when
+// the app runs and stopped gracefully during shutdown.
+//
+// If workers need to enqueue follow-up tasks, use WithJobs instead.
+//
+// Example:
+//
+//	// Dedicated worker process
+//	forge.New(
+//	    forge.WithJobWorker(pool,
+//	        job.WithTask(tasks.NewSendEmail(mailer)),
+//	        job.WithScheduledTask(tasks.NewCleanup(repo)),
+//	    ),
+//	)
+//	// c.Enqueue() returns job.ErrNotConfigured
+func WithJobWorker(pool *pgxpool.Pool, opts ...JobOption) Option {
+	return internal.WithJobWorker(pool, opts...)
 }
 
 // Job registration options - re-exported from pkg/job
@@ -471,12 +526,13 @@ func WithTask[P any, T interface {
 }
 
 // WithScheduledTask registers a periodic task.
-// The task must implement Schedule() and Handle(ctx) methods.
+// The task must implement Name(), Schedule(), and Handle(ctx) methods.
 func WithScheduledTask[T interface {
+	Name() string
 	Schedule() string
 	Handle(context.Context) error
-}](task T, name string) JobOption {
-	return job.WithScheduledTask[T](task, name)
+}](task T) JobOption {
+	return job.WithScheduledTask[T](task)
 }
 
 // WithJobQueue configures a named queue with the specified number of workers.
@@ -542,6 +598,7 @@ var (
 	ErrJobUnknownTask       = job.ErrUnknownTask
 	ErrJobInvalidPayload    = job.ErrInvalidPayload
 	ErrJobHealthcheckFailed = job.ErrHealthcheckFailed
+	ErrJobPoolRequired      = job.ErrPoolRequired
 )
 
 // JobHealthcheck returns a health check function for the job manager.
