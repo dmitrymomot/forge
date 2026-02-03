@@ -23,4 +23,8 @@ var (
 	// ErrNotStarted is returned when attempting to stop a manager
 	// that is not running.
 	ErrNotStarted = errors.New("job: not started")
+
+	// ErrPoolRequired is returned when attempting to create a manager
+	// or enqueuer without providing a database pool.
+	ErrPoolRequired = errors.New("job: pool is required")
 )
