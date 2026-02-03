@@ -22,6 +22,18 @@ func newConfig() *config {
 	}
 }
 
+// scheduleConfig holds scheduled task configuration.
+//
+//nolint:betteralign // all fields contain pointers, no optimization possible
+type scheduleConfig struct {
+	handler  scheduledHandler
+	name     string
+	schedule string
+}
+
+// scheduledHandler is a function type for scheduled task handlers.
+type scheduledHandler func(context.Context) error
+
 // Option configures the job manager.
 type Option func(*config)
 
@@ -52,7 +64,7 @@ func WithTask[P any, T interface {
 }
 
 // WithScheduledTask registers a periodic task using structural typing.
-// The task must implement Schedule() and Handle(ctx) methods.
+// The task must implement Name(), Schedule(), and Handle(ctx) methods.
 // Schedule() should return a cron expression (5 fields: min hour day month weekday).
 //
 // Example:
@@ -61,6 +73,7 @@ func WithTask[P any, T interface {
 //	    repo *repository.Queries
 //	}
 //
+//	func (t *CleanupSessions) Name() string     { return "cleanup_sessions" }
 //	func (t *CleanupSessions) Schedule() string { return "0 * * * *" } // Every hour
 //	func (t *CleanupSessions) Handle(ctx context.Context) error {
 //	    return t.repo.DeleteExpiredSessions(ctx)
@@ -68,12 +81,13 @@ func WithTask[P any, T interface {
 //
 //	job.WithScheduledTask(tasks.NewCleanupSessions(repo))
 func WithScheduledTask[T interface {
+	Name() string
 	Schedule() string
 	Handle(context.Context) error
-}](task T, name string) Option {
+}](task T) Option {
 	return func(c *config) {
 		c.schedules = append(c.schedules, scheduleConfig{
-			name:     name,
+			name:     task.Name(),
 			schedule: task.Schedule(),
 			handler:  task.Handle,
 		})
