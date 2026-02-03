@@ -222,13 +222,13 @@ type requestContext struct {
 	session        *session.Session
 
 	// Job management
-	jobManager            *JobManager
+	jobEnqueuer           *JobEnqueuer
 	sessionLoaded         bool
 	sessionHookRegistered bool
 }
 
 // newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, jm *JobManager) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer) *requestContext {
 	// Create response wrapper
 	rw := NewResponseWriter(w, htmx.IsHTMX(r))
 
@@ -239,7 +239,7 @@ func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm 
 		logger:         logger,
 		cookieManager:  cm,
 		sessionManager: sm,
-		jobManager:     jm,
+		jobEnqueuer:    je,
 	}
 }
 
@@ -695,20 +695,20 @@ func (c *requestContext) ResponseWriter() *ResponseWriter {
 }
 
 // Enqueue adds a job to the queue for background processing.
-// Returns job.ErrNotConfigured if WithJobs was not called.
+// Returns job.ErrNotConfigured if WithJobs or WithJobEnqueuer was not called.
 func (c *requestContext) Enqueue(name string, payload any, opts ...job.EnqueueOption) error {
-	if c.jobManager == nil {
+	if c.jobEnqueuer == nil {
 		return job.ErrNotConfigured
 	}
-	return c.jobManager.Enqueue(c.Context(), name, payload, opts...)
+	return c.jobEnqueuer.Enqueue(c.Context(), name, payload, opts...)
 }
 
 // EnqueueTx adds a job to the queue within a transaction.
 // The job is only visible after the transaction commits.
-// Returns job.ErrNotConfigured if WithJobs was not called.
+// Returns job.ErrNotConfigured if WithJobs or WithJobEnqueuer was not called.
 func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
-	if c.jobManager == nil {
+	if c.jobEnqueuer == nil {
 		return job.ErrNotConfigured
 	}
-	return c.jobManager.EnqueueTx(c.Context(), tx, name, payload, opts...)
+	return c.jobEnqueuer.EnqueueTx(c.Context(), tx, name, payload, opts...)
 }
