@@ -2,72 +2,70 @@
 
 This document outlines planned features for the Forge framework.
 
-**Current Status:** Concept stage — core architecture documented, foundational packages implemented (`binder`, `validator`, `sanitizer`, `htmx`, `session`, `cookie`, `db`, `logger`, `health`, `hostrouter`, `id`).
+**Current Status:** Concept stage — core architecture documented, foundational packages implemented.
 
 ---
 
-## Priority Legend
+## Implemented
 
-- **High** — Core features needed for MVP micro-SaaS applications
-- **Medium** — Important features that enhance developer experience
-- **Future** — Nice-to-have features for later consideration
+Foundational packages in `pkg/`:
 
----
-
-## Medium Priority
-
-### [ ] Storage
-
-**Package:** `pkg/storage/`
-
-File storage with S3-compatible backends.
-
-**Design:**
-
-- S3-compatible only (works with AWS S3, MinIO, Cloudflare R2, etc.)
-- Returns file info after upload
-- ACL support (private, public-read)
-
-```go
-type Storage interface {
-    Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) (*FileInfo, error)
-    Get(ctx context.Context, key string) (io.ReadCloser, error)
-    Delete(ctx context.Context, key string) error
-    URL(key string, ttl time.Duration) (string, error)  // presigned URL
-}
-
-type FileInfo struct {
-    Key         string
-    Size        int64
-    ContentType string
-    URL         string
-    ACL         ACL
-}
-
-type ACL string
-
-const (
-    ACLPrivate ACL = "private"
-    ACLPublic  ACL = "public-read"
-)
-
-// Put options
-WithACL(acl ACL) PutOption
-WithContentType(ct string) PutOption
-```
+- `binder` — request binding (form, JSON, query, path)
+- `validator` — input validation with struct tags
+- `sanitizer` — input sanitization (strings, HTML, collections)
+- `htmx` — HTMX response helpers
+- `session` — session management
+- `cookie` — cookie helpers
+- `db` — database connection, transactions, migrations
+- `logger` — structured logging with slog
+- `health` — health check endpoints
+- `hostrouter` — multi-domain routing
+- `id` — ID generation (UUID, etc.)
 
 ---
 
-## Future
+## Planned
 
-_Features to consider after core functionality is stable._
+### Utility Packages (`pkg/`)
 
-- SSE/WebSocket support
-- Rate limiting middleware
-- RBAC package to manage roles and permissions
-- Caching layer (Redis adapter)
-- Feature flags
-- Audit logging
-- Middlewares collection (default like request id, ratelimiter, etc and specialized: tenant, ARBAC, API key, webhook verifier, etc)
-- Services collection: profile, tenant, members, billing/subscription, auth (passwordless, email+password, oauth2, api keys)
-- Add predefined task to send webhook
+| Package       | Description                                               | Reference |
+| ------------- | --------------------------------------------------------- | --------- |
+| `sse`         | SSE writer, event encoding, flush helpers                 |           |
+| `websocket`   | Upgrader wrapper, connection management                   |           |
+| `ratelimit`   | Token bucket, sliding window + memory/Redis stores        |           |
+| `rbac`        | `Checker` interface, permission primitives (no DB)        |           |
+| `featureflag` | `Provider` interface, strategies, memory impl             | [ref][1]  |
+| `webhook`     | Sender with retries, signatures, circuit breaker, backoff | [ref][2]  |
+| `oauth`       | `Provider` interface, Google/GitHub implementations       | [ref][3]  |
+| `cache`       | `Cache` interface + memory/Redis implementations          |           |
+
+[1]: /Users/dmitrymomot/Dev/boilerplate/pkg/feature
+[2]: /Users/dmitrymomot/Dev/boilerplate/pkg/webhook
+[3]: /Users/dmitrymomot/Dev/boilerplate/pkg/oauth
+
+### Standard Middlewares
+
+Part of framework core, configurable via options:
+
+| Middleware  | Description                                |
+| ----------- | ------------------------------------------ |
+| `requestid` | Inject unique request ID                   |
+| `recover`   | Panic recovery with logging                |
+| `timeout`   | Request timeout enforcement                |
+| `cors`      | CORS headers                               |
+| `errorlog`  | Log 5xx errors with request context        |
+| `audit`     | Audit log writer (configurable sink)       |
+| `ratelimit` | Rate limiting (uses `pkg/ratelimit`)       |
+| `rbac`      | Permission check (uses `pkg/rbac.Checker`) |
+
+---
+
+## Out of Scope
+
+_Boilerplate responsibility, not framework:_
+
+- Services (auth, billing, tenant, members, profile)
+- DB implementations for RBAC, feature flags, audit storage
+- Tenant-aware middlewares
+- API key authentication middleware
+- OAuth2/passwordless auth flows
