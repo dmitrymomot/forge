@@ -1,6 +1,7 @@
 package middlewares_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,5 +90,311 @@ func TestPanicErrorHelpers(t *testing.T) {
 		err := http.ErrNoCookie
 		_, ok := middlewares.AsPanicError(err)
 		require.False(t, ok)
+	})
+}
+
+func TestRecover_PanicTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("recovers from string panic", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic("string panic")
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, "string panic", pe.Value)
+	})
+
+	t.Run("recovers from error panic", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		panicErr := errors.New("error panic")
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic(panicErr)
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, panicErr, pe.Value)
+	})
+
+	t.Run("recovers from integer panic", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic(42)
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, 42, pe.Value)
+	})
+
+	t.Run("recovers from struct panic", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		type customError struct {
+			Code    int
+			Message string
+		}
+		panicValue := customError{Code: 500, Message: "custom"}
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic(panicValue)
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, panicValue, pe.Value)
+	})
+
+	t.Run("recovers from nil panic", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic(nil)
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		// In Go 1.21+, panic(nil) creates a runtime.PanicNilError
+		require.NotNil(t, pe.Value)
+	})
+}
+
+func TestRecover_WithRecoverStackSize(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom stack size captures stack", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover(middlewares.WithRecoverStackSize(8192))
+		handler := mw(func(c internal.Context) error {
+			panic("test")
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.NotNil(t, pe.Stack)
+		require.NotEmpty(t, pe.Stack)
+	})
+
+	t.Run("small stack size still captures partial trace", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover(middlewares.WithRecoverStackSize(100))
+		handler := mw(func(c internal.Context) error {
+			panic("test")
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.NotNil(t, pe.Stack)
+		require.LessOrEqual(t, len(pe.Stack), 100)
+	})
+
+	t.Run("zero stack size still allocates default buffer", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover(middlewares.WithRecoverStackSize(0))
+		handler := mw(func(c internal.Context) error {
+			panic("test")
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		// With size 0, stack will be allocated but empty
+		require.NotNil(t, pe.Stack)
+	})
+}
+
+func TestRecover_CombinedOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithRecoverStackSize and WithRecoverDisablePrintStack together", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		// DisablePrintStack should take precedence
+		mw := middlewares.Recover(
+			middlewares.WithRecoverStackSize(8192),
+			middlewares.WithRecoverDisablePrintStack(),
+		)
+		handler := mw(func(c internal.Context) error {
+			panic("test")
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Nil(t, pe.Stack)
+	})
+}
+
+func TestRecover_ErrorPropagation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("handler error is returned without modification", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		expectedErr := errors.New("normal error")
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			return expectedErr
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+		require.Equal(t, expectedErr, err)
+		require.False(t, middlewares.IsPanicError(err))
+	})
+
+	t.Run("nil return is preserved", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			return nil
+		})
+
+		err := handler(ctx)
+		require.NoError(t, err)
+	})
+}
+
+func TestRecover_NestedPanic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("recovers from panic in nested function", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		nestedFunc := func() {
+			panic("nested panic")
+		}
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			nestedFunc()
+			return nil
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, "nested panic", pe.Value)
+		require.NotEmpty(t, pe.Stack)
+	})
+
+	t.Run("stack trace includes nested call frames", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		deepFunc := func() {
+			panic("deep panic")
+		}
+		middleFunc := func() {
+			deepFunc()
+		}
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			middleFunc()
+			return nil
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.NotEmpty(t, pe.Stack)
+		// Stack should contain function names
+		require.Contains(t, string(pe.Stack), "middlewares_test")
 	})
 }
