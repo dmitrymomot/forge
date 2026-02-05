@@ -198,13 +198,13 @@ func TestS3Storage_publicURL(t *testing.T) {
 	})
 }
 
-func TestS3Storage_URL_ACLDetection(t *testing.T) {
+func TestS3Storage_URL_Defaults(t *testing.T) {
 	t.Parallel()
 
-	// This test verifies the ACL tracking mechanism works.
-	// Full integration tests would require an actual S3 endpoint.
+	// URL() now defaults to signed URLs; use WithPublic() for public URLs.
+	// Full integration tests verify this behavior with actual S3 endpoint.
 
-	t.Run("tracks ACL for uploaded files", func(t *testing.T) {
+	t.Run("struct initialized correctly", func(t *testing.T) {
 		t.Parallel()
 		store := &S3Storage{
 			cfg: Config{
@@ -212,15 +212,11 @@ func TestS3Storage_URL_ACLDetection(t *testing.T) {
 				Region:     "us-east-1",
 				DefaultACL: ACLPrivate,
 			},
-			fileACLs: make(map[string]ACL),
 		}
 
-		// Simulate tracking ACL.
-		store.fileACLs["public-file.jpg"] = ACLPublicRead
-		store.fileACLs["private-file.jpg"] = ACLPrivate
-
-		// Verify tracking.
-		require.Equal(t, ACLPublicRead, store.fileACLs["public-file.jpg"])
-		require.Equal(t, ACLPrivate, store.fileACLs["private-file.jpg"])
+		// Verify config stored correctly.
+		require.Equal(t, "test-bucket", store.cfg.Bucket)
+		require.Equal(t, "us-east-1", store.cfg.Region)
+		require.Equal(t, ACLPrivate, store.cfg.DefaultACL)
 	})
 }
