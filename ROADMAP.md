@@ -18,6 +18,7 @@ This document outlines planned features for the Forge framework.
 - `requestid` — inject unique request ID
 - `recover` — panic recovery with logging
 - `timeout` — request timeout enforcement
+- `cors` — Cross-Origin Resource Sharing headers
 
 ### Utility Packages (`pkg/`)
 
@@ -61,7 +62,6 @@ Part of framework core, configurable via options:
 
 | Middleware  | Description                                |
 | ----------- | ------------------------------------------ |
-| `cors`      | CORS headers                               |
 | `errorlog`  | Log 5xx errors with request context        |
 | `audit`     | Audit log writer (configurable sink)       |
 | `ratelimit` | Rate limiting (uses `pkg/ratelimit`)       |
