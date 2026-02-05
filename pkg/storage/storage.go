@@ -89,7 +89,6 @@ const (
 	DefaultSignedURLExpiry = 15 * 60  // 15 minutes in seconds
 )
 
-// applyDefaults fills in default values for empty config fields.
 func (c *Config) applyDefaults() {
 	if c.Region == "" {
 		c.Region = DefaultRegion
@@ -102,7 +101,6 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// validate checks that required configuration fields are set.
 func (c *Config) validate() error {
 	if c.Bucket == "" {
 		return ErrInvalidConfig

@@ -10,13 +10,11 @@ import (
 
 // MIME type constants.
 const (
-	MIMEOctetStream = "application/octet-stream"
-
-	// mimeDetectionBytes is the number of bytes needed for MIME detection.
-	mimeDetectionBytes = 512
+	MIMEOctetStream    = "application/octet-stream"
+	mimeDetectionBytes = 512 // http.DetectContentType requires up to 512 bytes
 )
 
-// imageTypes contains all recognized image MIME types (O(1) lookup).
+// imageTypes contains all recognized image MIME types.
 var imageTypes = map[string]struct{}{
 	"image/jpeg":    {},
 	"image/png":     {},
@@ -31,7 +29,7 @@ var imageTypes = map[string]struct{}{
 	"image/avif":    {},
 }
 
-// documentTypes contains all recognized document MIME types (O(1) lookup).
+// documentTypes contains all recognized document MIME types.
 var documentTypes = map[string]struct{}{
 	"application/pdf":    {},
 	"application/msword": {},
@@ -45,7 +43,7 @@ var documentTypes = map[string]struct{}{
 	"application/rtf": {},
 }
 
-// videoTypes contains all recognized video MIME types (O(1) lookup).
+// videoTypes contains all recognized video MIME types.
 var videoTypes = map[string]struct{}{
 	"video/mp4":        {},
 	"video/webm":       {},
@@ -55,7 +53,7 @@ var videoTypes = map[string]struct{}{
 	"video/x-matroska": {},
 }
 
-// audioTypes contains all recognized audio MIME types (O(1) lookup).
+// audioTypes contains all recognized audio MIME types.
 var audioTypes = map[string]struct{}{
 	"audio/mpeg": {},
 	"audio/wav":  {},
@@ -175,9 +173,9 @@ func detectMIMEFromReader(r io.Reader) string {
 	return http.DetectContentType(buf[:n])
 }
 
-// detectMIMEWithReader detects MIME type from a reader and returns a new reader
-// that includes the peeked bytes. This avoids opening the file twice.
-// Returns the detected MIME type and a reader that can be used for the full content.
+// detectMIMEWithReader detects MIME type from a reader without consuming its data.
+// Returns the detected MIME type and a new reader that includes the peeked bytes,
+// avoiding the need to open the file twice for detection and upload.
 func detectMIMEWithReader(r io.Reader) (string, io.Reader) {
 	buf := make([]byte, mimeDetectionBytes)
 	n, err := r.Read(buf)
@@ -228,12 +226,10 @@ func matchesMIME(mimeType string, allowed []string) bool {
 	for _, pattern := range allowed {
 		pattern = strings.TrimSpace(strings.ToLower(pattern))
 
-		// Exact match.
 		if mimeType == pattern {
 			return true
 		}
 
-		// Wildcard match (e.g., "image/*").
 		if strings.HasSuffix(pattern, "/*") {
 			prefix := strings.TrimSuffix(pattern, "*")
 			if strings.HasPrefix(mimeType, prefix) {

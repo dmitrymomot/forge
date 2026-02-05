@@ -20,8 +20,10 @@ import (
 type S3Storage struct {
 	client    *s3.Client
 	presigner *s3.PresignClient
-	fileACLs  map[string]ACL // Tracks ACL per key for URL generation
-	cfg       Config
+	// fileACLs tracks ACL per key to avoid re-querying S3 during URL generation
+	// (determines whether to return public or signed URLs)
+	fileACLs map[string]ACL
+	cfg      Config
 }
 
 // New creates a new S3Storage with the given configuration.
@@ -31,7 +33,6 @@ func New(cfg Config) (*S3Storage, error) {
 		return nil, err
 	}
 
-	// Build S3 client options.
 	opts := []func(*s3.Options){
 		func(o *s3.Options) {
 			o.Region = cfg.Region
@@ -43,7 +44,6 @@ func New(cfg Config) (*S3Storage, error) {
 		},
 	}
 
-	// Custom endpoint (for MinIO or other S3-compatible services).
 	if cfg.Endpoint != "" {
 		opts = append(opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
@@ -64,7 +64,6 @@ func New(cfg Config) (*S3Storage, error) {
 
 // Put uploads data from a reader to S3.
 func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Option) (*FileInfo, error) {
-	// Apply options.
 	o := &putOptions{
 		acl: s.cfg.DefaultACL,
 	}
@@ -72,7 +71,6 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		opt(o)
 	}
 
-	// Detect MIME type from content.
 	var contentType string
 	if o.contentType != "" {
 		contentType = o.contentType
@@ -82,13 +80,11 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		r = newReader
 	}
 
-	// Build the storage key.
 	key := o.key
 	if key == "" {
 		key = s.buildKey(o.tenant, o.prefix, contentType)
 	}
 
-	// Convert ACL to S3 type.
 	var acl types.ObjectCannedACL
 	switch o.acl {
 	case ACLPublicRead:
@@ -97,7 +93,6 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		acl = types.ObjectCannedACLPrivate
 	}
 
-	// Upload to S3.
 	input := &s3.PutObjectInput{
 		Bucket:        aws.String(s.cfg.Bucket),
 		Key:           aws.String(key),
@@ -112,7 +107,6 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		return nil, wrapS3Error(err, ErrUploadFailed)
 	}
 
-	// Track ACL for URL generation.
 	s.fileACLs[key] = o.acl
 
 	return &FileInfo{
@@ -150,7 +144,6 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 		return wrapS3Error(err, ErrDeleteFailed)
 	}
 
-	// Clean up ACL tracking.
 	delete(s.fileACLs, key)
 
 	return nil
@@ -158,7 +151,6 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 
 // URL generates a URL for accessing the file.
 func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (string, error) {
-	// Apply options.
 	o := &urlOptions{
 		expiry: DefaultURLExpiry,
 	}
@@ -166,23 +158,19 @@ func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (str
 		opt(o)
 	}
 
-	// Determine if we should use public or signed URL.
 	usePublic := false
 	if o.forcePublic {
 		usePublic = true
 	} else if !o.forceSigned {
-		// Auto-detect based on ACL.
 		if acl, ok := s.fileACLs[key]; ok && acl == ACLPublicRead {
 			usePublic = true
 		}
 	}
 
-	// Generate public URL.
 	if usePublic {
 		return s.publicURL(key), nil
 	}
 
-	// Generate signed URL.
 	return s.signedURL(ctx, key, o)
 }
 
@@ -198,7 +186,6 @@ func (s *S3Storage) buildKey(tenant, prefix, contentType string) string {
 		parts = append(parts, sanitizePathSegment(prefix))
 	}
 
-	// Generate filename with ULID and extension.
 	ext := ExtFromMIME(contentType)
 	if ext == "" {
 		ext = ".bin"
@@ -316,7 +303,6 @@ func (s *S3Storage) Copy(ctx context.Context, srcKey, dstKey string) error {
 		CopySource: aws.String(s.cfg.Bucket + "/" + srcKey),
 	}
 
-	// Preserve ACL if tracked.
 	if acl, ok := s.fileACLs[srcKey]; ok {
 		switch acl {
 		case ACLPublicRead:
