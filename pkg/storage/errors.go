@@ -10,25 +10,16 @@ import (
 
 // Sentinel errors for storage operations.
 var (
-	// Configuration errors.
-	ErrInvalidConfig = errors.New("storage: invalid configuration")
-
-	// File errors.
-	ErrEmptyFile = errors.New("storage: file is empty")
-
-	// Validation errors.
-	ErrFileTooLarge = errors.New("storage: file exceeds size limit")
-	ErrFileTooSmall = errors.New("storage: file below minimum size")
-	ErrInvalidMIME  = errors.New("storage: file type not allowed")
-
-	// S3 operation errors.
-	ErrNotFound      = errors.New("storage: file not found")
-	ErrAccessDenied  = errors.New("storage: access denied")
-	ErrUploadFailed  = errors.New("storage: upload failed")
-	ErrDeleteFailed  = errors.New("storage: delete failed")
-	ErrPresignFailed = errors.New("storage: presign failed")
-
-	// URL errors.
+	ErrInvalidConfig    = errors.New("storage: invalid configuration")
+	ErrEmptyFile        = errors.New("storage: file is empty")
+	ErrFileTooLarge     = errors.New("storage: file exceeds size limit")
+	ErrFileTooSmall     = errors.New("storage: file below minimum size")
+	ErrInvalidMIME      = errors.New("storage: file type not allowed")
+	ErrNotFound         = errors.New("storage: file not found")
+	ErrAccessDenied     = errors.New("storage: access denied")
+	ErrUploadFailed     = errors.New("storage: upload failed")
+	ErrDeleteFailed     = errors.New("storage: delete failed")
+	ErrPresignFailed    = errors.New("storage: presign failed")
 	ErrInvalidURL       = errors.New("storage: invalid URL")
 	ErrDownloadFailed   = errors.New("storage: failed to download from URL")
 	ErrDownloadTooLarge = errors.New("storage: download exceeds size limit")
