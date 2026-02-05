@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/internal"
+	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/job"
@@ -114,6 +115,12 @@ type (
 
 	// FileValidationError represents a file validation failure.
 	FileValidationError = storage.FileValidationError
+
+	// HTTPError represents an HTTP error with all data needed for rendering.
+	HTTPError = internal.HTTPError
+
+	// HTTPErrorOption configures an HTTPError.
+	HTTPErrorOption = internal.HTTPErrorOption
 )
 
 // Constructors
@@ -856,3 +863,133 @@ var (
 	ErrStorageInvalidURL     = storage.ErrInvalidURL
 	ErrStorageDownloadFailed = storage.ErrDownloadFailed
 )
+
+// Middleware error types - re-exported from middlewares
+type (
+	// PanicError represents a recovered panic.
+	PanicError = middlewares.PanicError
+
+	// TimeoutError represents a request timeout.
+	TimeoutError = middlewares.TimeoutError
+)
+
+// Middleware helpers - re-exported from middlewares
+
+// GetRequestID extracts the request ID from the context.
+// Returns an empty string if no request ID is set.
+func GetRequestID(c Context) string {
+	return middlewares.GetRequestID(c)
+}
+
+// RequestIDExtractor returns a ContextExtractor for use with WithLogger.
+// Automatically adds "request_id" to all log entries.
+func RequestIDExtractor() ContextExtractor {
+	return middlewares.RequestIDExtractor()
+}
+
+// IsPanicError returns true if the error is a PanicError.
+func IsPanicError(err error) bool {
+	return middlewares.IsPanicError(err)
+}
+
+// IsTimeoutError returns true if the error is a TimeoutError.
+func IsTimeoutError(err error) bool {
+	return middlewares.IsTimeoutError(err)
+}
+
+// AsPanicError extracts the PanicError from an error if present.
+func AsPanicError(err error) (*PanicError, bool) {
+	return middlewares.AsPanicError(err)
+}
+
+// AsTimeoutError extracts the TimeoutError from an error if present.
+func AsTimeoutError(err error) (*TimeoutError, bool) {
+	return middlewares.AsTimeoutError(err)
+}
+
+// HTTPError constructors and options - re-exported from internal
+
+// NewHTTPError creates a new HTTPError with the given status code and message.
+func NewHTTPError(code int, message string) *HTTPError {
+	return internal.NewHTTPError(code, message)
+}
+
+// WithTitle sets the error title.
+func WithTitle(title string) HTTPErrorOption {
+	return internal.WithTitle(title)
+}
+
+// WithDetail sets the extended description.
+func WithDetail(detail string) HTTPErrorOption {
+	return internal.WithDetail(detail)
+}
+
+// WithErrorCode sets the application-specific error code.
+func WithErrorCode(code string) HTTPErrorOption {
+	return internal.WithErrorCode(code)
+}
+
+// WithRequestID sets the request tracking ID.
+func WithRequestID(id string) HTTPErrorOption {
+	return internal.WithRequestID(id)
+}
+
+// WithError sets the underlying error.
+func WithError(err error) HTTPErrorOption {
+	return internal.WithError(err)
+}
+
+// Convenience constructors for common HTTP errors.
+
+// ErrBadRequest creates a 400 Bad Request error.
+func ErrBadRequest(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrBadRequest(message, opts...)
+}
+
+// ErrUnauthorized creates a 401 Unauthorized error.
+func ErrUnauthorized(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrUnauthorized(message, opts...)
+}
+
+// ErrForbidden creates a 403 Forbidden error.
+func ErrForbidden(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrForbidden(message, opts...)
+}
+
+// ErrNotFound creates a 404 Not Found error.
+func ErrNotFound(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrNotFound(message, opts...)
+}
+
+// ErrConflict creates a 409 Conflict error.
+func ErrConflict(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrConflict(message, opts...)
+}
+
+// ErrUnprocessable creates a 422 Unprocessable Entity error.
+func ErrUnprocessable(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrUnprocessable(message, opts...)
+}
+
+// ErrInternal creates a 500 Internal Server Error.
+func ErrInternal(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrInternal(message, opts...)
+}
+
+// ErrServiceUnavailable creates a 503 Service Unavailable error.
+func ErrServiceUnavailable(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrServiceUnavailable(message, opts...)
+}
+
+// Helper functions for error inspection.
+
+// IsHTTPError returns true if the error is an HTTPError.
+func IsHTTPError(err error) bool {
+	return internal.IsHTTPError(err)
+}
+
+// AsHTTPError extracts the HTTPError from an error if present.
+// Returns nil if the error is not an HTTPError.
+func AsHTTPError(err error) *HTTPError {
+	return internal.AsHTTPError(err)
+}
