@@ -13,7 +13,6 @@ type FileValidationError struct {
 	Message string         // Human-readable message
 }
 
-// Error implements the error interface.
 func (e *FileValidationError) Error() string {
 	return e.Message
 }

@@ -98,10 +98,9 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 	}
 
 	var acl types.ObjectCannedACL
-	switch o.acl {
-	case ACLPublicRead:
+	if o.acl == ACLPublicRead {
 		acl = types.ObjectCannedACLPublicRead
-	default:
+	} else {
 		acl = types.ObjectCannedACLPrivate
 	}
 
