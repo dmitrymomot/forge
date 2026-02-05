@@ -2,13 +2,24 @@
 
 This document outlines planned features for the Forge framework.
 
-**Current Status:** Concept stage — core architecture documented, foundational packages implemented.
+**Current Status:** Active development — core framework functional, foundational packages and middlewares implemented.
 
 ---
 
 ## Implemented
 
-Foundational packages in `pkg/`:
+### Core Framework
+
+- `HTTPError` — structured error type with title, detail, error code, request ID
+- Error handling helpers (`NewHTTPError`, `BadRequest`, `NotFound`, etc.)
+
+### Middlewares (`middlewares/`)
+
+- `requestid` — inject unique request ID
+- `recover` — panic recovery with logging
+- `timeout` — request timeout enforcement
+
+### Utility Packages (`pkg/`)
 
 - `binder` — request binding (form, JSON, query, path)
 - `validator` — input validation with struct tags
@@ -21,6 +32,7 @@ Foundational packages in `pkg/`:
 - `health` — health check endpoints
 - `hostrouter` — multi-domain routing
 - `id` — ID generation (UUID, etc.)
+- `storage` — file storage abstraction (local filesystem, S3)
 
 ---
 
@@ -49,9 +61,6 @@ Part of framework core, configurable via options:
 
 | Middleware  | Description                                |
 | ----------- | ------------------------------------------ |
-| `requestid` | Inject unique request ID                   |
-| `recover`   | Panic recovery with logging                |
-| `timeout`   | Request timeout enforcement                |
 | `cors`      | CORS headers                               |
 | `errorlog`  | Log 5xx errors with request context        |
 | `audit`     | Audit log writer (configurable sink)       |
