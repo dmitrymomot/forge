@@ -135,6 +135,52 @@ func TestS3Integration_Put(t *testing.T) {
 			_ = s.Delete(ctx, info.Key)
 		})
 	})
+
+	t.Run("upload with validation passes", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("valid content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(
+				storage.NotEmpty(),
+				storage.MaxSize(1024),
+			),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, info.Key)
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload with validation fails on size", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content that exceeds the tiny limit")
+		_, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(storage.MaxSize(10)),
+		)
+		require.Error(t, err)
+		var verr *storage.FileValidationError
+		require.ErrorAs(t, err, &verr)
+		require.Equal(t, storage.ErrCodeFileTooLarge, verr.Code)
+	})
+
+	t.Run("upload with validation fails on MIME type", func(t *testing.T) {
+		t.Parallel()
+
+		// Plain text content
+		data := []byte("this is plain text")
+		_, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(storage.ImageOnly()),
+		)
+		require.Error(t, err)
+		var verr *storage.FileValidationError
+		require.ErrorAs(t, err, &verr)
+		require.Equal(t, storage.ErrCodeInvalidMIME, verr.Code)
+	})
 }
 
 func TestS3Integration_Get(t *testing.T) {
@@ -228,7 +274,7 @@ func TestS3Integration_URL(t *testing.T) {
 		require.Contains(t, url, "X-Amz-Signature") // Signed URL contains signature
 	})
 
-	t.Run("public URL for public file", func(t *testing.T) {
+	t.Run("public URL with WithPublic option", func(t *testing.T) {
 		t.Parallel()
 
 		data := []byte("public content")
@@ -241,7 +287,7 @@ func TestS3Integration_URL(t *testing.T) {
 			_ = s.Delete(ctx, info.Key)
 		})
 
-		url, err := s.URL(ctx, info.Key)
+		url, err := s.URL(ctx, info.Key, storage.WithPublic())
 		require.NoError(t, err)
 		require.Contains(t, url, info.Key)
 		require.NotContains(t, url, "X-Amz-Signature") // Public URL has no signature
@@ -308,9 +354,7 @@ func TestS3Integration_HeadObject(t *testing.T) {
 		t.Parallel()
 
 		data := []byte("content for head request")
-		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
-			storage.WithACL(storage.ACLPublicRead),
-		)
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)))
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -322,7 +366,8 @@ func TestS3Integration_HeadObject(t *testing.T) {
 		require.Equal(t, info.Key, headInfo.Key)
 		require.Equal(t, info.Size, headInfo.Size)
 		require.Equal(t, info.ContentType, headInfo.ContentType)
-		require.Equal(t, storage.ACLPublicRead, headInfo.ACL)
+		// HeadObject returns DefaultACL (ACLPrivate by default)
+		require.Equal(t, storage.ACLPrivate, headInfo.ACL)
 	})
 
 	t.Run("head non-existent file returns error", func(t *testing.T) {
@@ -371,13 +416,12 @@ func TestS3Integration_Copy(t *testing.T) {
 		require.Equal(t, data, copiedData)
 	})
 
-	t.Run("copy preserves ACL", func(t *testing.T) {
+	t.Run("copy creates duplicate file", func(t *testing.T) {
 		t.Parallel()
 
-		data := []byte("public content to copy")
+		data := []byte("content to copy and verify")
 		srcInfo, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
-			storage.WithPrefix("source-public"),
-			storage.WithACL(storage.ACLPublicRead),
+			storage.WithPrefix("source-copy"),
 		)
 		require.NoError(t, err)
 
@@ -385,7 +429,7 @@ func TestS3Integration_Copy(t *testing.T) {
 			_ = s.Delete(ctx, srcInfo.Key)
 		})
 
-		dstKey := "copied-public/" + srcInfo.Key
+		dstKey := "copied-dest/" + srcInfo.Key
 		err = s.Copy(ctx, srcInfo.Key, dstKey)
 		require.NoError(t, err)
 
@@ -393,10 +437,14 @@ func TestS3Integration_Copy(t *testing.T) {
 			_ = s.Delete(ctx, dstKey)
 		})
 
-		// Get URL for copied file - should be public (no signature)
-		url, err := s.URL(ctx, dstKey)
+		// Verify copy exists and has same content
+		reader, err := s.Get(ctx, dstKey)
 		require.NoError(t, err)
-		require.NotContains(t, url, "X-Amz-Signature")
+		defer reader.Close()
+
+		copiedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.Equal(t, data, copiedData)
 	})
 
 	t.Run("copy non-existent source returns error", func(t *testing.T) {
