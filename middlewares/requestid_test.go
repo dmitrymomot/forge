@@ -230,11 +230,11 @@ func TestRequestID_HeaderPriority(t *testing.T) {
 		require.Equal(t, "req-123", rec.Header().Get("X-Request-ID"))
 	})
 
-	t.Run("falls back to second header when first empty", func(t *testing.T) {
+	t.Run("falls back to next header when first not present", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Request-Id", "req-456")
+		req.Header.Set("X-Correlation-ID", "corr-456")
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
@@ -245,7 +245,7 @@ func TestRequestID_HeaderPriority(t *testing.T) {
 
 		err := handler(ctx)
 		require.NoError(t, err)
-		require.Equal(t, "req-456", rec.Header().Get("X-Request-ID"))
+		require.Equal(t, "corr-456", rec.Header().Get("X-Request-ID"))
 	})
 }
 

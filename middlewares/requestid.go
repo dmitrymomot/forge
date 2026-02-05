@@ -13,7 +13,7 @@ import (
 type requestIDKey struct{}
 
 // DefaultRequestIDHeaders are the headers checked (in order) for an existing request ID.
-var DefaultRequestIDHeaders = []string{"X-Request-ID", "X-Request-Id", "X-Correlation-ID"}
+var DefaultRequestIDHeaders = []string{"X-Request-ID", "X-Correlation-ID"}
 
 // RequestIDConfig configures the request ID middleware.
 type RequestIDConfig struct {
