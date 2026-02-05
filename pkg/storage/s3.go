@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -24,6 +26,7 @@ type S3Storage struct {
 	// (determines whether to return public or signed URLs)
 	fileACLs map[string]ACL
 	cfg      Config
+	mu       sync.RWMutex
 }
 
 // New creates a new S3Storage with the given configuration.
@@ -72,12 +75,20 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 	}
 
 	var contentType string
+	var body io.ReadSeeker
 	if o.contentType != "" {
 		contentType = o.contentType
+		if rs, ok := r.(io.ReadSeeker); ok {
+			body = rs
+		} else {
+			data, err := io.ReadAll(r)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read input: %w", err)
+			}
+			body = bytes.NewReader(data)
+		}
 	} else {
-		var newReader io.Reader
-		contentType, newReader = detectMIMEWithReader(r)
-		r = newReader
+		contentType, body = detectMIMEWithReader(r)
 	}
 
 	key := o.key
@@ -96,7 +107,7 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 	input := &s3.PutObjectInput{
 		Bucket:        aws.String(s.cfg.Bucket),
 		Key:           aws.String(key),
-		Body:          r,
+		Body:          body,
 		ContentLength: aws.Int64(size),
 		ContentType:   aws.String(contentType),
 		ACL:           acl,
@@ -107,7 +118,9 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		return nil, wrapS3Error(err, ErrUploadFailed)
 	}
 
+	s.mu.Lock()
 	s.fileACLs[key] = o.acl
+	s.mu.Unlock()
 
 	return &FileInfo{
 		Key:         key,
@@ -144,7 +157,9 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 		return wrapS3Error(err, ErrDeleteFailed)
 	}
 
+	s.mu.Lock()
 	delete(s.fileACLs, key)
+	s.mu.Unlock()
 
 	return nil
 }
@@ -162,7 +177,10 @@ func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (str
 	if o.forcePublic {
 		usePublic = true
 	} else if !o.forceSigned {
-		if acl, ok := s.fileACLs[key]; ok && acl == ACLPublicRead {
+		s.mu.RLock()
+		acl, ok := s.fileACLs[key]
+		s.mu.RUnlock()
+		if ok && acl == ACLPublicRead {
 			usePublic = true
 		}
 	}
@@ -283,9 +301,11 @@ func (s *S3Storage) HeadObject(ctx context.Context, key string) (*FileInfo, erro
 
 	// Get ACL from tracking, or default to private.
 	acl := s.cfg.DefaultACL
+	s.mu.RLock()
 	if tracked, ok := s.fileACLs[key]; ok {
 		acl = tracked
 	}
+	s.mu.RUnlock()
 
 	return &FileInfo{
 		Key:         key,
@@ -303,19 +323,28 @@ func (s *S3Storage) Copy(ctx context.Context, srcKey, dstKey string) error {
 		CopySource: aws.String(s.cfg.Bucket + "/" + srcKey),
 	}
 
-	if acl, ok := s.fileACLs[srcKey]; ok {
+	s.mu.RLock()
+	acl, hasACL := s.fileACLs[srcKey]
+	s.mu.RUnlock()
+
+	if hasACL {
 		switch acl {
 		case ACLPublicRead:
 			input.ACL = types.ObjectCannedACLPublicRead
 		default:
 			input.ACL = types.ObjectCannedACLPrivate
 		}
-		s.fileACLs[dstKey] = acl
 	}
 
 	_, err := s.client.CopyObject(ctx, input)
 	if err != nil {
 		return wrapS3Error(err, ErrUploadFailed)
+	}
+
+	if hasACL {
+		s.mu.Lock()
+		s.fileACLs[dstKey] = acl
+		s.mu.Unlock()
 	}
 
 	return nil
