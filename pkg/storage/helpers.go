@@ -38,7 +38,7 @@ func PutFile(ctx context.Context, s Storage, fh *multipart.FileHeader, opts ...O
 	if err != nil {
 		return nil, fmt.Errorf("storage: failed to open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return s.Put(ctx, f, fh.Size, opts...)
 }
@@ -84,7 +84,7 @@ func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64,
 	if resp == nil || resp.Body == nil {
 		return nil, fmt.Errorf("%w: empty response", ErrDownloadFailed)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: status %d", ErrDownloadFailed, resp.StatusCode)
