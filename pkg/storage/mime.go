@@ -173,18 +173,28 @@ func detectMIMEFromReader(r io.Reader) string {
 	return http.DetectContentType(buf[:n])
 }
 
-// detectMIMEWithReader detects MIME type from a reader without consuming its data.
-// Returns the detected MIME type and a new reader that includes the peeked bytes,
-// avoiding the need to open the file twice for detection and upload.
-func detectMIMEWithReader(r io.Reader) (string, io.Reader) {
-	buf := make([]byte, mimeDetectionBytes)
-	n, err := r.Read(buf)
-	if err != nil && n == 0 {
-		return MIMEOctetStream, r
+// detectMIMEWithReader detects MIME type from a reader and returns a seekable reader.
+// AWS SDK v2 requires io.ReadSeeker for computing payload hash.
+// If input is already seekable, it seeks back to start after detection.
+// Otherwise, it buffers the entire content into memory.
+func detectMIMEWithReader(r io.Reader) (string, io.ReadSeeker) {
+	if rs, ok := r.(io.ReadSeeker); ok {
+		buf := make([]byte, mimeDetectionBytes)
+		n, _ := rs.Read(buf)
+		_, _ = rs.Seek(0, io.SeekStart)
+		if n > 0 {
+			return http.DetectContentType(buf[:n]), rs
+		}
+		return MIMEOctetStream, rs
 	}
 
-	mimeType := http.DetectContentType(buf[:n])
-	return mimeType, io.MultiReader(bytes.NewReader(buf[:n]), r)
+	data, err := io.ReadAll(r)
+	if err != nil || len(data) == 0 {
+		return MIMEOctetStream, bytes.NewReader(nil)
+	}
+
+	mimeType := http.DetectContentType(data)
+	return mimeType, bytes.NewReader(data)
 }
 
 // normalizeMIME extracts the base MIME type, removing parameters like charset.
