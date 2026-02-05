@@ -3,6 +3,8 @@ package storage
 import (
 	"bytes"
 	"io"
+	"mime/multipart"
+	"net/textproto"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -261,4 +263,27 @@ func TestDetectMIMEWithReader(t *testing.T) {
 	readContent, err := io.ReadAll(newReader)
 	require.NoError(t, err)
 	require.Equal(t, content, readContent)
+}
+
+func TestDetectMIME(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil file header returns octet-stream", func(t *testing.T) {
+		t.Parallel()
+		got := DetectMIME(nil)
+		require.Equal(t, MIMEOctetStream, got)
+	})
+
+	t.Run("file header without content returns octet-stream", func(t *testing.T) {
+		t.Parallel()
+		// Create a FileHeader that will fail to open because it has no content
+		// (no multipart form backing it).
+		fh := &multipart.FileHeader{
+			Filename: "test.txt",
+			Size:     100,
+			Header:   textproto.MIMEHeader{},
+		}
+		got := DetectMIME(fh)
+		require.Equal(t, MIMEOctetStream, got)
+	})
 }
