@@ -158,6 +158,8 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 
 // URL generates a URL for accessing the file.
 // By default, returns a signed URL. Use WithPublic() to get an unsigned public URL.
+// If both WithPublic() and WithDownload() are used, signed URL is returned
+// because Content-Disposition headers require signed URLs.
 func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (string, error) {
 	o := &urlOptions{
 		expiry: DefaultURLExpiry,
@@ -166,7 +168,9 @@ func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (str
 		opt(o)
 	}
 
-	if o.forcePublic {
+	// Public URL only when explicitly requested AND no signed URL features needed.
+	// Content-Disposition headers (WithDownload) require signed URLs.
+	if o.forcePublic && o.downloadName == "" && !o.forceSigned {
 		return s.publicURL(key), nil
 	}
 

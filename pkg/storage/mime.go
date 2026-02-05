@@ -129,7 +129,7 @@ func DetectMIME(fh *multipart.FileHeader) string {
 	if err != nil {
 		return MIMEOctetStream
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return detectMIMEFromReader(f)
 }
