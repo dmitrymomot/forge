@@ -15,6 +15,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
+	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
 // Type aliases - public API
@@ -89,6 +90,30 @@ type (
 
 	// JobEnqueuer provides job enqueueing without worker processing.
 	JobEnqueuer = job.Enqueuer
+
+	// Storage defines the interface for file storage operations.
+	Storage = storage.Storage
+
+	// StorageConfig holds S3-compatible storage configuration.
+	StorageConfig = storage.Config
+
+	// FileInfo contains metadata about an uploaded file.
+	FileInfo = storage.FileInfo
+
+	// StorageOption configures Put operations.
+	StorageOption = storage.Option
+
+	// URLOption configures URL generation.
+	URLOption = storage.URLOption
+
+	// ACL represents access control levels for stored files.
+	ACL = storage.ACL
+
+	// ValidationRule defines a validation check for file uploads.
+	ValidationRule = storage.ValidationRule
+
+	// FileValidationError represents a file validation failure.
+	FileValidationError = storage.FileValidationError
 )
 
 // Constructors
@@ -693,3 +718,141 @@ func SessionValue[T any](sess *Session, key string) (T, error) {
 func SessionValueOr[T any](sess *Session, key string, defaultVal T) T {
 	return session.ValueOr(sess, key, defaultVal)
 }
+
+// Storage ACL constants.
+const (
+	// ACLPrivate makes the file accessible only via signed URLs.
+	ACLPrivate = storage.ACLPrivate
+
+	// ACLPublicRead makes the file publicly readable.
+	ACLPublicRead = storage.ACLPublicRead
+)
+
+// Storage options
+
+// WithStorage configures file storage for the application.
+// A storage.Storage implementation must be provided (e.g., S3Client).
+// Enables c.Upload(), c.Download(), c.DeleteFile(), and c.FileURL().
+//
+// Example:
+//
+//	s3 := storage.NewS3Client(storage.Config{
+//	    Bucket:    "my-bucket",
+//	    AccessKey: os.Getenv("AWS_ACCESS_KEY"),
+//	    SecretKey: os.Getenv("AWS_SECRET_KEY"),
+//	})
+//	forge.New(
+//	    forge.WithStorage(s3),
+//	)
+func WithStorage(s Storage) Option {
+	return internal.WithStorage(s)
+}
+
+// Storage Put options - re-exported from pkg/storage
+
+// WithStorageKey sets an explicit storage key, replacing the auto-generated ULID-based key.
+func WithStorageKey(key string) StorageOption {
+	return storage.WithKey(key)
+}
+
+// WithStoragePrefix sets a path prefix for the uploaded file.
+func WithStoragePrefix(prefix string) StorageOption {
+	return storage.WithPrefix(prefix)
+}
+
+// WithStorageTenant sets a tenant ID for multi-tenant isolation.
+func WithStorageTenant(id string) StorageOption {
+	return storage.WithTenant(id)
+}
+
+// WithStorageContentType overrides the auto-detected content type.
+func WithStorageContentType(ct string) StorageOption {
+	return storage.WithContentType(ct)
+}
+
+// WithStorageACL overrides the default ACL for this upload.
+func WithStorageACL(acl ACL) StorageOption {
+	return storage.WithACL(acl)
+}
+
+// WithStorageValidation adds validation rules to be applied before upload.
+func WithStorageValidation(rules ...ValidationRule) StorageOption {
+	return storage.WithValidation(rules...)
+}
+
+// Storage URL options - re-exported from pkg/storage
+
+// WithURLExpiry sets the expiry duration for signed URLs.
+func WithURLExpiry(d time.Duration) URLOption {
+	return storage.WithExpiry(d)
+}
+
+// WithURLDownload sets the filename for Content-Disposition: attachment header.
+func WithURLDownload(filename string) URLOption {
+	return storage.WithDownload(filename)
+}
+
+// WithURLSigned forces a signed URL regardless of the file's ACL.
+func WithURLSigned(expiry time.Duration) URLOption {
+	return storage.WithSigned(expiry)
+}
+
+// WithURLPublic forces a public URL regardless of the file's ACL.
+func WithURLPublic() URLOption {
+	return storage.WithPublic()
+}
+
+// Storage validation rules - re-exported from pkg/storage
+
+// MaxFileSize returns a rule that rejects files larger than the specified size.
+func MaxFileSize(bytes int64) ValidationRule {
+	return storage.MaxSize(bytes)
+}
+
+// MinFileSize returns a rule that rejects files smaller than the specified size.
+func MinFileSize(bytes int64) ValidationRule {
+	return storage.MinSize(bytes)
+}
+
+// FileNotEmpty returns a rule that rejects empty files.
+func FileNotEmpty() ValidationRule {
+	return storage.NotEmpty()
+}
+
+// AllowedFileTypes returns a rule that only accepts files matching the given MIME patterns.
+// Supports wildcards like "image/*".
+func AllowedFileTypes(patterns ...string) ValidationRule {
+	return storage.AllowedTypes(patterns...)
+}
+
+// ImageFilesOnly returns a rule that only accepts image files.
+func ImageFilesOnly() ValidationRule {
+	return storage.ImageOnly()
+}
+
+// DocumentFilesOnly returns a rule that only accepts document files.
+func DocumentFilesOnly() ValidationRule {
+	return storage.DocumentsOnly()
+}
+
+// NewS3Storage creates a new S3-compatible storage client.
+func NewS3Storage(cfg StorageConfig) (Storage, error) {
+	return storage.New(cfg)
+}
+
+// Storage errors for checking return values.
+var (
+	ErrStorageNotConfigured  = storage.ErrNotConfigured
+	ErrStorageInvalidConfig  = storage.ErrInvalidConfig
+	ErrStorageEmptyFile      = storage.ErrEmptyFile
+	ErrStorageFileTooLarge   = storage.ErrFileTooLarge
+	ErrStorageFileTooSmall   = storage.ErrFileTooSmall
+	ErrStorageInvalidMIME    = storage.ErrInvalidMIME
+	ErrStorageNotFound       = storage.ErrNotFound
+	ErrStorageAccessDenied   = storage.ErrAccessDenied
+	ErrStorageUploadFailed   = storage.ErrUploadFailed
+	ErrStorageDeleteFailed   = storage.ErrDeleteFailed
+	ErrStoragePresignFailed  = storage.ErrPresignFailed
+	ErrStorageInvalidURL     = storage.ErrInvalidURL
+	ErrStorageDownloadFailed = storage.ErrDownloadFailed
+)

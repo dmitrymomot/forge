@@ -14,6 +14,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
+	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
 // Option configures the application.
@@ -293,5 +294,25 @@ func WithJobWorker(pool *pgxpool.Pool, opts ...job.Option) Option {
 		}
 		a.jobWorker = jm
 		// Note: jobEnqueuer stays nil - c.Enqueue() returns ErrNotConfigured
+	}
+}
+
+// WithStorage configures file storage for the application.
+// A storage.Storage implementation must be provided (e.g., S3Client).
+// Enables c.Upload(), c.Download(), c.DeleteFile(), and c.FileURL().
+//
+// Example:
+//
+//	s3 := storage.NewS3Client(storage.Config{
+//	    Bucket:    "my-bucket",
+//	    AccessKey: os.Getenv("AWS_ACCESS_KEY"),
+//	    SecretKey: os.Getenv("AWS_SECRET_KEY"),
+//	})
+//	forge.New(
+//	    forge.WithStorage(s3),
+//	)
+func WithStorage(s storage.Storage) Option {
+	return func(a *App) {
+		a.storage = s
 	}
 }
