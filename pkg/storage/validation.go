@@ -32,6 +32,12 @@ type ValidationRule interface {
 	Validate(fh *multipart.FileHeader, mimeType string) error
 }
 
+// ReaderValidationRule validates uploads using only Reader-available data (size and MIME type).
+// Rules that implement this interface can be used with Put() to validate uploads from io.Reader.
+type ReaderValidationRule interface {
+	ValidateReader(size int64, mimeType string) error
+}
+
 // ValidateFile runs all validation rules against a file.
 // Returns the first validation error encountered, or nil if all pass.
 // The mimeType should be pre-detected from magic bytes for accuracy.
@@ -39,6 +45,20 @@ func ValidateFile(fh *multipart.FileHeader, mimeType string, rules ...Validation
 	for _, rule := range rules {
 		if err := rule.Validate(fh, mimeType); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// ValidateReader runs validation rules against Reader-available data (size and MIME type).
+// Only rules that implement ReaderValidationRule are applied; others are silently skipped.
+// Returns the first validation error encountered, or nil if all pass.
+func ValidateReader(size int64, mimeType string, rules ...ValidationRule) error {
+	for _, rule := range rules {
+		if rr, ok := rule.(ReaderValidationRule); ok {
+			if err := rr.ValidateReader(size, mimeType); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -56,14 +76,19 @@ func MaxSize(bytes int64) ValidationRule {
 
 // Validate implements ValidationRule.
 func (r *maxSizeRule) Validate(fh *multipart.FileHeader, _ string) error {
-	if fh.Size > r.maxBytes {
+	return r.ValidateReader(fh.Size, "")
+}
+
+// ValidateReader implements ReaderValidationRule.
+func (r *maxSizeRule) ValidateReader(size int64, _ string) error {
+	if size > r.maxBytes {
 		return &FileValidationError{
 			Field:   "file",
 			Code:    ErrCodeFileTooLarge,
-			Message: fmt.Sprintf("file size %d exceeds limit of %d bytes", fh.Size, r.maxBytes),
+			Message: fmt.Sprintf("file size %d exceeds limit of %d bytes", size, r.maxBytes),
 			Details: map[string]any{
 				"limit": r.maxBytes,
-				"got":   fh.Size,
+				"got":   size,
 			},
 		}
 	}
@@ -82,14 +107,19 @@ func MinSize(bytes int64) ValidationRule {
 
 // Validate implements ValidationRule.
 func (r *minSizeRule) Validate(fh *multipart.FileHeader, _ string) error {
-	if fh.Size < r.minBytes {
+	return r.ValidateReader(fh.Size, "")
+}
+
+// ValidateReader implements ReaderValidationRule.
+func (r *minSizeRule) ValidateReader(size int64, _ string) error {
+	if size < r.minBytes {
 		return &FileValidationError{
 			Field:   "file",
 			Code:    ErrCodeFileTooSmall,
-			Message: fmt.Sprintf("file size %d is below minimum of %d bytes", fh.Size, r.minBytes),
+			Message: fmt.Sprintf("file size %d is below minimum of %d bytes", size, r.minBytes),
 			Details: map[string]any{
 				"minimum": r.minBytes,
-				"got":     fh.Size,
+				"got":     size,
 			},
 		}
 	}
@@ -106,7 +136,20 @@ func NotEmpty() ValidationRule {
 
 // Validate implements ValidationRule.
 func (r *notEmptyRule) Validate(fh *multipart.FileHeader, _ string) error {
-	if fh == nil || fh.Size == 0 {
+	if fh == nil {
+		return &FileValidationError{
+			Field:   "file",
+			Code:    ErrCodeEmptyFile,
+			Message: "file is empty",
+			Details: map[string]any{},
+		}
+	}
+	return r.ValidateReader(fh.Size, "")
+}
+
+// ValidateReader implements ReaderValidationRule.
+func (r *notEmptyRule) ValidateReader(size int64, _ string) error {
+	if size == 0 {
 		return &FileValidationError{
 			Field:   "file",
 			Code:    ErrCodeEmptyFile,
@@ -130,6 +173,11 @@ func AllowedTypes(patterns ...string) ValidationRule {
 
 // Validate implements ValidationRule.
 func (r *allowedTypesRule) Validate(_ *multipart.FileHeader, mimeType string) error {
+	return r.ValidateReader(0, mimeType)
+}
+
+// ValidateReader implements ReaderValidationRule.
+func (r *allowedTypesRule) ValidateReader(_ int64, mimeType string) error {
 	if !matchesMIME(mimeType, r.patterns) {
 		return &FileValidationError{
 			Field:   "file",

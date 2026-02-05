@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -22,11 +21,7 @@ import (
 type S3Storage struct {
 	client    *s3.Client
 	presigner *s3.PresignClient
-	// fileACLs tracks ACL per key to avoid re-querying S3 during URL generation
-	// (determines whether to return public or signed URLs)
-	fileACLs map[string]ACL
-	cfg      Config
-	mu       sync.RWMutex
+	cfg       Config
 }
 
 // New creates a new S3Storage with the given configuration.
@@ -61,7 +56,6 @@ func New(cfg Config) (*S3Storage, error) {
 		client:    client,
 		presigner: presigner,
 		cfg:       cfg,
-		fileACLs:  make(map[string]ACL),
 	}, nil
 }
 
@@ -91,6 +85,13 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		contentType, body = detectMIMEWithReader(r)
 	}
 
+	// Run validation if rules present.
+	if len(o.validationRules) > 0 {
+		if err := ValidateReader(size, contentType, o.validationRules...); err != nil {
+			return nil, err
+		}
+	}
+
 	key := o.key
 	if key == "" {
 		key = s.buildKey(o.tenant, o.prefix, contentType)
@@ -117,10 +118,6 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 	if err != nil {
 		return nil, wrapS3Error(err, ErrUploadFailed)
 	}
-
-	s.mu.Lock()
-	s.fileACLs[key] = o.acl
-	s.mu.Unlock()
 
 	return &FileInfo{
 		Key:         key,
@@ -157,14 +154,11 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 		return wrapS3Error(err, ErrDeleteFailed)
 	}
 
-	s.mu.Lock()
-	delete(s.fileACLs, key)
-	s.mu.Unlock()
-
 	return nil
 }
 
 // URL generates a URL for accessing the file.
+// By default, returns a signed URL. Use WithPublic() to get an unsigned public URL.
 func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (string, error) {
 	o := &urlOptions{
 		expiry: DefaultURLExpiry,
@@ -173,19 +167,7 @@ func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (str
 		opt(o)
 	}
 
-	usePublic := false
 	if o.forcePublic {
-		usePublic = true
-	} else if !o.forceSigned {
-		s.mu.RLock()
-		acl, ok := s.fileACLs[key]
-		s.mu.RUnlock()
-		if ok && acl == ACLPublicRead {
-			usePublic = true
-		}
-	}
-
-	if usePublic {
 		return s.publicURL(key), nil
 	}
 
@@ -299,23 +281,16 @@ func (s *S3Storage) HeadObject(ctx context.Context, key string) (*FileInfo, erro
 		size = *output.ContentLength
 	}
 
-	// Get ACL from tracking, or default to private.
-	acl := s.cfg.DefaultACL
-	s.mu.RLock()
-	if tracked, ok := s.fileACLs[key]; ok {
-		acl = tracked
-	}
-	s.mu.RUnlock()
-
 	return &FileInfo{
 		Key:         key,
 		Size:        size,
 		ContentType: contentType,
-		ACL:         acl,
+		ACL:         s.cfg.DefaultACL,
 	}, nil
 }
 
 // Copy copies a file from one key to another within the same bucket.
+// S3 CopyObject preserves ACL by default.
 func (s *S3Storage) Copy(ctx context.Context, srcKey, dstKey string) error {
 	input := &s3.CopyObjectInput{
 		Bucket:     aws.String(s.cfg.Bucket),
@@ -323,28 +298,9 @@ func (s *S3Storage) Copy(ctx context.Context, srcKey, dstKey string) error {
 		CopySource: aws.String(s.cfg.Bucket + "/" + srcKey),
 	}
 
-	s.mu.RLock()
-	acl, hasACL := s.fileACLs[srcKey]
-	s.mu.RUnlock()
-
-	if hasACL {
-		switch acl {
-		case ACLPublicRead:
-			input.ACL = types.ObjectCannedACLPublicRead
-		default:
-			input.ACL = types.ObjectCannedACLPrivate
-		}
-	}
-
 	_, err := s.client.CopyObject(ctx, input)
 	if err != nil {
 		return wrapS3Error(err, ErrUploadFailed)
-	}
-
-	if hasACL {
-		s.mu.Lock()
-		s.fileACLs[dstKey] = acl
-		s.mu.Unlock()
 	}
 
 	return nil
