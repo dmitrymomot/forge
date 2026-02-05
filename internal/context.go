@@ -81,8 +81,9 @@ type Context interface {
 	// Handles both regular HTTP redirects and HTMX requests.
 	Redirect(code int, url string) error
 
-	// Error writes an error response.
-	Error(code int, message string) error
+	// Error creates and returns an HTTPError without writing a response.
+	// The error should be returned from the handler to trigger the error handler.
+	Error(code int, message string, opts ...HTTPErrorOption) *HTTPError
 
 	// IsHTMX returns true if the request originated from HTMX.
 	IsHTMX() bool
@@ -367,10 +368,14 @@ func (c *requestContext) Redirect(code int, url string) error {
 	return nil
 }
 
-// Error writes an error response.
-func (c *requestContext) Error(code int, message string) error {
-	http.Error(c.response, message, code)
-	return nil
+// Error creates and returns an HTTPError without writing a response.
+// The error should be returned from the handler to trigger the error handler.
+func (c *requestContext) Error(code int, message string, opts ...HTTPErrorOption) *HTTPError {
+	err := NewHTTPError(code, message)
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // IsHTMX returns true if the request originated from HTMX.
