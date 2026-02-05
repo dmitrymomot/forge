@@ -298,3 +298,178 @@ func TestFileValidationError_Error(t *testing.T) {
 
 	require.Equal(t, "file size exceeds limit", err.Error())
 }
+
+func TestValidateReader(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all rules pass", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(1024, "image/jpeg",
+			NotEmpty(),
+			MaxSize(5<<20),
+			ImageOnly(),
+		)
+		require.NoError(t, err)
+	})
+
+	t.Run("size rule fails", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(10<<20, "image/jpeg",
+			NotEmpty(),
+			MaxSize(5<<20),
+		)
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeFileTooLarge, verr.Code)
+	})
+
+	t.Run("type rule fails", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(1024, "text/plain",
+			NotEmpty(),
+			ImageOnly(),
+		)
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeInvalidMIME, verr.Code)
+	})
+
+	t.Run("empty file fails", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(0, "image/jpeg",
+			NotEmpty(),
+			MaxSize(5<<20),
+		)
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeEmptyFile, verr.Code)
+	})
+
+	t.Run("no rules", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(1024, "image/jpeg")
+		require.NoError(t, err)
+	})
+
+	t.Run("min size fails", func(t *testing.T) {
+		t.Parallel()
+
+		err := ValidateReader(50, "image/jpeg",
+			MinSize(100),
+		)
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeFileTooSmall, verr.Code)
+	})
+}
+
+func TestMaxSize_ValidateReader(t *testing.T) {
+	t.Parallel()
+
+	rule := MaxSize(1024)
+
+	t.Run("under limit", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*maxSizeRule).ValidateReader(512, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("at limit", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*maxSizeRule).ValidateReader(1024, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("over limit", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*maxSizeRule).ValidateReader(2048, "")
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeFileTooLarge, verr.Code)
+	})
+}
+
+func TestMinSize_ValidateReader(t *testing.T) {
+	t.Parallel()
+
+	rule := MinSize(100)
+
+	t.Run("above minimum", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*minSizeRule).ValidateReader(512, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("at minimum", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*minSizeRule).ValidateReader(100, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("below minimum", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*minSizeRule).ValidateReader(50, "")
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeFileTooSmall, verr.Code)
+	})
+}
+
+func TestNotEmpty_ValidateReader(t *testing.T) {
+	t.Parallel()
+
+	rule := NotEmpty()
+
+	t.Run("non-empty", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*notEmptyRule).ValidateReader(100, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*notEmptyRule).ValidateReader(0, "")
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeEmptyFile, verr.Code)
+	})
+}
+
+func TestAllowedTypes_ValidateReader(t *testing.T) {
+	t.Parallel()
+
+	rule := AllowedTypes("image/*", "application/pdf")
+
+	t.Run("allowed type", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*allowedTypesRule).ValidateReader(0, "image/png")
+		require.NoError(t, err)
+	})
+
+	t.Run("allowed exact type", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*allowedTypesRule).ValidateReader(0, "application/pdf")
+		require.NoError(t, err)
+	})
+
+	t.Run("disallowed type", func(t *testing.T) {
+		t.Parallel()
+		err := rule.(*allowedTypesRule).ValidateReader(0, "video/mp4")
+		require.Error(t, err)
+		var verr *FileValidationError
+		require.True(t, errors.As(err, &verr))
+		require.Equal(t, ErrCodeInvalidMIME, verr.Code)
+	})
+}
