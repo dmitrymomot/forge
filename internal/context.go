@@ -18,6 +18,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 	"github.com/dmitrymomot/forge/pkg/session"
+	"github.com/dmitrymomot/forge/pkg/storage"
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
 
@@ -217,6 +218,26 @@ type Context interface {
 	// Returns job.ErrNotConfigured if WithJobs was not called.
 	// Returns job.ErrUnknownTask if the task name is not registered.
 	EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error
+
+	// Storage returns the configured storage client.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	Storage() (storage.Storage, error)
+
+	// Upload stores data and returns file info.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error)
+
+	// Download retrieves a file from storage.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	Download(key string) (io.ReadCloser, error)
+
+	// DeleteFile removes a file from storage.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	DeleteFile(key string) error
+
+	// FileURL generates a URL for accessing the file.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	FileURL(key string, opts ...storage.URLOption) (string, error)
 }
 
 // requestContext implements the Context interface.
@@ -234,6 +255,9 @@ type requestContext struct {
 	// Job management
 	jobEnqueuer *JobEnqueuer
 
+	// Storage
+	storage storage.Storage
+
 	baseDomain string
 
 	sessionLoaded         bool
@@ -241,7 +265,7 @@ type requestContext struct {
 }
 
 // newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer, baseDomain string) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer, s storage.Storage, baseDomain string) *requestContext {
 	// Create response wrapper
 	rw := NewResponseWriter(w, htmx.IsHTMX(r))
 
@@ -253,6 +277,7 @@ func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm 
 		cookieManager:  cm,
 		sessionManager: sm,
 		jobEnqueuer:    je,
+		storage:        s,
 		baseDomain:     baseDomain,
 	}
 }
@@ -736,4 +761,49 @@ func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...
 		return job.ErrNotConfigured
 	}
 	return c.jobEnqueuer.EnqueueTx(c.Context(), tx, name, payload, opts...)
+}
+
+// Storage returns the configured storage client.
+// Returns storage.ErrNotConfigured if WithStorage was not called.
+func (c *requestContext) Storage() (storage.Storage, error) {
+	if c.storage == nil {
+		return nil, storage.ErrNotConfigured
+	}
+	return c.storage, nil
+}
+
+// Upload stores data and returns file info.
+// Returns storage.ErrNotConfigured if WithStorage was not called.
+func (c *requestContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
+	if c.storage == nil {
+		return nil, storage.ErrNotConfigured
+	}
+	return c.storage.Put(c.Context(), r, size, opts...)
+}
+
+// Download retrieves a file from storage.
+// Returns storage.ErrNotConfigured if WithStorage was not called.
+func (c *requestContext) Download(key string) (io.ReadCloser, error) {
+	if c.storage == nil {
+		return nil, storage.ErrNotConfigured
+	}
+	return c.storage.Get(c.Context(), key)
+}
+
+// DeleteFile removes a file from storage.
+// Returns storage.ErrNotConfigured if WithStorage was not called.
+func (c *requestContext) DeleteFile(key string) error {
+	if c.storage == nil {
+		return storage.ErrNotConfigured
+	}
+	return c.storage.Delete(c.Context(), key)
+}
+
+// FileURL generates a URL for accessing the file.
+// Returns storage.ErrNotConfigured if WithStorage was not called.
+func (c *requestContext) FileURL(key string, opts ...storage.URLOption) (string, error) {
+	if c.storage == nil {
+		return "", storage.ErrNotConfigured
+	}
+	return c.storage.URL(c.Context(), key, opts...)
 }

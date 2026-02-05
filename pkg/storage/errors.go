@@ -10,6 +10,7 @@ import (
 
 // Sentinel errors for storage operations.
 var (
+	ErrNotConfigured    = errors.New("storage: not configured")
 	ErrInvalidConfig    = errors.New("storage: invalid configuration")
 	ErrEmptyFile        = errors.New("storage: file is empty")
 	ErrFileTooLarge     = errors.New("storage: file exceeds size limit")

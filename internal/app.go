@@ -11,6 +11,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
+	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
 // Default server timeouts (hardcoded, opinionated).
@@ -37,6 +38,7 @@ type App struct {
 	sessionManager          *SessionManager
 	jobEnqueuer             *JobEnqueuer
 	jobWorker               *JobManager
+	storage                 storage.Storage
 	baseDomain              string
 	middlewares             []Middleware
 	handlers                []Handler
@@ -163,7 +165,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobEnqueuer, a.baseDomain)
+		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobEnqueuer, a.storage, a.baseDomain)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
