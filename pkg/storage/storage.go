@@ -27,48 +27,35 @@ type Storage interface {
 
 // Config holds S3-compatible storage configuration.
 type Config struct {
-	// Bucket is the S3 bucket name (required).
 	Bucket string
 
-	// AccessKey is the AWS access key ID (required).
 	AccessKey string
 
-	// SecretKey is the AWS secret access key (required).
 	SecretKey string
 
 	// Endpoint is the custom S3 endpoint URL (optional, for MinIO or other S3-compatible services).
 	Endpoint string
 
-	// Region is the AWS region (default: us-east-1).
 	Region string
 
 	// PublicURL is the CDN or public URL prefix for public files (optional).
 	// If set, public URLs will use this prefix instead of the S3 URL.
 	PublicURL string
 
-	// DefaultACL is the default ACL for uploaded files (default: private).
 	DefaultACL ACL
 
 	// PathStyle enables path-style URLs (required for MinIO).
 	PathStyle bool
 
-	// MaxDownloadSize is the maximum size for URL downloads in bytes (default: 50MB).
 	MaxDownloadSize int64
 }
 
 // FileInfo contains metadata about an uploaded file.
 type FileInfo struct {
-	// Key is the storage key (path) for the file.
-	Key string
-
-	// ContentType is the detected MIME type.
+	Key         string
 	ContentType string
-
-	// ACL is the access control setting.
-	ACL ACL
-
-	// Size is the file size in bytes.
-	Size int64
+	ACL         ACL
+	Size        int64
 }
 
 // ACL represents access control levels for stored files.
@@ -85,7 +72,7 @@ const (
 // Default configuration values.
 const (
 	DefaultRegion          = "us-east-1"
-	DefaultMaxDownloadSize = 50 << 20 // 50MB
+	DefaultMaxDownloadSize = 50 << 20 // 50MB to prevent abuse
 	DefaultSignedURLExpiry = 15 * 60  // 15 minutes in seconds
 )
 

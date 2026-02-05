@@ -20,19 +20,17 @@ func PutFile(ctx context.Context, s Storage, fh *multipart.FileHeader, opts ...O
 		return nil, ErrEmptyFile
 	}
 
-	// Apply options to check for validation rules.
 	o := &putOptions{}
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	// Run validation if rules are present.
 	if len(o.validationRules) > 0 {
 		mimeType := DetectMIME(fh)
 		if err := ValidateFile(fh, mimeType, o.validationRules...); err != nil {
 			return nil, err
 		}
-		// Add detected content type to avoid re-detection.
+		// Avoid re-detecting MIME type in Put.
 		opts = append(opts, WithContentType(mimeType))
 	}
 
@@ -62,24 +60,20 @@ func PutBytes(ctx context.Context, s Storage, data []byte, filename string, opts
 // Returns ErrDownloadTooLarge if the file exceeds maxSize.
 // Returns ErrDownloadFailed for network or HTTP errors.
 func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64, opts ...Option) (*FileInfo, error) {
-	// Validate URL.
 	parsed, err := url.Parse(sourceURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, ErrInvalidURL
 	}
 
-	// Use default max size if not specified.
 	if maxSize == 0 {
 		maxSize = DefaultMaxDownloadSize
 	}
 
-	// Create HTTP request with context.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidURL, err)
 	}
 
-	// Execute request.
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
@@ -92,26 +86,22 @@ func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64,
 	}
 	defer resp.Body.Close()
 
-	// Check status code.
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: status %d", ErrDownloadFailed, resp.StatusCode)
 	}
 
-	// Check content length if available.
 	if resp.ContentLength > maxSize {
 		return nil, ErrDownloadTooLarge
 	}
 
-	// Limit reader to prevent downloading too much.
+	// Read maxSize+1 to detect if actual size exceeds limit without buffering entire file.
 	limited := io.LimitReader(resp.Body, maxSize+1)
 
-	// Read into buffer to get size and detect MIME.
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDownloadFailed, err)
 	}
 
-	// Check actual size.
 	if int64(len(data)) > maxSize {
 		return nil, ErrDownloadTooLarge
 	}

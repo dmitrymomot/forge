@@ -5,12 +5,12 @@ type Option func(*putOptions)
 
 // putOptions holds configuration for Put operations.
 type putOptions struct {
-	key             string           // Explicit key (replaces auto-generated)
-	prefix          string           // Path prefix (e.g., "avatars/")
-	tenant          string           // Tenant ID for multi-tenant isolation
-	contentType     string           // Override detected content type
-	acl             ACL              // Override default ACL
-	validationRules []ValidationRule // Validation rules to apply before upload
+	key             string           // Explicit S3 key (prevents auto-generation)
+	prefix          string           // Path component within the key
+	tenant          string           // First path component for isolation
+	contentType     string           // Skip auto-detection with explicit type
+	acl             ACL              // Upload ACL setting
+	validationRules []ValidationRule // Applied before upload
 }
 
 // WithKey sets an explicit storage key, replacing the auto-generated ULID-based key.
