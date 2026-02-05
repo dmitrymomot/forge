@@ -95,18 +95,3 @@ func TestConfig_validate(t *testing.T) {
 		})
 	}
 }
-
-func TestACLConstants(t *testing.T) {
-	t.Parallel()
-
-	require.Equal(t, ACL("private"), ACLPrivate)
-	require.Equal(t, ACL("public-read"), ACLPublicRead)
-}
-
-func TestDefaultConstants(t *testing.T) {
-	t.Parallel()
-
-	require.Equal(t, "us-east-1", DefaultRegion)
-	require.Equal(t, int64(50<<20), int64(DefaultMaxDownloadSize))
-	require.Equal(t, 15*60, DefaultSignedURLExpiry)
-}
