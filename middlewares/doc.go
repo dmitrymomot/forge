@@ -1,6 +1,6 @@
 // Package middlewares provides HTTP middleware for Forge applications.
 //
-// This package includes three essential middlewares:
+// This package includes four essential middlewares:
 //
 // # Request ID
 //
@@ -58,14 +58,50 @@
 //	    }),
 //	)
 //
+// # CORS
+//
+// CORS middleware handles Cross-Origin Resource Sharing headers.
+// It processes preflight (OPTIONS) requests and adds CORS headers to all responses.
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.CORS(),  // Allow all origins (default)
+//	    ),
+//	)
+//
+// Configure specific origins and credentials:
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.CORS(
+//	            middlewares.WithAllowOrigins("https://app.example.com"),
+//	            middlewares.WithAllowCredentials(),
+//	        ),
+//	    ),
+//	)
+//
+// Use dynamic origin validation:
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.CORS(
+//	            middlewares.WithAllowOriginFunc(func(origin string) bool {
+//	                // Custom logic to validate origin
+//	                return strings.HasSuffix(origin, ".example.com")
+//	            }),
+//	        ),
+//	    ),
+//	)
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:
 //
 //	forge.WithMiddleware(
-//	    middlewares.RequestID(),  // First: assign ID for all subsequent logging
-//	    middlewares.Recover(),    // Second: catch panics from timeout and handlers
-//	    middlewares.Timeout(5*time.Second), // Third: enforce timeout
+//	    middlewares.CORS(),       // First: handle preflight before other processing
+//	    middlewares.RequestID(),  // Second: assign ID for all subsequent logging
+//	    middlewares.Recover(),    // Third: catch panics from timeout and handlers
+//	    middlewares.Timeout(5*time.Second), // Fourth: enforce timeout
 //	)
 //
 // # Complete Example
@@ -78,6 +114,7 @@
 //	app := forge.New(
 //	    forge.WithLogger("api", forge.RequestIDExtractor()),
 //	    forge.WithMiddleware(
+//	        middlewares.CORS(),
 //	        middlewares.RequestID(),
 //	        middlewares.Recover(),
 //	        middlewares.Timeout(5*time.Second),
