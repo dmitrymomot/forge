@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/dmitrymomot/forge/internal"
@@ -10,14 +11,6 @@ import (
 // DefaultTimeout is the default request timeout.
 const DefaultTimeout = 30 * time.Second
 
-// TimeoutConfig configures the timeout middleware.
-type TimeoutConfig struct {
-	Timeout time.Duration
-}
-
-// TimeoutOption configures TimeoutConfig.
-type TimeoutOption func(*TimeoutConfig)
-
 // Timeout returns middleware that enforces a request timeout.
 // If the handler does not complete within the timeout, a TimeoutError is returned
 // to be handled by the global ErrorHandler.
@@ -25,28 +18,21 @@ type TimeoutOption func(*TimeoutConfig)
 // Note: The handler goroutine continues running after timeout. Use context.Done()
 // in long-running operations to detect cancellation and terminate early.
 // Request ID is automatically included via RequestIDExtractor() if configured.
-func Timeout(timeout time.Duration, opts ...TimeoutOption) internal.Middleware {
-	cfg := &TimeoutConfig{
-		Timeout: timeout,
-	}
-
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = DefaultTimeout
+func Timeout(timeout time.Duration) internal.Middleware {
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
 
 	return func(next internal.HandlerFunc) internal.HandlerFunc {
 		return func(c internal.Context) error {
-			ctx, cancel := context.WithTimeout(c.Context(), cfg.Timeout)
+			ctx, cancel := context.WithTimeout(c.Context(), timeout)
 			defer cancel()
 
 			c.Set(timeoutContextKey{}, ctx)
 
-			// Use goroutine + select to allow handler to complete normally if context is cancelled
-			// for reasons other than timeout, rather than forcing early termination.
+			// Capture logger before spawning goroutine to avoid race on c.
+			logger := c.Logger()
+
 			done := make(chan error, 1)
 			go func() {
 				done <- next(c)
@@ -56,9 +42,9 @@ func Timeout(timeout time.Duration, opts ...TimeoutOption) internal.Middleware {
 			case err := <-done:
 				return err
 			case <-ctx.Done():
-				if ctx.Err() == context.DeadlineExceeded {
-					c.LogWarn("request timeout", "timeout", cfg.Timeout.String())
-					return &TimeoutError{Duration: cfg.Timeout}
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					logger.WarnContext(ctx, "request timeout", "timeout", timeout.String())
+					return &TimeoutError{Duration: timeout}
 				}
 				return ctx.Err()
 			}

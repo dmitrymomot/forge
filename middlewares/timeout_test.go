@@ -155,7 +155,7 @@ func TestTimeout_EdgeCases(t *testing.T) {
 		err := handler(ctx)
 		require.Error(t, err)
 		// Should return context.Canceled, not TimeoutError
-		require.Equal(t, context.Canceled, err)
+		require.True(t, errors.Is(err, context.Canceled))
 		require.False(t, middlewares.IsTimeoutError(err))
 	})
 }
@@ -272,35 +272,6 @@ func TestGetTimeoutContext(t *testing.T) {
 
 		err := handler(ctx)
 		require.True(t, middlewares.IsTimeoutError(err) || cancelled.Load())
-	})
-}
-
-func TestTimeout_WithOptions(t *testing.T) {
-	t.Parallel()
-
-	t.Run("timeout can be configured via option", func(t *testing.T) {
-		t.Parallel()
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-		ctx := newTestContext(rec, req)
-
-		// Create timeout with initial value then override with option
-		// Note: Current implementation doesn't have timeout options that override,
-		// but we test that options are applied
-		mw := middlewares.Timeout(10 * time.Millisecond)
-		handler := mw(func(c internal.Context) error {
-			time.Sleep(50 * time.Millisecond)
-			return nil
-		})
-
-		err := handler(ctx)
-		require.Error(t, err)
-		require.True(t, middlewares.IsTimeoutError(err))
-
-		te, ok := middlewares.AsTimeoutError(err)
-		require.True(t, ok)
-		require.Equal(t, 10*time.Millisecond, te.Duration)
 	})
 }
 
