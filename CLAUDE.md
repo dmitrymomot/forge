@@ -6,49 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Forge is a Go framework for building B2B micro-SaaS applications. It provides importable packages with pre-built features (auth, multi-tenancy, billing, background jobs).
 
-**Status:** Concept stage — architecture documented, implementation pending.
+**Status:** Active development — core packages implemented, see ROADMAP.md for planned features.
 
 ## Commands
 
 ```bash
-make test    # Run tests with race detection and coverage
-make bench   # Run benchmarks
-make lint    # Run all linters (vet, golangci-lint, nilaway, betteralign, modernize)
-make fmt     # Format code and organize imports
+make test               # Run tests with race detection and coverage
+make lint               # Run all linters (vet, golangci-lint, nilaway, betteralign, modernize)
+make fmt                # Format code and organize imports
+make test-integration   # Run integration tests (starts docker, runs tests, stops docker)
 ```
-
-## Tech Stack
-
-- Go 1.25+
-- PostgreSQL with pgx/v5
-- Goose for migrations
-- chi/v5 router
-- River for background/scheduled tasks (Postgres-native queue)
-- templ or html/template for SSR
-- Tailwind CSS
 
 ## Architecture
 
 ```
 forge/
-├── forge.go                    # Public API entry point (re-exports internal types)
-├── internal/                   # Core framework types (App, Context, Router, Handler)
-├── pkg/                        # Importable utility packages
-│   ├── binder/                 # Request binding (form, JSON, query, path)
-│   ├── cookie/                 # Cookie helpers
-│   ├── db/                     # Database connection, transactions, migrations
-│   ├── health/                 # Health check endpoints
-│   ├── hostrouter/             # Multi-domain routing
-│   ├── htmx/                   # HTMX response helpers
-│   ├── id/                     # ID generation (UUID, etc.)
-│   ├── logger/                 # Structured logging with slog
-│   ├── sanitizer/              # Input sanitization (strings, HTML, collections)
-│   ├── session/                # Session management
-│   └── validator/              # Input validation with struct tags
-└── examples/                   # Usage examples (full-app, multi-domain, simple)
+├── forge.go      # Public API (re-exports internal types)
+├── internal/     # Core framework types (App, Context, Router, Handler)
+├── pkg/          # Importable utility packages (see pkg/ for full list)
+└── examples/     # Usage examples
 ```
 
-**Type aliasing pattern:** `forge.go` re-exports types from `internal/` as the public API. Import `github.com/dmitrymomot/forge` for `App`, `Context`, `Router`, `Handler`, etc.
+**Type aliasing:** `forge.go` re-exports types from `internal/`. Import `github.com/dmitrymomot/forge` for `App`, `Context`, `Router`, `Handler`.
 
 ## Design Principles
 
@@ -58,54 +37,28 @@ forge/
 - **Explicit over implicit:** Favor clear, readable code over clever abstractions
 - **No redundant accessors:** Don't expose fields users already have (e.g., `Pool()` when they passed the pool to constructor)
 - **No unexported returns:** Public methods must not return unexported types
+- **Framework, not boilerplate:** Forge provides utility packages; business logic (auth, billing, tenants) belongs in boilerplate repos
+- **No context helpers in packages:** Packages receive values via parameters, not context. Middleware handles context extraction.
 
 ## Key Patterns
 
-### Handler Pattern
-
-Handlers implement `Routes(Router)` to declare routes and receive dependencies via constructor.
-
-### Task Pattern
-
-Background tasks use River with type-safe payloads. Scheduled tasks use cron syntax. Both use the same queue system.
-
-### Middleware Pattern
-
-Standard `func(next) next` pattern using repo types directly.
-
-## Go Tools
-
-Uses Go 1.25 tool directives (`go.mod`). Install with `go tool <name>`:
-
-- `golangci-lint` — linter aggregator
-- `nilaway` — nil safety analysis
-- `betteralign` — struct field alignment
-- `goimports` — import organization
-- `modernize` — Go idiom updates
-- `mockery` — mock generation
+- **Handlers:** Implement `Routes(Router)`, receive dependencies via constructor
+- **Tasks:** River with type-safe payloads, cron syntax for scheduled tasks
+- **Config:** Use `env` tags (caarlos0/env) with `envPrefix` for composable configs
 
 ## Testing
 
 ```bash
-go test -v ./pkg/validator/...              # Test specific package
-go test -v -run TestValidate ./pkg/...      # Run tests matching pattern
-go test -race -cover ./...                  # Full test suite (same as make test)
+go test -v ./pkg/validator/...    # Test specific package
+go test -v -run TestName ./...    # Run tests matching pattern
 ```
 
-### Test Style Requirements
+### Test Style
 
-- **Parallel execution:** All tests must use `t.Parallel()` at function and subtest level
-- **Assertions:** Use `require` (not `assert`) for critical checks that should fail fast
-- **Test cases:** Use `t.Run("descriptive name", ...)` subtests; table-driven tests only for simple functions
-- **Integration tests:** Code requiring River/pgxpool is tested via integration tests, not unit tests
-
-For integration tests, use `httptest.NewServer` with `app.Router()`:
-
-```go
-app := forge.New(forge.WithHandlers(myHandler))
-ts := httptest.NewServer(app.Router())
-defer ts.Close()
-```
+- **Parallel:** All tests must use `t.Parallel()` at function and subtest level
+- **Assertions:** Use `require` (not `assert`) for critical checks
+- **Subtests:** Use `t.Run("descriptive name", ...)`; table-driven only for simple functions
+- **Integration:** Code requiring River/pgxpool uses integration tests (`make test-integration`)
 
 ## Gotchas
 
@@ -116,4 +69,3 @@ defer ts.Close()
 - **Build to /dev/null:** Never `go build` into repo; use `go build -o /dev/null ./...` to verify compilation
 - **Validator tags:** Use semicolons as separators, colons for params: `validate:"required;max:100"` (not commas)
 - **Sanitizer tags:** Use semicolons as separators: `sanitize:"trim;lowercase"` (same pattern as validator)
-- **Framework, not template:** Forge is an importable library; template repos are separate and unknown to this codebase
