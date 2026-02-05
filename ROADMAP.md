@@ -62,9 +62,12 @@ WithContentType(ct string) PutOption
 
 _Features to consider after core functionality is stable._
 
-- WebSocket support
+- SSE/WebSocket support
 - Rate limiting middleware
+- RBAC package to manage roles and permissions
 - Caching layer (Redis adapter)
 - Feature flags
 - Audit logging
-- Multi-tenant database isolation patterns
+- Middlewares collection (default like request id, ratelimiter, etc and specialized: tenant, ARBAC, API key, webhook verifier, etc)
+- Services collection: profile, tenant, members, billing/subscription, auth (passwordless, email+password, oauth2, api keys)
+- Add predefined task to send webhook
