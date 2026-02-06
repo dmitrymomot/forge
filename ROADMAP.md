@@ -23,17 +23,26 @@ This document outlines planned features for the Forge framework.
 ### Utility Packages (`pkg/`)
 
 - `binder` — request binding (form, JSON, query, path)
-- `validator` — input validation with struct tags
-- `sanitizer` — input sanitization (strings, HTML, collections)
-- `htmx` — HTMX response helpers
-- `session` — session management
+- `clientip` — client IP extraction with CDN header support
 - `cookie` — cookie helpers
 - `db` — database connection, transactions, migrations
-- `logger` — structured logging with slog
+- `dnsverify` — domain ownership verification via DNS TXT records
+- `fingerprint` — device fingerprinting for session security
 - `health` — health check endpoints
 - `hostrouter` — multi-domain routing
+- `htmx` — HTMX response helpers
 - `id` — ID generation (UUID, etc.)
+- `job` — background job scheduling
+- `logger` — structured logging with slog
+- `mailer` — template-based email rendering and sending
+- `randomname` — human-readable random name generation
+- `sanitizer` — input sanitization (strings, HTML, collections)
+- `session` — session management
+- `slug` — URL-safe slug generation with diacritic normalization
 - `storage` — file storage abstraction (local filesystem, S3)
+- `totp` — Time-based One-Time Passwords (RFC 6238)
+- `useragent` — User-Agent parsing with bot detection
+- `validator` — input validation with struct tags
 
 ---
 
@@ -41,22 +50,21 @@ This document outlines planned features for the Forge framework.
 
 ### Utility Packages (`pkg/`)
 
-| Package       | Description                                               | Reference |
-| ------------- | --------------------------------------------------------- | --------- |
-| `sse`         | SSE writer, event encoding, flush helpers                 |           |
-| `websocket`   | Upgrader wrapper, connection management                   |           |
-| `ratelimit`   | Token bucket, sliding window + memory/Redis stores        |           |
-| `rbac`        | `Checker` interface, permission primitives (no DB)        |           |
-| `featureflag` | `Provider` interface, strategies, memory impl             | [ref][1]  |
-| `webhook`     | Sender with retries, signatures, circuit breaker, backoff | [ref][2]  |
-| `oauth`       | `Provider` interface, Google/GitHub implementations       | [ref][3]  |
-| `cache`       | `Cache` interface + memory/Redis implementations          |           |
-| `i18n`        | Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)` |           |
-| `locale`      | Locale-aware formatting: numbers, currency, dates, percentages |           |
-
-[1]: /Users/dmitrymomot/Dev/boilerplate/pkg/feature
-[2]: /Users/dmitrymomot/Dev/boilerplate/pkg/webhook
-[3]: /Users/dmitrymomot/Dev/boilerplate/pkg/oauth
+| Package       | Description                                               |
+| ------------- | --------------------------------------------------------- |
+| `cache`       | `Cache` interface + memory/Redis implementations          |
+| `featureflag` | `Provider` interface, strategies, memory impl             |
+| `i18n`        | Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)` |
+| `jwt`         | JWT generation and validation (HMAC-SHA256)               |
+| `locale`      | Locale-aware formatting: numbers, currency, dates, percentages |
+| `oauth`       | `Provider` interface, Google/GitHub implementations       |
+| `ratelimit`   | Token bucket, sliding window + memory/Redis stores        |
+| `rbac`        | `Checker` interface, permission primitives (no DB)        |
+| `redis`       | Redis connection helper with retry logic                  |
+| `secrets`     | AES-256-GCM encryption with key derivation                |
+| `sse`         | SSE writer, event encoding, flush helpers                 |
+| `webhook`     | Sender with retries, signatures, circuit breaker, backoff |
+| `websocket`   | Upgrader wrapper, connection management                   |
 
 ### Standard Middlewares
 
@@ -64,6 +72,7 @@ Part of framework core, configurable via options:
 
 | Middleware  | Description                                |
 | ----------- | ------------------------------------------ |
+| `csrf`      | CSRF protection (double-submit cookie)     |
 | `errorlog`  | Log 5xx errors with request context        |
 | `audit`     | Audit log writer (configurable sink)       |
 | `ratelimit` | Rate limiting (uses `pkg/ratelimit`)       |
