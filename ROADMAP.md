@@ -56,43 +56,43 @@ This document outlines planned features for the Forge framework.
 - `Context.IsCurrentUser(id)` — compares `UserID()` to a given ID
 - `Context.Can(permission)` — checks if current user's role has the permission (lazy role extraction, cached per request)
 - `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
+- `Param[T](ctx, name)`, `Query[T](ctx, name)`, `QueryDefault[T](ctx, name, default)` — type-safe generic helpers for route params and query values
+- `Context` implements `context.Context` — pass Forge context directly to stdlib functions without `.Context()` unwrapping
 
 ### Utility Packages (`pkg/`)
 
-| Package       | Description                                               |
-| ------------- | --------------------------------------------------------- |
-| `cache`       | `Cache` interface + memory/Redis implementations          |
-| `featureflag` | `Provider` interface, strategies, memory impl             |
-| `i18n`        | Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)` |
-| `jwt`         | JWT generation and validation (HMAC-SHA256)               |
-| `locale`      | Locale-aware formatting: numbers, currency, dates, percentages |
-| `oauth`       | `Provider` interface, Google/GitHub implementations       |
-| `ratelimit`   | Token bucket, sliding window + memory/Redis stores        |
-| `redis`       | Redis connection helper with retry logic                  |
-| `secrets`     | AES-256-GCM encryption with key derivation                |
-| `sse`         | SSE writer, event encoding, flush helpers                 |
-| `webhook`     | Sender with retries, signatures, circuit breaker, backoff |
-| `websocket`   | Upgrader wrapper, connection management                   |
+- `cache` — `Cache` interface + memory/Redis implementations
+- `featureflag` — `Provider` interface, strategies, memory impl
+- `i18n` — Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)`
+- `jwt` — JWT generation and validation (HMAC-SHA256)
+- `locale` — Locale-aware formatting: numbers, currency, dates, percentages
+- `oauth` — `Provider` interface, Google/GitHub implementations
+- `ratelimit` — Token bucket, sliding window + memory/Redis stores
+- `redis` — Redis connection helper with retry logic
+- `secrets` — AES-256-GCM encryption with key derivation
+- `sse` — SSE writer, event encoding, flush helpers
+- `webhook` — Sender with retries, signatures, circuit breaker, backoff
+- `websocket` — Upgrader wrapper, connection management
+- `extractor` — Composable value extraction from headers, cookies, query, form — chainable `FromHeader()`, `FromCookie()`, `FromQuery()` pattern for auth middleware, API key lookup, etc.
+- `compress` — Response compression with `gzip` and `zstd` support, `Accept-Encoding` negotiation, min-size threshold
 
 ### Standard Middlewares
 
 Part of framework core, configurable via options:
 
-| Middleware  | Description                                |
-| ----------- | ------------------------------------------ |
-| `csrf`      | CSRF protection (double-submit cookie)     |
-| `errorlog`  | Log 5xx errors with request context        |
-| `audit`     | Audit log writer (configurable sink)       |
-| `ratelimit` | Rate limiting (uses `pkg/ratelimit`)       |
-| `rbac`      | Coarse-grained role/permission gate for route groups (uses `WithRoles` config) |
+- `csrf` — CSRF protection (double-submit cookie)
+- `errorlog` — Log 5xx errors with request context
+- `audit` — Audit log writer (configurable sink)
+- `ratelimit` — Rate limiting (uses `pkg/ratelimit`)
+- `rbac` — Coarse-grained role/permission gate for route groups (uses `WithRoles` config)
 
 ---
 
 ## Under Consideration
 
-| Package       | Description                                               |
-| ------------- | --------------------------------------------------------- |
-| `render`      | Template rendering integration based on [MiniJinja-Go](https://github.com/dmitrymomot/minijinja/tree/main/minijinja-go) — Jinja2 templates with dev-mode hot-reload, production caching, and middleware for template globals |
+- `render` — Template rendering integration based on [MiniJinja-Go](https://github.com/dmitrymomot/minijinja/tree/main/minijinja-go) — Jinja2 templates with dev-mode hot-reload, production caching, and middleware for template globals
+- `negotiate` — Content negotiation helpers — auto-format response based on `Accept` header (JSON, XML, plain text)
+- `streaming` — General streaming response support — chunked transfers, large downloads, live data (complements `sse`)
 
 ---
 
