@@ -88,6 +88,14 @@ Part of framework core, configurable via options:
 
 ---
 
+## Under Consideration
+
+| Package       | Description                                               |
+| ------------- | --------------------------------------------------------- |
+| `render`      | Template rendering integration based on [MiniJinja-Go](https://github.com/dmitrymomot/minijinja/tree/main/minijinja-go) — Jinja2 templates with dev-mode hot-reload, production caching, and middleware for template globals |
+
+---
+
 ## Out of Scope
 
 _Boilerplate responsibility, not framework:_
