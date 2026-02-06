@@ -12,6 +12,7 @@ This document outlines planned features for the Forge framework.
 
 - `HTTPError` — structured error type with title, detail, error code, request ID
 - Error handling helpers (`NewHTTPError`, `BadRequest`, `NotFound`, etc.)
+- Pre-defined error responses (`ErrForbidden`, `ErrUnauthorized`, etc.)
 
 ### Middlewares (`middlewares/`)
 
@@ -48,6 +49,14 @@ This document outlines planned features for the Forge framework.
 
 ## Planned
 
+### Core Framework
+
+- `Context.UserID()` — session user ID shortcut (empty string if unauthenticated)
+- `Context.IsAuthenticated()` — checks session exists with user ID
+- `Context.IsCurrentUser(id)` — compares `UserID()` to a given ID
+- `Context.Can(permission)` — checks if current user's role has the permission (lazy role extraction, cached per request)
+- `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
+
 ### Utility Packages (`pkg/`)
 
 | Package       | Description                                               |
@@ -59,7 +68,6 @@ This document outlines planned features for the Forge framework.
 | `locale`      | Locale-aware formatting: numbers, currency, dates, percentages |
 | `oauth`       | `Provider` interface, Google/GitHub implementations       |
 | `ratelimit`   | Token bucket, sliding window + memory/Redis stores        |
-| `rbac`        | `Checker` interface, permission primitives (no DB)        |
 | `redis`       | Redis connection helper with retry logic                  |
 | `secrets`     | AES-256-GCM encryption with key derivation                |
 | `sse`         | SSE writer, event encoding, flush helpers                 |
@@ -76,7 +84,7 @@ Part of framework core, configurable via options:
 | `errorlog`  | Log 5xx errors with request context        |
 | `audit`     | Audit log writer (configurable sink)       |
 | `ratelimit` | Rate limiting (uses `pkg/ratelimit`)       |
-| `rbac`      | Permission check (uses `pkg/rbac.Checker`) |
+| `rbac`      | Coarse-grained role/permission gate for route groups (uses `WithRoles` config) |
 
 ---
 
