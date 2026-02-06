@@ -51,6 +51,8 @@ This document outlines planned features for the Forge framework.
 | `webhook`     | Sender with retries, signatures, circuit breaker, backoff | [ref][2]  |
 | `oauth`       | `Provider` interface, Google/GitHub implementations       | [ref][3]  |
 | `cache`       | `Cache` interface + memory/Redis implementations          |           |
+| `i18n`        | Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)` |           |
+| `locale`      | Locale-aware formatting: numbers, currency, dates, percentages |           |
 
 [1]: /Users/dmitrymomot/Dev/boilerplate/pkg/feature
 [2]: /Users/dmitrymomot/Dev/boilerplate/pkg/webhook
