@@ -30,7 +30,7 @@ func Timeout(timeout time.Duration) internal.Middleware {
 
 			c.Set(timeoutContextKey{}, ctx)
 
-			// Capture logger before spawning goroutine to avoid race on c.
+			// Capture logger before spawning goroutine (not safe to access c.Logger() from timeout goroutine)
 			logger := c.Logger()
 
 			done := make(chan error, 1)

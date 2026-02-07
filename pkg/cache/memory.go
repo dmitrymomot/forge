@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// entry holds a cached value with its expiration time and key
-// for reverse lookup when evicting from the linked list.
+// entry holds a cached value with its expiration time and key.
 type entry[V any] struct {
 	expiresAt time.Time // zero value = never expires
 	value     V
@@ -253,7 +252,7 @@ func (m *Memory[V]) deleteExpired() {
 	}
 }
 
-// evictOldest removes the least recently used entry (back of the list).
+// evictOldest removes the least recently used entry.
 // Caller must hold the mutex.
 func (m *Memory[V]) evictOldest() {
 	elem := m.eviction.Back()
@@ -262,8 +261,8 @@ func (m *Memory[V]) evictOldest() {
 	}
 }
 
-// removeElement removes a specific element from the cache and triggers
-// the eviction callback. Caller must hold the mutex.
+// removeElement removes a specific element and triggers the eviction callback.
+// Caller must hold the mutex.
 func (m *Memory[V]) removeElement(elem *list.Element) {
 	m.eviction.Remove(elem)
 	e := elem.Value.(*entry[V])
@@ -274,5 +273,4 @@ func (m *Memory[V]) removeElement(elem *list.Element) {
 	}
 }
 
-// Compile-time interface check.
 var _ Cache[any] = (*Memory[any])(nil)

@@ -43,7 +43,6 @@ type Marshaler[V any] interface {
 	Unmarshal(data []byte) (V, error)
 }
 
-// jsonMarshaler is the default Marshaler using encoding/json.
 type jsonMarshaler[V any] struct{}
 
 func (jsonMarshaler[V]) Marshal(v V) ([]byte, error) {
@@ -62,10 +61,8 @@ func (jsonMarshaler[V]) Unmarshal(data []byte) (V, error) {
 	return v, nil
 }
 
-// sfGroup is the package-level singleflight group for GetOrSet.
 var sfGroup singleflight.Group
 
-// getOrSetResult carries both value and TTL through singleflight's any interface.
 type getOrSetResult[V any] struct {
 	val V
 	ttl time.Duration

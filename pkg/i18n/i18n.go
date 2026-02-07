@@ -21,6 +21,7 @@ type I18n struct {
 	pluralRules map[string]PluralRule
 
 	// Optional handler called when a translation key is not found.
+	// Useful for detecting untranslated keys during development or monitoring gaps in translations.
 	missingKeyHandler func(lang, namespace, key string)
 
 	// Default/fallback language.

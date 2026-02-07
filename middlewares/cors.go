@@ -117,13 +117,13 @@ func CORS(opts ...CORSOption) internal.Middleware {
 		opt(cfg)
 	}
 
-	// Pre-compute joined strings for headers
+	// Pre-compute joined strings to avoid repeated string allocations across multiple requests
 	allowMethodsStr := strings.Join(cfg.AllowMethods, ", ")
 	allowHeadersStr := strings.Join(cfg.AllowHeaders, ", ")
 	exposeHeadersStr := strings.Join(cfg.ExposeHeaders, ", ")
 	maxAgeStr := strconv.Itoa(int(cfg.MaxAge.Seconds()))
 
-	// Check if wildcard is in allow origins
+	// Wildcard check is performed once during middleware setup to optimize lookups on each request
 	hasWildcard := slices.Contains(cfg.AllowOrigins, "*")
 
 	return func(next internal.HandlerFunc) internal.HandlerFunc {
@@ -142,7 +142,7 @@ func CORS(opts ...CORSOption) internal.Middleware {
 			// Check if origin is allowed
 			allowed := isOriginAllowed(origin, cfg, hasWildcard)
 			if !allowed {
-				// Origin not allowed — continue without CORS headers (browser will block)
+				// Continue without CORS headers; browser's same-origin policy prevents credential access from rejected origins
 				return next(c)
 			}
 

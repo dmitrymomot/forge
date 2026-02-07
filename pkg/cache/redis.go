@@ -153,5 +153,4 @@ func (r *Redis[V]) clearByPrefix(ctx context.Context) error {
 	return nil
 }
 
-// Compile-time interface check.
 var _ Cache[any] = (*Redis[any])(nil)

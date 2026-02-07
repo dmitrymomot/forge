@@ -103,6 +103,7 @@ func WithDateTimeFormat(format string) LocaleFormatOption {
 }
 
 // FormatNumber formats a number with the locale's separators.
+// Decimal rounding to 2 places prevents floating-point precision artifacts in output.
 func (lf *LocaleFormat) FormatNumber(n float64) string {
 	negative := n < 0
 	if negative {
