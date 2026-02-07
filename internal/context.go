@@ -18,6 +18,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/hostrouter"
 	"github.com/dmitrymomot/forge/pkg/htmx"
+	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 	"github.com/dmitrymomot/forge/pkg/session"
@@ -36,6 +37,12 @@ type RolePermissions = map[string][]Permission
 
 // RoleExtractorFunc extracts the current user's role from the request context.
 type RoleExtractorFunc = func(Context) string
+
+// TranslatorKey is the context key used to store the i18n Translator.
+type TranslatorKey struct{}
+
+// LanguageKey is the context key used to store the resolved language string.
+type LanguageKey struct{}
 
 // Component is the interface for renderable templates.
 // This is compatible with templ.Component.
@@ -279,6 +286,42 @@ type Context interface {
 	// FileURL generates a URL for accessing the file.
 	// Returns storage.ErrNotConfigured if WithStorage was not called.
 	FileURL(key string, opts ...storage.URLOption) (string, error)
+
+	// T translates a key using the Translator stored in context by the I18n middleware.
+	// Returns the key itself if no translator is in context.
+	T(key string, placeholders ...i18n.M) string
+
+	// Tn translates a key with pluralization using the Translator stored in context.
+	// Returns the key itself if no translator is in context.
+	Tn(key string, n int, placeholders ...i18n.M) string
+
+	// Language returns the resolved language from the I18n middleware.
+	// Returns an empty string if no translator is in context.
+	Language() string
+
+	// FormatNumber formats a number using locale-specific separators.
+	// Falls back to fmt.Sprintf if no translator is in context.
+	FormatNumber(n float64) string
+
+	// FormatCurrency formats a currency amount using locale-specific formatting.
+	// Falls back to fmt.Sprintf if no translator is in context.
+	FormatCurrency(amount float64) string
+
+	// FormatPercent formats a percentage using locale-specific formatting.
+	// Falls back to fmt.Sprintf if no translator is in context.
+	FormatPercent(n float64) string
+
+	// FormatDate formats a date using locale-specific formatting.
+	// Falls back to time.Format if no translator is in context.
+	FormatDate(date time.Time) string
+
+	// FormatTime formats a time value using locale-specific formatting.
+	// Falls back to time.Format if no translator is in context.
+	FormatTime(t time.Time) string
+
+	// FormatDateTime formats a datetime using locale-specific formatting.
+	// Falls back to time.Format if no translator is in context.
+	FormatDateTime(datetime time.Time) string
 }
 
 // requestContext implements the Context interface.
@@ -555,7 +598,11 @@ func (c *requestContext) bindAndValidate(bind func(*http.Request, any) error, v 
 	}
 	if err := validator.ValidateStruct(v); err != nil {
 		if validator.IsValidationError(err) {
-			return validator.ExtractValidationErrors(err), nil
+			ve := validator.ExtractValidationErrors(err)
+			if tr := c.translator(); tr != nil {
+				ve.Translate(tr.TranslateMessage)
+			}
+			return ve, nil
 		}
 		return nil, fmt.Errorf("validate: %w", err)
 	}
@@ -849,4 +896,74 @@ func (c *requestContext) FileURL(key string, opts ...storage.URLOption) (string,
 		return "", storage.ErrNotConfigured
 	}
 	return c.storage.URL(c.Context(), key, opts...)
+}
+
+func (c *requestContext) translator() *i18n.Translator {
+	if tr, ok := c.Get(TranslatorKey{}).(*i18n.Translator); ok {
+		return tr
+	}
+	return nil
+}
+
+func (c *requestContext) T(key string, placeholders ...i18n.M) string {
+	if tr := c.translator(); tr != nil {
+		return tr.T(key, placeholders...)
+	}
+	return key
+}
+
+func (c *requestContext) Tn(key string, n int, placeholders ...i18n.M) string {
+	if tr := c.translator(); tr != nil {
+		return tr.Tn(key, n, placeholders...)
+	}
+	return key
+}
+
+func (c *requestContext) Language() string {
+	if tr := c.translator(); tr != nil {
+		return tr.Language()
+	}
+	return ""
+}
+
+func (c *requestContext) FormatNumber(n float64) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatNumber(n)
+	}
+	return fmt.Sprintf("%g", n)
+}
+
+func (c *requestContext) FormatCurrency(amount float64) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatCurrency(amount)
+	}
+	return fmt.Sprintf("%.2f", amount)
+}
+
+func (c *requestContext) FormatPercent(n float64) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatPercent(n)
+	}
+	return fmt.Sprintf("%.0f%%", n*100)
+}
+
+func (c *requestContext) FormatDate(date time.Time) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatDate(date)
+	}
+	return date.Format("2006-01-02")
+}
+
+func (c *requestContext) FormatTime(t time.Time) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatTime(t)
+	}
+	return t.Format("15:04:05")
+}
+
+func (c *requestContext) FormatDateTime(datetime time.Time) string {
+	if tr := c.translator(); tr != nil {
+		return tr.FormatDateTime(datetime)
+	}
+	return datetime.Format("2006-01-02 15:04:05")
 }

@@ -5,9 +5,6 @@ import (
 	"github.com/dmitrymomot/forge/pkg/i18n"
 )
 
-type translatorKey struct{}
-type languageKey struct{}
-
 // I18nConfig configures the I18n middleware.
 type I18nConfig struct {
 	FormatMap     map[string]*i18n.LocaleFormat
@@ -98,8 +95,8 @@ func I18n(svc *i18n.I18n, opts ...I18nOption) internal.Middleware {
 
 			tr := i18n.NewTranslator(svc, lang, cfg.Namespace, format)
 
-			c.Set(translatorKey{}, tr)
-			c.Set(languageKey{}, lang)
+			c.Set(internal.TranslatorKey{}, tr)
+			c.Set(internal.LanguageKey{}, lang)
 
 			return next(c)
 		}
@@ -109,7 +106,7 @@ func I18n(svc *i18n.I18n, opts ...I18nOption) internal.Middleware {
 // GetTranslator extracts the Translator from the context.
 // Returns nil if the I18n middleware is not used.
 func GetTranslator(c internal.Context) *i18n.Translator {
-	if v, ok := c.Get(translatorKey{}).(*i18n.Translator); ok {
+	if v, ok := c.Get(internal.TranslatorKey{}).(*i18n.Translator); ok {
 		return v
 	}
 	return nil
@@ -118,7 +115,7 @@ func GetTranslator(c internal.Context) *i18n.Translator {
 // GetLanguage extracts the resolved language from the context.
 // Returns an empty string if the I18n middleware is not used.
 func GetLanguage(c internal.Context) string {
-	if v, ok := c.Get(languageKey{}).(string); ok {
+	if v, ok := c.Get(internal.LanguageKey{}).(string); ok {
 		return v
 	}
 	return ""

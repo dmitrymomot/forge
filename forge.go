@@ -132,6 +132,12 @@ type (
 	// RoleExtractorFunc extracts the current user's role from the request context.
 	RoleExtractorFunc = internal.RoleExtractorFunc
 
+	// TranslatorKey is the context key used to store the i18n Translator.
+	TranslatorKey = internal.TranslatorKey
+
+	// LanguageKey is the context key used to store the resolved language string.
+	LanguageKey = internal.LanguageKey
+
 	// Extractor tries multiple sources in order and returns the first match.
 	// Use with FromHeader, FromQuery, FromCookie, etc. to compose extraction chains.
 	Extractor = internal.Extractor
