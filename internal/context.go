@@ -739,7 +739,7 @@ func (c *requestContext) Session() (*session.Session, error) {
 	}
 
 	// Load from store
-	sess, err := c.sessionManager.LoadSession(c.Context(), c.request)
+	sess, err := c.sessionManager.LoadSession(c.request)
 	if err != nil {
 		return nil, err
 	}
