@@ -10,8 +10,8 @@ import (
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
 
-// MockTranslator simulates a translation function
-func MockTranslator(key string, values map[string]any) string {
+// mockTranslator simulates a translation function for use with Translate.
+func mockTranslator(key string, values map[string]any) string {
 	translations := map[string]string{
 		"validation.required":     "The {{field}} field is required.",
 		"validation.min_length":   "The {{field}} must be at least {{min}} characters long.",
@@ -24,65 +24,22 @@ func MockTranslator(key string, values map[string]any) string {
 		"validation.exact_items":  "The {{field}} must contain exactly {{count}} items.",
 	}
 
-	template := translations[key]
-	if template == "" {
+	tmpl := translations[key]
+	if tmpl == "" {
 		return key
 	}
 
-	result := template
+	result := tmpl
 	for placeholder, value := range values {
 		token := "{{" + placeholder + "}}"
-		if str, ok := value.(string); ok {
-			result = replaceAll(result, token, str)
-		} else {
-			result = replaceAll(result, token, toString(value))
-		}
+		result = strings.ReplaceAll(result, token, formatValue(value))
 	}
 	return result
 }
 
-func replaceAll(s, old, new string) string {
-	return strings.ReplaceAll(s, old, new)
-}
-
-func toString(v any) string {
-	switch val := v.(type) {
-	case int:
-		return intToString(val)
-	case string:
-		return val
-	default:
-		return "unknown"
-	}
-}
-
-func intToString(i int) string {
-	if i == 0 {
-		return "0"
-	}
-
-	negative := i < 0
-	if negative {
-		i = -i
-	}
-
-	digits := ""
-	for i > 0 {
-		digit := i % 10
-		digits = string(rune('0'+digit)) + digits
-		i /= 10
-	}
-
-	if negative {
-		digits = "-" + digits
-	}
-
-	return digits
-}
-
 func TestTranslationWorkflow(t *testing.T) {
 	t.Parallel()
-	t.Run("demonstrates basic translation workflow", func(t *testing.T) {
+	t.Run("basic translation workflow with Translate", func(t *testing.T) {
 		type LoginForm struct {
 			Email    string
 			Password string
@@ -102,24 +59,20 @@ func TestTranslationWorkflow(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, validator.IsValidationError(err))
 
-		validationErr := validator.ExtractValidationErrors(err)
-		translatableErrors := validationErr.GetTranslatableErrors()
+		ve := validator.ExtractValidationErrors(err)
+		ve.Translate(mockTranslator)
 
-		translatedMessages := make(map[string][]string)
-		for _, errInfo := range translatableErrors {
-			translatedMsg := MockTranslator(errInfo.TranslationKey, errInfo.TranslationValues)
-			translatedMessages[errInfo.Field] = append(translatedMessages[errInfo.Field], translatedMsg)
-		}
+		emailMsgs := ve.Get("email")
+		require.Len(t, emailMsgs, 1)
+		assert.Equal(t, "The email field is required.", emailMsgs[0])
 
-		expectedTranslations := map[string][]string{
-			"email":    {"The email field is required."},
-			"password": {"The password must be at least 8 characters long."},
-		}
-
-		assert.Equal(t, expectedTranslations, translatedMessages)
+		pwdMsgs := ve.Get("password")
+		require.Len(t, pwdMsgs, 1)
+		assert.Equal(t, "The password must be at least 8 characters long.", pwdMsgs[0])
 	})
 
-	t.Run("demonstrates complex validation with multiple translation values", func(t *testing.T) {
+	t.Run("complex validation with multiple translation values", func(t *testing.T) {
+		t.Parallel()
 		username := "ab"
 		tags := []string{"tag1", "tag2", "tag3", "tag4", "tag5", "tag6"}
 		age := 15
@@ -132,26 +85,24 @@ func TestTranslationWorkflow(t *testing.T) {
 		)
 
 		require.Error(t, err)
-		validationErr := validator.ExtractValidationErrors(err)
+		ve := validator.ExtractValidationErrors(err)
+		ve.Translate(mockTranslator)
 
-		translatedErrors := make(map[string]string)
-		for _, errInfo := range validationErr.GetTranslatableErrors() {
-			translatedMsg := MockTranslator(errInfo.TranslationKey, errInfo.TranslationValues)
-			translatedErrors[errInfo.Field+"_"+errInfo.TranslationKey] = translatedMsg
-		}
+		usernameMsgs := ve.Get("username")
+		require.Len(t, usernameMsgs, 1)
+		assert.Equal(t, "The username must be at least 3 characters long.", usernameMsgs[0])
 
-		expectedTranslations := map[string]string{
-			"username_validation.min_length": "The username must be at least 3 characters long.",
-			"tags_validation.max_items":      "The tags must not contain more than 5 items.",
-			"age_validation.min":             "The age must be at least 18.",
-		}
+		tagsMsgs := ve.Get("tags")
+		require.Len(t, tagsMsgs, 1)
+		assert.Equal(t, "The tags must not contain more than 5 items.", tagsMsgs[0])
 
-		for key, expected := range expectedTranslations {
-			assert.Equal(t, expected, translatedErrors[key])
-		}
+		ageMsgs := ve.Get("age")
+		require.Len(t, ageMsgs, 1)
+		assert.Equal(t, "The age must be at least 18.", ageMsgs[0])
 	})
 
-	t.Run("demonstrates field-specific translation data extraction", func(t *testing.T) {
+	t.Run("field-specific translation data preserved after Translate", func(t *testing.T) {
+		t.Parallel()
 		email := ""
 		password := "weak"
 
@@ -162,21 +113,25 @@ func TestTranslationWorkflow(t *testing.T) {
 		)
 
 		require.Error(t, err)
-		validationErr := validator.ExtractValidationErrors(err)
+		ve := validator.ExtractValidationErrors(err)
+		ve.Translate(mockTranslator)
 
-		emailErrors := validationErr.GetErrors("email")
-		assert.Len(t, emailErrors, 1)
+		emailErrors := ve.GetErrors("email")
+		require.Len(t, emailErrors, 1)
 		assert.Equal(t, "validation.required", emailErrors[0].TranslationKey)
 		assert.Equal(t, "email", emailErrors[0].TranslationValues["field"])
+		assert.Equal(t, "The email field is required.", emailErrors[0].Message)
 
-		passwordErrors := validationErr.GetErrors("password")
-		assert.Len(t, passwordErrors, 1)
+		passwordErrors := ve.GetErrors("password")
+		require.Len(t, passwordErrors, 1)
 		assert.Equal(t, "validation.min_length", passwordErrors[0].TranslationKey)
 		assert.Equal(t, "password", passwordErrors[0].TranslationValues["field"])
 		assert.Equal(t, 8, passwordErrors[0].TranslationValues["min"])
+		assert.Equal(t, "The password must be at least 8 characters long.", passwordErrors[0].Message)
 	})
 
-	t.Run("demonstrates translation key consistency across rule types", func(t *testing.T) {
+	t.Run("translation key consistency across rule types", func(t *testing.T) {
+		t.Parallel()
 		stringField := ""
 		sliceField := []string{}
 		mapField := map[string]string{}
@@ -190,15 +145,13 @@ func TestTranslationWorkflow(t *testing.T) {
 		)
 
 		require.Error(t, err)
-		validationErr := validator.ExtractValidationErrors(err)
+		ve := validator.ExtractValidationErrors(err)
+		ve.Translate(mockTranslator)
 
-		allErrors := validationErr.GetTranslatableErrors()
-		for _, errInfo := range allErrors {
-			assert.Equal(t, "validation.required", errInfo.TranslationKey)
-			assert.Contains(t, errInfo.TranslationValues, "field")
-
-			translatedMsg := MockTranslator(errInfo.TranslationKey, errInfo.TranslationValues)
-			assert.Contains(t, translatedMsg, "field is required")
+		for _, e := range ve {
+			assert.Equal(t, "validation.required", e.TranslationKey)
+			assert.Contains(t, e.TranslationValues, "field")
+			assert.Contains(t, e.Message, "field is required")
 		}
 	})
 }
@@ -206,6 +159,7 @@ func TestTranslationWorkflow(t *testing.T) {
 func TestTranslationKeyStandards(t *testing.T) {
 	t.Parallel()
 	t.Run("validates standard translation keys", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			rule           validator.Rule
 			expectedKey    string
