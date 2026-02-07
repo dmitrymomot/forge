@@ -20,7 +20,7 @@ fmt: ## Format code and imports
 	go tool betteralign -apply -generated_files -exclude_dirs examples ./...
 
 test-up: ## Start test infrastructure (docker containers)
-	docker compose up -d --wait postgres mailpit rustfs
+	docker compose up -d --wait postgres mailpit rustfs redis
 	docker compose up rustfs-bucket-init
 
 test-down: ## Stop and remove test infrastructure
