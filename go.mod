@@ -19,11 +19,12 @@ require (
 	github.com/aws/smithy-go v1.24.0
 	github.com/getsentry/sentry-go v0.42.0
 	github.com/getsentry/sentry-go/slog v0.42.0
-	github.com/go-chi/chi/v5 v5.2.4
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/pressly/goose/v3 v3.26.0
+	github.com/redis/go-redis/v9 v9.17.3
 	github.com/resend/resend-go/v3 v3.1.0
 	github.com/riverqueue/river v0.30.2
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.30.2
@@ -84,6 +85,7 @@ require (
 	github.com/daixiang0/gci v0.13.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dkorunic/betteralign v0.8.3 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
