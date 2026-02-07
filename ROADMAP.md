@@ -39,7 +39,6 @@ This document outlines planned features for the Forge framework.
 - `db` — database connection, transactions, migrations
 - `dnsverify` — domain ownership verification via DNS TXT records
 - `fingerprint` — device fingerprinting for session security
-- `health` — health check endpoints
 - `hostrouter` — multi-domain routing
 - `htmx` — HTMX response helpers
 - `id` — ID generation (UUID, etc.)

@@ -12,7 +12,6 @@ import (
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
-	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
@@ -58,6 +57,9 @@ type (
 
 	// HealthOption configures health check endpoints.
 	HealthOption = internal.HealthOption
+
+	// CheckFunc is the standard health check function signature.
+	CheckFunc = internal.CheckFunc
 
 	// ContextExtractor extracts a slog attribute from context.
 	// Used with WithLogger to add request-scoped values to logs.
@@ -341,7 +343,7 @@ func WithReadinessPath(path string) HealthOption {
 
 // WithReadinessCheck adds a named readiness check.
 // Checks run in parallel during readiness probe.
-func WithReadinessCheck(name string, fn health.CheckFunc) HealthOption {
+func WithReadinessCheck(name string, fn CheckFunc) HealthOption {
 	return internal.WithReadinessCheck(name, fn)
 }
 
@@ -844,7 +846,7 @@ var (
 )
 
 // JobHealthcheck returns a health check function for the job manager.
-func JobHealthcheck(m *JobManager) health.CheckFunc {
+func JobHealthcheck(m *JobManager) CheckFunc {
 	return job.Healthcheck(m)
 }
 
