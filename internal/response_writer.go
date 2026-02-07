@@ -17,6 +17,7 @@ type ResponseWriter struct {
 	size        int64
 	mu          sync.Mutex
 	written     bool
+	sealed      bool
 	isHTMX      bool
 }
 
@@ -37,11 +38,21 @@ func (w *ResponseWriter) OnBeforeWrite(fn func()) {
 	w.beforeWrite = append(w.beforeWrite, fn)
 }
 
+// Seal prevents any further writes to the response.
+// After sealing, both Write and WriteHeader become silent no-ops.
+// Used by the timeout middleware to prevent the handler goroutine from
+// corrupting the response after timeout has fired.
+func (w *ResponseWriter) Seal() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sealed = true
+}
+
 // WriteHeader sends an HTTP response header with the provided status code.
 // For HTMX requests, non-200 status codes are transformed to 200.
 func (w *ResponseWriter) WriteHeader(code int) {
 	w.mu.Lock()
-	if w.written {
+	if w.written || w.sealed {
 		w.mu.Unlock()
 		return
 	}
@@ -69,6 +80,10 @@ func (w *ResponseWriter) WriteHeader(code int) {
 
 func (w *ResponseWriter) Write(b []byte) (int, error) {
 	w.mu.Lock()
+	if w.sealed {
+		w.mu.Unlock()
+		return 0, nil
+	}
 	if !w.written {
 		w.written = true
 		hooks := w.beforeWrite
@@ -84,6 +99,15 @@ func (w *ResponseWriter) Write(b []byte) (int, error) {
 	} else {
 		w.mu.Unlock()
 	}
+
+	// Re-check sealed before writing to the underlying writer, since the lock
+	// was released above and Seal() may have been called in the meantime.
+	w.mu.Lock()
+	if w.sealed {
+		w.mu.Unlock()
+		return 0, nil
+	}
+	w.mu.Unlock()
 
 	n, err := w.ResponseWriter.Write(b)
 	w.mu.Lock()

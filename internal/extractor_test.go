@@ -34,7 +34,7 @@ func requestViaParam(t *testing.T, req *http.Request, opts []internal.Option, fn
 
 	h := &paramCaptureHandler{fn: fn}
 	opts = append(opts, internal.WithHandlers(h))
-	app := internal.New(opts...)
+	app := internal.New(internal.AppConfig{}, opts...)
 
 	w := httptest.NewRecorder()
 	app.Router().ServeHTTP(w, req)
@@ -251,7 +251,7 @@ func TestFromCookieSigned(t *testing.T) {
 		src := internal.FromCookieSigned("sid")
 
 		opts := []internal.Option{
-			internal.WithCookieOptions(cookie.WithSecret(secret)),
+			internal.WithCookieConfig(cookie.Config{Secret: secret}),
 		}
 
 		// First request: set a signed cookie
@@ -284,7 +284,7 @@ func TestFromCookieSigned(t *testing.T) {
 		src := internal.FromCookieSigned("sid")
 
 		opts := []internal.Option{
-			internal.WithCookieOptions(cookie.WithSecret(secret)),
+			internal.WithCookieConfig(cookie.Config{Secret: secret}),
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -309,7 +309,7 @@ func TestFromCookieEncrypted(t *testing.T) {
 		src := internal.FromCookieEncrypted("enc")
 
 		opts := []internal.Option{
-			internal.WithCookieOptions(cookie.WithSecret(secret)),
+			internal.WithCookieConfig(cookie.Config{Secret: secret}),
 		}
 
 		// First request: set an encrypted cookie
@@ -341,7 +341,7 @@ func TestFromCookieEncrypted(t *testing.T) {
 		src := internal.FromCookieEncrypted("enc")
 
 		opts := []internal.Option{
-			internal.WithCookieOptions(cookie.WithSecret(secret)),
+			internal.WithCookieConfig(cookie.Config{Secret: secret}),
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -418,7 +418,7 @@ func TestFromForm(t *testing.T) {
 		// Use POST handler for form tests
 		h := &postCaptureHandler{}
 		opts := []internal.Option{internal.WithHandlers(h)}
-		app := internal.New(opts...)
+		app := internal.New(internal.AppConfig{}, opts...)
 
 		var gotVal string
 		var gotOk bool
@@ -444,7 +444,7 @@ func TestFromForm(t *testing.T) {
 
 		h := &postCaptureHandler{}
 		opts := []internal.Option{internal.WithHandlers(h)}
-		app := internal.New(opts...)
+		app := internal.New(internal.AppConfig{}, opts...)
 
 		var gotVal string
 		var gotOk bool
@@ -495,7 +495,7 @@ func TestFromSession(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 
 		requestVia(t, req, opts, func(c internal.Context) {
@@ -523,7 +523,7 @@ func TestFromSession(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-2"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 
 		requestVia(t, req, opts, func(c internal.Context) {
@@ -550,7 +550,7 @@ func TestFromSession(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-3"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 
 		requestVia(t, req, opts, func(c internal.Context) {

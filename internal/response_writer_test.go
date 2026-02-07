@@ -57,6 +57,57 @@ func TestResponseWriterSizeTracking(t *testing.T) {
 	})
 }
 
+func TestResponseWriterSeal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Write becomes no-op after Seal", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		rw := internal.NewResponseWriter(rec, false)
+
+		n, err := rw.Write([]byte("before"))
+		require.NoError(t, err)
+		require.Equal(t, 6, n)
+
+		rw.Seal()
+
+		n, err = rw.Write([]byte("after"))
+		require.NoError(t, err)
+		require.Equal(t, 0, n)
+		require.Equal(t, int64(6), rw.Size())
+		require.Equal(t, "before", rec.Body.String())
+	})
+
+	t.Run("WriteHeader becomes no-op after Seal", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		rw := internal.NewResponseWriter(rec, false)
+
+		rw.Seal()
+		rw.WriteHeader(http.StatusNotFound)
+
+		require.False(t, rw.Written())
+		require.Equal(t, http.StatusOK, rw.Status())
+	})
+
+	t.Run("Seal before any write prevents all output", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		rw := internal.NewResponseWriter(rec, false)
+
+		rw.Seal()
+
+		n, err := rw.Write([]byte("blocked"))
+		require.NoError(t, err)
+		require.Equal(t, 0, n)
+		require.Equal(t, int64(0), rw.Size())
+		require.Empty(t, rec.Body.String())
+	})
+}
+
 func TestResponseWriterConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
