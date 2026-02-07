@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// RunConfig holds externally configurable runtime settings.
+type RunConfig struct {
+	Address         string        `env:"ADDRESS"          envDefault:":8080"`
+	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"30s"`
+}
+
 // RunOption configures the server runtime.
 type RunOption func(*runConfig)
 
@@ -21,31 +27,29 @@ type runConfig struct {
 	shutdownTimeout time.Duration
 }
 
-// buildRunConfig creates a runConfig from the provided options.
-func buildRunConfig(opts ...RunOption) *runConfig {
-	cfg := &runConfig{
+// buildRunConfig creates a runConfig from the provided RunConfig and options.
+func buildRunConfig(cfg RunConfig, opts ...RunOption) *runConfig {
+	if cfg.Address == "" {
+		cfg.Address = ":8080"
+	}
+	if cfg.ShutdownTimeout == 0 {
+		cfg.ShutdownTimeout = defaultShutdownTimeout
+	}
+
+	rc := &runConfig{
 		domains:         make(map[string]*App),
-		shutdownTimeout: defaultShutdownTimeout,
+		address:         cfg.Address,
+		shutdownTimeout: cfg.ShutdownTimeout,
 	}
 	for _, opt := range opts {
-		opt(cfg)
+		opt(rc)
 	}
-	return cfg
+	return rc
 }
 
-// Address sets the HTTP server address.
-// Defaults to ":8080".
-func Address(addr string) RunOption {
-	return func(c *runConfig) {
-		if addr != "" {
-			c.address = addr
-		}
-	}
-}
-
-// Logger sets the application logger.
+// WithRunLogger sets the application logger for the runtime.
 // If nil, logging is disabled.
-func Logger(l *slog.Logger) RunOption {
+func WithRunLogger(l *slog.Logger) RunOption {
 	return func(c *runConfig) {
 		if l != nil {
 			c.logger = l
@@ -53,26 +57,11 @@ func Logger(l *slog.Logger) RunOption {
 	}
 }
 
-// ShutdownTimeout sets the timeout for graceful shutdown.
-// This applies to both the HTTP server and shutdown hooks.
-// Defaults to 30 seconds.
-func ShutdownTimeout(d time.Duration) RunOption {
-	return func(c *runConfig) {
-		if d > 0 {
-			c.shutdownTimeout = d
-		}
-	}
-}
-
-// StartupHook registers a function to run during server startup.
+// WithStartupHook registers a function to run during server startup.
 // Hooks are called in the order they were registered, after the port is bound
 // but before serving requests. If any hook fails, the server stops and
 // returns the error.
-//
-// Example:
-//
-//	forge.StartupHook(worker.Start)
-func StartupHook(fn func(context.Context) error) RunOption {
+func WithStartupHook(fn func(context.Context) error) RunOption {
 	return func(c *runConfig) {
 		if fn != nil {
 			c.startupHooks = append(c.startupHooks, fn)
@@ -80,14 +69,10 @@ func StartupHook(fn func(context.Context) error) RunOption {
 	}
 }
 
-// ShutdownHook registers a cleanup function to run during shutdown.
+// WithShutdownHook registers a cleanup function to run during shutdown.
 // Hooks are called in the order they were registered.
 // Each hook receives a context with the shutdown timeout.
-//
-// Example:
-//
-//	forge.ShutdownHook(db.Shutdown(pool))
-func ShutdownHook(fn func(context.Context) error) RunOption {
+func WithShutdownHook(fn func(context.Context) error) RunOption {
 	return func(c *runConfig) {
 		if fn != nil {
 			c.shutdownHooks = append(c.shutdownHooks, fn)
@@ -95,16 +80,9 @@ func ShutdownHook(fn func(context.Context) error) RunOption {
 	}
 }
 
-// Domain maps a host pattern to an App.
+// WithDomain maps a host pattern to an App.
 // Patterns: "api.example.com" (exact) or "*.example.com" (wildcard)
-//
-// Example:
-//
-//	forge.Run(
-//	    forge.Domain("api.acme.com", apiApp),
-//	    forge.Domain("*.acme.com", tenantApp),
-//	)
-func Domain(pattern string, app *App) RunOption {
+func WithDomain(pattern string, app *App) RunOption {
 	return func(c *runConfig) {
 		if pattern != "" && app != nil {
 			c.domains[pattern] = app
@@ -112,16 +90,9 @@ func Domain(pattern string, app *App) RunOption {
 	}
 }
 
-// Fallback sets the default App for requests that don't match any domain.
+// WithFallback sets the default App for requests that don't match any domain.
 // If no domains are configured, the fallback becomes the main handler.
-//
-// Example:
-//
-//	forge.Run(
-//	    forge.Domain("api.acme.com", apiApp),
-//	    forge.Fallback(landingApp),
-//	)
-func Fallback(app *App) RunOption {
+func WithFallback(app *App) RunOption {
 	return func(c *runConfig) {
 		if app != nil {
 			c.fallback = app
