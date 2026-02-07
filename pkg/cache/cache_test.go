@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/cache"
@@ -21,7 +23,7 @@ func TestMemory_Get(t *testing.T) {
 	t.Run("returns ErrNotFound for missing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		_, err := c.Get(context.Background(), "missing")
@@ -31,7 +33,7 @@ func TestMemory_Get(t *testing.T) {
 	t.Run("returns stored value", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int]()
+		c := cache.NewMemory[int](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -45,7 +47,7 @@ func TestMemory_Get(t *testing.T) {
 	t.Run("returns ErrNotFound for expired key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](cache.WithCleanupInterval(0))
+		c := cache.NewMemory[string](cache.MemoryConfig{CleanupInterval: -1})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -60,7 +62,7 @@ func TestMemory_Get(t *testing.T) {
 	t.Run("marks entry as recently used", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](cache.WithMaxEntries(2))
+		c := cache.NewMemory[string](cache.MemoryConfig{MaxEntries: 2})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -92,7 +94,7 @@ func TestMemory_Set(t *testing.T) {
 	t.Run("stores and retrieves value", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -106,7 +108,7 @@ func TestMemory_Set(t *testing.T) {
 	t.Run("zero TTL uses default", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](cache.WithDefaultTTL(50*time.Millisecond), cache.WithCleanupInterval(0))
+		c := cache.NewMemory[string](cache.MemoryConfig{DefaultTTL: 50 * time.Millisecond, CleanupInterval: -1})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -125,7 +127,7 @@ func TestMemory_Set(t *testing.T) {
 	t.Run("negative TTL never expires", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](cache.WithDefaultTTL(10*time.Millisecond), cache.WithCleanupInterval(0))
+		c := cache.NewMemory[string](cache.MemoryConfig{DefaultTTL: 10 * time.Millisecond, CleanupInterval: -1})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -141,7 +143,7 @@ func TestMemory_Set(t *testing.T) {
 	t.Run("overwrites existing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int]()
+		c := cache.NewMemory[int](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -156,7 +158,7 @@ func TestMemory_Set(t *testing.T) {
 	t.Run("returns ErrClosed after Close", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		require.NoError(t, c.Close())
 
 		err := c.Set(context.Background(), "key", "value", time.Minute)
@@ -172,7 +174,7 @@ func TestMemory_Delete(t *testing.T) {
 	t.Run("removes existing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -186,7 +188,7 @@ func TestMemory_Delete(t *testing.T) {
 	t.Run("no error for missing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		err := c.Delete(context.Background(), "missing")
@@ -196,7 +198,7 @@ func TestMemory_Delete(t *testing.T) {
 	t.Run("returns ErrClosed after Close", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		require.NoError(t, c.Close())
 
 		err := c.Delete(context.Background(), "key")
@@ -212,7 +214,7 @@ func TestMemory_Has(t *testing.T) {
 	t.Run("returns true for existing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -226,7 +228,7 @@ func TestMemory_Has(t *testing.T) {
 	t.Run("returns false for missing key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		has, err := c.Has(context.Background(), "missing")
@@ -237,7 +239,7 @@ func TestMemory_Has(t *testing.T) {
 	t.Run("returns false for expired key", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](cache.WithCleanupInterval(0))
+		c := cache.NewMemory[string](cache.MemoryConfig{CleanupInterval: -1})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -259,7 +261,7 @@ func TestMemory_Clear(t *testing.T) {
 	t.Run("removes all entries", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -280,7 +282,7 @@ func TestMemory_Clear(t *testing.T) {
 	t.Run("returns ErrClosed after Close", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		require.NoError(t, c.Close())
 
 		err := c.Clear(context.Background())
@@ -296,7 +298,7 @@ func TestMemory_Close(t *testing.T) {
 	t.Run("idempotent close", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		require.NoError(t, c.Close())
 		require.NoError(t, c.Close())
 	})
@@ -310,7 +312,7 @@ func TestMemory_MaxEntries(t *testing.T) {
 	t.Run("evicts LRU when at capacity", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(3))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 3})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -332,7 +334,7 @@ func TestMemory_MaxEntries(t *testing.T) {
 	t.Run("no eviction when under capacity", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(5))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 5})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -351,7 +353,7 @@ func TestMemory_MaxEntries(t *testing.T) {
 	t.Run("overwrite does not count as new entry", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(2))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 2})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -373,7 +375,7 @@ func TestMemory_MaxEntries(t *testing.T) {
 	t.Run("put updates recency for LRU", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(3))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 3})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -398,7 +400,7 @@ func TestMemory_MaxEntries(t *testing.T) {
 	t.Run("capacity of 1", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(1))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 1})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -422,7 +424,7 @@ func TestMemory_EvictCallback(t *testing.T) {
 	t.Run("called on LRU eviction", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(2))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 2})
 		defer c.Close()
 
 		var mu sync.Mutex
@@ -446,7 +448,7 @@ func TestMemory_EvictCallback(t *testing.T) {
 	t.Run("called on Delete", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		var evictedKey string
@@ -464,7 +466,7 @@ func TestMemory_EvictCallback(t *testing.T) {
 	t.Run("called on Clear", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int]()
+		c := cache.NewMemory[int](cache.MemoryConfig{})
 		defer c.Close()
 
 		var mu sync.Mutex
@@ -495,9 +497,9 @@ func TestMemory_Janitor(t *testing.T) {
 	t.Run("removes expired entries periodically", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](
-			cache.WithCleanupInterval(10 * time.Millisecond),
-		)
+		c := cache.NewMemory[string](cache.MemoryConfig{
+			CleanupInterval: 10 * time.Millisecond,
+		})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -523,7 +525,7 @@ func TestMemory_ConcurrentAccess(t *testing.T) {
 	t.Run("concurrent reads and writes", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int](cache.WithMaxEntries(100))
+		c := cache.NewMemory[int](cache.MemoryConfig{MaxEntries: 100})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -562,7 +564,7 @@ func TestGetOrSet(t *testing.T) {
 	t.Run("returns cached value on hit", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -579,7 +581,7 @@ func TestGetOrSet(t *testing.T) {
 	t.Run("calls fn on miss and caches result", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -598,7 +600,7 @@ func TestGetOrSet(t *testing.T) {
 	t.Run("returns error from fn", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -617,7 +619,7 @@ func TestGetOrSet(t *testing.T) {
 	t.Run("deduplicates concurrent calls", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[int]()
+		c := cache.NewMemory[int](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -661,7 +663,7 @@ func TestJsonMarshaler(t *testing.T) {
 
 		// Use Redis cache constructor to exercise the default JSON marshaler indirectly.
 		// Instead, test via round-trip through memory cache with a struct value.
-		c := cache.NewMemory[user]()
+		c := cache.NewMemory[user](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -679,13 +681,13 @@ func TestJsonMarshaler(t *testing.T) {
 func TestMemoryOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("WithDefaultTTL sets default TTL", func(t *testing.T) {
+	t.Run("DefaultTTL config sets default TTL", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string](
-			cache.WithDefaultTTL(20*time.Millisecond),
-			cache.WithCleanupInterval(0),
-		)
+		c := cache.NewMemory[string](cache.MemoryConfig{
+			DefaultTTL:      20 * time.Millisecond,
+			CleanupInterval: -1,
+		})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -700,7 +702,7 @@ func TestMemoryOptions(t *testing.T) {
 	t.Run("default options are sensible", func(t *testing.T) {
 		t.Parallel()
 
-		c := cache.NewMemory[string]()
+		c := cache.NewMemory[string](cache.MemoryConfig{})
 		defer c.Close()
 
 		ctx := context.Background()
@@ -709,5 +711,337 @@ func TestMemoryOptions(t *testing.T) {
 		val, err := c.Get(ctx, "key")
 		require.NoError(t, err)
 		require.Equal(t, "value", val)
+	})
+}
+
+// --- Redis test helpers ---
+
+func newTestRedis(t *testing.T) (goredis.UniversalClient, *miniredis.Miniredis) {
+	t.Helper()
+	s := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: s.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	return client, s
+}
+
+// --- Redis: Get ---
+
+func TestRedis_Get(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrNotFound for missing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-get-miss"})
+
+		_, err := c.Get(context.Background(), "missing")
+		require.ErrorIs(t, err, cache.ErrNotFound)
+	})
+
+	t.Run("returns stored value", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[int](client, nil, cache.RedisConfig{Prefix: "test-get-hit"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", 42, time.Minute))
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, 42, val)
+	})
+
+	t.Run("returns ErrNotFound for expired key", func(t *testing.T) {
+		t.Parallel()
+
+		client, s := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-get-expired"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", 50*time.Millisecond))
+
+		s.FastForward(100 * time.Millisecond)
+
+		_, err := c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrNotFound)
+	})
+}
+
+// --- Redis: Set ---
+
+func TestRedis_Set(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stores and retrieves value", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-set"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "value", val)
+	})
+
+	t.Run("zero TTL uses default", func(t *testing.T) {
+		t.Parallel()
+
+		client, s := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{
+			Prefix:     "test-set-default-ttl",
+			DefaultTTL: 100 * time.Millisecond,
+		})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", 0))
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "value", val)
+
+		s.FastForward(200 * time.Millisecond)
+
+		_, err = c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrNotFound)
+	})
+
+	t.Run("negative TTL persists indefinitely", func(t *testing.T) {
+		t.Parallel()
+
+		client, s := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{
+			Prefix:     "test-set-no-expire",
+			DefaultTTL: 50 * time.Millisecond,
+		})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "forever", -1))
+
+		s.FastForward(100 * time.Millisecond)
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "forever", val)
+	})
+
+	t.Run("overwrites existing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[int](client, nil, cache.RedisConfig{Prefix: "test-set-overwrite"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", 1, time.Minute))
+		require.NoError(t, c.Set(ctx, "key", 2, time.Minute))
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, 2, val)
+	})
+
+	t.Run("stores struct values", func(t *testing.T) {
+		t.Parallel()
+
+		type user struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		}
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[user](client, nil, cache.RedisConfig{Prefix: "test-set-struct"})
+
+		ctx := context.Background()
+		u := user{Name: "Alice", Age: 30}
+		require.NoError(t, c.Set(ctx, "user", u, time.Minute))
+
+		val, err := c.Get(ctx, "user")
+		require.NoError(t, err)
+		require.Equal(t, u, val)
+	})
+}
+
+// --- Redis: Delete ---
+
+func TestRedis_Delete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes existing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-del"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+		require.NoError(t, c.Delete(ctx, "key"))
+
+		_, err := c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrNotFound)
+	})
+
+	t.Run("no error for missing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-del-miss"})
+
+		err := c.Delete(context.Background(), "missing")
+		require.NoError(t, err)
+	})
+}
+
+// --- Redis: Has ---
+
+func TestRedis_Has(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns true for existing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-has"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+
+		has, err := c.Has(ctx, "key")
+		require.NoError(t, err)
+		require.True(t, has)
+	})
+
+	t.Run("returns false for missing key", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-has-miss"})
+
+		has, err := c.Has(context.Background(), "missing")
+		require.NoError(t, err)
+		require.False(t, has)
+	})
+}
+
+// --- Redis: Clear ---
+
+func TestRedis_Clear(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears only prefixed keys with prefix", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c1 := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-clear-ns1"})
+		c2 := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-clear-ns2"})
+
+		ctx := context.Background()
+		require.NoError(t, c1.Set(ctx, "a", "1", time.Minute))
+		require.NoError(t, c1.Set(ctx, "b", "2", time.Minute))
+		require.NoError(t, c2.Set(ctx, "c", "3", time.Minute))
+
+		// Clear ns1 only.
+		require.NoError(t, c1.Clear(ctx))
+
+		has, err := c1.Has(ctx, "a")
+		require.NoError(t, err)
+		require.False(t, has, "ns1:a should be cleared")
+
+		has, err = c1.Has(ctx, "b")
+		require.NoError(t, err)
+		require.False(t, has, "ns1:b should be cleared")
+
+		// ns2 should be unaffected.
+		has, err = c2.Has(ctx, "c")
+		require.NoError(t, err)
+		require.True(t, has, "ns2:c should still exist")
+	})
+}
+
+// --- Redis: Prefix ---
+
+func TestRedis_Prefix(t *testing.T) {
+	t.Parallel()
+
+	t.Run("different prefixes are isolated", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c1 := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-prefix-iso1"})
+		c2 := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-prefix-iso2"})
+
+		ctx := context.Background()
+		require.NoError(t, c1.Set(ctx, "key", "from-c1", time.Minute))
+		require.NoError(t, c2.Set(ctx, "key", "from-c2", time.Minute))
+
+		v1, err := c1.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "from-c1", v1)
+
+		v2, err := c2.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "from-c2", v2)
+	})
+}
+
+// --- Redis: Close ---
+
+func TestRedis_Close(t *testing.T) {
+	t.Parallel()
+
+	t.Run("close is no-op", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{})
+
+		require.NoError(t, c.Close())
+		require.NoError(t, c.Close())
+	})
+}
+
+// --- Redis: Custom Marshaler ---
+
+type reversedMarshaler struct{}
+
+func (reversedMarshaler) Marshal(v string) ([]byte, error) {
+	runes := []rune(v)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return []byte(string(runes)), nil
+}
+
+func (reversedMarshaler) Unmarshal(data []byte) (string, error) {
+	runes := []rune(string(data))
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes), nil
+}
+
+func TestRedis_CustomMarshaler(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uses custom marshaler for serialization", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, reversedMarshaler{}, cache.RedisConfig{Prefix: "test-custom-marshal"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "hello", time.Minute))
+
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "hello", val) // Round-trip should restore original.
+
+		// Verify the raw value in Redis is reversed.
+		raw, err := client.Get(ctx, "test-custom-marshal:key").Result()
+		require.NoError(t, err)
+		require.Equal(t, "olleh", raw)
 	})
 }

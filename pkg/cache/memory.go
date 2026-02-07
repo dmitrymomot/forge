@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// MemoryConfig configures the in-memory cache.
+type MemoryConfig struct {
+	DefaultTTL      time.Duration `env:"DEFAULT_TTL"      envDefault:"5m"`
+	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" envDefault:"1m"`
+	MaxEntries      int           `env:"MAX_ENTRIES"       envDefault:"0"`
+}
+
 // entry holds a cached value with its expiration time and key.
 type entry[V any] struct {
 	expiresAt time.Time // zero value = never expires
@@ -31,9 +38,9 @@ func (e *entry[V]) isExpired() bool {
 type Memory[V any] struct {
 	items    map[string]*list.Element
 	eviction *list.List
-	opts     *memoryOptions
 	onEvict  func(key string, value V)
 	done     chan struct{}
+	cfg      MemoryConfig
 	mu       sync.Mutex
 	closed   bool
 }
@@ -42,26 +49,28 @@ type Memory[V any] struct {
 //
 // Example:
 //
-//	c := cache.NewMemory[string](
-//	    cache.WithDefaultTTL(5 * time.Minute),
-//	    cache.WithCleanupInterval(30 * time.Second),
-//	    cache.WithMaxEntries(10000),
-//	)
+//	c := cache.NewMemory[string](cache.MemoryConfig{
+//	    DefaultTTL:      5 * time.Minute,
+//	    CleanupInterval: 30 * time.Second,
+//	    MaxEntries:      10000,
+//	})
 //	defer c.Close()
-func NewMemory[V any](opts ...MemoryOption) *Memory[V] {
-	o := defaultMemoryOptions()
-	for _, opt := range opts {
-		opt(o)
+func NewMemory[V any](cfg MemoryConfig) *Memory[V] {
+	if cfg.DefaultTTL == 0 {
+		cfg.DefaultTTL = 5 * time.Minute
+	}
+	if cfg.CleanupInterval == 0 {
+		cfg.CleanupInterval = time.Minute
 	}
 
 	m := &Memory[V]{
 		items:    make(map[string]*list.Element),
 		eviction: list.New(),
-		opts:     o,
+		cfg:      cfg,
 		done:     make(chan struct{}),
 	}
 
-	if o.cleanupInterval > 0 {
+	if cfg.CleanupInterval > 0 {
 		go m.janitor()
 	}
 
@@ -117,7 +126,7 @@ func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duratio
 
 	// Resolve TTL.
 	if ttl == 0 {
-		ttl = m.opts.defaultTTL
+		ttl = m.cfg.DefaultTTL
 	}
 
 	var expiresAt time.Time
@@ -136,7 +145,7 @@ func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duratio
 	}
 
 	// Evict LRU entry if at capacity.
-	if m.opts.maxEntries > 0 && len(m.items) >= m.opts.maxEntries {
+	if m.cfg.MaxEntries > 0 && len(m.items) >= m.cfg.MaxEntries {
 		m.evictOldest()
 	}
 
@@ -223,7 +232,7 @@ func (m *Memory[V]) Close() error {
 
 // janitor periodically removes expired entries.
 func (m *Memory[V]) janitor() {
-	ticker := time.NewTicker(m.opts.cleanupInterval)
+	ticker := time.NewTicker(m.cfg.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
