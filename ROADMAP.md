@@ -20,6 +20,7 @@ This document outlines planned features for the Forge framework.
 - `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
 - `Param[T](ctx, name)`, `Query[T](ctx, name)`, `QueryDefault[T](ctx, name, default)` — type-safe generic helpers for route params and query values
 - `Context` implements `context.Context` — pass Forge context directly to stdlib functions without `.Context()` unwrapping
+- `Extractor` — composable value extraction from headers, cookies, query, form, session, bearer token — chainable `FromHeader()`, `FromCookie()`, `FromQuery()`, `FromSession()`, `FromBearerToken()` pattern
 
 ### Middlewares (`middlewares/`)
 
@@ -27,6 +28,7 @@ This document outlines planned features for the Forge framework.
 - `recover` — panic recovery with logging
 - `timeout` — request timeout enforcement
 - `cors` — Cross-Origin Resource Sharing headers
+- `i18n` — language resolution from Accept-Language/cookie/query, translator injection into context
 
 ### Utility Packages (`pkg/`)
 
@@ -53,6 +55,7 @@ This document outlines planned features for the Forge framework.
 - `validator` — input validation with struct tags
 - `redis` — Redis connection helper with retry logic
 - `cache` — Generic `Cache` interface + in-memory (LRU) and Redis implementations
+- `i18n` — Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, locale-aware formatting (numbers, currency, dates, percentages), templ helpers via context
 
 ---
 
@@ -60,16 +63,13 @@ This document outlines planned features for the Forge framework.
 
 ### Utility Packages (`pkg/`)
 - `featureflag` — `Provider` interface, strategies, memory impl
-- `i18n` — Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)`
 - `jwt` — JWT generation and validation (HMAC-SHA256)
-- `locale` — Locale-aware formatting: numbers, currency, dates, percentages
 - `oauth` — `Provider` interface, Google/GitHub implementations
 - `ratelimit` — Token bucket, sliding window + memory/Redis stores
 - `secrets` — AES-256-GCM encryption with key derivation
 - `sse` — SSE writer, event encoding, flush helpers
 - `webhook` — Sender with retries, signatures, circuit breaker, backoff
 - `websocket` — Upgrader wrapper, connection management
-- `extractor` — Composable value extraction from headers, cookies, query, form — chainable `FromHeader()`, `FromCookie()`, `FromQuery()` pattern for auth middleware, API key lookup, etc.
 - `compress` — Response compression with `gzip` and `zstd` support, `Accept-Encoding` negotiation, min-size threshold
 
 ### Standard Middlewares
