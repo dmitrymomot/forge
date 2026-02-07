@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 )
 
 // DefaultLang is the default language code used when no default language is specified.
@@ -165,7 +166,14 @@ func (i *I18n) T(lang, namespace, key string, placeholders ...M) string {
 		return replacePlaceholdersWithMerge(translation, placeholders...)
 	}
 
-	if lang != i.defaultLang {
+	if base := baseLanguage(lang); base != lang {
+		baseKey := buildKey(base, namespace, key)
+		if translation, exists := i.translations[baseKey]; exists {
+			return replacePlaceholdersWithMerge(translation, placeholders...)
+		}
+	}
+
+	if lang != i.defaultLang && baseLanguage(lang) != i.defaultLang {
 		defaultKey := buildKey(i.defaultLang, namespace, key)
 		if translation, exists := i.translations[defaultKey]; exists {
 			return replacePlaceholdersWithMerge(translation, placeholders...)
@@ -185,47 +193,35 @@ func (i *I18n) T(lang, namespace, key string, placeholders ...M) string {
 func (i *I18n) Tn(lang, namespace, key string, n int, placeholders ...M) string {
 	rule, exists := i.pluralRules[lang]
 	if !exists {
-		if rule, exists = i.pluralRules[i.defaultLang]; !exists {
-			rule = DefaultPluralRule
+		if base := baseLanguage(lang); base != lang {
+			rule, exists = i.pluralRules[base]
+		}
+		if !exists {
+			if rule, exists = i.pluralRules[i.defaultLang]; !exists {
+				rule = DefaultPluralRule
+			}
 		}
 	}
 
 	form := rule(n)
 	pluralKey := key + "." + form
-	compositeKey := buildKey(lang, namespace, pluralKey)
 
 	var translation string
 	var found bool
 
-	if trans, exists := i.translations[compositeKey]; exists {
-		translation = trans
-		found = true
-	} else {
-		for _, fallbackForm := range getPluralFallbackForms(form) {
-			fallbackKey := buildKey(lang, namespace, key+"."+fallbackForm)
-			if trans, exists := i.translations[fallbackKey]; exists {
-				translation = trans
-				found = true
-				break
-			}
+	// Try exact language
+	found, translation = i.findPluralTranslation(lang, namespace, pluralKey, key, form)
+
+	// Try base language (e.g., "en" for "en-US")
+	if !found {
+		if base := baseLanguage(lang); base != lang {
+			found, translation = i.findPluralTranslation(base, namespace, pluralKey, key, form)
 		}
 	}
 
-	if !found && lang != i.defaultLang {
-		compositeKey = buildKey(i.defaultLang, namespace, pluralKey)
-		if trans, exists := i.translations[compositeKey]; exists {
-			translation = trans
-			found = true
-		} else {
-			for _, fallbackForm := range getPluralFallbackForms(form) {
-				fallbackKey := buildKey(i.defaultLang, namespace, key+"."+fallbackForm)
-				if trans, exists := i.translations[fallbackKey]; exists {
-					translation = trans
-					found = true
-					break
-				}
-			}
-		}
+	// Try default language
+	if !found && lang != i.defaultLang && baseLanguage(lang) != i.defaultLang {
+		found, translation = i.findPluralTranslation(i.defaultLang, namespace, pluralKey, key, form)
 	}
 
 	if !found {
@@ -241,6 +237,22 @@ func (i *I18n) Tn(lang, namespace, key string, n int, placeholders ...M) string 
 	}
 
 	return ReplacePlaceholders(translation, mergedPlaceholders)
+}
+
+// findPluralTranslation tries to find a plural translation for a given language,
+// checking the exact form first, then fallback forms.
+func (i *I18n) findPluralTranslation(lang, namespace, pluralKey, key, form string) (bool, string) {
+	compositeKey := buildKey(lang, namespace, pluralKey)
+	if trans, exists := i.translations[compositeKey]; exists {
+		return true, trans
+	}
+	for _, fallbackForm := range getPluralFallbackForms(form) {
+		fallbackKey := buildKey(lang, namespace, key+"."+fallbackForm)
+		if trans, exists := i.translations[fallbackKey]; exists {
+			return true, trans
+		}
+	}
+	return false, ""
 }
 
 // Languages returns the list of available languages.
@@ -302,6 +314,15 @@ func replacePlaceholdersWithMerge(template string, placeholders ...M) string {
 	}
 
 	return ReplacePlaceholders(template, merged)
+}
+
+// baseLanguage strips the region from a language tag (e.g., "en-US" → "en").
+// Returns the input unchanged if there is no region.
+func baseLanguage(lang string) string {
+	if i := strings.IndexByte(lang, '-'); i > 0 {
+		return lang[:i]
+	}
+	return lang
 }
 
 func getPluralFallbackForms(form string) []string {
