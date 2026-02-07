@@ -13,6 +13,7 @@ import (
 	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/health"
+	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
@@ -1003,6 +1004,18 @@ type (
 
 	// TimeoutError represents a request timeout.
 	TimeoutError = middlewares.TimeoutError
+
+	// TranslationMap is a map of placeholder keys to values for translation interpolation.
+	TranslationMap = i18n.M
+
+	// I18nOption configures the I18n middleware.
+	I18nOption = middlewares.I18nOption
+
+	// Translator provides a simplified translation interface with a fixed language and namespace context.
+	Translator = i18n.Translator
+
+	// LocaleFormat contains formatting rules for locale-specific formatting.
+	LocaleFormat = i18n.LocaleFormat
 )
 
 // Middleware helpers - re-exported from middlewares
@@ -1037,6 +1050,68 @@ func AsPanicError(err error) (*PanicError, bool) {
 // AsTimeoutError extracts the TimeoutError from an error if present.
 func AsTimeoutError(err error) (*TimeoutError, bool) {
 	return middlewares.AsTimeoutError(err)
+}
+
+// I18n middleware helpers
+
+// GetTranslator extracts the Translator from the context.
+// Returns nil if the I18n middleware is not used.
+func GetTranslator(c Context) *Translator {
+	return middlewares.GetTranslator(c)
+}
+
+// GetLanguage extracts the resolved language from the context.
+// Returns an empty string if the I18n middleware is not used.
+func GetLanguage(c Context) string {
+	return middlewares.GetLanguage(c)
+}
+
+// T translates a key using the Translator stored in context by the I18n middleware.
+// Returns the key itself if no translator is in context.
+func T(c Context, key string, placeholders ...TranslationMap) string {
+	tr := middlewares.GetTranslator(c)
+	if tr == nil {
+		return key
+	}
+	return tr.T(key, placeholders...)
+}
+
+// Tn translates a key with pluralization using the Translator stored in context.
+// Returns the key itself if no translator is in context.
+func Tn(c Context, key string, n int, placeholders ...TranslationMap) string {
+	tr := middlewares.GetTranslator(c)
+	if tr == nil {
+		return key
+	}
+	return tr.Tn(key, n, placeholders...)
+}
+
+// FromAcceptLanguage returns an ExtractorSource that parses the Accept-Language
+// header and matches against the available languages.
+func FromAcceptLanguage(available []string) ExtractorSource {
+	return middlewares.FromAcceptLanguage(available)
+}
+
+// I18n middleware option constructors
+
+// WithI18nNamespace sets the default namespace for the context translator.
+func WithI18nNamespace(ns string) I18nOption {
+	return middlewares.WithI18nNamespace(ns)
+}
+
+// WithI18nExtractor sets a custom language extractor chain.
+func WithI18nExtractor(ext Extractor) I18nOption {
+	return middlewares.WithI18nExtractor(ext)
+}
+
+// WithI18nFormatMap sets the language-to-format mapping.
+func WithI18nFormatMap(m map[string]*LocaleFormat) I18nOption {
+	return middlewares.WithI18nFormatMap(m)
+}
+
+// WithI18nDefaultFormat sets the fallback locale format.
+func WithI18nDefaultFormat(f *LocaleFormat) I18nOption {
+	return middlewares.WithI18nDefaultFormat(f)
 }
 
 // HTTPError constructors and options - re-exported from internal
