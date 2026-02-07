@@ -130,6 +130,14 @@ type (
 
 	// RoleExtractorFunc extracts the current user's role from the request context.
 	RoleExtractorFunc = internal.RoleExtractorFunc
+
+	// Extractor tries multiple sources in order and returns the first match.
+	// Use with FromHeader, FromQuery, FromCookie, etc. to compose extraction chains.
+	Extractor = internal.Extractor
+
+	// ExtractorSource extracts a value from the request context.
+	// Returns the value and true if found, or ("", false) if not present.
+	ExtractorSource = internal.ExtractorSource
 )
 
 // Constructors
@@ -450,6 +458,70 @@ func Query[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string)
 //	limit := forge.QueryDefault[int](c, "limit", 20)
 func QueryDefault[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string, defaultValue T) T {
 	return internal.QueryDefault[T](c, name, defaultValue)
+}
+
+// Extractor helpers
+
+// NewExtractor creates an Extractor that tries the given sources in order.
+// Returns the first non-empty value found.
+//
+// Example:
+//
+//	ext := forge.NewExtractor(
+//	    forge.FromHeader("X-API-Key"),
+//	    forge.FromQuery("api_key"),
+//	    forge.FromCookie("api_key"),
+//	)
+//	value, ok := ext.Extract(c)
+func NewExtractor(sources ...ExtractorSource) Extractor {
+	return internal.NewExtractor(sources...)
+}
+
+// FromHeader returns an ExtractorSource that reads from a request header.
+func FromHeader(name string) ExtractorSource {
+	return internal.FromHeader(name)
+}
+
+// FromQuery returns an ExtractorSource that reads from a query parameter.
+func FromQuery(name string) ExtractorSource {
+	return internal.FromQuery(name)
+}
+
+// FromCookie returns an ExtractorSource that reads from a plain cookie.
+func FromCookie(name string) ExtractorSource {
+	return internal.FromCookie(name)
+}
+
+// FromCookieSigned returns an ExtractorSource that reads from a signed cookie.
+func FromCookieSigned(name string) ExtractorSource {
+	return internal.FromCookieSigned(name)
+}
+
+// FromCookieEncrypted returns an ExtractorSource that reads from an encrypted cookie.
+func FromCookieEncrypted(name string) ExtractorSource {
+	return internal.FromCookieEncrypted(name)
+}
+
+// FromParam returns an ExtractorSource that reads from a URL parameter.
+func FromParam(name string) ExtractorSource {
+	return internal.FromParam(name)
+}
+
+// FromForm returns an ExtractorSource that reads from a form field.
+func FromForm(name string) ExtractorSource {
+	return internal.FromForm(name)
+}
+
+// FromSession returns an ExtractorSource that reads from a session value.
+// Tries string type assertion first, falls back to fmt.Sprint for non-string values.
+func FromSession(key string) ExtractorSource {
+	return internal.FromSession(key)
+}
+
+// FromBearerToken returns an ExtractorSource that reads a Bearer token
+// from the Authorization header. Uses case-insensitive prefix matching.
+func FromBearerToken() ExtractorSource {
+	return internal.FromBearerToken()
 }
 
 // Cookie options
