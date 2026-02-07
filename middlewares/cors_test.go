@@ -24,7 +24,7 @@ func TestCORS(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.CORS()
+		mw := middlewares.CORS(middlewares.CORSConfig{})
 		handler := mw(func(c internal.Context) error {
 			return c.NoContent(http.StatusOK)
 		})
@@ -41,7 +41,7 @@ func TestCORS(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.CORS()
+		mw := middlewares.CORS(middlewares.CORSConfig{})
 		handler := mw(func(c internal.Context) error {
 			return c.NoContent(http.StatusOK)
 		})
@@ -54,9 +54,9 @@ func TestCORS(t *testing.T) {
 	t.Run("specific origins list", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowOrigins("http://allowed.com", "http://also-allowed.com"),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowOrigins: []string{"http://allowed.com", "http://also-allowed.com"},
+		})
 
 		t.Run("allows listed origin", func(t *testing.T) {
 			t.Parallel()
@@ -98,7 +98,9 @@ func TestCORS(t *testing.T) {
 
 		// AllowOrigins has "http://static.com" but AllowOriginFunc only allows "http://dynamic.com"
 		mw := middlewares.CORS(
-			middlewares.WithAllowOrigins("http://static.com"),
+			middlewares.CORSConfig{
+				AllowOrigins: []string{"http://static.com"},
+			},
 			middlewares.WithAllowOriginFunc(func(origin string) bool {
 				return origin == "http://dynamic.com"
 			}),
@@ -144,6 +146,7 @@ func TestCORS(t *testing.T) {
 		t.Parallel()
 
 		mw := middlewares.CORS(
+			middlewares.CORSConfig{},
 			middlewares.WithAllowOriginFunc(func(origin string) bool {
 				return false // Always reject
 			}),
@@ -166,11 +169,11 @@ func TestCORS(t *testing.T) {
 	t.Run("preflight request handling", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowMethods("GET", "POST", "PUT"),
-			middlewares.WithAllowHeaders("Content-Type", "X-Custom-Header"),
-			middlewares.WithMaxAge(1*time.Hour),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowMethods: []string{"GET", "POST", "PUT"},
+			AllowHeaders: []string{"Content-Type", "X-Custom-Header"},
+			MaxAge:       1 * time.Hour,
+		})
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -201,9 +204,9 @@ func TestCORS(t *testing.T) {
 	t.Run("credentials mode echoes origin instead of wildcard", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowCredentials(),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowCredentials: true,
+		})
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -225,9 +228,9 @@ func TestCORS(t *testing.T) {
 	t.Run("expose headers", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithExposeHeaders("X-Custom-Response", "X-Request-Id"),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			ExposeHeaders: []string{"X-Custom-Response", "X-Request-Id"},
+		})
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -246,7 +249,7 @@ func TestCORS(t *testing.T) {
 	t.Run("Vary header is always set", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS()
+		mw := middlewares.CORS(middlewares.CORSConfig{})
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -265,7 +268,7 @@ func TestCORS(t *testing.T) {
 	t.Run("preflight adds additional Vary headers", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS()
+		mw := middlewares.CORS(middlewares.CORSConfig{})
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -289,14 +292,14 @@ func TestCORS(t *testing.T) {
 	t.Run("multiple options combined", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowOrigins("http://app.example.com"),
-			middlewares.WithAllowMethods("GET", "POST"),
-			middlewares.WithAllowHeaders("Content-Type", "Authorization"),
-			middlewares.WithExposeHeaders("X-Request-Id"),
-			middlewares.WithAllowCredentials(),
-			middlewares.WithMaxAge(30*time.Minute),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowOrigins:     []string{"http://app.example.com"},
+			AllowMethods:     []string{"GET", "POST"},
+			AllowHeaders:     []string{"Content-Type", "Authorization"},
+			ExposeHeaders:    []string{"X-Request-Id"},
+			AllowCredentials: true,
+			MaxAge:           30 * time.Minute,
+		})
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "http://app.example.com")
@@ -322,7 +325,7 @@ func TestCORS(t *testing.T) {
 	t.Run("handler is called for actual requests", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS()
+		mw := middlewares.CORS(middlewares.CORSConfig{})
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Origin", "http://example.com")
@@ -344,9 +347,9 @@ func TestCORS(t *testing.T) {
 	t.Run("malformed and edge-case origins", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowOrigins("http://allowed.com"),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowOrigins: []string{"http://allowed.com"},
+		})
 
 		t.Run("trailing slash does not match", func(t *testing.T) {
 			t.Parallel()
@@ -438,9 +441,9 @@ func TestCORS(t *testing.T) {
 	t.Run("specific origins echoes actual origin not wildcard", func(t *testing.T) {
 		t.Parallel()
 
-		mw := middlewares.CORS(
-			middlewares.WithAllowOrigins("http://app1.example.com", "http://app2.example.com"),
-		)
+		mw := middlewares.CORS(middlewares.CORSConfig{
+			AllowOrigins: []string{"http://app1.example.com", "http://app2.example.com"},
+		})
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Origin", "http://app1.example.com")
