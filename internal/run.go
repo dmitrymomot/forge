@@ -12,58 +12,41 @@ import (
 // Use this for composing multiple Apps under different domain patterns.
 // If any Apps have job workers configured, they start automatically before
 // serving requests and stop gracefully during shutdown.
-//
-// Example:
-//
-//	api := forge.New(
-//	    forge.WithHandlers(handlers.NewAPIHandler()),
-//	)
-//
-//	website := forge.New(
-//	    forge.WithHandlers(handlers.NewLandingHandler()),
-//	)
-//
-//	err := forge.Run(
-//	    forge.Domain("api.acme.com", api),
-//	    forge.Domain("*.acme.com", website),
-//	    forge.Address(":8080"),
-//	    forge.Logger(slog),
-//	)
-func Run(opts ...RunOption) error {
-	cfg := buildRunConfig(opts...)
+func Run(cfg RunConfig, opts ...RunOption) error {
+	rc := buildRunConfig(cfg, opts...)
 
 	var handler http.Handler
 
 	// Collect all apps for worker registration
 	var allApps []*App
 
-	if len(cfg.domains) > 0 {
+	if len(rc.domains) > 0 {
 		// Build host router from domain mappings
 		routes := make(hostrouter.Routes)
-		for pattern, app := range cfg.domains {
+		for pattern, app := range rc.domains {
 			routes[pattern] = app.Router()
 			allApps = append(allApps, app)
 		}
 
 		// Determine fallback handler
 		var fallback http.Handler = http.NotFoundHandler()
-		if cfg.fallback != nil {
-			fallback = cfg.fallback.Router()
-			allApps = append(allApps, cfg.fallback)
+		if rc.fallback != nil {
+			fallback = rc.fallback.Router()
+			allApps = append(allApps, rc.fallback)
 		}
 
 		handler = hostrouter.New(routes, fallback)
-	} else if cfg.fallback != nil {
+	} else if rc.fallback != nil {
 		// No domains, but fallback provided - use as main handler
-		handler = cfg.fallback.Router()
-		allApps = append(allApps, cfg.fallback)
+		handler = rc.fallback.Router()
+		allApps = append(allApps, rc.fallback)
 	} else {
 		return errors.New("forge.Run: no domains or fallback configured")
 	}
 
 	// Collect workers from all apps and deduplicate
-	startupHooks := cfg.startupHooks
-	shutdownHooks := cfg.shutdownHooks
+	startupHooks := rc.startupHooks
+	shutdownHooks := rc.shutdownHooks
 	seenWorkers := make(map[*JobManager]bool)
 
 	for _, app := range allApps {
@@ -77,11 +60,11 @@ func Run(opts ...RunOption) error {
 
 	return runServer(runtimeConfig{
 		handler:         handler,
-		address:         cfg.address,
-		logger:          cfg.logger,
-		shutdownTimeout: cfg.shutdownTimeout,
+		address:         rc.address,
+		logger:          rc.logger,
+		shutdownTimeout: rc.shutdownTimeout,
 		startupHooks:    startupHooks,
 		shutdownHooks:   shutdownHooks,
-		baseCtx:         cfg.baseCtx,
+		baseCtx:         rc.baseCtx,
 	})
 }
