@@ -156,7 +156,7 @@ func (sm *SessionManager) SetLogger(l *slog.Logger) {
 // Returns ErrNotFound if the session doesn't exist in the store.
 // Returns ErrExpired if the session has expired.
 // Returns ErrFingerprintMismatch if fingerprint validation fails (when strictness is FingerprintReject).
-func (sm *SessionManager) LoadSession(ctx context.Context, r *http.Request) (*session.Session, error) {
+func (sm *SessionManager) LoadSession(r *http.Request) (*session.Session, error) {
 	cookie, err := r.Cookie(sm.cookieName)
 	if err != nil {
 		return nil, nil // No session cookie
@@ -167,7 +167,7 @@ func (sm *SessionManager) LoadSession(ctx context.Context, r *http.Request) (*se
 		return nil, nil
 	}
 
-	sess, err := sm.store.Get(ctx, token)
+	sess, err := sm.store.Get(r.Context(), token)
 	if err != nil {
 		return nil, err
 	}
