@@ -11,31 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Config holds database connection configuration.
+type Config struct {
+	URL               string        `env:"URL,required"`
+	MaxConns          int32         `env:"MAX_CONNS"           envDefault:"10"`
+	MinConns          int32         `env:"MIN_CONNS"           envDefault:"5"`
+	HealthCheckPeriod time.Duration `env:"HEALTH_CHECK_PERIOD" envDefault:"1m"`
+	MaxConnIdleTime   time.Duration `env:"MAX_CONN_IDLE_TIME"  envDefault:"10m"`
+	MaxConnLifetime   time.Duration `env:"MAX_CONN_LIFETIME"   envDefault:"30m"`
+	RetryAttempts     int           `env:"RETRY_ATTEMPTS"      envDefault:"3"`
+	RetryInterval     time.Duration `env:"RETRY_INTERVAL"      envDefault:"5s"`
+}
+
 // Option configures database connection.
 type Option func(*options)
 
 type options struct {
-	migrations        *embed.FS
-	logger            *slog.Logger
-	maxConns          int32
-	minConns          int32
-	healthCheckPeriod time.Duration
-	maxConnIdleTime   time.Duration
-	maxConnLifetime   time.Duration
-	retryAttempts     int
-	retryInterval     time.Duration
-}
-
-func defaultOptions() *options {
-	return &options{
-		maxConns:          10,
-		minConns:          5,
-		healthCheckPeriod: 1 * time.Minute,
-		maxConnIdleTime:   10 * time.Minute,
-		maxConnLifetime:   30 * time.Minute,
-		retryAttempts:     3,
-		retryInterval:     5 * time.Second,
-	}
+	migrations *embed.FS
+	logger     *slog.Logger
 }
 
 // WithMigrations enables automatic migrations using embedded SQL files.
@@ -52,85 +45,62 @@ func WithLogger(log *slog.Logger) Option {
 	}
 }
 
-// WithMaxConns sets maximum number of connections in the pool.
-// Default: 10
-func WithMaxConns(n int32) Option {
-	return func(o *options) {
-		o.maxConns = n
-	}
-}
-
-// WithMinConns sets minimum number of connections kept open.
-// Default: 5
-func WithMinConns(n int32) Option {
-	return func(o *options) {
-		o.minConns = n
-	}
-}
-
-// WithHealthCheckPeriod sets how often connections are checked.
-// Default: 1 minute
-func WithHealthCheckPeriod(d time.Duration) Option {
-	return func(o *options) {
-		o.healthCheckPeriod = d
-	}
-}
-
-// WithMaxConnIdleTime sets maximum time a connection can be idle.
-// Default: 10 minutes
-func WithMaxConnIdleTime(d time.Duration) Option {
-	return func(o *options) {
-		o.maxConnIdleTime = d
-	}
-}
-
-// WithMaxConnLifetime sets maximum lifetime of a connection.
-// Default: 30 minutes
-func WithMaxConnLifetime(d time.Duration) Option {
-	return func(o *options) {
-		o.maxConnLifetime = d
-	}
-}
-
-// WithRetry configures connection retry behavior.
-// Default: 3 attempts, 5 second interval with exponential backoff.
-func WithRetry(attempts int, interval time.Duration) Option {
-	return func(o *options) {
-		o.retryAttempts = attempts
-		o.retryInterval = interval
-	}
-}
-
 // Open creates a PostgreSQL connection pool with sensible defaults.
-// Supports optional migrations and configurable pool settings via functional options.
+// Supports optional migrations and configurable pool settings via Config.
 //
 // Example:
 //
 //	//go:embed migrations/*.sql
 //	var migrations embed.FS
 //
-//	pool, err := db.Open(ctx, "postgres://user:pass@host:5432/db",
+//	pool, err := db.Open(ctx, db.Config{URL: "postgres://user:pass@host:5432/db"},
 //	    db.WithMigrations(migrations),
 //	    db.WithLogger(log),
 //	)
-func Open(ctx context.Context, connString string, opts ...Option) (*pgxpool.Pool, error) {
-	o := defaultOptions()
+func Open(ctx context.Context, cfg Config, opts ...Option) (*pgxpool.Pool, error) {
+	if cfg.URL == "" {
+		return nil, ErrFailedToParseDBConfig
+	}
+
+	if cfg.MaxConns == 0 {
+		cfg.MaxConns = 10
+	}
+	if cfg.MinConns == 0 {
+		cfg.MinConns = 5
+	}
+	if cfg.HealthCheckPeriod == 0 {
+		cfg.HealthCheckPeriod = time.Minute
+	}
+	if cfg.MaxConnIdleTime == 0 {
+		cfg.MaxConnIdleTime = 10 * time.Minute
+	}
+	if cfg.MaxConnLifetime == 0 {
+		cfg.MaxConnLifetime = 30 * time.Minute
+	}
+	if cfg.RetryAttempts == 0 {
+		cfg.RetryAttempts = 3
+	}
+	if cfg.RetryInterval == 0 {
+		cfg.RetryInterval = 5 * time.Second
+	}
+
+	o := &options{}
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	connConfig, err := pgxpool.ParseConfig(connString)
+	connConfig, err := pgxpool.ParseConfig(cfg.URL)
 	if err != nil {
 		return nil, errors.Join(ErrFailedToParseDBConfig, err)
 	}
 
-	connConfig.MaxConns = o.maxConns
-	connConfig.MinConns = o.minConns
-	connConfig.HealthCheckPeriod = o.healthCheckPeriod
-	connConfig.MaxConnIdleTime = o.maxConnIdleTime
-	connConfig.MaxConnLifetime = o.maxConnLifetime
+	connConfig.MaxConns = cfg.MaxConns
+	connConfig.MinConns = cfg.MinConns
+	connConfig.HealthCheckPeriod = cfg.HealthCheckPeriod
+	connConfig.MaxConnIdleTime = cfg.MaxConnIdleTime
+	connConfig.MaxConnLifetime = cfg.MaxConnLifetime
 
-	pool, err := connect(ctx, connConfig, o.retryAttempts, o.retryInterval)
+	pool, err := connect(ctx, connConfig, cfg.RetryAttempts, cfg.RetryInterval)
 	if err != nil {
 		return nil, err
 	}
@@ -150,12 +120,12 @@ func Open(ctx context.Context, connString string, opts ...Option) (*pgxpool.Pool
 //
 // Example:
 //
-//	pool := db.MustOpen(ctx, os.Getenv("DATABASE_URL"),
+//	pool := db.MustOpen(ctx, db.Config{URL: os.Getenv("DATABASE_URL")},
 //	    db.WithMigrations(migrations),
 //	    db.WithLogger(log),
 //	)
-func MustOpen(ctx context.Context, connString string, opts ...Option) *pgxpool.Pool {
-	pool, err := Open(ctx, connString, opts...)
+func MustOpen(ctx context.Context, cfg Config, opts ...Option) *pgxpool.Pool {
+	pool, err := Open(ctx, cfg, opts...)
 	if err != nil {
 		slog.Error("failed to open database connection", "error", err)
 		os.Exit(1)

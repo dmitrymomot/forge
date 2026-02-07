@@ -14,7 +14,7 @@
 //	)
 //
 //	func handler(w http.ResponseWriter, r *http.Request) {
-//		m := cookie.New()
+//		m, _ := cookie.New(cookie.Config{})
 //		m.Set(w, "theme", "dark", 86400)
 //		value, err := m.Get(r, "theme")
 //		if err != nil {
@@ -26,11 +26,11 @@
 //
 // Enable signing and encryption with a 32+ byte secret:
 //
-//	m := cookie.New(
-//		cookie.WithSecret("your-32+-byte-secret-key-here!!"),
-//		cookie.WithSecure(true),
-//		cookie.WithHTTPOnly(true),
-//	)
+//	m, err := cookie.New(cookie.Config{
+//		Secret:   "your-32+-byte-secret-key-here!!",
+//		Secure:   true,
+//		HTTPOnly: true,
+//	})
 //
 // Signed cookies detect tampering with HMAC-SHA256:
 //
@@ -57,20 +57,20 @@
 //
 // # Configuration
 //
-// Use options to configure cookie attributes:
-//   - [WithSecret]: Set the secret for signing/encryption (32+ bytes)
-//   - [WithDomain]: Set the cookie domain
-//   - [WithPath]: Set the cookie path (default: "/")
-//   - [WithSecure]: Set the Secure flag (HTTPS only)
-//   - [WithHTTPOnly]: Set the HttpOnly flag (default: true)
-//   - [WithSameSite]: Set the SameSite attribute (default: Lax)
+// Use [Config] to configure cookie attributes:
+//   - Secret: Set the secret for signing/encryption (32+ bytes)
+//   - Domain: Set the cookie domain
+//   - Path: Set the cookie path (default: "/")
+//   - SameSite: Set the SameSite attribute as string (default: "lax")
+//   - Secure: Set the Secure flag (HTTPS only)
+//   - HTTPOnly: Set the HttpOnly flag (default: false)
 //
 // # Errors
 //
 // The package defines these sentinel errors:
 //   - [ErrNotFound]: Cookie does not exist
 //   - [ErrNoSecret]: Secret required for signed/encrypted operations
-//   - [ErrBadSecret]: Secret must be at least 32 bytes (note: automatically ignored if provided)
+//   - [ErrBadSecret]: Secret must be at least 32 bytes
 //   - [ErrBadSig]: Signature verification failed (tampering detected)
 //   - [ErrDecrypt]: Decryption failed (tampering or corruption detected)
 package cookie
