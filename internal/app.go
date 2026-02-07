@@ -9,12 +9,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/dmitrymomot/forge/pkg/cookie"
-	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
-// Default server timeouts (hardcoded, opinionated).
 const (
 	defaultReadTimeout       = 15 * time.Second
 	defaultWriteTimeout      = 30 * time.Second
@@ -131,7 +129,6 @@ func (a *App) Run(addr string, opts ...RunOption) error {
 	})
 }
 
-// setupRoutes configures the router with middleware and handlers.
 func (a *App) setupRoutes() {
 	// Set custom error handlers on chi router
 	if a.notFoundHandler != nil {
@@ -153,8 +150,8 @@ func (a *App) setupRoutes() {
 
 	// Register health check endpoints
 	if a.healthConfig != nil {
-		a.router.Get(a.healthConfig.livenessPath, health.LivenessHandler())
-		a.router.Get(a.healthConfig.readinessPath, health.ReadinessHandler(a.healthConfig.checks))
+		a.router.Get(a.healthConfig.livenessPath, livenessHandler())
+		a.router.Get(a.healthConfig.readinessPath, readinessHandler(a.healthConfig.checks))
 	}
 
 	// Register handlers
@@ -164,7 +161,6 @@ func (a *App) setupRoutes() {
 	}
 }
 
-// wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c := newContext(w, r, a)
@@ -174,7 +170,6 @@ func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleError handles errors from handlers using the configured error handler.
 func (a *App) handleError(c Context, err error) {
 	// Check if response has already been written
 	if c.Written() {
@@ -189,7 +184,7 @@ func (a *App) handleError(c Context, err error) {
 
 // healthConfig holds health check endpoint configuration.
 type healthConfig struct {
-	checks        health.Checks
+	checks        healthChecks
 	livenessPath  string
 	readinessPath string
 }
@@ -229,10 +224,10 @@ func WithReadinessPath(path string) HealthOption {
 // Example:
 //
 //	forge.WithReadinessCheck("db", db.Healthcheck(pool))
-func WithReadinessCheck(name string, fn health.CheckFunc) HealthOption {
+func WithReadinessCheck(name string, fn CheckFunc) HealthOption {
 	return func(c *healthConfig) {
 		if c.checks == nil {
-			c.checks = make(health.Checks)
+			c.checks = make(healthChecks)
 		}
 		c.checks[name] = fn
 	}

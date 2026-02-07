@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/pkg/cookie"
-	"github.com/dmitrymomot/forge/pkg/health"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/session"
@@ -145,7 +144,7 @@ func WithHealthChecks(opts ...HealthOption) Option {
 		cfg := &healthConfig{
 			livenessPath:  defaultLivenessPath,
 			readinessPath: defaultReadinessPath,
-			checks:        make(health.Checks),
+			checks:        make(healthChecks),
 		}
 		for _, opt := range opts {
 			opt(cfg)
