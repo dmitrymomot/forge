@@ -52,14 +52,13 @@ This document outlines planned features for the Forge framework.
 - `useragent` — User-Agent parsing with bot detection
 - `validator` — input validation with struct tags
 - `redis` — Redis connection helper with retry logic
+- `cache` — Generic `Cache` interface + in-memory (LRU) and Redis implementations
 
 ---
 
 ## Planned
 
 ### Utility Packages (`pkg/`)
-
-- `cache` — `Cache` interface + memory/Redis implementations
 - `featureflag` — `Provider` interface, strategies, memory impl
 - `i18n` — Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, templ helpers via `t(ctx, key)`
 - `jwt` — JWT generation and validation (HMAC-SHA256)
