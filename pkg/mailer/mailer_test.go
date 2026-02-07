@@ -37,7 +37,7 @@ Hello **{{.Name}}**!
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	cfg := Config{
 		DefaultLayout:   "base.html",
 		FallbackSubject: "Notification",
@@ -65,7 +65,7 @@ func TestMailer_Send_NoRecipient(t *testing.T) {
 	t.Parallel()
 
 	mockSender := &MockSender{}
-	renderer := NewRenderer(fstest.MapFS{})
+	renderer := NewRenderer(fstest.MapFS{}, RendererConfig{})
 	mailer := New(mockSender, renderer, Config{})
 
 	err := mailer.Send(context.Background(), SendParams{
@@ -82,7 +82,7 @@ func TestMailer_Send_RenderFailure(t *testing.T) {
 
 	fs := fstest.MapFS{} // Empty filesystem
 	mockSender := &MockSender{}
-	renderer := NewRenderer(fs)
+	renderer := NewRenderer(fs, RendererConfig{})
 	mailer := New(mockSender, renderer, Config{DefaultLayout: "missing.html"})
 
 	err := mailer.Send(context.Background(), SendParams{
@@ -109,7 +109,7 @@ func TestMailer_Send_SenderFailure(t *testing.T) {
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	mailer := New(mockSender, renderer, Config{
 		DefaultLayout:   "base.html",
 		FallbackSubject: "Test",
@@ -183,7 +183,7 @@ Body`,
 			}
 
 			mockSender := &MockSender{}
-			renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+			renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 			mailer := New(mockSender, renderer, Config{
 				DefaultLayout:   "base.html",
 				FallbackSubject: tt.fallbackSubject,
@@ -223,7 +223,7 @@ Your order has been confirmed.
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	mailer := New(mockSender, renderer, Config{DefaultLayout: "base.html"})
 
 	mockSender.On("Send", mock.Anything, mock.MatchedBy(func(email *Email) bool {
@@ -253,7 +253,7 @@ func TestMailer_Send_SubjectTemplatingError(t *testing.T) {
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	mailer := New(mockSender, renderer, Config{
 		DefaultLayout:   "base.html",
 		FallbackSubject: "Invalid {{.Unclosed",
@@ -283,7 +283,7 @@ func TestMailer_Send_WithOptionalFields(t *testing.T) {
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	mailer := New(mockSender, renderer, Config{
 		DefaultLayout:   "base.html",
 		FallbackSubject: "Test",
@@ -331,7 +331,7 @@ func TestMailer_Send_CustomLayout(t *testing.T) {
 	}
 
 	mockSender := &MockSender{}
-	renderer := NewRendererWithConfig(fs, RendererConfig{LayoutDir: "layouts"})
+	renderer := NewRenderer(fs, RendererConfig{LayoutDir: "layouts"})
 	mailer := New(mockSender, renderer, Config{
 		DefaultLayout:   "base.html",
 		FallbackSubject: "Test",

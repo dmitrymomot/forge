@@ -35,28 +35,23 @@ type cachedTemplate struct {
 
 // RendererConfig configures the renderer.
 type RendererConfig struct {
-	TemplateDir string // Default: "."
-	LayoutDir   string // Default: "layouts"
+	TemplateDir string `env:"TEMPLATE_DIR" envDefault:"."`
+	LayoutDir   string `env:"LAYOUT_DIR"   envDefault:"layouts"`
 }
 
-// NewRenderer creates a new renderer with default config.
-func NewRenderer(filesystem fs.FS) *Renderer {
-	return NewRendererWithConfig(filesystem, RendererConfig{})
-}
-
-// NewRendererWithConfig creates a new renderer with custom config.
-func NewRendererWithConfig(filesystem fs.FS, opts RendererConfig) *Renderer {
-	if opts.TemplateDir == "" {
-		opts.TemplateDir = "."
+// NewRenderer creates a new renderer with the given config.
+func NewRenderer(filesystem fs.FS, cfg RendererConfig) *Renderer {
+	if cfg.TemplateDir == "" {
+		cfg.TemplateDir = "."
 	}
-	if opts.LayoutDir == "" {
-		opts.LayoutDir = "layouts"
+	if cfg.LayoutDir == "" {
+		cfg.LayoutDir = "layouts"
 	}
 
 	return &Renderer{
 		fs:          filesystem,
-		templateDir: opts.TemplateDir,
-		layoutDir:   opts.LayoutDir,
+		templateDir: cfg.TemplateDir,
+		layoutDir:   cfg.LayoutDir,
 		md: goldmark.New(
 			goldmark.WithExtensions(NewButtonExtension()),
 		),

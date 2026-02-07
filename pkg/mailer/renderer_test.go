@@ -27,7 +27,7 @@ Welcome to our service.
 		},
 	}
 
-	renderer := NewRendererWithConfig(fs, RendererConfig{
+	renderer := NewRenderer(fs, RendererConfig{
 		LayoutDir: "layouts",
 	})
 
@@ -65,7 +65,7 @@ Hello {{.Name}}
 		openCount: &openCount,
 	}
 
-	renderer := NewRendererWithConfig(cfs, RendererConfig{
+	renderer := NewRenderer(cfs, RendererConfig{
 		LayoutDir: "layouts",
 	})
 
@@ -107,7 +107,7 @@ Welcome {{.Name}}!
 		},
 	}
 
-	renderer := NewRendererWithConfig(fs, RendererConfig{
+	renderer := NewRenderer(fs, RendererConfig{
 		LayoutDir: "layouts",
 	})
 
@@ -140,7 +140,7 @@ Hello {{.ID}}
 		},
 	}
 
-	renderer := NewRendererWithConfig(fs, RendererConfig{
+	renderer := NewRenderer(fs, RendererConfig{
 		LayoutDir: "layouts",
 	})
 

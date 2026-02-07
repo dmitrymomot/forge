@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/getsentry/sentry-go"
 	sentryslog "github.com/getsentry/sentry-go/slog"
@@ -11,10 +12,27 @@ import (
 
 // SentryConfig holds Sentry integration configuration.
 type SentryConfig struct {
-	DSN         string `env:"SENTRY_DSN"`
-	Environment string `env:"SENTRY_ENVIRONMENT" envDefault:"production"`
-	// MinLevel determines which log levels to send to Sentry (e.g., slog.LevelWarn for warnings+errors)
-	MinLevel slog.Level
+	DSN         string `env:"DSN"`
+	Environment string `env:"ENVIRONMENT" envDefault:"production"`
+	MinLevel    string `env:"MIN_LEVEL"   envDefault:"warn"`
+}
+
+// parseMinLevel converts a string level name to slog.Level.
+// Supports: "debug", "info", "warn"/"warning", "error".
+// Defaults to slog.LevelWarn for unknown values.
+func parseMinLevel(s string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelWarn
+	}
 }
 
 // NewWithSentry creates a logger that sends logs to both stdout and Sentry.
@@ -41,10 +59,12 @@ func NewWithSentry(cfg SentryConfig, extractors ...ContextExtractor) *slog.Logge
 		return slog.New(NewLogHandlerDecorator(stdoutHandler, extractors...))
 	}
 
+	minLevel := parseMinLevel(cfg.MinLevel)
+
 	// Determine which levels to send to Sentry
 	eventLevel := []slog.Level{slog.LevelError}
 	logLevel := []slog.Level{slog.LevelWarn, slog.LevelError}
-	if cfg.MinLevel == slog.LevelError {
+	if minLevel == slog.LevelError {
 		logLevel = []slog.Level{slog.LevelError}
 	}
 
