@@ -7,6 +7,7 @@ import (
 )
 
 // DefaultStackSize is the default maximum stack trace size in bytes.
+// Stack traces are truncated to prevent memory exhaustion from large call stacks.
 const DefaultStackSize = 4096
 
 // RecoverConfig configures the recover middleware.
@@ -49,7 +50,6 @@ func Recover(opts ...RecoverOption) internal.Middleware {
 			defer func() {
 				if r := recover(); r != nil {
 					var stack []byte
-					// Allocate buffer only if stack traces are enabled to avoid unnecessary memory allocation
 					if !cfg.DisablePrintStack {
 						stack = make([]byte, cfg.StackSize)
 						n := runtime.Stack(stack, false)

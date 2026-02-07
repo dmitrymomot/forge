@@ -55,7 +55,7 @@ func loadDir(i *I18n, fsys fs.FS, ext string, unmarshal func([]byte, any) error)
 
 		fileExt := strings.ToLower(path.Ext(filePath))
 
-		// For YAML, accept both .yaml and .yml
+		// Case-insensitive comparison handles both .YAML and .yaml extensions across different systems
 		var matches bool
 		if ext == ".yaml" {
 			matches = fileExt == ".yaml" || fileExt == ".yml"

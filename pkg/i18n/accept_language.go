@@ -8,6 +8,7 @@ import (
 )
 
 // maxAcceptLanguageLength prevents DoS attacks through oversized Accept-Language headers.
+// 4096 bytes prevents algorithmic complexity attacks with maliciously long Accept-Language headers.
 const maxAcceptLanguageLength = 4096
 
 // languageTag represents a parsed language tag with quality value.
@@ -20,6 +21,9 @@ type languageTag struct {
 // applicable language from the available languages list.
 // It supports quality values (q=0.9) and will match the highest quality
 // available language. If no match is found, returns the first available language.
+//
+// The function handles partial matching (e.g., "en" matches "en-US") to be forgiving
+// of client implementation variations and support language fallback chains.
 //
 // Example header: "en-US,en;q=0.9,pl;q=0.8"
 // Available: ["pl", "en", "de"]
