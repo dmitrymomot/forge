@@ -13,6 +13,13 @@ This document outlines planned features for the Forge framework.
 - `HTTPError` — structured error type with title, detail, error code, request ID
 - Error handling helpers (`NewHTTPError`, `BadRequest`, `NotFound`, etc.)
 - Pre-defined error responses (`ErrForbidden`, `ErrUnauthorized`, etc.)
+- `Context.UserID()` — session user ID shortcut (empty string if unauthenticated)
+- `Context.IsAuthenticated()` — checks session exists with user ID
+- `Context.IsCurrentUser(id)` — compares `UserID()` to a given ID
+- `Context.Can(permission)` — checks if current user's role has the permission (lazy role extraction, cached per request)
+- `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
+- `Param[T](ctx, name)`, `Query[T](ctx, name)`, `QueryDefault[T](ctx, name, default)` — type-safe generic helpers for route params and query values
+- `Context` implements `context.Context` — pass Forge context directly to stdlib functions without `.Context()` unwrapping
 
 ### Middlewares (`middlewares/`)
 
@@ -48,16 +55,6 @@ This document outlines planned features for the Forge framework.
 ---
 
 ## Planned
-
-### Core Framework
-
-- `Context.UserID()` — session user ID shortcut (empty string if unauthenticated)
-- `Context.IsAuthenticated()` — checks session exists with user ID
-- `Context.IsCurrentUser(id)` — compares `UserID()` to a given ID
-- `Context.Can(permission)` — checks if current user's role has the permission (lazy role extraction, cached per request)
-- `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
-- `Param[T](ctx, name)`, `Query[T](ctx, name)`, `QueryDefault[T](ctx, name, default)` — type-safe generic helpers for route params and query values
-- `Context` implements `context.Context` — pass Forge context directly to stdlib functions without `.Context()` unwrapping
 
 ### Utility Packages (`pkg/`)
 
