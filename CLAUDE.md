@@ -12,10 +12,16 @@ Forge is a Go framework for building B2B micro-SaaS applications. It provides im
 
 ```bash
 make test               # Run tests with race detection and coverage
+make bench              # Run benchmarks with memory allocation stats
 make lint               # Run all linters (vet, golangci-lint, nilaway, betteralign, modernize)
 make fmt                # Format code and organize imports
 make test-integration   # Run integration tests (starts docker, runs tests, stops docker)
 ```
+
+## Prerequisites
+
+- Go 1.25+
+- Docker (for integration tests — postgres, redis, mailpit, rustfs via docker-compose)
 
 ## Architecture
 
@@ -23,6 +29,7 @@ make test-integration   # Run integration tests (starts docker, runs tests, stop
 forge/
 ├── forge.go      # Public API (re-exports internal types)
 ├── internal/     # Core framework types (App, Context, Router, Handler)
+├── middlewares/  # Standard middlewares (cors, recover, requestid, timeout, i18n, jwt)
 ├── pkg/          # Importable utility packages (see pkg/ for full list)
 └── examples/     # Usage examples
 ```
@@ -45,6 +52,7 @@ forge/
 - **Handlers:** Implement `Routes(Router)`, receive dependencies via constructor
 - **Tasks:** River with type-safe payloads, cron syntax for scheduled tasks
 - **Config:** Use `env` tags (caarlos0/env) with `envPrefix` for composable configs
+- **Initialize-once fields:** Use `sync.Once` for lazy-initialized, write-once fields (e.g., `roleOnce`, `sessionHookOnce` in `requestContext`)
 
 ## Testing
 
@@ -63,7 +71,7 @@ go test -v -run TestName ./...    # Run tests matching pattern
 
 ## Gotchas
 
-- **requestContext is single-goroutine:** `internal.requestContext` is NOT goroutine-safe (e.g., `Can()` caches role without synchronization). Don't spawn goroutines calling Context methods in tests.
+- **requestContext session fields are single-goroutine:** `internal.requestContext` session methods (`Session()`, `InitSession()`, `DestroySession()`) are NOT goroutine-safe. Don't spawn goroutines calling these methods.
 - **panic(nil) in Go 1.21+:** `recover()` returns `*runtime.PanicNilError`, not nil. Account for this in panic recovery tests.
 - **Loop variables (Go 1.22+):** No need for `v := v` captures in closures; remove if found during review
 - **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
