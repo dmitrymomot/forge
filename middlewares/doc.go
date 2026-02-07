@@ -134,14 +134,45 @@
 //	    ),
 //	)
 //
+// # RBAC
+//
+// RBAC middlewares gate route groups by authentication status and permissions.
+// They use the existing Context.IsAuthenticated() and Context.Can() methods,
+// so RBAC must be configured with forge.WithRoles() for permission checks.
+//
+// RequireAuthenticated rejects unauthenticated requests with 401:
+//
+//	r.Group(func(r forge.Router) {
+//	    r.Use(middlewares.RequireAuthenticated())
+//	    r.GET("/dashboard", h.dashboard)
+//	})
+//
+// RequirePermission requires ALL listed permissions (AND logic).
+// Returns 401 if unauthenticated, 403 if missing any permission:
+//
+//	r.Group(func(r forge.Router) {
+//	    r.Use(middlewares.RequirePermission("billing.read", "billing.write"))
+//	    r.GET("/billing", h.billing)
+//	})
+//
+// RequireAnyPermission requires at least ONE permission (OR logic).
+// Returns 401 if unauthenticated, 403 if none match:
+//
+//	r.Group(func(r forge.Router) {
+//	    r.Use(middlewares.RequireAnyPermission("users.read", "users.admin"))
+//	    r.GET("/users", h.listUsers)
+//	})
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:
 //
 //	forge.WithMiddleware(
-//	    middlewares.CORS(),       // First: handle preflight before other processing
-//	    middlewares.RequestID(),  // Second: assign ID for all subsequent logging
-//	    middlewares.Recover(),    // Third: catch panics from handlers
+//	    middlewares.CORS(),                // First: handle preflight before other processing
+//	    middlewares.RequestID(),           // Second: assign ID for all subsequent logging
+//	    middlewares.Recover(),             // Third: catch panics from handlers
+//	    // middlewares.RequireAuthenticated(), // Fourth: auth gate (on protected groups)
+//	    // middlewares.RequirePermission(...), // Fifth: permission gate (on protected groups)
 //	)
 //
 // # Complete Example
