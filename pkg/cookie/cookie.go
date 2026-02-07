@@ -23,6 +23,16 @@ var (
 	ErrDecrypt   = errors.New("cookie: decryption failed")
 )
 
+// Config configures the cookie Manager.
+type Config struct {
+	Secret   string `env:"SECRET"`
+	Domain   string `env:"DOMAIN"`
+	Path     string `env:"PATH"      envDefault:"/"`
+	SameSite string `env:"SAME_SITE" envDefault:"lax"`
+	Secure   bool   `env:"SECURE"    envDefault:"false"`
+	HTTPOnly bool   `env:"HTTP_ONLY" envDefault:"true"`
+}
+
 // Manager handles cookie operations.
 type Manager struct {
 	domain   string
@@ -33,64 +43,44 @@ type Manager struct {
 	httpOnly bool
 }
 
-// Option configures the Manager.
-type Option func(*Manager)
+// New creates a cookie Manager with the given config.
+// Returns ErrBadSecret if Secret is non-empty but shorter than 32 bytes.
+func New(cfg Config) (*Manager, error) {
+	if cfg.Path == "" {
+		cfg.Path = "/"
+	}
 
-// New creates a cookie Manager with the given options.
-func New(opts ...Option) *Manager {
+	sameSite := parseSameSite(cfg.SameSite)
+
 	m := &Manager{
-		path:     "/",
-		httpOnly: true,
-		sameSite: http.SameSiteLaxMode,
+		domain:   cfg.Domain,
+		path:     cfg.Path,
+		sameSite: sameSite,
+		secure:   cfg.Secure,
+		httpOnly: cfg.HTTPOnly,
 	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
 
-// WithSecret sets the secret for signing and encryption.
-// Must be at least 32 bytes.
-func WithSecret(secret string) Option {
-	return func(m *Manager) {
-		if len(secret) >= 32 {
-			m.secret = []byte(secret)
+	if cfg.Secret != "" {
+		if len(cfg.Secret) < 32 {
+			return nil, ErrBadSecret
 		}
+		m.secret = []byte(cfg.Secret)
 	}
+
+	return m, nil
 }
 
-// WithDomain sets the cookie domain.
-func WithDomain(domain string) Option {
-	return func(m *Manager) {
-		m.domain = domain
-	}
-}
-
-// WithPath sets the cookie path.
-func WithPath(path string) Option {
-	return func(m *Manager) {
-		m.path = path
-	}
-}
-
-// WithSecure sets the Secure flag.
-func WithSecure(secure bool) Option {
-	return func(m *Manager) {
-		m.secure = secure
-	}
-}
-
-// WithHTTPOnly sets the HttpOnly flag.
-func WithHTTPOnly(httpOnly bool) Option {
-	return func(m *Manager) {
-		m.httpOnly = httpOnly
-	}
-}
-
-// WithSameSite sets the SameSite attribute.
-func WithSameSite(ss http.SameSite) Option {
-	return func(m *Manager) {
-		m.sameSite = ss
+// parseSameSite converts a string to http.SameSite.
+func parseSameSite(s string) http.SameSite {
+	switch strings.ToLower(s) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	case "lax":
+		return http.SameSiteLaxMode
+	default:
+		return http.SameSiteLaxMode
 	}
 }
 

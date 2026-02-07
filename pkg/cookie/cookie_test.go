@@ -12,28 +12,50 @@ import (
 const testSecret = "this-is-a-32-byte-or-longer-key!"
 
 func TestNew(t *testing.T) {
-	m := cookie.New()
+	m, err := cookie.New(cookie.Config{})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
 	if m == nil {
 		t.Fatal("New() returned nil")
 	}
 }
 
-func TestNewWithOptions(t *testing.T) {
-	m := cookie.New(
-		cookie.WithSecret(testSecret),
-		cookie.WithDomain("example.com"),
-		cookie.WithPath("/app"),
-		cookie.WithSecure(true),
-		cookie.WithHTTPOnly(true),
-		cookie.WithSameSite(http.SameSiteStrictMode),
-	)
+func TestNewWithConfig(t *testing.T) {
+	m, err := cookie.New(cookie.Config{
+		Secret:   testSecret,
+		Domain:   "example.com",
+		Path:     "/app",
+		Secure:   true,
+		HTTPOnly: true,
+		SameSite: "strict",
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
 	if m == nil {
 		t.Fatal("New() returned nil")
 	}
+}
+
+func TestNewBadSecret(t *testing.T) {
+	_, err := cookie.New(cookie.Config{Secret: "short"})
+	if !errors.Is(err, cookie.ErrBadSecret) {
+		t.Errorf("New() error = %v, want ErrBadSecret", err)
+	}
+}
+
+func mustNew(t *testing.T, cfg cookie.Config) *cookie.Manager {
+	t.Helper()
+	m, err := cookie.New(cfg)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	return m
 }
 
 func TestPlainCookies(t *testing.T) {
-	m := cookie.New()
+	m := mustNew(t, cookie.Config{})
 
 	t.Run("get non-existent cookie", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -94,7 +116,7 @@ func TestPlainCookies(t *testing.T) {
 
 func TestSignedCookies(t *testing.T) {
 	t.Run("no secret returns error", func(t *testing.T) {
-		m := cookie.New() // no secret
+		m := mustNew(t, cookie.Config{}) // no secret
 		w := httptest.NewRecorder()
 
 		err := m.SetSigned(w, "session", "data", 3600)
@@ -109,18 +131,15 @@ func TestSignedCookies(t *testing.T) {
 		}
 	})
 
-	t.Run("short secret is ignored", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret("short")) // less than 32 bytes
-		w := httptest.NewRecorder()
-
-		err := m.SetSigned(w, "session", "data", 3600)
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("SetSigned() error = %v, want ErrNoSecret", err)
+	t.Run("short secret returns error on New", func(t *testing.T) {
+		_, err := cookie.New(cookie.Config{Secret: "short"}) // less than 32 bytes
+		if !errors.Is(err, cookie.ErrBadSecret) {
+			t.Errorf("New() error = %v, want ErrBadSecret", err)
 		}
 	})
 
 	t.Run("set and get signed cookie", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
 		if err := m.SetSigned(w, "session", "user123", 3600); err != nil {
@@ -147,7 +166,7 @@ func TestSignedCookies(t *testing.T) {
 	})
 
 	t.Run("tampered cookie fails", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
 		_ = m.SetSigned(w, "session", "user123", 3600)
@@ -168,7 +187,7 @@ func TestSignedCookies(t *testing.T) {
 	})
 
 	t.Run("missing cookie returns not found", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		_, err := m.GetSigned(r, "missing")
@@ -180,7 +199,7 @@ func TestSignedCookies(t *testing.T) {
 
 func TestEncryptedCookies(t *testing.T) {
 	t.Run("no secret returns error", func(t *testing.T) {
-		m := cookie.New() // no secret
+		m := mustNew(t, cookie.Config{}) // no secret
 		w := httptest.NewRecorder()
 
 		err := m.SetEncrypted(w, "data", "secret", 3600)
@@ -196,7 +215,7 @@ func TestEncryptedCookies(t *testing.T) {
 	})
 
 	t.Run("set and get encrypted cookie", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
 		if err := m.SetEncrypted(w, "secret", "confidential", 3600); err != nil {
@@ -228,7 +247,7 @@ func TestEncryptedCookies(t *testing.T) {
 	})
 
 	t.Run("tampered cookie fails", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
 		_ = m.SetEncrypted(w, "secret", "confidential", 3600)
@@ -249,7 +268,7 @@ func TestEncryptedCookies(t *testing.T) {
 	})
 
 	t.Run("missing cookie returns not found", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		_, err := m.GetEncrypted(r, "missing")
@@ -261,7 +280,7 @@ func TestEncryptedCookies(t *testing.T) {
 
 func TestFlash(t *testing.T) {
 	t.Run("no secret returns error", func(t *testing.T) {
-		m := cookie.New()
+		m := mustNew(t, cookie.Config{})
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -278,7 +297,7 @@ func TestFlash(t *testing.T) {
 	})
 
 	t.Run("set and get flash", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		// Set flash
 		w := httptest.NewRecorder()
@@ -325,7 +344,7 @@ func TestFlash(t *testing.T) {
 	})
 
 	t.Run("missing flash returns not found", func(t *testing.T) {
-		m := cookie.New(cookie.WithSecret(testSecret))
+		m := mustNew(t, cookie.Config{Secret: testSecret})
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -338,14 +357,14 @@ func TestFlash(t *testing.T) {
 }
 
 func TestCookieAttributes(t *testing.T) {
-	m := cookie.New(
-		cookie.WithSecret(testSecret),
-		cookie.WithDomain("example.com"),
-		cookie.WithPath("/app"),
-		cookie.WithSecure(true),
-		cookie.WithHTTPOnly(true),
-		cookie.WithSameSite(http.SameSiteStrictMode),
-	)
+	m := mustNew(t, cookie.Config{
+		Secret:   testSecret,
+		Domain:   "example.com",
+		Path:     "/app",
+		Secure:   true,
+		HTTPOnly: true,
+		SameSite: "strict",
+	})
 
 	w := httptest.NewRecorder()
 	m.Set(w, "test", "value", 3600)
@@ -371,7 +390,7 @@ func TestCookieAttributes(t *testing.T) {
 }
 
 func TestDefaultAttributes(t *testing.T) {
-	m := cookie.New()
+	m := mustNew(t, cookie.Config{})
 
 	w := httptest.NewRecorder()
 	m.Set(w, "test", "value", 3600)
@@ -382,8 +401,8 @@ func TestDefaultAttributes(t *testing.T) {
 	if c.Path != "/" {
 		t.Errorf("default Path = %q, want %q", c.Path, "/")
 	}
-	if !c.HttpOnly {
-		t.Error("default HttpOnly = false, want true")
+	if c.HttpOnly {
+		t.Error("default HttpOnly = true, want false (zero value)")
 	}
 	if c.SameSite != http.SameSiteLaxMode {
 		t.Errorf("default SameSite = %v, want %v", c.SameSite, http.SameSiteLaxMode)

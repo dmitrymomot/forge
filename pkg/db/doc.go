@@ -28,7 +28,7 @@
 //
 // # Usage
 //
-// Basic connection setup with functional options:
+// Basic connection setup with Config:
 //
 //	import (
 //		"context"
@@ -41,10 +41,11 @@
 //	func main() {
 //		ctx := context.Background()
 //
-//		pool, err := db.Open(ctx, os.Getenv("DATABASE_CONN_URL"),
-//			db.WithMaxConns(10),
-//			db.WithMinConns(5),
-//		)
+//		pool, err := db.Open(ctx, db.Config{
+//			URL:      os.Getenv("DATABASE_CONN_URL"),
+//			MaxConns: 10,
+//			MinConns: 5,
+//		})
 //		if err != nil {
 //			log.Fatal(err)
 //		}
