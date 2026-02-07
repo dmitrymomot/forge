@@ -37,10 +37,10 @@
 //
 // Create an application with New() and configure it using options:
 //
-//	app := internal.New(
+//	app := internal.New(internal.AppConfig{},
 //	    internal.WithHandlers(authHandler, pageHandler),
 //	    internal.WithMiddleware(loggingMiddleware, panicMiddleware),
-//	    internal.WithHealthChecks(internal.WithReadinessCheck("db", dbCheck)),
+//	    internal.WithHealthChecks(internal.HealthCheck("db", dbCheck)),
 //	)
 //
 // # Handler Pattern
@@ -88,7 +88,7 @@
 // extractor function. The role extractor is called lazily on the first Can()
 // call and the result is cached for the lifetime of the request:
 //
-//	app := internal.New(
+//	app := internal.New(internal.AppConfig{},
 //	    internal.WithRoles(
 //	        internal.RolePermissions{
 //	            "admin":  {"users.read", "users.write", "billing.manage"},
@@ -168,13 +168,12 @@
 // Start the server with Run() or use Run() for multi-domain deployments:
 //
 //	// Single app
-//	err := app.Run(":8080", internal.Logger(log))
+//	err := app.Run(internal.RunConfig{Address: ":8080"}, internal.WithLogger(log))
 //
 //	// Multi-domain
-//	err := internal.Run(
-//	    internal.Domain("api.example.com", apiApp),
-//	    internal.Domain("*.example.com", tenantApp),
-//	    internal.Address(":8080"),
+//	err := internal.Run(internal.RunConfig{Address: ":8080"},
+//	    internal.WithDomain("api.example.com", apiApp),
+//	    internal.WithDomain("*.example.com", tenantApp),
 //	)
 //
 // # Features
