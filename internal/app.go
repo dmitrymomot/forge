@@ -22,27 +22,44 @@ const (
 	defaultShutdownTimeout   = 30 * time.Second
 )
 
+// AppConfig holds externally configurable application settings.
+type AppConfig struct {
+	BaseDomain     string        `env:"BASE_DOMAIN"`
+	RequestTimeout time.Duration `env:"REQUEST_TIMEOUT"`
+}
+
+// HealthCheckOption adds a readiness check to the health configuration.
+type HealthCheckOption func(healthChecks)
+
+// HealthCheck creates a named readiness check option.
+func HealthCheck(name string, fn CheckFunc) HealthCheckOption {
+	return func(checks healthChecks) {
+		checks[name] = fn
+	}
+}
+
 // App orchestrates the application lifecycle.
 // It manages HTTP routing, middleware, and graceful shutdown.
 // App is immutable after creation - all configuration is done via New().
 type App struct {
 	router                  chi.Router
+	storage                 storage.Storage
 	errorHandler            ErrorHandler
 	notFoundHandler         HandlerFunc
 	methodNotAllowedHandler HandlerFunc
+	roleExtractor           RoleExtractorFunc
+	rolePermissions         RolePermissions
 	healthConfig            *healthConfig
 	logger                  *slog.Logger
 	cookieManager           *cookie.Manager
 	sessionManager          *SessionManager
 	jobEnqueuer             *JobEnqueuer
 	jobWorker               *JobManager
-	storage                 storage.Storage
-	rolePermissions         RolePermissions
-	roleExtractor           RoleExtractorFunc
 	baseDomain              string
 	middlewares             []Middleware
 	handlers                []Handler
 	staticRoutes            []staticRoute
+	requestTimeout          time.Duration
 }
 
 // staticRoute represents a static file handler mount point.
@@ -51,23 +68,16 @@ type staticRoute struct {
 	pattern string
 }
 
-// New creates a new application with the given options.
+// New creates a new application with the given config and options.
 // The App is immutable after creation.
-//
-// Example:
-//
-//	app := forge.New(
-//	    forge.WithMiddleware(middlewares.Logger(log)),
-//	    forge.WithHandlers(
-//	        handlers.NewAuth(repo),
-//	        handlers.NewPages(repo),
-//	    ),
-//	)
-func New(opts ...Option) *App {
+func New(cfg AppConfig, opts ...Option) *App {
+	cm, _ := cookie.New(cookie.Config{})
 	a := &App{
-		router:        chi.NewRouter(),
-		logger:        logger.NewNope(), // Default: noop logger (before options)
-		cookieManager: cookie.New(),     // Default: cookie manager (no secret)
+		router:         chi.NewRouter(),
+		logger:         logger.NewNope(),
+		cookieManager:  cm,
+		baseDomain:     cfg.BaseDomain,
+		requestTimeout: cfg.RequestTimeout,
 	}
 
 	for _, opt := range opts {
@@ -99,18 +109,11 @@ func (a *App) JobWorker() *JobManager {
 // This is a convenience method for the common single-app case.
 // If job workers are configured, they start automatically before serving
 // requests and stop gracefully during shutdown.
-//
-// Example:
-//
-//	app := forge.New(
-//	    forge.WithHandlers(handlers.NewLandingHandler()),
-//	)
-//	err := app.Run(":8080", forge.Logger(slog))
-func (a *App) Run(addr string, opts ...RunOption) error {
-	cfg := buildRunConfig(opts...)
+func (a *App) Run(cfg RunConfig, opts ...RunOption) error {
+	rc := buildRunConfig(cfg, opts...)
 
-	startupHooks := cfg.startupHooks
-	shutdownHooks := cfg.shutdownHooks
+	startupHooks := rc.startupHooks
+	shutdownHooks := rc.shutdownHooks
 
 	// Auto-register worker hooks if configured
 	if a.jobWorker != nil {
@@ -120,12 +123,12 @@ func (a *App) Run(addr string, opts ...RunOption) error {
 
 	return runServer(runtimeConfig{
 		handler:         a.router,
-		address:         addr,
-		logger:          cfg.logger,
-		shutdownTimeout: cfg.shutdownTimeout,
+		address:         rc.address,
+		logger:          rc.logger,
+		shutdownTimeout: rc.shutdownTimeout,
 		startupHooks:    startupHooks,
 		shutdownHooks:   shutdownHooks,
-		baseCtx:         cfg.baseCtx,
+		baseCtx:         rc.baseCtx,
 	})
 }
 
@@ -136,6 +139,19 @@ func (a *App) setupRoutes() {
 	}
 	if a.methodNotAllowedHandler != nil {
 		a.router.MethodNotAllowed(a.wrapHandler(a.methodNotAllowedHandler))
+	}
+
+	// Apply request deadline before all other middleware.
+	// Operations using the context (DB queries, HTTP clients) unblock
+	// on deadline and return context.DeadlineExceeded naturally.
+	if a.requestTimeout > 0 {
+		a.router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx, cancel := context.WithTimeout(r.Context(), a.requestTimeout)
+				defer cancel()
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
+		})
 	}
 
 	// Apply global middleware
@@ -180,55 +196,16 @@ func (a *App) handleError(c Context, err error) {
 	} else {
 		http.Error(c.Response(), "Internal Server Error", http.StatusInternalServerError)
 	}
+	// Seal the writer to prevent any concurrent or deferred writes
+	// from corrupting the response after the error has been written.
+	if rw := c.ResponseWriter(); rw != nil {
+		rw.Seal()
+	}
 }
 
-// healthConfig holds health check endpoint configuration.
+// healthConfig holds health check endpoint configuration (internal).
 type healthConfig struct {
 	checks        healthChecks
 	livenessPath  string
 	readinessPath string
-}
-
-// Default health check paths.
-const (
-	defaultLivenessPath  = "/health/live"
-	defaultReadinessPath = "/health/ready"
-)
-
-// HealthOption configures health check endpoints.
-type HealthOption func(*healthConfig)
-
-// WithLivenessPath sets a custom liveness endpoint path.
-// Defaults to "/health/live".
-func WithLivenessPath(path string) HealthOption {
-	return func(c *healthConfig) {
-		if path != "" {
-			c.livenessPath = path
-		}
-	}
-}
-
-// WithReadinessPath sets a custom readiness endpoint path.
-// Defaults to "/health/ready".
-func WithReadinessPath(path string) HealthOption {
-	return func(c *healthConfig) {
-		if path != "" {
-			c.readinessPath = path
-		}
-	}
-}
-
-// WithReadinessCheck adds a named readiness check.
-// Checks run in parallel during readiness probe.
-//
-// Example:
-//
-//	forge.WithReadinessCheck("db", db.Healthcheck(pool))
-func WithReadinessCheck(name string, fn CheckFunc) HealthOption {
-	return func(c *healthConfig) {
-		if c.checks == nil {
-			c.checks = make(healthChecks)
-		}
-		c.checks[name] = fn
-	}
 }
