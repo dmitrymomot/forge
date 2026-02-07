@@ -113,8 +113,16 @@
 //	    // proceed with deletion...
 //	}
 //
-// Can() returns false if RBAC is not configured, the user has no role, or
-// the role does not grant the requested permission. It never panics.
+// Retrieve the resolved role with Role():
+//
+//	func (h *Handler) dashboard(c internal.Context) error {
+//	    role := c.Role() // e.g. "admin", "viewer", ""
+//	    // ...
+//	}
+//
+// Can() and Role() return safe defaults if RBAC is not configured (false and
+// empty string respectively). Both share the same lazy extraction and
+// per-request caching — the role extractor is called at most once.
 //
 // # Request Handling
 //
