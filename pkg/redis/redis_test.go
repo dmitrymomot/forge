@@ -18,7 +18,7 @@ func TestOpen_Validation(t *testing.T) {
 	t.Run("empty URL returns ErrEmptyConnectionURL", func(t *testing.T) {
 		t.Parallel()
 
-		client, err := Open(ctx, "")
+		client, err := Open(ctx, Config{})
 		require.Error(t, err)
 		require.Nil(t, client)
 		require.True(t, errors.Is(err, ErrEmptyConnectionURL))
@@ -53,7 +53,7 @@ func TestOpen_Validation(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				client, err := Open(ctx, tc.url)
+				client, err := Open(ctx, Config{URL: tc.url})
 				require.Error(t, err)
 				require.Nil(t, client)
 				require.True(t, errors.Is(err, ErrFailedToParseURL))
@@ -82,7 +82,7 @@ func TestOpen_Validation(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				client, err := Open(ctx, tc.url)
+				client, err := Open(ctx, Config{URL: tc.url})
 				require.Error(t, err)
 				require.Nil(t, client)
 				require.True(t, errors.Is(err, ErrFailedToParseURL))
@@ -185,101 +185,51 @@ func TestWait_ContextCancellation(t *testing.T) {
 	})
 }
 
-func TestOptions(t *testing.T) {
+func TestConfig_ApplyDefaults(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default options", func(t *testing.T) {
+	t.Run("zero value config gets defaults", func(t *testing.T) {
 		t.Parallel()
 
-		opts := defaultOptions()
-		require.Equal(t, 10, opts.poolSize)
-		require.Equal(t, 5, opts.minIdleConns)
-		require.Equal(t, 10*time.Minute, opts.maxIdleTime)
-		require.Equal(t, 30*time.Minute, opts.maxActiveTime)
-		require.Equal(t, 3, opts.retryAttempts)
-		require.Equal(t, 5*time.Second, opts.retryInterval)
-		require.Equal(t, 3*time.Second, opts.readTimeout)
-		require.Equal(t, 3*time.Second, opts.writeTimeout)
-		require.Equal(t, 5*time.Second, opts.dialTimeout)
+		cfg := Config{URL: "redis://localhost:6379"}
+		cfg.applyDefaults()
+		require.Equal(t, 10, cfg.PoolSize)
+		require.Equal(t, 5, cfg.MinIdleConns)
+		require.Equal(t, 10*time.Minute, cfg.MaxIdleTime)
+		require.Equal(t, 30*time.Minute, cfg.MaxActiveTime)
+		require.Equal(t, 3, cfg.RetryAttempts)
+		require.Equal(t, 5*time.Second, cfg.RetryInterval)
+		require.Equal(t, 3*time.Second, cfg.ReadTimeout)
+		require.Equal(t, 3*time.Second, cfg.WriteTimeout)
+		require.Equal(t, 5*time.Second, cfg.DialTimeout)
 	})
 
-	t.Run("WithPoolSize sets pool size", func(t *testing.T) {
+	t.Run("explicit values are preserved", func(t *testing.T) {
 		t.Parallel()
 
-		opts := defaultOptions()
-		WithPoolSize(25)(opts)
-		require.Equal(t, 25, opts.poolSize)
-	})
+		cfg := Config{
+			URL:           "redis://localhost:6379",
+			PoolSize:      25,
+			MinIdleConns:  10,
+			MaxIdleTime:   15 * time.Minute,
+			MaxActiveTime: 45 * time.Minute,
+			RetryAttempts: 5,
+			RetryInterval: 10 * time.Second,
+			ReadTimeout:   7 * time.Second,
+			WriteTimeout:  8 * time.Second,
+			DialTimeout:   10 * time.Second,
+		}
+		cfg.applyDefaults()
 
-	t.Run("WithMinIdleConns sets min idle connections", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithMinIdleConns(10)(opts)
-		require.Equal(t, 10, opts.minIdleConns)
-	})
-
-	t.Run("WithMaxIdleTime sets max idle time", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithMaxIdleTime(15 * time.Minute)(opts)
-		require.Equal(t, 15*time.Minute, opts.maxIdleTime)
-	})
-
-	t.Run("WithMaxActiveTime sets max active time", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithMaxActiveTime(45 * time.Minute)(opts)
-		require.Equal(t, 45*time.Minute, opts.maxActiveTime)
-	})
-
-	t.Run("WithRetry sets retry attempts and interval", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithRetry(5, 10*time.Second)(opts)
-		require.Equal(t, 5, opts.retryAttempts)
-		require.Equal(t, 10*time.Second, opts.retryInterval)
-	})
-
-	t.Run("WithReadTimeout sets read timeout", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithReadTimeout(7 * time.Second)(opts)
-		require.Equal(t, 7*time.Second, opts.readTimeout)
-	})
-
-	t.Run("WithWriteTimeout sets write timeout", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithWriteTimeout(8 * time.Second)(opts)
-		require.Equal(t, 8*time.Second, opts.writeTimeout)
-	})
-
-	t.Run("WithDialTimeout sets dial timeout", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithDialTimeout(10 * time.Second)(opts)
-		require.Equal(t, 10*time.Second, opts.dialTimeout)
-	})
-
-	t.Run("multiple options applied in order", func(t *testing.T) {
-		t.Parallel()
-
-		opts := defaultOptions()
-		WithPoolSize(20)(opts)
-		WithMinIdleConns(8)(opts)
-		WithRetry(7, 2*time.Second)(opts)
-
-		require.Equal(t, 20, opts.poolSize)
-		require.Equal(t, 8, opts.minIdleConns)
-		require.Equal(t, 7, opts.retryAttempts)
-		require.Equal(t, 2*time.Second, opts.retryInterval)
+		require.Equal(t, 25, cfg.PoolSize)
+		require.Equal(t, 10, cfg.MinIdleConns)
+		require.Equal(t, 15*time.Minute, cfg.MaxIdleTime)
+		require.Equal(t, 45*time.Minute, cfg.MaxActiveTime)
+		require.Equal(t, 5, cfg.RetryAttempts)
+		require.Equal(t, 10*time.Second, cfg.RetryInterval)
+		require.Equal(t, 7*time.Second, cfg.ReadTimeout)
+		require.Equal(t, 8*time.Second, cfg.WriteTimeout)
+		require.Equal(t, 10*time.Second, cfg.DialTimeout)
 	})
 }
 

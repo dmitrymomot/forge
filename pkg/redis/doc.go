@@ -13,20 +13,22 @@
 //
 // # Configuration
 //
-// All settings are configured via functional options:
+// All settings are configured via the Config struct:
 //
-//   - WithPoolSize(n int) — Maximum number of connections (default: 10)
-//   - WithMinIdleConns(n int) — Minimum idle connections (default: 5)
-//   - WithMaxIdleTime(d time.Duration) — Maximum connection idle time (default: 10m)
-//   - WithMaxActiveTime(d time.Duration) — Maximum connection lifetime (default: 30m)
-//   - WithRetry(attempts int, interval time.Duration) — Retry attempts and base interval (default: 3 attempts, 5s)
-//   - WithReadTimeout(d time.Duration) — Read operation timeout (default: 3s)
-//   - WithWriteTimeout(d time.Duration) — Write operation timeout (default: 3s)
-//   - WithDialTimeout(d time.Duration) — Connection dial timeout (default: 5s)
+//   - URL — Redis connection URL (required)
+//   - PoolSize — Maximum number of connections (default: 10)
+//   - MinIdleConns — Minimum idle connections (default: 5)
+//   - MaxIdleTime — Maximum connection idle time (default: 10m)
+//   - MaxActiveTime — Maximum connection lifetime (default: 30m)
+//   - RetryAttempts — Retry attempts (default: 3)
+//   - RetryInterval — Retry base interval (default: 5s)
+//   - ReadTimeout — Read operation timeout (default: 3s)
+//   - WriteTimeout — Write operation timeout (default: 3s)
+//   - DialTimeout — Connection dial timeout (default: 5s)
 //
 // # Usage
 //
-// Basic connection setup with functional options:
+// Basic connection setup with Config:
 //
 //	import (
 //		"context"
@@ -39,10 +41,10 @@
 //	func main() {
 //		ctx := context.Background()
 //
-//		client, err := redis.Open(ctx, os.Getenv("REDIS_URL"),
-//			redis.WithPoolSize(20),
-//			redis.WithMinIdleConns(5),
-//		)
+//		client, err := redis.Open(ctx, redis.Config{
+//			URL:      os.Getenv("REDIS_URL"),
+//			PoolSize: 20,
+//		})
 //		if err != nil {
 //			log.Fatal(err)
 //		}
@@ -80,7 +82,7 @@
 //		"github.com/dmitrymomot/forge/pkg/redis"
 //	)
 //
-//	client := redis.MustOpen(ctx, redisURL)
+//	client := redis.MustOpen(ctx, redis.Config{URL: redisURL})
 //	app := forge.New(
 //		forge.WithShutdownHook(redis.Shutdown(client)),
 //	)

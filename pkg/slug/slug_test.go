@@ -64,38 +64,38 @@ func TestMake(t *testing.T) {
 		{
 			name:     "mixed case with lowercase false",
 			input:    "Hello World",
-			opts:     []slug.Option{slug.Lowercase(false)},
+			opts:     []slug.Option{slug.WithLowercase(false)},
 			expected: "Hello-World",
 		},
 		{
 			name:     "custom separator",
 			input:    "Hello World",
-			opts:     []slug.Option{slug.Separator("_")},
+			opts:     []slug.Option{slug.WithSeparator("_")},
 			expected: "hello_world",
 		},
 		{
 			name:     "max length",
 			input:    "This is a very long title that should be truncated",
-			opts:     []slug.Option{slug.MaxLength(20)},
+			opts:     []slug.Option{slug.WithMaxLength(20)},
 			expected: "this-is-a-very-long",
 		},
 		{
 			name:     "max length with separator",
 			input:    "Cut off cleanly",
-			opts:     []slug.Option{slug.MaxLength(7)},
+			opts:     []slug.Option{slug.WithMaxLength(7)},
 			expected: "cut-off",
 		},
 		{
 			name:     "strip specific characters",
 			input:    "Remove (these) [chars]",
-			opts:     []slug.Option{slug.StripChars("()[]")},
+			opts:     []slug.Option{slug.WithStripChars("()[]")},
 			expected: "remove-these-chars",
 		},
 		{
 			name:  "custom replacements",
 			input: "Fish & Chips @ Home",
 			opts: []slug.Option{
-				slug.CustomReplace(map[string]string{
+				slug.WithCustomReplace(map[string]string{
 					"&": "and",
 					"@": "at",
 				}),
@@ -136,11 +136,11 @@ func TestMake(t *testing.T) {
 			name:  "all options combined",
 			input: "COMPLEX & Test @ 2024!!!",
 			opts: []slug.Option{
-				slug.Separator("_"),
-				slug.Lowercase(false),
-				slug.MaxLength(15),
-				slug.StripChars("!"),
-				slug.CustomReplace(map[string]string{
+				slug.WithSeparator("_"),
+				slug.WithLowercase(false),
+				slug.WithMaxLength(15),
+				slug.WithStripChars("!"),
+				slug.WithCustomReplace(map[string]string{
 					"&": "AND",
 					"@": "AT",
 				}),
@@ -195,19 +195,19 @@ func TestMake(t *testing.T) {
 		{
 			name:     "zero max length",
 			input:    "Should not truncate",
-			opts:     []slug.Option{slug.MaxLength(0)},
+			opts:     []slug.Option{slug.WithMaxLength(0)},
 			expected: "should-not-truncate",
 		},
 		{
 			name:     "empty separator",
 			input:    "No Separator",
-			opts:     []slug.Option{slug.Separator("")},
+			opts:     []slug.Option{slug.WithSeparator("")},
 			expected: "noseparator",
 		},
 		{
 			name:     "multi-character separator",
 			input:    "Multi Sep Test",
-			opts:     []slug.Option{slug.Separator("---")},
+			opts:     []slug.Option{slug.WithSeparator("---")},
 			expected: "multi---sep---test",
 		},
 	}
@@ -261,7 +261,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "basic reserved slug",
 			input: "admin",
-			opts:  []slug.Option{slug.ReservedSlugs("admin", "api", "login")},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin", "api", "login")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "admin", result)
 				assert.True(t, strings.HasPrefix(result, "admin-"))
@@ -273,7 +273,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "case-insensitive reserved slug (uppercase input)",
 			input: "ADMIN",
-			opts:  []slug.Option{slug.ReservedSlugs("admin")},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "admin", result)
 				assert.True(t, strings.HasPrefix(result, "admin-"))
@@ -282,7 +282,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "case-insensitive reserved slug (mixed case input)",
 			input: "AdMiN",
-			opts:  []slug.Option{slug.ReservedSlugs("admin")},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "admin", result)
 				assert.True(t, strings.HasPrefix(result, "admin-"))
@@ -291,7 +291,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug with uppercase output",
 			input: "ADMIN",
-			opts:  []slug.Option{slug.ReservedSlugs("admin"), slug.Lowercase(false)},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin"), slug.WithLowercase(false)},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "ADMIN", result)
 				assert.True(t, strings.HasPrefix(result, "ADMIN-"))
@@ -302,7 +302,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "non-reserved slug passes through",
 			input: "product",
-			opts:  []slug.Option{slug.ReservedSlugs("admin", "api", "login")},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin", "api", "login")},
 			validate: func(t *testing.T, result string) {
 				assert.Equal(t, "product", result)
 			},
@@ -310,7 +310,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug with custom separator",
 			input: "api",
-			opts:  []slug.Option{slug.ReservedSlugs("api"), slug.Separator("_")},
+			opts:  []slug.Option{slug.WithReservedSlugs("api"), slug.WithSeparator("_")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "api", result)
 				assert.True(t, strings.HasPrefix(result, "api_"))
@@ -321,7 +321,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug with explicit suffix",
 			input: "login",
-			opts:  []slug.Option{slug.ReservedSlugs("login"), slug.WithSuffix(8)},
+			opts:  []slug.Option{slug.WithReservedSlugs("login"), slug.WithSuffix(8)},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "login", result)
 				assert.True(t, strings.HasPrefix(result, "login-"))
@@ -333,7 +333,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug with max length",
 			input: "admin",
-			opts:  []slug.Option{slug.ReservedSlugs("admin"), slug.MaxLength(10)},
+			opts:  []slug.Option{slug.WithReservedSlugs("admin"), slug.WithMaxLength(10)},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "admin", result)
 				assert.LessOrEqual(t, len(result), 10)
@@ -347,7 +347,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug too long for max length",
 			input: "administrator",
-			opts:  []slug.Option{slug.ReservedSlugs("administrator"), slug.MaxLength(10)},
+			opts:  []slug.Option{slug.WithReservedSlugs("administrator"), slug.WithMaxLength(10)},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "administrator", result)
 				assert.LessOrEqual(t, len(result), 10)
@@ -356,7 +356,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "multiple reserved slugs",
 			input: "api endpoint",
-			opts:  []slug.Option{slug.ReservedSlugs("api-endpoint", "api", "endpoint")},
+			opts:  []slug.Option{slug.WithReservedSlugs("api-endpoint", "api", "endpoint")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "api-endpoint", result)
 				assert.True(t, strings.HasPrefix(result, "api-endpoint-"))
@@ -365,7 +365,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug from slice expansion",
 			input: "config",
-			opts:  []slug.Option{slug.ReservedSlugs([]string{"config", "system", "root"}...)},
+			opts:  []slug.Option{slug.WithReservedSlugs([]string{"config", "system", "root"}...)},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "config", result)
 				assert.True(t, strings.HasPrefix(result, "config-"))
@@ -374,7 +374,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "empty reserved slug list",
 			input: "admin",
-			opts:  []slug.Option{slug.ReservedSlugs()},
+			opts:  []slug.Option{slug.WithReservedSlugs()},
 			validate: func(t *testing.T, result string) {
 				assert.Equal(t, "admin", result)
 			},
@@ -382,7 +382,7 @@ func TestReservedSlugs(t *testing.T) {
 		{
 			name:  "reserved slug case variations in list",
 			input: "admin",
-			opts:  []slug.Option{slug.ReservedSlugs("ADMIN", "Admin", "admin")},
+			opts:  []slug.Option{slug.WithReservedSlugs("ADMIN", "Admin", "admin")},
 			validate: func(t *testing.T, result string) {
 				assert.NotEqual(t, "admin", result)
 				assert.True(t, strings.HasPrefix(result, "admin-"))
@@ -420,8 +420,8 @@ func BenchmarkMake(b *testing.B) {
 			name:  "with_options",
 			input: "Complex & Test @ 2024",
 			opts: []slug.Option{
-				slug.MaxLength(20),
-				slug.CustomReplace(map[string]string{"&": "and", "@": "at"}),
+				slug.WithMaxLength(20),
+				slug.WithCustomReplace(map[string]string{"&": "and", "@": "at"}),
 			},
 		},
 		{
@@ -451,7 +451,7 @@ func BenchmarkMake(b *testing.B) {
 
 func BenchmarkMakeParallel(b *testing.B) {
 	input := "This is a sample text with some special characters: !@#$%"
-	opts := []slug.Option{slug.MaxLength(50)}
+	opts := []slug.Option{slug.WithMaxLength(50)}
 
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -524,7 +524,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "max length smaller than suffix",
 			input: "Test",
-			opts:  []slug.Option{slug.WithSuffix(10), slug.MaxLength(5)},
+			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
 				assert.LessOrEqual(t, len(result), 5)
 				// Should be just truncated suffix
@@ -534,7 +534,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "max length exactly suffix length",
 			input: "Test",
-			opts:  []slug.Option{slug.WithSuffix(8), slug.MaxLength(8)},
+			opts:  []slug.Option{slug.WithSuffix(8), slug.WithMaxLength(8)},
 			validate: func(t *testing.T, result string) {
 				assert.Equal(t, 8, len(result))
 				assert.Regexp(t, "^[a-z0-9]{8}$", result)
@@ -543,7 +543,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "max length with multi-byte separator",
 			input: "Test Case",
-			opts:  []slug.Option{slug.WithSuffix(4), slug.MaxLength(15), slug.Separator("---")},
+			opts:  []slug.Option{slug.WithSuffix(4), slug.WithMaxLength(15), slug.WithSeparator("---")},
 			validate: func(t *testing.T, result string) {
 				assert.LessOrEqual(t, len(result), 15)
 				assert.Contains(t, result, "---")
@@ -552,7 +552,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "very small max length with suffix",
 			input: "Long Title Here",
-			opts:  []slug.Option{slug.WithSuffix(3), slug.MaxLength(5)},
+			opts:  []slug.Option{slug.WithSuffix(3), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
 				assert.LessOrEqual(t, len(result), 5)
 				// Should be "l-abc" or similar
@@ -565,7 +565,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "max length cuts in middle of rune",
 			input: "Test™Case", // ™ is multi-byte
-			opts:  []slug.Option{slug.MaxLength(6)},
+			opts:  []slug.Option{slug.WithMaxLength(6)},
 			validate: func(t *testing.T, result string) {
 				// "Test™Case" becomes "test-case" but truncated to 6 chars = "test-c"
 				assert.Equal(t, "test-c", result)
@@ -574,7 +574,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "empty input with suffix and max length",
 			input: "",
-			opts:  []slug.Option{slug.WithSuffix(10), slug.MaxLength(5)},
+			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
 				assert.Equal(t, 5, len(result))
 				assert.Regexp(t, "^[a-z0-9]{5}$", result)
@@ -583,7 +583,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 		{
 			name:  "suffix with no room after max length truncation",
 			input: "VeryLongTitleThatNeedsToBeShortened",
-			opts:  []slug.Option{slug.WithSuffix(6), slug.MaxLength(8)},
+			opts:  []slug.Option{slug.WithSuffix(6), slug.WithMaxLength(8)},
 			validate: func(t *testing.T, result string) {
 				// Should be "v-abc123" (1 char + separator + 6 char suffix = 8)
 				assert.Equal(t, 8, len(result))
@@ -613,7 +613,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "short input gets padded with 6-char suffix",
 			input: "owl",
-			opts:  []slug.Option{slug.MinLength(10)},
+			opts:  []slug.Option{slug.WithMinLength(10)},
 			checkFunc: func(t *testing.T, result string) {
 				// "owl" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				assert.Equal(t, 10, len(result))
@@ -628,7 +628,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "input already meeting minimum length unchanged",
 			input: "hello",
-			opts:  []slug.Option{slug.MinLength(5)},
+			opts:  []slug.Option{slug.WithMinLength(5)},
 			checkFunc: func(t *testing.T, result string) {
 				assert.Equal(t, "hello", result)
 			},
@@ -636,7 +636,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "input exceeding minimum length unchanged",
 			input: "hello world",
-			opts:  []slug.Option{slug.MinLength(5)},
+			opts:  []slug.Option{slug.WithMinLength(5)},
 			checkFunc: func(t *testing.T, result string) {
 				assert.Equal(t, "hello-world", result)
 			},
@@ -644,7 +644,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "zero minimum length has no effect",
 			input: "hi",
-			opts:  []slug.Option{slug.MinLength(0)},
+			opts:  []slug.Option{slug.WithMinLength(0)},
 			checkFunc: func(t *testing.T, result string) {
 				assert.Equal(t, "hi", result)
 			},
@@ -652,7 +652,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length with custom separator",
 			input: "cat",
-			opts:  []slug.Option{slug.MinLength(8), slug.Separator("_")},
+			opts:  []slug.Option{slug.WithMinLength(8), slug.WithSeparator("_")},
 			checkFunc: func(t *testing.T, result string) {
 				// "cat" (3 chars) + "_" (1 char) + 6-char suffix = 10 total
 				assert.Equal(t, 10, len(result))
@@ -666,7 +666,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length with uppercase disabled",
 			input: "Cat",
-			opts:  []slug.Option{slug.MinLength(10), slug.Lowercase(false)},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithLowercase(false)},
 			checkFunc: func(t *testing.T, result string) {
 				// "Cat" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				assert.Equal(t, 10, len(result))
@@ -680,7 +680,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length exactly equals base slug length",
 			input: "test",
-			opts:  []slug.Option{slug.MinLength(4)},
+			opts:  []slug.Option{slug.WithMinLength(4)},
 			checkFunc: func(t *testing.T, result string) {
 				assert.Equal(t, "test", result)
 			},
@@ -688,7 +688,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length one more than base slug gets 6-char suffix",
 			input: "test",
-			opts:  []slug.Option{slug.MinLength(5)},
+			opts:  []slug.Option{slug.WithMinLength(5)},
 			checkFunc: func(t *testing.T, result string) {
 				// "test" is 4 chars, MinLength is 5
 				// With new behavior: always adds 6-char suffix when below minLength
@@ -702,7 +702,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length two more than base slug gets 6-char suffix",
 			input: "test",
-			opts:  []slug.Option{slug.MinLength(6)},
+			opts:  []slug.Option{slug.WithMinLength(6)},
 			checkFunc: func(t *testing.T, result string) {
 				// "test" is 4 chars, MinLength is 6
 				// With new behavior: always adds 6-char suffix when below minLength
@@ -716,7 +716,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length with empty separator",
 			input: "go",
-			opts:  []slug.Option{slug.MinLength(6), slug.Separator("")},
+			opts:  []slug.Option{slug.WithMinLength(6), slug.WithSeparator("")},
 			checkFunc: func(t *testing.T, result string) {
 				// "go" (2 chars) + "" (0 chars) + 6-char suffix = 8 total
 				assert.Equal(t, 8, len(result))
@@ -728,7 +728,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length with multi-character separator",
 			input: "xy",
-			opts:  []slug.Option{slug.MinLength(10), slug.Separator("---")},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithSeparator("---")},
 			checkFunc: func(t *testing.T, result string) {
 				// "xy" (2 chars) + "---" (3 chars) + 6-char suffix = 11 total
 				assert.Equal(t, 11, len(result))
@@ -742,7 +742,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "empty input with min length",
 			input: "",
-			opts:  []slug.Option{slug.MinLength(8)},
+			opts:  []slug.Option{slug.WithMinLength(8)},
 			checkFunc: func(t *testing.T, result string) {
 				// Empty input gets a 6-char random suffix (no separator since result is empty)
 				// With new behavior: always uses 6-char suffix
@@ -753,9 +753,9 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length padding is random each time",
 			input: "dog",
-			opts:  []slug.Option{slug.MinLength(10)},
+			opts:  []slug.Option{slug.WithMinLength(10)},
 			checkFunc: func(t *testing.T, result string) {
-				result2 := slug.Make("dog", slug.MinLength(10))
+				result2 := slug.Make("dog", slug.WithMinLength(10))
 				// "dog" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				assert.Equal(t, 10, len(result))
 				assert.Equal(t, 10, len(result2))
@@ -773,7 +773,7 @@ func TestMinLength(t *testing.T) {
 		{
 			name:  "min length with diacritics",
 			input: "café",
-			opts:  []slug.Option{slug.MinLength(10)},
+			opts:  []slug.Option{slug.WithMinLength(10)},
 			checkFunc: func(t *testing.T, result string) {
 				// "café" becomes "cafe" (4 chars), needs padding with 6-char suffix
 				// "cafe" (4 chars) + "-" (1 char) + 6-char suffix = 11 total
@@ -806,7 +806,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "min length smaller than max length",
 			input: "cat",
-			opts:  []slug.Option{slug.MinLength(10), slug.MaxLength(15)},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(15)},
 			checkFunc: func(t *testing.T, result string) {
 				// "cat" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				// This fits within maxLength of 15
@@ -819,7 +819,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "min length equals max length",
 			input: "dog",
-			opts:  []slug.Option{slug.MinLength(10), slug.MaxLength(10)},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(10)},
 			checkFunc: func(t *testing.T, result string) {
 				// "dog" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				// Perfectly fits min and max
@@ -832,7 +832,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "min length larger than max length - max takes priority",
 			input: "bird",
-			opts:  []slug.Option{slug.MinLength(20), slug.MaxLength(10)},
+			opts:  []slug.Option{slug.WithMinLength(20), slug.WithMaxLength(10)},
 			checkFunc: func(t *testing.T, result string) {
 				// MinLength wants 6-char suffix, but maxLength constrains it
 				// "bird" (4 chars) + "-" (1 char) + suffix fits in maxLength 10
@@ -846,7 +846,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "long input with min and max length",
 			input: "this is a very long title that needs truncation",
-			opts:  []slug.Option{slug.MinLength(10), slug.MaxLength(20)},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(20)},
 			checkFunc: func(t *testing.T, result string) {
 				// Input is already long, so maxLength applies
 				assert.LessOrEqual(t, len(result), 20)
@@ -855,7 +855,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "short input meeting max but not min",
 			input: "xyz",
-			opts:  []slug.Option{slug.MinLength(10), slug.MaxLength(50)},
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(50)},
 			checkFunc: func(t *testing.T, result string) {
 				// MinLength applies with 6-char suffix
 				// "xyz" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
@@ -868,7 +868,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 		{
 			name:  "min and max with custom separator",
 			input: "ab",
-			opts:  []slug.Option{slug.MinLength(8), slug.MaxLength(12), slug.Separator("_")},
+			opts:  []slug.Option{slug.WithMinLength(8), slug.WithMaxLength(12), slug.WithSeparator("_")},
 			checkFunc: func(t *testing.T, result string) {
 				// "ab" (2 chars) + "_" (1 char) + 6-char suffix = 9 total
 				// Fits within maxLength of 12
@@ -901,7 +901,7 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 		{
 			name:  "min length with reserved slugs",
 			input: "api",
-			opts:  []slug.Option{slug.MinLength(15), slug.ReservedSlugs("api")},
+			opts:  []slug.Option{slug.WithMinLength(15), slug.WithReservedSlugs("api")},
 			checkFunc: func(t *testing.T, result string) {
 				// Reserved slug adds 6-char suffix: "api-xxxxxx" (10 chars)
 				// Then MinLength check happens, sees 10 < 15, adds another 6-char suffix
@@ -916,7 +916,7 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 		{
 			name:  "min length with with suffix option",
 			input: "test",
-			opts:  []slug.Option{slug.MinLength(15), slug.WithSuffix(8)},
+			opts:  []slug.Option{slug.WithMinLength(15), slug.WithSuffix(8)},
 			checkFunc: func(t *testing.T, result string) {
 				// WithSuffix adds 8-char suffix: "test-xxxxxxxx" (13 chars)
 				// Then MinLength check sees 13 < 15, adds 6-char suffix
@@ -932,8 +932,8 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 			name:  "min length with custom replace",
 			input: "a&b",
 			opts: []slug.Option{
-				slug.MinLength(10),
-				slug.CustomReplace(map[string]string{"&": "and"}),
+				slug.WithMinLength(10),
+				slug.WithCustomReplace(map[string]string{"&": "and"}),
 			},
 			checkFunc: func(t *testing.T, result string) {
 				// "a&b" with CustomReplace becomes "aandb" (5 chars), below minLength of 10
@@ -948,7 +948,7 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 		{
 			name:  "min length with strip chars",
 			input: "x[y]",
-			opts:  []slug.Option{slug.MinLength(8), slug.StripChars("[]")},
+			opts:  []slug.Option{slug.WithMinLength(8), slug.WithStripChars("[]")},
 			checkFunc: func(t *testing.T, result string) {
 				// "x[y]" with StripChars becomes "xy" (2 chars), below minLength of 8
 				// Adds 6-char suffix: "xy-xxxxxx" (9 chars)
@@ -964,10 +964,10 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 			name:  "min length with all options",
 			input: "a",
 			opts: []slug.Option{
-				slug.MinLength(12),
-				slug.MaxLength(15),
-				slug.Separator("_"),
-				slug.Lowercase(false),
+				slug.WithMinLength(12),
+				slug.WithMaxLength(15),
+				slug.WithSeparator("_"),
+				slug.WithLowercase(false),
 			},
 			checkFunc: func(t *testing.T, result string) {
 				// "a" (1 char) + "_" (1 char) + 6-char suffix = 8 total
@@ -1016,7 +1016,7 @@ func TestMakeWithSuffix(t *testing.T) {
 		{
 			name:  "suffix with uppercase disabled",
 			input: "Test",
-			opts:  []slug.Option{slug.WithSuffix(8), slug.Lowercase(false)},
+			opts:  []slug.Option{slug.WithSuffix(8), slug.WithLowercase(false)},
 			checkFunc: func(t *testing.T, result string) {
 				parts := strings.Split(result, "-")
 				assert.Equal(t, "Test", parts[0])
@@ -1028,7 +1028,7 @@ func TestMakeWithSuffix(t *testing.T) {
 		{
 			name:  "suffix with custom separator",
 			input: "Product",
-			opts:  []slug.Option{slug.WithSuffix(4), slug.Separator("_")},
+			opts:  []slug.Option{slug.WithSuffix(4), slug.WithSeparator("_")},
 			checkFunc: func(t *testing.T, result string) {
 				parts := strings.Split(result, "_")
 				assert.Equal(t, "product", parts[0])
@@ -1038,7 +1038,7 @@ func TestMakeWithSuffix(t *testing.T) {
 		{
 			name:  "suffix with max length",
 			input: "Very Long Title Here",
-			opts:  []slug.Option{slug.WithSuffix(6), slug.MaxLength(20)},
+			opts:  []slug.Option{slug.WithSuffix(6), slug.WithMaxLength(20)},
 			checkFunc: func(t *testing.T, result string) {
 				assert.LessOrEqual(t, len(result), 20)
 				assert.Contains(t, result, "-") // Should have separator
@@ -1050,7 +1050,7 @@ func TestMakeWithSuffix(t *testing.T) {
 		{
 			name:  "suffix longer than max length",
 			input: "Test",
-			opts:  []slug.Option{slug.WithSuffix(10), slug.MaxLength(8)},
+			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(8)},
 			checkFunc: func(t *testing.T, result string) {
 				// Should just be the suffix truncated
 				assert.Len(t, result, 8)
