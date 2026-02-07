@@ -16,6 +16,7 @@ func main() {
 	slog := logger.New().With("app", "simple")
 
 	app := forge.New(
+		forge.AppConfig{},
 		forge.WithCustomLogger(slog),
 		forge.WithMiddleware(loggingMiddleware),
 		forge.WithHandlers(
@@ -30,9 +31,8 @@ func main() {
 	slog.Info("starting server", "addr", ":8080")
 
 	if err := app.Run(
-		":8080",
-		forge.Logger(slog),
-		forge.ShutdownTimeout(10*time.Second),
+		forge.RunConfig{ShutdownTimeout: 10 * time.Second},
+		forge.WithRunLogger(slog),
 	); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)

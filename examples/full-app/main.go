@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/dmitrymomot/forge"
 	"github.com/dmitrymomot/forge/examples/full-app/handlers"
@@ -19,15 +18,25 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+type config struct {
+	Server forge.RunConfig `envPrefix:"SERVER_"`
+	DB     db.Config       `envPrefix:"DB_"`
+}
+
 func main() {
+	var cfg config
+	if err := forge.LoadConfig(&cfg); err != nil {
+		log.Fatal(err)
+	}
+
 	ctx := context.Background()
 	slog := logger.New()
 
 	// Database connection with migrations (single call)
-	pool := db.MustOpen(ctx, getEnv("DATABASE_URL", "postgres://forge:forge@localhost:5432/forge_example?sslmode=disable"),
+	pool := db.MustOpen(ctx,
+		cfg.DB,
 		db.WithMigrations(migrations),
 		db.WithLogger(slog),
-		db.WithMinConns(2),
 	)
 
 	// Create repository
@@ -35,6 +44,7 @@ func main() {
 
 	// Create application with explicit dependency wiring
 	app := forge.New(
+		forge.AppConfig{},
 		// Register handlers with injected dependencies
 		forge.WithHandlers(
 			handlers.NewContactHandler(repo),
@@ -48,17 +58,16 @@ func main() {
 
 		// Health checks (integrated)
 		forge.WithHealthChecks(
-			forge.WithReadinessCheck("postgres", db.Healthcheck(pool)),
+			forge.HealthCheck("postgres", db.Healthcheck(pool)),
 		),
 	)
 
 	// Run the application (blocks until shutdown)
 	// Server-level configuration is now passed to app.Run()
 	if err := app.Run(
-		getEnv("ADDRESS", ":8080"),
-		forge.Logger(slog),
-		forge.ShutdownTimeout(30*time.Second),
-		forge.ShutdownHook(db.Shutdown(pool)),
+		cfg.Server,
+		forge.WithRunLogger(slog),
+		forge.WithShutdownHook(db.Shutdown(pool)),
 	); err != nil {
 		slog.Error("application error", "error", err)
 		os.Exit(1)
@@ -90,12 +99,4 @@ func handleMethodNotAllowed(c forge.Context) error {
 		views.ErrorPage(405, "This HTTP method is not allowed for this resource."),
 		views.ErrorContent(405, "This HTTP method is not allowed for this resource."),
 	)
-}
-
-// getEnv returns environment variable value or default if not set.
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
