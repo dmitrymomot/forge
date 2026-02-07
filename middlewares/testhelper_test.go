@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
 
-// testContext is a minimal implementation of internal.Context for testing.
 type testContext struct {
 	response http.ResponseWriter
 	request  *http.Request
@@ -31,21 +31,10 @@ func newTestContext(w http.ResponseWriter, r *http.Request) *testContext {
 	}
 }
 
-func (c *testContext) Request() *http.Request {
-	return c.request
-}
-
-func (c *testContext) Response() http.ResponseWriter {
-	return c.response
-}
-
-func (c *testContext) Context() context.Context {
-	return c.request.Context()
-}
-
-func (c *testContext) Param(name string) string {
-	return ""
-}
+func (c *testContext) Request() *http.Request        { return c.request }
+func (c *testContext) Response() http.ResponseWriter { return c.response }
+func (c *testContext) Context() context.Context      { return c.request.Context() }
+func (c *testContext) Param(name string) string      { return "" }
 
 func (c *testContext) Query(name string) string {
 	return c.request.URL.Query().Get(name)
@@ -59,42 +48,28 @@ func (c *testContext) QueryDefault(name, defaultValue string) string {
 	return v
 }
 
-func (c *testContext) Domain() string {
-	return c.request.Host
-}
-
-func (c *testContext) Subdomain() string {
-	return ""
-}
-
-func (c *testContext) Header(name string) string {
-	return c.request.Header.Get(name)
-}
-
-func (c *testContext) SetHeader(name, value string) {
-	c.response.Header().Set(name, value)
-}
-
-func (c *testContext) JSON(code int, v any) error {
-	c.response.WriteHeader(code)
-	return nil
-}
-
+func (c *testContext) Domain() string               { return c.request.Host }
+func (c *testContext) Subdomain() string            { return "" }
+func (c *testContext) Header(name string) string    { return c.request.Header.Get(name) }
+func (c *testContext) SetHeader(name, value string) { c.response.Header().Set(name, value) }
+func (c *testContext) JSON(code int, v any) error   { c.response.WriteHeader(code); return nil }
 func (c *testContext) String(code int, s string) error {
 	c.response.WriteHeader(code)
 	_, err := c.response.Write([]byte(s))
 	return err
 }
-
-func (c *testContext) NoContent(code int) error {
-	c.response.WriteHeader(code)
-	return nil
-}
-
+func (c *testContext) NoContent(code int) error { c.response.WriteHeader(code); return nil }
 func (c *testContext) Redirect(code int, url string) error {
 	http.Redirect(c.response, c.request, url, code)
 	return nil
 }
+func (c *testContext) IsHTMX() bool                      { return htmx.IsHTMX(c.request) }
+func (c *testContext) Written() bool                     { return false }
+func (c *testContext) Logger() *slog.Logger              { return slog.Default() }
+func (c *testContext) LogDebug(msg string, attrs ...any) {}
+func (c *testContext) LogInfo(msg string, attrs ...any)  {}
+func (c *testContext) LogWarn(msg string, attrs ...any)  {}
+func (c *testContext) LogError(msg string, attrs ...any) {}
 
 func (c *testContext) Error(code int, message string, opts ...internal.HTTPErrorOption) *internal.HTTPError {
 	err := internal.NewHTTPError(code, message)
@@ -102,10 +77,6 @@ func (c *testContext) Error(code int, message string, opts ...internal.HTTPError
 		opt(err)
 	}
 	return err
-}
-
-func (c *testContext) IsHTMX() bool {
-	return htmx.IsHTMX(c.request)
 }
 
 func (c *testContext) Render(code int, component internal.Component, opts ...htmx.RenderOption) error {
@@ -120,30 +91,9 @@ func (c *testContext) RenderPartial(code int, fullPage, partial internal.Compone
 	return c.Render(code, fullPage)
 }
 
-func (c *testContext) Bind(v any) (validator.ValidationErrors, error) {
-	return nil, nil
-}
-
-func (c *testContext) BindQuery(v any) (validator.ValidationErrors, error) {
-	return nil, nil
-}
-
-func (c *testContext) BindJSON(v any) (validator.ValidationErrors, error) {
-	return nil, nil
-}
-
-func (c *testContext) Written() bool {
-	return false
-}
-
-func (c *testContext) Logger() *slog.Logger {
-	return slog.Default()
-}
-
-func (c *testContext) LogDebug(msg string, attrs ...any) {}
-func (c *testContext) LogInfo(msg string, attrs ...any)  {}
-func (c *testContext) LogWarn(msg string, attrs ...any)  {}
-func (c *testContext) LogError(msg string, attrs ...any) {}
+func (c *testContext) Bind(v any) (validator.ValidationErrors, error)      { return nil, nil }
+func (c *testContext) BindQuery(v any) (validator.ValidationErrors, error) { return nil, nil }
+func (c *testContext) BindJSON(v any) (validator.ValidationErrors, error)  { return nil, nil }
 
 func (c *testContext) Set(key, value any) {
 	c.values[key] = value
@@ -204,3 +154,11 @@ func (c *testContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*
 func (c *testContext) Download(key string) (io.ReadCloser, error)                    { return nil, nil }
 func (c *testContext) DeleteFile(key string) error                                   { return nil }
 func (c *testContext) FileURL(key string, opts ...storage.URLOption) (string, error) { return "", nil }
+func (c *testContext) Deadline() (time.Time, bool)                                   { return c.request.Context().Deadline() }
+func (c *testContext) Done() <-chan struct{}                                         { return c.request.Context().Done() }
+func (c *testContext) Err() error                                                    { return c.request.Context().Err() }
+func (c *testContext) Value(key any) any                                             { return c.request.Context().Value(key) }
+func (c *testContext) UserID() string                                                { return "" }
+func (c *testContext) IsAuthenticated() bool                                         { return false }
+func (c *testContext) IsCurrentUser(id string) bool                                  { return false }
+func (c *testContext) Can(permission internal.Permission) bool                       { return false }

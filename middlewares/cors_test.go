@@ -3,6 +3,7 @@ package middlewares_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,6 +339,100 @@ func TestCORS(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, handlerCalled)
 		require.Equal(t, "response", rec.Body.String())
+	})
+
+	t.Run("malformed and edge-case origins", func(t *testing.T) {
+		t.Parallel()
+
+		mw := middlewares.CORS(
+			middlewares.WithAllowOrigins("http://allowed.com"),
+		)
+
+		t.Run("trailing slash does not match", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", "http://allowed.com/")
+			rec := httptest.NewRecorder()
+			ctx := newTestContext(rec, req)
+
+			handler := mw(func(c internal.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			err := handler(ctx)
+			require.NoError(t, err)
+			require.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
+
+		t.Run("port mismatch does not match", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", "http://allowed.com:8080")
+			rec := httptest.NewRecorder()
+			ctx := newTestContext(rec, req)
+
+			handler := mw(func(c internal.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			err := handler(ctx)
+			require.NoError(t, err)
+			require.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
+
+		t.Run("case mismatch does not match", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", "HTTP://ALLOWED.COM")
+			rec := httptest.NewRecorder()
+			ctx := newTestContext(rec, req)
+
+			handler := mw(func(c internal.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			err := handler(ctx)
+			require.NoError(t, err)
+			require.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
+
+		t.Run("very long origin is handled without crash", func(t *testing.T) {
+			t.Parallel()
+
+			longOrigin := "http://" + strings.Repeat("a", 10000) + ".com"
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", longOrigin)
+			rec := httptest.NewRecorder()
+			ctx := newTestContext(rec, req)
+
+			handler := mw(func(c internal.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			err := handler(ctx)
+			require.NoError(t, err)
+			require.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
+
+		t.Run("origin with special characters is rejected", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", "http://allowed.com\u0000evil")
+			rec := httptest.NewRecorder()
+			ctx := newTestContext(rec, req)
+
+			handler := mw(func(c internal.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			err := handler(ctx)
+			require.NoError(t, err)
+			require.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
 	})
 
 	t.Run("specific origins echoes actual origin not wildcard", func(t *testing.T) {
