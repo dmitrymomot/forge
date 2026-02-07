@@ -84,8 +84,22 @@ func (ve ValidationErrors) IsEmpty() bool {
 	return len(ve) == 0
 }
 
-func (ve ValidationErrors) GetTranslatableErrors() []ValidationError {
-	return ve
+// TranslateFunc translates a message key with the given values into a localized string.
+type TranslateFunc func(key string, values map[string]any) string
+
+// Translate replaces the Message field of each ValidationError in-place using the
+// provided translation function. Errors with an empty TranslationKey are skipped.
+// It is a no-op if fn is nil or the slice is empty.
+func (ve ValidationErrors) Translate(fn TranslateFunc) {
+	if fn == nil {
+		return
+	}
+	for i := range ve {
+		if ve[i].TranslationKey == "" {
+			continue
+		}
+		ve[i].Message = fn(ve[i].TranslationKey, ve[i].TranslationValues)
+	}
 }
 
 // Rule represents a single validation rule.

@@ -249,33 +249,6 @@ func TestValidationErrors_IsEmpty(t *testing.T) {
 	})
 }
 
-func TestValidationErrors_GetTranslatableErrors(t *testing.T) {
-	t.Parallel()
-	t.Run("returns all errors with translation data", func(t *testing.T) {
-		t.Parallel()
-		var errs validator.ValidationErrors
-		err1 := validator.ValidationError{
-			Field:             "email",
-			Message:           "is required",
-			TranslationKey:    "validation.required",
-			TranslationValues: map[string]any{"field": "email"},
-		}
-		err2 := validator.ValidationError{
-			Field:             "password",
-			Message:           "too short",
-			TranslationKey:    "validation.min_length",
-			TranslationValues: map[string]any{"field": "password", "min": 8},
-		}
-		errs.Add(err1)
-		errs.Add(err2)
-
-		result := errs.GetTranslatableErrors()
-		assert.Len(t, result, 2)
-		assert.Equal(t, err1, result[0])
-		assert.Equal(t, err2, result[1])
-	})
-}
-
 func TestApply(t *testing.T) {
 	t.Parallel()
 	t.Run("returns nil when all rules pass", func(t *testing.T) {
