@@ -75,6 +75,19 @@ func TestNewTranslator(t *testing.T) {
 		tr := i18n.NewTranslator(inst, "en", "test", nil)
 		require.Equal(t, "test", tr.Namespace())
 	})
+
+	t.Run("TranslateMessage without placeholders", func(t *testing.T) {
+		t.Parallel()
+		tr := i18n.NewTranslator(inst, "en", "test", nil)
+		require.Equal(t, tr.T("hello"), tr.TranslateMessage("hello", nil))
+	})
+
+	t.Run("TranslateMessage with placeholders", func(t *testing.T) {
+		t.Parallel()
+		tr := i18n.NewTranslator(inst, "en", "test", nil)
+		values := map[string]any{"name": "Alice"}
+		require.Equal(t, tr.T("welcome", values), tr.TranslateMessage("welcome", values))
+	})
 }
 
 func TestTranslatorFormatting(t *testing.T) {
