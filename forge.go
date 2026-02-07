@@ -121,6 +121,15 @@ type (
 
 	// HTTPErrorOption configures an HTTPError.
 	HTTPErrorOption = internal.HTTPErrorOption
+
+	// Permission represents a named permission string.
+	Permission = internal.Permission
+
+	// RolePermissions maps role names to their granted permissions.
+	RolePermissions = internal.RolePermissions
+
+	// RoleExtractorFunc extracts the current user's role from the request context.
+	RoleExtractorFunc = internal.RoleExtractorFunc
 )
 
 // Constructors
@@ -262,6 +271,28 @@ func WithBaseDomain(domain string) Option {
 	return internal.WithBaseDomain(domain)
 }
 
+// WithRoles configures role-based access control for the application.
+// The permissions map defines which permissions each role grants.
+// The extractor function determines the current user's role from the request context.
+// Roles are extracted lazily (once per request) and cached.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithRoles(
+//	        forge.RolePermissions{
+//	            "admin":  {"users.read", "users.write", "billing.manage"},
+//	            "member": {"users.read"},
+//	        },
+//	        func(c forge.Context) string {
+//	            return forge.ContextValue[string](c, roleKey{})
+//	        },
+//	    ),
+//	)
+func WithRoles(permissions RolePermissions, extractor RoleExtractorFunc) Option {
+	return internal.WithRoles(permissions, extractor)
+}
+
 // WithCookieOptions configures the cookie manager.
 //
 // Example:
@@ -385,11 +416,40 @@ func WithContext(ctx context.Context) RunOption {
 //	tenant := forge.ContextValue[string](c, tenantKey{})
 //	user := forge.ContextValue[*User](c, userKey{})
 func ContextValue[T any](c Context, key any) T {
-	if v, ok := c.Get(key).(T); ok {
-		return v
-	}
-	var zero T
-	return zero
+	return internal.ContextValue[T](c, key)
+}
+
+// Param retrieves a typed URL parameter from the request.
+// Uses strconv for type conversion. Returns the zero value of T on parse error.
+//
+// Example:
+//
+//	id := forge.Param[int64](c, "id")
+//	slug := forge.Param[string](c, "slug")
+func Param[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string) T {
+	return internal.Param[T](c, name)
+}
+
+// Query retrieves a typed query parameter from the request.
+// Uses strconv for type conversion. Returns the zero value of T on parse error.
+//
+// Example:
+//
+//	page := forge.Query[int](c, "page")
+//	verbose := forge.Query[bool](c, "verbose")
+func Query[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string) T {
+	return internal.Query[T](c, name)
+}
+
+// QueryDefault retrieves a typed query parameter with a default value.
+// Returns defaultValue if the parameter is empty or cannot be parsed.
+//
+// Example:
+//
+//	page := forge.QueryDefault[int](c, "page", 1)
+//	limit := forge.QueryDefault[int](c, "limit", 20)
+func QueryDefault[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string, defaultValue T) T {
+	return internal.QueryDefault[T](c, name, defaultValue)
 }
 
 // Cookie options

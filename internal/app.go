@@ -39,6 +39,8 @@ type App struct {
 	jobEnqueuer             *JobEnqueuer
 	jobWorker               *JobManager
 	storage                 storage.Storage
+	rolePermissions         RolePermissions
+	roleExtractor           RoleExtractorFunc
 	baseDomain              string
 	middlewares             []Middleware
 	handlers                []Handler
@@ -165,7 +167,7 @@ func (a *App) setupRoutes() {
 // wrapHandler converts a HandlerFunc to http.HandlerFunc using the app's error handler.
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a.logger, a.cookieManager, a.sessionManager, a.jobEnqueuer, a.storage, a.baseDomain)
+		c := newContext(w, r, a)
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}
