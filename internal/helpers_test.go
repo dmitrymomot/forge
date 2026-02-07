@@ -2,6 +2,7 @@ package internal_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/pkg/htmx"
+	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
@@ -119,6 +121,17 @@ func (c *paramContext) Upload(r io.Reader, size int64, opts ...storage.Option) (
 func (c *paramContext) Download(key string) (io.ReadCloser, error)                    { return nil, nil }
 func (c *paramContext) DeleteFile(key string) error                                   { return nil }
 func (c *paramContext) FileURL(key string, opts ...storage.URLOption) (string, error) { return "", nil }
+func (c *paramContext) T(key string, _ ...i18n.M) string                              { return key }
+func (c *paramContext) Tn(key string, _ int, _ ...i18n.M) string                      { return key }
+func (c *paramContext) Language() string                                              { return "" }
+func (c *paramContext) FormatNumber(n float64) string                                 { return fmt.Sprintf("%g", n) }
+func (c *paramContext) FormatCurrency(amount float64) string                          { return fmt.Sprintf("%.2f", amount) }
+func (c *paramContext) FormatPercent(n float64) string                                { return fmt.Sprintf("%.0f%%", n*100) }
+func (c *paramContext) FormatDate(date time.Time) string                              { return date.Format("2006-01-02") }
+func (c *paramContext) FormatTime(t time.Time) string                                 { return t.Format("15:04:05") }
+func (c *paramContext) FormatDateTime(datetime time.Time) string {
+	return datetime.Format("2006-01-02 15:04:05")
+}
 
 func TestParam(t *testing.T) {
 	t.Parallel()
