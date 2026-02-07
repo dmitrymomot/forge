@@ -1,4 +1,4 @@
-package internal
+package internal_test
 
 import (
 	"bytes"
@@ -11,8 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/forge/pkg/cookie"
-	"github.com/dmitrymomot/forge/pkg/logger"
+	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
@@ -56,46 +55,54 @@ func TestStorageNotConfigured(t *testing.T) {
 	t.Parallel()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-	c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, nil, "")
 
 	t.Run("Storage returns error when not configured", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := c.Storage()
-		require.Nil(t, s)
-		require.ErrorIs(t, err, storage.ErrNotConfigured)
+		requestVia(t, req, nil, func(c internal.Context) {
+			s, err := c.Storage()
+			require.Nil(t, s)
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
 	})
 
 	t.Run("Upload returns error when not configured", func(t *testing.T) {
 		t.Parallel()
 
-		info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
-		require.Nil(t, info)
-		require.ErrorIs(t, err, storage.ErrNotConfigured)
+		requestVia(t, req, nil, func(c internal.Context) {
+			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			require.Nil(t, info)
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
 	})
 
 	t.Run("Download returns error when not configured", func(t *testing.T) {
 		t.Parallel()
 
-		rc, err := c.Download("test-key")
-		require.Nil(t, rc)
-		require.ErrorIs(t, err, storage.ErrNotConfigured)
+		requestVia(t, req, nil, func(c internal.Context) {
+			rc, err := c.Download("test-key")
+			require.Nil(t, rc)
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
 	})
 
 	t.Run("DeleteFile returns error when not configured", func(t *testing.T) {
 		t.Parallel()
 
-		err := c.DeleteFile("test-key")
-		require.ErrorIs(t, err, storage.ErrNotConfigured)
+		requestVia(t, req, nil, func(c internal.Context) {
+			err := c.DeleteFile("test-key")
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
 	})
 
 	t.Run("FileURL returns error when not configured", func(t *testing.T) {
 		t.Parallel()
 
-		url, err := c.FileURL("test-key")
-		require.Empty(t, url)
-		require.ErrorIs(t, err, storage.ErrNotConfigured)
+		requestVia(t, req, nil, func(c internal.Context) {
+			url, err := c.FileURL("test-key")
+			require.Empty(t, url)
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
 	})
 }
 
@@ -103,52 +110,94 @@ func TestStorageConfigured(t *testing.T) {
 	t.Parallel()
 
 	mock := &mockStorage{}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-	c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, mock, "")
+	opts := []internal.Option{
+		internal.WithStorage(mock),
+	}
 
 	t.Run("Storage returns configured client", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := c.Storage()
-		require.NoError(t, err)
-		require.Equal(t, mock, s)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			s, err := c.Storage()
+			require.NoError(t, err)
+			require.Equal(t, mock, s)
+		})
 	})
 
 	t.Run("Upload delegates to storage", func(t *testing.T) {
 		t.Parallel()
 
-		info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
-		require.NoError(t, err)
-		require.Equal(t, "test-key", info.Key)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			require.NoError(t, err)
+			require.Equal(t, "test-key", info.Key)
+		})
 	})
 
 	t.Run("Download delegates to storage", func(t *testing.T) {
 		t.Parallel()
 
-		rc, err := c.Download("test-key")
-		require.NoError(t, err)
-		defer rc.Close()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			rc, err := c.Download("test-key")
+			require.NoError(t, err)
+			defer rc.Close()
 
-		data, err := io.ReadAll(rc)
-		require.NoError(t, err)
-		require.Equal(t, "test content", string(data))
+			data, err := io.ReadAll(rc)
+			require.NoError(t, err)
+			require.Equal(t, "test content", string(data))
+		})
 	})
 
 	t.Run("DeleteFile delegates to storage", func(t *testing.T) {
 		t.Parallel()
 
-		err := c.DeleteFile("test-key")
-		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			err := c.DeleteFile("test-key")
+			require.NoError(t, err)
+		})
 	})
 
 	t.Run("FileURL delegates to storage", func(t *testing.T) {
 		t.Parallel()
 
-		url, err := c.FileURL("test-key")
-		require.NoError(t, err)
-		require.Equal(t, "https://example.com/test-key", url)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			url, err := c.FileURL("test-key")
+			require.NoError(t, err)
+			require.Equal(t, "https://example.com/test-key", url)
+		})
 	})
+}
+
+func TestUploadWithOptions(t *testing.T) {
+	t.Parallel()
+
+	var receivedOpts []storage.Option
+
+	mock := &mockStorage{
+		putFn: func(_ context.Context, r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
+			receivedOpts = opts
+			return &storage.FileInfo{Key: "test-key"}, nil
+		},
+	}
+	opts := []internal.Option{internal.WithStorage(mock)}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	requestVia(t, req, opts, func(c internal.Context) {
+		info, err := c.Upload(
+			bytes.NewReader([]byte("data")), 4,
+			storage.WithContentType("image/png"),
+			storage.WithPrefix("uploads"),
+		)
+		require.NoError(t, err)
+		require.Equal(t, "test-key", info.Key)
+	})
+
+	require.Len(t, receivedOpts, 2, "Upload should forward all storage options to Put")
 }
 
 func TestStorageErrors(t *testing.T) {
@@ -164,13 +213,14 @@ func TestStorageErrors(t *testing.T) {
 				return nil, testErr
 			},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		w := httptest.NewRecorder()
-		c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, mock, "")
+		opts := []internal.Option{internal.WithStorage(mock)}
 
-		info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
-		require.Nil(t, info)
-		require.ErrorIs(t, err, testErr)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			require.Nil(t, info)
+			require.ErrorIs(t, err, testErr)
+		})
 	})
 
 	t.Run("Download propagates errors", func(t *testing.T) {
@@ -181,13 +231,14 @@ func TestStorageErrors(t *testing.T) {
 				return nil, testErr
 			},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		w := httptest.NewRecorder()
-		c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, mock, "")
+		opts := []internal.Option{internal.WithStorage(mock)}
 
-		rc, err := c.Download("test-key")
-		require.Nil(t, rc)
-		require.ErrorIs(t, err, testErr)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			rc, err := c.Download("test-key")
+			require.Nil(t, rc)
+			require.ErrorIs(t, err, testErr)
+		})
 	})
 
 	t.Run("DeleteFile propagates errors", func(t *testing.T) {
@@ -198,12 +249,13 @@ func TestStorageErrors(t *testing.T) {
 				return testErr
 			},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		w := httptest.NewRecorder()
-		c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, mock, "")
+		opts := []internal.Option{internal.WithStorage(mock)}
 
-		err := c.DeleteFile("test-key")
-		require.ErrorIs(t, err, testErr)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			err := c.DeleteFile("test-key")
+			require.ErrorIs(t, err, testErr)
+		})
 	})
 
 	t.Run("FileURL propagates errors", func(t *testing.T) {
@@ -214,12 +266,13 @@ func TestStorageErrors(t *testing.T) {
 				return "", testErr
 			},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		w := httptest.NewRecorder()
-		c := newContext(w, req, logger.NewNope(), cookie.New(), nil, nil, mock, "")
+		opts := []internal.Option{internal.WithStorage(mock)}
 
-		url, err := c.FileURL("test-key")
-		require.Empty(t, url)
-		require.ErrorIs(t, err, testErr)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			url, err := c.FileURL("test-key")
+			require.Empty(t, url)
+			require.ErrorIs(t, err, testErr)
+		})
 	})
 }
