@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -327,9 +328,12 @@ type Context interface {
 	FormatDateTime(datetime time.Time) string
 }
 
-// requestContext implements the Context interface.
 type requestContext struct {
-	response       http.ResponseWriter
+	response http.ResponseWriter
+
+	// Storage
+	storage storage.Storage
+
 	request        *http.Request
 	responseWriter *ResponseWriter
 	logger         *slog.Logger
@@ -342,9 +346,6 @@ type requestContext struct {
 	// Job management
 	jobEnqueuer *JobEnqueuer
 
-	// Storage
-	storage storage.Storage
-
 	// RBAC
 	rolePermissions RolePermissions
 	roleExtractor   RoleExtractorFunc
@@ -352,8 +353,11 @@ type requestContext struct {
 
 	baseDomain string
 
-	sessionLoaded         bool
-	sessionHookRegistered bool
+	roleOnce sync.Once
+
+	sessionHookOnce sync.Once
+
+	sessionLoaded bool
 }
 
 // newContext creates a new context with the response wrapper.
@@ -458,15 +462,13 @@ func (c *requestContext) Can(permission Permission) bool {
 		return false
 	}
 
-	// Lazy role extraction, cached per request.
-	// Set sentinel before calling extractor to prevent infinite recursion
-	// if the extractor itself calls Can().
-	if c.cachedRole == nil {
+	c.roleOnce.Do(func() {
+		// Sentinel prevents infinite recursion if the extractor calls Can().
 		empty := ""
 		c.cachedRole = &empty
 		role := c.roleExtractor(c)
 		c.cachedRole = &role
-	}
+	})
 
 	perms, ok := c.rolePermissions[*c.cachedRole]
 	if !ok {
@@ -681,23 +683,24 @@ func (c *requestContext) SetFlash(key string, value any) error {
 	return c.cookieManager.SetFlash(c.response, key, value)
 }
 
-// registerSessionHook ensures the session flush hook is registered once.
-// It runs before the response is written to persist any session changes.
+// registerSessionHook registers a hook to save dirty sessions before response write.
+// Uses sync.Once to ensure the hook is registered only once per request.
 func (c *requestContext) registerSessionHook() {
-	if c.sessionHookRegistered || c.sessionManager == nil || c.responseWriter == nil {
+	if c.sessionManager == nil || c.responseWriter == nil {
 		return
 	}
-	c.sessionHookRegistered = true
-	c.responseWriter.OnBeforeWrite(func() {
-		if c.session != nil && c.session.IsDirty() {
-			// Best-effort save; errors are logged but not propagated
-			// to avoid interrupting response rendering
-			if err := c.sessionManager.Store().Update(c.Context(), c.session); err != nil {
-				c.logger.ErrorContext(c.Context(), "failed to save session", "error", err)
-				return
+	c.sessionHookOnce.Do(func() {
+		c.responseWriter.OnBeforeWrite(func() {
+			if c.session != nil && c.session.IsDirty() {
+				// Best-effort save; errors are logged but not propagated
+				// to avoid interrupting response rendering
+				if err := c.sessionManager.Store().Update(c.Context(), c.session); err != nil {
+					c.logger.ErrorContext(c.Context(), "failed to save session", "error", err)
+					return
+				}
+				c.session.ClearDirty()
 			}
-			c.session.ClearDirty()
-		}
+		})
 	})
 }
 
@@ -708,10 +711,8 @@ func (c *requestContext) Session() (*session.Session, error) {
 		return nil, session.ErrNotConfigured
 	}
 
-	// Register flush hook (lazy, only once)
 	c.registerSessionHook()
 
-	// Return cached session if already loaded
 	if c.sessionLoaded {
 		return c.session, nil
 	}
@@ -734,7 +735,6 @@ func (c *requestContext) InitSession() error {
 		return session.ErrNotConfigured
 	}
 
-	// Register flush hook (lazy, only once)
 	c.registerSessionHook()
 
 	sess, err := c.sessionManager.CreateSession(c.Context(), c.request)
@@ -839,7 +839,6 @@ func (c *requestContext) DestroySession() error {
 	// Clear cookie
 	c.sessionManager.DeleteSession(c.response)
 
-	// Clear cached session
 	c.session = nil
 	c.sessionLoaded = true // Mark as loaded (with nil) to prevent reload
 
