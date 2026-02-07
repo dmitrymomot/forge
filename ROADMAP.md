@@ -51,6 +51,7 @@ This document outlines planned features for the Forge framework.
 - `totp` — Time-based One-Time Passwords (RFC 6238)
 - `useragent` — User-Agent parsing with bot detection
 - `validator` — input validation with struct tags
+- `redis` — Redis connection helper with retry logic
 
 ---
 
@@ -65,7 +66,6 @@ This document outlines planned features for the Forge framework.
 - `locale` — Locale-aware formatting: numbers, currency, dates, percentages
 - `oauth` — `Provider` interface, Google/GitHub implementations
 - `ratelimit` — Token bucket, sliding window + memory/Redis stores
-- `redis` — Redis connection helper with retry logic
 - `secrets` — AES-256-GCM encryption with key derivation
 - `sse` — SSE writer, event encoding, flush helpers
 - `webhook` — Sender with retries, signatures, circuit breaker, backoff
