@@ -37,6 +37,14 @@ func (t *Translator) T(key string, placeholders ...M) string {
 	return t.i18n.T(t.language, t.namespace, key, placeholders...)
 }
 
+// TranslateMessage translates a key with a single placeholder map.
+// Its signature matches validator.TranslateFunc, allowing direct use as:
+//
+//	ve.Translate(translator.TranslateMessage)
+func (t *Translator) TranslateMessage(key string, values map[string]any) string {
+	return t.i18n.T(t.language, t.namespace, key, values)
+}
+
 // Tn translates a key with pluralization using the translator's language and namespace context.
 func (t *Translator) Tn(key string, n int, placeholders ...M) string {
 	return t.i18n.Tn(t.language, t.namespace, key, n, placeholders...)
