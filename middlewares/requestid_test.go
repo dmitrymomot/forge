@@ -21,7 +21,7 @@ func TestRequestID(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -40,7 +40,7 @@ func TestRequestID(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -58,7 +58,7 @@ func TestRequestID(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		var capturedID string
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			capturedID = middlewares.GetRequestID(ctx)
 			return nil
@@ -81,7 +81,7 @@ func TestRequestIDExtractor(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -100,7 +100,7 @@ func TestRequestIDExtractor(t *testing.T) {
 func TestRequestID_CustomOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("WithRequestIDHeaders uses custom headers in priority order", func(t *testing.T) {
+	t.Run("custom headers uses custom headers in priority order", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -109,9 +109,9 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID(
-			middlewares.WithRequestIDHeaders("X-Custom-ID", "X-Trace-ID"),
-		)
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{
+			Headers: []string{"X-Custom-ID", "X-Trace-ID"},
+		})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -121,7 +121,7 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		require.Equal(t, "custom-123", rec.Header().Get("X-Request-ID"))
 	})
 
-	t.Run("WithRequestIDHeaders respects priority order", func(t *testing.T) {
+	t.Run("custom headers respects priority order", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -129,9 +129,9 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID(
-			middlewares.WithRequestIDHeaders("X-Custom-ID", "X-Trace-ID"),
-		)
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{
+			Headers: []string{"X-Custom-ID", "X-Trace-ID"},
+		})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -150,6 +150,7 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		mw := middlewares.RequestID(
+			middlewares.RequestIDConfig{},
 			middlewares.WithRequestIDGenerator(func() string {
 				return customID
 			}),
@@ -163,16 +164,16 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		require.Equal(t, customID, rec.Header().Get("X-Request-ID"))
 	})
 
-	t.Run("WithRequestIDResponseHeader sets custom response header", func(t *testing.T) {
+	t.Run("custom response header sets custom response header", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID(
-			middlewares.WithRequestIDResponseHeader("X-Custom-Response-ID"),
-		)
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{
+			ResponseHeader: "X-Custom-Response-ID",
+		})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -192,9 +193,11 @@ func TestRequestID_CustomOptions(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		mw := middlewares.RequestID(
-			middlewares.WithRequestIDHeaders("X-Trace-ID", "X-Request-ID"),
+			middlewares.RequestIDConfig{
+				Headers:        []string{"X-Trace-ID", "X-Request-ID"},
+				ResponseHeader: "X-Response-ID",
+			},
 			middlewares.WithRequestIDGenerator(func() string { return customID }),
-			middlewares.WithRequestIDResponseHeader("X-Response-ID"),
 		)
 		handler := mw(func(c internal.Context) error {
 			return nil
@@ -220,7 +223,7 @@ func TestRequestID_HeaderPriority(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -238,7 +241,7 @@ func TestRequestID_HeaderPriority(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.RequestID()
+		mw := middlewares.RequestID(middlewares.RequestIDConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})

@@ -23,7 +23,7 @@ func TestRecover(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic("test panic")
 		})
@@ -45,7 +45,7 @@ func TestRecover(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -61,7 +61,7 @@ func TestRecover(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover(middlewares.WithRecoverDisablePrintStack())
+		mw := middlewares.Recover(middlewares.RecoverConfig{DisablePrintStack: true})
 		handler := mw(func(c internal.Context) error {
 			panic("test panic")
 		})
@@ -104,7 +104,7 @@ func TestRecover_PanicTypes(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic("string panic")
 		})
@@ -125,7 +125,7 @@ func TestRecover_PanicTypes(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		panicErr := errors.New("error panic")
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic(panicErr)
 		})
@@ -145,7 +145,7 @@ func TestRecover_PanicTypes(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic(42)
 		})
@@ -171,7 +171,7 @@ func TestRecover_PanicTypes(t *testing.T) {
 		}
 		panicValue := customError{Code: 500, Message: "custom"}
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic(panicValue)
 		})
@@ -195,7 +195,7 @@ func TestRecover_WithRecoverStackSize(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover(middlewares.WithRecoverStackSize(8192))
+		mw := middlewares.Recover(middlewares.RecoverConfig{StackSize: 8192})
 		handler := mw(func(c internal.Context) error {
 			panic("test")
 		})
@@ -216,7 +216,7 @@ func TestRecover_WithRecoverStackSize(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover(middlewares.WithRecoverStackSize(100))
+		mw := middlewares.Recover(middlewares.RecoverConfig{StackSize: 100})
 		handler := mw(func(c internal.Context) error {
 			panic("test")
 		})
@@ -237,7 +237,7 @@ func TestRecover_WithRecoverStackSize(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover(middlewares.WithRecoverStackSize(0))
+		mw := middlewares.Recover(middlewares.RecoverConfig{StackSize: 0})
 		handler := mw(func(c internal.Context) error {
 			panic("test")
 		})
@@ -255,7 +255,7 @@ func TestRecover_WithRecoverStackSize(t *testing.T) {
 func TestRecover_CombinedOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("WithRecoverStackSize and WithRecoverDisablePrintStack together", func(t *testing.T) {
+	t.Run("StackSize and DisablePrintStack together", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -263,10 +263,10 @@ func TestRecover_CombinedOptions(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		// DisablePrintStack should take precedence
-		mw := middlewares.Recover(
-			middlewares.WithRecoverStackSize(8192),
-			middlewares.WithRecoverDisablePrintStack(),
-		)
+		mw := middlewares.Recover(middlewares.RecoverConfig{
+			StackSize:         8192,
+			DisablePrintStack: true,
+		})
 		handler := mw(func(c internal.Context) error {
 			panic("test")
 		})
@@ -291,7 +291,7 @@ func TestRecover_ErrorPropagation(t *testing.T) {
 		ctx := newTestContext(rec, req)
 
 		expectedErr := errors.New("normal error")
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			return expectedErr
 		})
@@ -309,7 +309,7 @@ func TestRecover_ErrorPropagation(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			return nil
 		})
@@ -329,7 +329,7 @@ func TestRecover_PanicNil(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			panic(nil) //nolint:govet // intentional: testing panic(nil) handling
 		})
@@ -355,7 +355,7 @@ func TestRecover_DeferredPanic(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ctx := newTestContext(rec, req)
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			defer func() {
 				panic("deferred panic value")
@@ -388,7 +388,7 @@ func TestRecover_NestedPanic(t *testing.T) {
 			panic("nested panic")
 		}
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			nestedFunc()
 			return nil
@@ -417,7 +417,7 @@ func TestRecover_NestedPanic(t *testing.T) {
 			deepFunc()
 		}
 
-		mw := middlewares.Recover()
+		mw := middlewares.Recover(middlewares.RecoverConfig{})
 		handler := mw(func(c internal.Context) error {
 			middleFunc()
 			return nil
