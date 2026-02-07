@@ -36,48 +36,48 @@ func defaultConfig() *config {
 	}
 }
 
-// MaxLength sets the maximum length of the generated slug.
+// WithMaxLength sets the maximum length of the generated slug.
 // If the slug exceeds this length, it will be truncated.
-func MaxLength(n int) Option {
+func WithMaxLength(n int) Option {
 	return func(c *config) {
 		c.maxLength = n
 	}
 }
 
-// MinLength sets the minimum length of the generated slug.
+// WithMinLength sets the minimum length of the generated slug.
 // If the slug is shorter than this length, a random suffix will be appended.
-func MinLength(n int) Option {
+func WithMinLength(n int) Option {
 	return func(c *config) {
 		c.minLength = n
 	}
 }
 
-// Separator sets the separator character for the slug.
+// WithSeparator sets the separator character for the slug.
 // Default is "-".
-func Separator(s string) Option {
+func WithSeparator(s string) Option {
 	return func(c *config) {
 		c.separator = s
 	}
 }
 
-// Lowercase controls whether the slug should be converted to lowercase.
+// WithLowercase controls whether the slug should be converted to lowercase.
 // Default is true.
-func Lowercase(enabled bool) Option {
+func WithLowercase(enabled bool) Option {
 	return func(c *config) {
 		c.lowercase = enabled
 	}
 }
 
-// StripChars sets additional characters to strip from the slug.
-func StripChars(chars string) Option {
+// WithStripChars sets additional characters to strip from the slug.
+func WithStripChars(chars string) Option {
 	return func(c *config) {
 		c.stripChars = chars
 	}
 }
 
-// CustomReplace sets custom string replacements to apply before slugification.
+// WithCustomReplace sets custom string replacements to apply before slugification.
 // For example: {"&": "and", "@": "at"}
-func CustomReplace(replacements map[string]string) Option {
+func WithCustomReplace(replacements map[string]string) Option {
 	return func(c *config) {
 		c.customReplace = replacements
 	}
@@ -92,11 +92,11 @@ func WithSuffix(length int) Option {
 	}
 }
 
-// ReservedSlugs sets a list of reserved slugs that cannot be used.
+// WithReservedSlugs sets a list of reserved slugs that cannot be used.
 // If the generated slug matches any reserved slug (case-insensitive),
 // a random suffix will be automatically appended.
-// Example: slug.Make("admin", ReservedSlugs("admin", "api")) returns "admin-x7g3k2"
-func ReservedSlugs(slugs ...string) Option {
+// Example: slug.Make("admin", WithReservedSlugs("admin", "api")) returns "admin-x7g3k2"
+func WithReservedSlugs(slugs ...string) Option {
 	return func(c *config) {
 		// Store reserved slugs in lowercase for case-insensitive comparison
 		c.reservedSlugs = make([]string, len(slugs))

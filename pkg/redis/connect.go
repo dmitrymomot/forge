@@ -11,149 +11,85 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Option configures a Redis connection.
-type Option func(*options)
-
-type options struct {
-	poolSize      int
-	minIdleConns  int
-	maxIdleTime   time.Duration
-	maxActiveTime time.Duration
-	retryAttempts int
-	retryInterval time.Duration
-	readTimeout   time.Duration
-	writeTimeout  time.Duration
-	dialTimeout   time.Duration
+// Config holds Redis connection configuration.
+type Config struct {
+	URL           string        `env:"URL,required"`
+	PoolSize      int           `env:"POOL_SIZE"       envDefault:"10"`
+	MinIdleConns  int           `env:"MIN_IDLE_CONNS"  envDefault:"5"`
+	MaxIdleTime   time.Duration `env:"MAX_IDLE_TIME"   envDefault:"10m"`
+	MaxActiveTime time.Duration `env:"MAX_ACTIVE_TIME" envDefault:"30m"`
+	RetryAttempts int           `env:"RETRY_ATTEMPTS"  envDefault:"3"`
+	RetryInterval time.Duration `env:"RETRY_INTERVAL"  envDefault:"5s"`
+	ReadTimeout   time.Duration `env:"READ_TIMEOUT"    envDefault:"3s"`
+	WriteTimeout  time.Duration `env:"WRITE_TIMEOUT"   envDefault:"3s"`
+	DialTimeout   time.Duration `env:"DIAL_TIMEOUT"    envDefault:"5s"`
 }
 
-func defaultOptions() *options {
-	return &options{
-		poolSize:      10,
-		minIdleConns:  5,
-		maxIdleTime:   10 * time.Minute,
-		maxActiveTime: 30 * time.Minute,
-		retryAttempts: 3,
-		retryInterval: 5 * time.Second,
-		readTimeout:   3 * time.Second,
-		writeTimeout:  3 * time.Second,
-		dialTimeout:   5 * time.Second,
+// applyDefaults fills zero-value fields with sensible defaults.
+// The envDefault tags handle env parsing; this covers programmatic construction.
+func (c *Config) applyDefaults() {
+	if c.PoolSize == 0 {
+		c.PoolSize = 10
+	}
+	if c.MinIdleConns == 0 {
+		c.MinIdleConns = 5
+	}
+	if c.MaxIdleTime == 0 {
+		c.MaxIdleTime = 10 * time.Minute
+	}
+	if c.MaxActiveTime == 0 {
+		c.MaxActiveTime = 30 * time.Minute
+	}
+	if c.RetryAttempts == 0 {
+		c.RetryAttempts = 3
+	}
+	if c.RetryInterval == 0 {
+		c.RetryInterval = 5 * time.Second
+	}
+	if c.ReadTimeout == 0 {
+		c.ReadTimeout = 3 * time.Second
+	}
+	if c.WriteTimeout == 0 {
+		c.WriteTimeout = 3 * time.Second
+	}
+	if c.DialTimeout == 0 {
+		c.DialTimeout = 5 * time.Second
 	}
 }
 
-// WithPoolSize sets the maximum number of connections in the pool.
-// Default: 10
-func WithPoolSize(n int) Option {
-	return func(o *options) {
-		o.poolSize = n
-	}
-}
-
-// WithMinIdleConns sets the minimum number of idle connections kept open.
-// Default: 5
-func WithMinIdleConns(n int) Option {
-	return func(o *options) {
-		o.minIdleConns = n
-	}
-}
-
-// WithMaxIdleTime sets the maximum time a connection can be idle before being closed.
-// Default: 10 minutes
-func WithMaxIdleTime(d time.Duration) Option {
-	return func(o *options) {
-		o.maxIdleTime = d
-	}
-}
-
-// WithMaxActiveTime sets the maximum lifetime of a connection.
-// Default: 30 minutes
-func WithMaxActiveTime(d time.Duration) Option {
-	return func(o *options) {
-		o.maxActiveTime = d
-	}
-}
-
-// WithRetry configures connection retry behavior.
-// Default: 3 attempts, 5 second base interval with exponential backoff.
-func WithRetry(attempts int, interval time.Duration) Option {
-	return func(o *options) {
-		o.retryAttempts = attempts
-		o.retryInterval = interval
-	}
-}
-
-// WithReadTimeout sets the timeout for read operations.
-// Default: 3 seconds
-func WithReadTimeout(d time.Duration) Option {
-	return func(o *options) {
-		o.readTimeout = d
-	}
-}
-
-// WithWriteTimeout sets the timeout for write operations.
-// Default: 3 seconds
-func WithWriteTimeout(d time.Duration) Option {
-	return func(o *options) {
-		o.writeTimeout = d
-	}
-}
-
-// WithDialTimeout sets the timeout for establishing new connections.
-// Default: 5 seconds
-func WithDialTimeout(d time.Duration) Option {
-	return func(o *options) {
-		o.dialTimeout = d
-	}
-}
-
-// Open creates a Redis client with sensible defaults.
+// Open creates a Redis client with the given configuration.
 // Supports both redis:// and rediss:// (TLS) URL schemes.
-//
-// Example:
-//
-//	client, err := redis.Open(ctx, "redis://localhost:6379/0",
-//	    redis.WithPoolSize(20),
-//	    redis.WithRetry(5, 3*time.Second),
-//	)
-func Open(ctx context.Context, url string, opts ...Option) (redis.UniversalClient, error) {
-	if url == "" {
+func Open(ctx context.Context, cfg Config) (redis.UniversalClient, error) {
+	if cfg.URL == "" {
 		return nil, ErrEmptyConnectionURL
 	}
 
-	if !strings.HasPrefix(url, "redis://") && !strings.HasPrefix(url, "rediss://") {
+	if !strings.HasPrefix(cfg.URL, "redis://") && !strings.HasPrefix(cfg.URL, "rediss://") {
 		return nil, ErrFailedToParseURL
 	}
 
-	o := defaultOptions()
-	for _, opt := range opts {
-		opt(o)
-	}
+	cfg.applyDefaults()
 
-	redisOpts, err := redis.ParseURL(url)
+	redisOpts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
 		return nil, errors.Join(ErrFailedToParseURL, err)
 	}
 
-	redisOpts.PoolSize = o.poolSize
-	redisOpts.MinIdleConns = o.minIdleConns
-	redisOpts.ConnMaxIdleTime = o.maxIdleTime
-	redisOpts.ConnMaxLifetime = o.maxActiveTime
-	redisOpts.ReadTimeout = o.readTimeout
-	redisOpts.WriteTimeout = o.writeTimeout
-	redisOpts.DialTimeout = o.dialTimeout
+	redisOpts.PoolSize = cfg.PoolSize
+	redisOpts.MinIdleConns = cfg.MinIdleConns
+	redisOpts.ConnMaxIdleTime = cfg.MaxIdleTime
+	redisOpts.ConnMaxLifetime = cfg.MaxActiveTime
+	redisOpts.ReadTimeout = cfg.ReadTimeout
+	redisOpts.WriteTimeout = cfg.WriteTimeout
+	redisOpts.DialTimeout = cfg.DialTimeout
 
-	return connect(ctx, redisOpts, o.retryAttempts, o.retryInterval)
+	return connect(ctx, redisOpts, cfg.RetryAttempts, cfg.RetryInterval)
 }
 
 // MustOpen creates a Redis client or exits on failure.
 // Use for simple applications where startup failure is fatal.
-//
-// Example:
-//
-//	client := redis.MustOpen(ctx, os.Getenv("REDIS_URL"),
-//	    redis.WithPoolSize(20),
-//	)
-func MustOpen(ctx context.Context, url string, opts ...Option) redis.UniversalClient {
-	client, err := Open(ctx, url, opts...)
+func MustOpen(ctx context.Context, cfg Config) redis.UniversalClient {
+	client, err := Open(ctx, cfg)
 	if err != nil {
 		slog.Error("failed to open redis connection", "error", err)
 		os.Exit(1)
