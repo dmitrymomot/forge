@@ -120,13 +120,133 @@ This document outlines planned features for the Forge framework.
 ## Planned
 
 ### Utility Packages (`pkg/`)
+
 - `featureflag` — `Provider` interface, strategies, memory impl
-- `ratelimit` — Token bucket, sliding window + memory/Redis stores
-- `secrets` — AES-256-GCM encryption with key derivation
 - `sse` — SSE writer, event encoding, flush helpers
-- `webhook` — Sender with retries, signatures, circuit breaker, backoff
 - `websocket` — Upgrader wrapper, connection management
 - `compress` — Response compression with `gzip` and `zstd` support, `Accept-Encoding` negotiation, min-size threshold
+
+#### `ratelimit` — Sliding window rate limiter with pluggable storage
+
+Sliding window algorithm using a weighted blend of current + previous window counts for smooth rate enforcement.
+
+**Core types:**
+- `Limiter` — main rate limiter with `Allow(ctx, key)`, `AllowN(ctx, key, n)`, `Peek(ctx, key)` methods
+- `Info` struct — response from limiter: `Limit`, `Remaining`, `ResetAt`, `RetryAfter`
+- `Counter` interface — pluggable storage backend for window counts
+- `KeyFunc` type — function that extracts rate-limit keys from requests
+
+**Storage backends:**
+- `MemoryCounter` — in-memory with background cleanup of expired windows
+- `RedisCounter` — Redis-backed with automatic fallback to memory on connection failure
+
+**Key extractors** (composable via `KeyComposite`):
+- `KeyByIP` — client IP address
+- `KeyByFingerprint` — device fingerprint
+- `KeyByHeader(name)` — arbitrary request header
+- `KeyByPath` — request URL path
+- `KeyComposite(funcs...)` — combine multiple extractors into a single key
+
+**Errors:** `ErrRateLimited`, `ErrInvalidLimit`, `ErrInvalidWindow`, `ErrNilCounter`
+
+> Reference: `boilerplate/pkg/ratelimiter/`
+
+#### `secrets` — AES-256-GCM encryption with compound key derivation
+
+Compound key model: app key + workspace key → HKDF derivation for tenant-isolated encryption. Automatic nonce generation prepended to ciphertext. Sensitive key material cleaned via `defer clearBytes(key)`.
+
+**Constants:** `KeySize = 32` (AES-256)
+
+**Functions:**
+- `GenerateKey() ([]byte, error)` — generate a random encryption key
+- `ValidateKeys(appKey, workspaceKey []byte) error` — validate key sizes
+- `EncryptString(plaintext string, appKey, workspaceKey []byte) (string, error)`
+- `DecryptString(ciphertext string, appKey, workspaceKey []byte) (string, error)`
+- `EncryptBytes(data, appKey, workspaceKey []byte) ([]byte, error)`
+- `DecryptBytes(data, appKey, workspaceKey []byte) ([]byte, error)`
+
+**Errors:** `ErrInvalidAppKey`, `ErrInvalidWorkspaceKey`, `ErrEncryptionFailed`, `ErrDecryptionFailed`, `ErrInvalidCiphertext`, `ErrKeyDerivationFailed`
+
+**Dependency:** `golang.org/x/crypto/hkdf`
+
+> Reference: `boilerplate/pkg/secrets/`
+
+#### `webhook` — Webhook delivery with retries, signatures, and circuit breaking
+
+**Sender:**
+- `Sender` — main entry point with `Send(ctx, url, data, opts...) (*DeliveryResult, error)`
+- JSON marshaling, configurable retries, circuit breaking, payload signing
+
+**Signature verification:**
+- `SignPayload(payload, secret []byte) string` — HMAC-SHA256 signature
+- `VerifySignature(payload []byte, signature string, secret []byte) bool` — constant-time verification
+- `ExtractSignatureHeaders(r *http.Request) (signature, timestamp string)` — extract headers for replay prevention
+
+**Circuit breaker:**
+- `CircuitBreaker` — 3-state machine: Closed → Open → HalfOpen
+- Methods: `Allow() bool`, `RecordSuccess()`, `RecordFailure()`, `Stats() Stats`
+
+**Backoff strategies:**
+- `BackoffStrategy` interface with `NextDelay(attempt int) time.Duration`
+- `ExponentialBackoff` — exponential with jitter
+- `LinearBackoff` — linear increase
+- `FixedBackoff` — constant delay
+
+**Result type:**
+- `DeliveryResult` struct — `Error`, `StatusCode`, `Attempt`, `Duration`, `Success`
+- `DeliveryHook` callback type — invoked after each delivery attempt
+
+**Functional options:** `WithTimeout`, `WithMaxRetries`, `WithBackoff`, `WithSignature`, `WithCircuitBreaker`, `WithOnDelivery`, `WithMaxPayloadSize`, `WithHeaders`
+
+**Errors:** `ErrWebhookDeliveryFailed`, `ErrCircuitOpen`, `ErrPermanentFailure`, `ErrTemporaryFailure`
+
+**Dependency:** `github.com/google/uuid`
+
+> Reference: `boilerplate/pkg/webhook/`
+
+#### `token` — Compact URL-safe signed tokens
+
+Compact URL-safe signed tokens with truncated HMAC-SHA256 (8-byte signature). Format: `base64url-payload.base64url-signature`. Constant-time signature comparison. Zero external dependencies (stdlib only).
+
+**Generic functions:**
+- `GenerateToken[T any](payload T, secret []byte) (string, error)` — encode + sign any JSON-serializable payload
+- `ParseToken[T any](token string, secret []byte) (*T, error)` — verify signature + decode payload
+
+**Use cases:** email verification links, invite tokens, magic links, password reset tokens
+
+**Errors:** `ErrInvalidToken`, `ErrSignatureInvalid`
+
+> Reference: `boilerplate/pkg/token/`
+
+#### `qrcode` — QR code generation
+
+**Functions:**
+- `Generate(content string, size ...int) ([]byte, error)` — PNG bytes, default 256px, medium error correction
+- `GenerateBase64Image(content string, size ...int) (string, error)` — data URI string for HTML `<img src="">`
+
+Content validation rejects empty or whitespace-only input. Pairs with existing `totp` package for authenticator app QR codes.
+
+**Errors:** `ErrEmptyContent`, `ErrFailedToGenerateQRCode`
+
+**Dependency:** `github.com/skip2/go-qrcode`
+
+> Reference: `boilerplate/pkg/qrcode/`
+
+#### `geolocation` — IP geolocation via MaxMind databases
+
+**Types:**
+- `Location` struct — `Country` (ISO 3166-1), `City`, `Region`, `Timezone` (IANA) + `String()` method
+- `Provider` interface — `Lookup(ctx context.Context, ip string) (*Location, error)` + `Close() error`
+
+**Implementations:**
+- `MaxMindProvider` — memory-mapped GeoIP2/GeoLite2 database reader, thread-safe via `sync.RWMutex`
+- Graceful degradation: returns nil (not error) for private/loopback IPs
+
+**Errors:** `ErrClosed`
+
+**Dependency:** `github.com/oschwald/geoip2-golang`
+
+> Reference: `boilerplate/pkg/geolocation/`
 
 ### Standard Middlewares
 
