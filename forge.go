@@ -579,7 +579,7 @@ const (
 
 // WithStorage configures file storage for the application.
 // A storage.Storage implementation must be provided (e.g., S3Client).
-// Enables c.Upload(), c.Download(), c.DeleteFile(), and c.FileURL().
+// Enables c.Upload(), c.UploadFromURL(), c.Download(), c.DeleteFile(), and c.FileURL().
 func WithStorage(s Storage) Option {
 	return internal.WithStorage(s)
 }
