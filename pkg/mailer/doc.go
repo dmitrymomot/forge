@@ -34,7 +34,7 @@
 //		})
 //
 //		// Create the renderer with embedded templates
-//		renderer := mailer.NewRenderer(emails.FS)
+//		renderer := mailer.NewRenderer(emails.FS, mailer.RendererConfig{})
 //
 //		// Create the mailer
 //		m := mailer.New(sender, renderer, mailer.Config{
