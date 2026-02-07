@@ -1,6 +1,6 @@
 // Package middlewares provides HTTP middleware for Forge applications.
 //
-// This package includes four essential middlewares:
+// This package includes the following middlewares:
 //
 // # Request ID
 //
@@ -36,23 +36,6 @@
 //	            pe, _ := forge.AsPanicError(err)
 //	            c.LogError("panic", "value", pe.Value, "stack", string(pe.Stack))
 //	            return c.Error(500, "Internal Server Error")
-//	        }
-//	        return c.Error(500, err.Error())
-//	    }),
-//	)
-//
-// # Timeout
-//
-// Timeout middleware enforces request timeouts and returns typed TimeoutError.
-// Note: The handler goroutine continues after timeout; use context.Done() for early termination.
-//
-//	app := forge.New(
-//	    forge.WithMiddleware(
-//	        middlewares.Timeout(5*time.Second),
-//	    ),
-//	    forge.WithErrorHandler(func(c forge.Context, err error) error {
-//	        if forge.IsTimeoutError(err) {
-//	            return c.Error(504, "Gateway Timeout")
 //	        }
 //	        return c.Error(500, err.Error())
 //	    }),
@@ -101,7 +84,7 @@
 //
 // Basic usage with standard claims:
 //
-//	jwtSvc, _ := jwt.NewFromString(os.Getenv("JWT_SECRET"))
+//	jwtSvc, _ := jwt.New(jwt.Config{SigningKey: os.Getenv("JWT_SECRET")})
 //	app := forge.New(
 //	    forge.WithMiddleware(
 //	        middlewares.JWT[jwt.StandardClaims](jwtSvc),
@@ -158,8 +141,7 @@
 //	forge.WithMiddleware(
 //	    middlewares.CORS(),       // First: handle preflight before other processing
 //	    middlewares.RequestID(),  // Second: assign ID for all subsequent logging
-//	    middlewares.Recover(),    // Third: catch panics from timeout and handlers
-//	    middlewares.Timeout(5*time.Second), // Fourth: enforce timeout
+//	    middlewares.Recover(),    // Third: catch panics from handlers
 //	)
 //
 // # Complete Example
@@ -175,14 +157,11 @@
 //	        middlewares.CORS(),
 //	        middlewares.RequestID(),
 //	        middlewares.Recover(),
-//	        middlewares.Timeout(5*time.Second),
 //	    ),
 //	    forge.WithErrorHandler(func(c forge.Context, err error) error {
 //	        switch {
 //	        case forge.IsPanicError(err):
 //	            return c.Error(500, "Internal Server Error")
-//	        case forge.IsTimeoutError(err):
-//	            return c.Error(504, "Gateway Timeout")
 //	        default:
 //	            return c.Error(500, err.Error())
 //	        }

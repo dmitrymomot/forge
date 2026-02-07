@@ -3,7 +3,6 @@ package middlewares_test
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -44,28 +43,6 @@ func TestPanicError_Error(t *testing.T) {
 	})
 }
 
-func TestTimeoutError_Error(t *testing.T) {
-	t.Parallel()
-
-	t.Run("formats timeout duration", func(t *testing.T) {
-		t.Parallel()
-
-		err := &middlewares.TimeoutError{
-			Duration: 5 * time.Second,
-		}
-		require.Equal(t, "request timeout after 5s", err.Error())
-	})
-
-	t.Run("formats millisecond timeout", func(t *testing.T) {
-		t.Parallel()
-
-		err := &middlewares.TimeoutError{
-			Duration: 100 * time.Millisecond,
-		}
-		require.Equal(t, "request timeout after 100ms", err.Error())
-	})
-}
-
 func TestIsPanicError(t *testing.T) {
 	t.Parallel()
 
@@ -88,31 +65,6 @@ func TestIsPanicError(t *testing.T) {
 		t.Parallel()
 
 		require.False(t, middlewares.IsPanicError(nil))
-	})
-}
-
-func TestIsTimeoutError(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns true for TimeoutError", func(t *testing.T) {
-		t.Parallel()
-
-		err := &middlewares.TimeoutError{Duration: time.Second}
-		require.True(t, middlewares.IsTimeoutError(err))
-	})
-
-	t.Run("returns true for wrapped TimeoutError", func(t *testing.T) {
-		t.Parallel()
-
-		err := &middlewares.TimeoutError{Duration: time.Second}
-		wrapped := errors.Join(err, errors.New("other error"))
-		require.True(t, middlewares.IsTimeoutError(wrapped))
-	})
-
-	t.Run("returns false for nil error", func(t *testing.T) {
-		t.Parallel()
-
-		require.False(t, middlewares.IsTimeoutError(nil))
 	})
 }
 
@@ -156,44 +108,5 @@ func TestAsPanicError(t *testing.T) {
 		pe, ok := middlewares.AsPanicError(nil)
 		require.False(t, ok)
 		require.Nil(t, pe)
-	})
-}
-
-func TestAsTimeoutError(t *testing.T) {
-	t.Parallel()
-
-	t.Run("extracts TimeoutError", func(t *testing.T) {
-		t.Parallel()
-
-		original := &middlewares.TimeoutError{Duration: 5 * time.Second}
-		te, ok := middlewares.AsTimeoutError(original)
-		require.True(t, ok)
-		require.Equal(t, original.Duration, te.Duration)
-	})
-
-	t.Run("extracts wrapped TimeoutError", func(t *testing.T) {
-		t.Parallel()
-
-		original := &middlewares.TimeoutError{Duration: time.Second}
-		wrapped := errors.Join(original, errors.New("other"))
-		te, ok := middlewares.AsTimeoutError(wrapped)
-		require.True(t, ok)
-		require.Equal(t, original.Duration, te.Duration)
-	})
-
-	t.Run("returns false for non-timeout error", func(t *testing.T) {
-		t.Parallel()
-
-		err := errors.New("regular error")
-		_, ok := middlewares.AsTimeoutError(err)
-		require.False(t, ok)
-	})
-
-	t.Run("returns false for nil error", func(t *testing.T) {
-		t.Parallel()
-
-		te, ok := middlewares.AsTimeoutError(nil)
-		require.False(t, ok)
-		require.Nil(t, te)
 	})
 }

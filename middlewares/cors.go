@@ -10,111 +10,48 @@ import (
 	"github.com/dmitrymomot/forge/internal"
 )
 
-// DefaultCORSMaxAge is the default preflight cache duration.
-const DefaultCORSMaxAge = 12 * time.Hour
-
-// DefaultCORSConfig provides sensible defaults for CORS.
-var DefaultCORSConfig = CORSConfig{
-	AllowOrigins: []string{"*"},
-	AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-	AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
-	MaxAge:       DefaultCORSMaxAge,
-}
-
 // CORSConfig configures the CORS middleware.
 type CORSConfig struct {
-	// AllowOrigins is a static list of allowed origins.
-	// Use "*" to allow all origins (not recommended with credentials).
-	AllowOrigins []string
-
-	// AllowOriginFunc is a dynamic origin validator.
-	// When set, it completely overrides AllowOrigins for that request.
-	// Return true if the origin should be allowed.
-	AllowOriginFunc func(origin string) bool
-
-	// AllowMethods specifies the allowed HTTP methods.
-	AllowMethods []string
-
-	// AllowHeaders specifies the allowed request headers.
-	AllowHeaders []string
-
-	// ExposeHeaders specifies headers exposed to the client.
-	ExposeHeaders []string
-
-	// AllowCredentials indicates whether credentials (cookies, authorization headers) are allowed.
-	// When true, Access-Control-Allow-Origin cannot be "*" — the actual origin is echoed.
-	AllowCredentials bool
-
-	// MaxAge specifies how long preflight responses can be cached.
-	MaxAge time.Duration
+	AllowOrigins     []string      `env:"ALLOW_ORIGINS"     envSeparator:"," envDefault:"*"`
+	AllowMethods     []string      `env:"ALLOW_METHODS"     envSeparator:"," envDefault:"GET,POST,PUT,PATCH,DELETE,OPTIONS"`
+	AllowHeaders     []string      `env:"ALLOW_HEADERS"     envSeparator:"," envDefault:"Origin,Content-Type,Accept,Authorization"`
+	ExposeHeaders    []string      `env:"EXPOSE_HEADERS"    envSeparator:","`
+	AllowCredentials bool          `env:"ALLOW_CREDENTIALS" envDefault:"false"`
+	MaxAge           time.Duration `env:"MAX_AGE"           envDefault:"12h"`
 }
 
-// CORSOption configures CORSConfig.
-type CORSOption func(*CORSConfig)
-
-// WithAllowOrigins sets the allowed origins.
-func WithAllowOrigins(origins ...string) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.AllowOrigins = origins
-	}
+type corsOptions struct {
+	allowOriginFunc func(origin string) bool
 }
+
+// CORSOption configures runtime dependencies for the CORS middleware.
+type CORSOption func(*corsOptions)
 
 // WithAllowOriginFunc sets a dynamic origin validator.
 // When set, it completely overrides AllowOrigins.
 func WithAllowOriginFunc(fn func(origin string) bool) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.AllowOriginFunc = fn
-	}
-}
-
-// WithAllowMethods sets the allowed HTTP methods.
-func WithAllowMethods(methods ...string) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.AllowMethods = methods
-	}
-}
-
-// WithAllowHeaders sets the allowed request headers.
-func WithAllowHeaders(headers ...string) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.AllowHeaders = headers
-	}
-}
-
-// WithExposeHeaders sets the headers exposed to the client.
-func WithExposeHeaders(headers ...string) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.ExposeHeaders = headers
-	}
-}
-
-// WithAllowCredentials enables credentials support.
-// When enabled, Access-Control-Allow-Origin echoes the actual origin instead of "*".
-func WithAllowCredentials() CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.AllowCredentials = true
-	}
-}
-
-// WithMaxAge sets the preflight cache duration.
-func WithMaxAge(duration time.Duration) CORSOption {
-	return func(cfg *CORSConfig) {
-		cfg.MaxAge = duration
+	return func(o *corsOptions) {
+		o.allowOriginFunc = fn
 	}
 }
 
 // CORS returns middleware that handles Cross-Origin Resource Sharing.
 // It processes preflight (OPTIONS) requests and adds CORS headers to all responses.
-func CORS(opts ...CORSOption) internal.Middleware {
-	cfg := &CORSConfig{
-		AllowOrigins: DefaultCORSConfig.AllowOrigins,
-		AllowMethods: DefaultCORSConfig.AllowMethods,
-		AllowHeaders: DefaultCORSConfig.AllowHeaders,
-		MaxAge:       DefaultCORSConfig.MaxAge,
+func CORS(cfg CORSConfig, opts ...CORSOption) internal.Middleware {
+	o := &corsOptions{}
+	for _, opt := range opts {
+		opt(o)
 	}
 
-	for _, opt := range opts {
-		opt(cfg)
+	// Apply runtime defaults for zero/nil fields
+	if len(cfg.AllowOrigins) == 0 {
+		cfg.AllowOrigins = []string{"*"}
+	}
+	if len(cfg.AllowMethods) == 0 {
+		cfg.AllowMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions}
+	}
+	if len(cfg.AllowHeaders) == 0 {
+		cfg.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	}
 
 	// Pre-compute joined strings to avoid repeated string allocations across multiple requests
@@ -140,7 +77,7 @@ func CORS(opts ...CORSOption) internal.Middleware {
 			}
 
 			// Check if origin is allowed
-			allowed := isOriginAllowed(origin, cfg, hasWildcard)
+			allowed := isOriginAllowed(origin, &cfg, o, hasWildcard)
 			if !allowed {
 				// Continue without CORS headers; browser's same-origin policy prevents credential access from rejected origins
 				return next(c)
@@ -191,10 +128,10 @@ func CORS(opts ...CORSOption) internal.Middleware {
 }
 
 // isOriginAllowed checks if the given origin is allowed based on configuration.
-func isOriginAllowed(origin string, cfg *CORSConfig, hasWildcard bool) bool {
+func isOriginAllowed(origin string, cfg *CORSConfig, o *corsOptions, hasWildcard bool) bool {
 	// AllowOriginFunc completely overrides AllowOrigins when set
-	if cfg.AllowOriginFunc != nil {
-		return cfg.AllowOriginFunc(origin)
+	if o.allowOriginFunc != nil {
+		return o.allowOriginFunc(origin)
 	}
 
 	// Wildcard allows all
