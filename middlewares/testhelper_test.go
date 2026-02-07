@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -162,3 +163,7 @@ func (c *testContext) UserID() string                                           
 func (c *testContext) IsAuthenticated() bool                                         { return false }
 func (c *testContext) IsCurrentUser(id string) bool                                  { return false }
 func (c *testContext) Can(permission internal.Permission) bool                       { return false }
+func (c *testContext) Form(name string) string                                       { return c.request.FormValue(name) }
+func (c *testContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
+	return c.request.FormFile(name)
+}

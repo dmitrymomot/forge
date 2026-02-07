@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -72,6 +73,10 @@ func (c *paramContext) UserID() string                           { return "" }
 func (c *paramContext) IsAuthenticated() bool                    { return false }
 func (c *paramContext) IsCurrentUser(id string) bool             { return false }
 func (c *paramContext) Can(permission internal.Permission) bool  { return false }
+func (c *paramContext) Form(name string) string                  { return "" }
+func (c *paramContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
+	return nil, nil, nil
+}
 
 func (c *paramContext) Error(code int, message string, opts ...internal.HTTPErrorOption) *internal.HTTPError {
 	return internal.NewHTTPError(code, message)
