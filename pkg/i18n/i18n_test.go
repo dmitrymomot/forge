@@ -411,6 +411,100 @@ func TestTn(t *testing.T) {
 	})
 }
 
+func TestBaseLanguageFallback(t *testing.T) {
+	t.Parallel()
+
+	setup := func() *i18n.I18n {
+		inst, _ := i18n.New(
+			i18n.WithDefaultLanguage("en"),
+			i18n.WithTranslations("en", "common", map[string]any{
+				"hello":   "Hello",
+				"welcome": "Welcome, {{name}}!",
+				"items": map[string]any{
+					"one":   "{{count}} item",
+					"other": "{{count}} items",
+				},
+			}),
+			i18n.WithTranslations("es", "common", map[string]any{
+				"hello":   "Hola",
+				"welcome": "Bienvenido, {{name}}!",
+				"items": map[string]any{
+					"one":   "{{count}} artículo",
+					"other": "{{count}} artículos",
+				},
+			}),
+			i18n.WithTranslations("en-US", "common", map[string]any{
+				"color": "Color",
+			}),
+		)
+		return inst
+	}
+
+	t.Run("T falls back from en-US to en", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "Hello", inst.T("en-US", "common", "hello"))
+	})
+
+	t.Run("T falls back from es-ES to es", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "Hola", inst.T("es-ES", "common", "hello"))
+	})
+
+	t.Run("T with placeholders falls back to base language", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		result := inst.T("en-US", "common", "welcome", i18n.M{"name": "John"})
+		require.Equal(t, "Welcome, John!", result)
+	})
+
+	t.Run("T exact match takes priority over base language", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "Color", inst.T("en-US", "common", "color"))
+	})
+
+	t.Run("T falls back to default when base language also missing", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "Hello", inst.T("fr-FR", "common", "hello"))
+	})
+
+	t.Run("T returns key when not found anywhere", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "missing.key", inst.T("en-US", "common", "missing.key"))
+	})
+
+	t.Run("Tn falls back from en-US to en", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "1 item", inst.Tn("en-US", "common", "items", 1))
+		require.Equal(t, "5 items", inst.Tn("en-US", "common", "items", 5))
+	})
+
+	t.Run("Tn falls back from es-ES to es", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "1 artículo", inst.Tn("es-ES", "common", "items", 1))
+		require.Equal(t, "3 artículos", inst.Tn("es-ES", "common", "items", 3))
+	})
+
+	t.Run("Tn falls back to default when base language also missing", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "5 items", inst.Tn("fr-FR", "common", "items", 5))
+	})
+
+	t.Run("base language without region is unchanged", func(t *testing.T) {
+		t.Parallel()
+		inst := setup()
+		require.Equal(t, "Hello", inst.T("en", "common", "hello"))
+		require.Equal(t, "Hola", inst.T("es", "common", "hello"))
+	})
+}
+
 func TestFlattenTranslations(t *testing.T) {
 	t.Parallel()
 
