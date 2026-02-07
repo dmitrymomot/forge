@@ -75,6 +75,7 @@ func (c *paramContext) UserID() string                           { return "" }
 func (c *paramContext) IsAuthenticated() bool                    { return false }
 func (c *paramContext) IsCurrentUser(id string) bool             { return false }
 func (c *paramContext) Can(permission internal.Permission) bool  { return false }
+func (c *paramContext) Role() string                             { return "" }
 func (c *paramContext) Form(name string) string                  { return "" }
 func (c *paramContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
 	return nil, nil, nil
@@ -115,7 +116,10 @@ func (c *paramContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...jo
 	return nil
 }
 func (c *paramContext) Storage() (storage.Storage, error) { return nil, nil }
-func (c *paramContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
+func (c *paramContext) Upload(field string, opts ...storage.Option) (*storage.FileInfo, error) {
+	return nil, nil
+}
+func (c *paramContext) UploadFromURL(sourceURL string, opts ...storage.Option) (*storage.FileInfo, error) {
 	return nil, nil
 }
 func (c *paramContext) Download(key string) (io.ReadCloser, error)                    { return nil, nil }

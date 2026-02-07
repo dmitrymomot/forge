@@ -154,7 +154,10 @@ func (c *testContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job
 	return nil
 }
 func (c *testContext) Storage() (storage.Storage, error) { return nil, nil }
-func (c *testContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
+func (c *testContext) Upload(field string, opts ...storage.Option) (*storage.FileInfo, error) {
+	return nil, nil
+}
+func (c *testContext) UploadFromURL(sourceURL string, opts ...storage.Option) (*storage.FileInfo, error) {
 	return nil, nil
 }
 func (c *testContext) Download(key string) (io.ReadCloser, error)                    { return nil, nil }
@@ -179,6 +182,7 @@ func (c *testContext) UserID() string                          { return "" }
 func (c *testContext) IsAuthenticated() bool                   { return false }
 func (c *testContext) IsCurrentUser(id string) bool            { return false }
 func (c *testContext) Can(permission internal.Permission) bool { return false }
+func (c *testContext) Role() string                            { return "" }
 func (c *testContext) Form(name string) string                 { return c.request.FormValue(name) }
 func (c *testContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
 	return c.request.FormFile(name)

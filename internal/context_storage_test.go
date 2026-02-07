@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -51,6 +53,21 @@ func (m *mockStorage) URL(ctx context.Context, key string, opts ...storage.URLOp
 	return "https://example.com/" + key, nil
 }
 
+// multipartRequest builds an *http.Request containing a single multipart form file.
+func multipartRequest(t *testing.T, fieldName, fileName string, data []byte) *http.Request {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	require.NoError(t, err)
+	_, err = part.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	req := httptest.NewRequest(http.MethodGet, "/", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
 func TestStorageNotConfigured(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +87,17 @@ func TestStorageNotConfigured(t *testing.T) {
 		t.Parallel()
 
 		requestVia(t, req, nil, func(c internal.Context) {
-			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			info, err := c.Upload("file")
+			require.Nil(t, info)
+			require.ErrorIs(t, err, storage.ErrNotConfigured)
+		})
+	})
+
+	t.Run("UploadFromURL returns error when not configured", func(t *testing.T) {
+		t.Parallel()
+
+		requestVia(t, req, nil, func(c internal.Context) {
+			info, err := c.UploadFromURL("https://example.com/image.png")
 			require.Nil(t, info)
 			require.ErrorIs(t, err, storage.ErrNotConfigured)
 		})
@@ -128,11 +155,22 @@ func TestStorageConfigured(t *testing.T) {
 	t.Run("Upload delegates to storage", func(t *testing.T) {
 		t.Parallel()
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := multipartRequest(t, "file", "hello.txt", []byte("test"))
 		requestVia(t, req, opts, func(c internal.Context) {
-			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			info, err := c.Upload("file")
 			require.NoError(t, err)
 			require.Equal(t, "test-key", info.Key)
+		})
+	})
+
+	t.Run("Upload missing form field", func(t *testing.T) {
+		t.Parallel()
+
+		req := multipartRequest(t, "other", "hello.txt", []byte("test"))
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.Upload("file")
+			require.Nil(t, info)
+			require.ErrorIs(t, err, http.ErrMissingFile)
 		})
 	})
 
@@ -186,10 +224,10 @@ func TestUploadWithOptions(t *testing.T) {
 	}
 	opts := []internal.Option{internal.WithStorage(mock)}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := multipartRequest(t, "file", "photo.png", []byte("data"))
 	requestVia(t, req, opts, func(c internal.Context) {
 		info, err := c.Upload(
-			bytes.NewReader([]byte("data")), 4,
+			"file",
 			storage.WithContentType("image/png"),
 			storage.WithPrefix("uploads"),
 		)
@@ -197,7 +235,73 @@ func TestUploadWithOptions(t *testing.T) {
 		require.Equal(t, "test-key", info.Key)
 	})
 
-	require.Len(t, receivedOpts, 2, "Upload should forward all storage options to Put")
+	// PutFile may add a WithContentType from MIME detection, so at least the two
+	// caller-supplied options must be present.
+	require.GreaterOrEqual(t, len(receivedOpts), 2, "Upload should forward storage options to Put")
+}
+
+func TestUploadFromURL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delegates to storage", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &mockStorage{}
+		opts := []internal.Option{internal.WithStorage(mock)}
+
+		// Serve a tiny file.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, "hello")
+		}))
+		defer srv.Close()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.UploadFromURL(srv.URL + "/file.txt")
+			require.NoError(t, err)
+			require.Equal(t, "test-key", info.Key)
+		})
+	})
+
+	t.Run("invalid URL returns ErrInvalidURL", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &mockStorage{}
+		opts := []internal.Option{internal.WithStorage(mock)}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.UploadFromURL("not-a-url")
+			require.Nil(t, info)
+			require.ErrorIs(t, err, storage.ErrInvalidURL)
+		})
+	})
+
+	t.Run("propagates storage errors", func(t *testing.T) {
+		t.Parallel()
+
+		testErr := errors.New("storage error")
+		mock := &mockStorage{
+			putFn: func(_ context.Context, _ io.Reader, _ int64, _ ...storage.Option) (*storage.FileInfo, error) {
+				return nil, testErr
+			},
+		}
+		opts := []internal.Option{internal.WithStorage(mock)}
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, "hello")
+		}))
+		defer srv.Close()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, opts, func(c internal.Context) {
+			info, err := c.UploadFromURL(srv.URL + "/file.txt")
+			require.Nil(t, info)
+			require.ErrorIs(t, err, testErr)
+		})
+	})
 }
 
 func TestStorageErrors(t *testing.T) {
@@ -215,9 +319,9 @@ func TestStorageErrors(t *testing.T) {
 		}
 		opts := []internal.Option{internal.WithStorage(mock)}
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := multipartRequest(t, "file", "hello.txt", []byte("test"))
 		requestVia(t, req, opts, func(c internal.Context) {
-			info, err := c.Upload(bytes.NewReader([]byte("test")), 4)
+			info, err := c.Upload("file")
 			require.Nil(t, info)
 			require.ErrorIs(t, err, testErr)
 		})
