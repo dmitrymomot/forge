@@ -190,11 +190,16 @@
 //
 // # Translation Support
 //
-// ValidationError includes translation keys and values for internationalization:
+// ValidationError includes translation keys and values for internationalization.
+// Use the Translate method on ValidationErrors with a TranslateFunc to translate
+// all error messages in a single call. The i18n Translator.TranslateMessage method
+// matches TranslateFunc directly:
 //
-//	for _, verr := range validationErrs {
-//		// Use translation key and values with your i18n system
-//		translatedMsg := translator.Translate(verr.TranslationKey, verr.TranslationValues)
-//		fmt.Printf("%s: %s\n", verr.Field, translatedMsg)
+//	if err := validator.Apply(rules...); err != nil {
+//		ve := validator.ExtractValidationErrors(err)
+//		ve.Translate(translator.TranslateMessage) // translates Message fields in-place
+//		for _, verr := range ve {
+//			fmt.Printf("%s: %s\n", verr.Field, verr.Message)
+//		}
 //	}
 package validator
