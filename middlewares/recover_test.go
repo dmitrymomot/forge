@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -182,27 +183,6 @@ func TestRecover_PanicTypes(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, panicValue, pe.Value)
 	})
-
-	t.Run("recovers from nil panic", func(t *testing.T) {
-		t.Parallel()
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-		ctx := newTestContext(rec, req)
-
-		mw := middlewares.Recover()
-		handler := mw(func(c internal.Context) error {
-			panic(nil)
-		})
-
-		err := handler(ctx)
-		require.Error(t, err)
-
-		pe, ok := middlewares.AsPanicError(err)
-		require.True(t, ok)
-		// In Go 1.21+, panic(nil) creates a runtime.PanicNilError
-		require.NotNil(t, pe.Value)
-	})
 }
 
 func TestRecover_WithRecoverStackSize(t *testing.T) {
@@ -336,6 +316,61 @@ func TestRecover_ErrorPropagation(t *testing.T) {
 
 		err := handler(ctx)
 		require.NoError(t, err)
+	})
+}
+
+func TestRecover_PanicNil(t *testing.T) {
+	t.Parallel()
+
+	t.Run("panic(nil) is caught as *runtime.PanicNilError", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			panic(nil) //nolint:govet // intentional: testing panic(nil) handling
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+		require.True(t, middlewares.IsPanicError(err))
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		// Go 1.21+ wraps panic(nil) as *runtime.PanicNilError.
+		require.IsType(t, (*runtime.PanicNilError)(nil), pe.Value)
+	})
+}
+
+func TestRecover_DeferredPanic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("catches panic from deferred function", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		ctx := newTestContext(rec, req)
+
+		mw := middlewares.Recover()
+		handler := mw(func(c internal.Context) error {
+			defer func() {
+				panic("deferred panic value")
+			}()
+			return nil
+		})
+
+		err := handler(ctx)
+		require.Error(t, err)
+		require.True(t, middlewares.IsPanicError(err))
+
+		pe, ok := middlewares.AsPanicError(err)
+		require.True(t, ok)
+		require.Equal(t, "deferred panic value", pe.Value)
+		require.NotEmpty(t, pe.Stack)
 	})
 }
 
