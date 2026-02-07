@@ -67,7 +67,6 @@ func (w *ResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// Write writes the data to the connection as part of an HTTP reply.
 func (w *ResponseWriter) Write(b []byte) (int, error) {
 	w.mu.Lock()
 	if !w.written {

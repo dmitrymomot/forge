@@ -154,8 +154,6 @@ func ErrServiceUnavailable(message string, opts ...HTTPErrorOption) *HTTPError {
 	return e
 }
 
-// Helper functions for error inspection.
-
 func IsHTTPError(err error) bool {
 	var target *HTTPError
 	return errors.As(err, &target)
