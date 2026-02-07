@@ -83,7 +83,7 @@
 //		Endpoint        string // STORAGE_ENDPOINT (for MinIO/custom S3)
 //		Region          string // STORAGE_REGION (default: us-east-1)
 //		PublicURL       string // STORAGE_PUBLIC_URL (CDN URL)
-//		DefaultACL      ACL    // STORAGE_DEFAULT_ACL (default: private)
+//		DefaultACL      string // DEFAULT_ACL (default: private)
 //		PathStyle       bool   // STORAGE_PATH_STYLE (for MinIO)
 //		MaxDownloadSize int64  // STORAGE_MAX_DOWNLOAD (default: 50MB)
 //	}

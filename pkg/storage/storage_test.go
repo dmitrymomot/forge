@@ -15,7 +15,7 @@ func TestConfig_applyDefaults(t *testing.T) {
 		cfg.applyDefaults()
 
 		require.Equal(t, DefaultRegion, cfg.Region)
-		require.Equal(t, ACLPrivate, cfg.DefaultACL)
+		require.Equal(t, string(ACLPrivate), cfg.DefaultACL)
 		require.Equal(t, int64(DefaultMaxDownloadSize), cfg.MaxDownloadSize)
 	})
 
@@ -23,13 +23,13 @@ func TestConfig_applyDefaults(t *testing.T) {
 		t.Parallel()
 		cfg := &Config{
 			Region:          "eu-west-1",
-			DefaultACL:      ACLPublicRead,
+			DefaultACL:      string(ACLPublicRead),
 			MaxDownloadSize: 100 << 20,
 		}
 		cfg.applyDefaults()
 
 		require.Equal(t, "eu-west-1", cfg.Region)
-		require.Equal(t, ACLPublicRead, cfg.DefaultACL)
+		require.Equal(t, string(ACLPublicRead), cfg.DefaultACL)
 		require.Equal(t, int64(100<<20), cfg.MaxDownloadSize)
 	})
 }

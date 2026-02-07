@@ -27,27 +27,25 @@ type Storage interface {
 
 // Config holds S3-compatible storage configuration.
 type Config struct {
-	Bucket string
-
-	AccessKey string
-
-	SecretKey string
+	Bucket    string `env:"BUCKET,required"`
+	AccessKey string `env:"ACCESS_KEY,required"`
+	SecretKey string `env:"SECRET_KEY,required"`
 
 	// Endpoint is the custom S3 endpoint URL (optional, for MinIO or other S3-compatible services).
-	Endpoint string
+	Endpoint string `env:"ENDPOINT"`
 
-	Region string
+	Region string `env:"REGION" envDefault:"us-east-1"`
 
 	// PublicURL is the CDN or public URL prefix for public files (optional).
 	// If set, public URLs will use this prefix instead of the S3 URL.
-	PublicURL string
+	PublicURL string `env:"PUBLIC_URL"`
 
-	DefaultACL ACL
+	DefaultACL string `env:"DEFAULT_ACL" envDefault:"private"`
 
 	// PathStyle enables path-style URLs (required for MinIO).
-	PathStyle bool
+	PathStyle bool `env:"PATH_STYLE" envDefault:"false"`
 
-	MaxDownloadSize int64
+	MaxDownloadSize int64 `env:"MAX_DOWNLOAD_SIZE" envDefault:"52428800"`
 }
 
 // FileInfo contains metadata about an uploaded file.
@@ -81,7 +79,7 @@ func (c *Config) applyDefaults() {
 		c.Region = DefaultRegion
 	}
 	if c.DefaultACL == "" {
-		c.DefaultACL = ACLPrivate
+		c.DefaultACL = string(ACLPrivate)
 	}
 	if c.MaxDownloadSize == 0 {
 		c.MaxDownloadSize = DefaultMaxDownloadSize

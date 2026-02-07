@@ -62,7 +62,7 @@ func New(cfg Config) (*S3Storage, error) {
 // Put uploads data from a reader to S3.
 func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Option) (*FileInfo, error) {
 	o := &putOptions{
-		acl: s.cfg.DefaultACL,
+		acl: ACL(s.cfg.DefaultACL),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -288,7 +288,7 @@ func (s *S3Storage) HeadObject(ctx context.Context, key string) (*FileInfo, erro
 		Key:         key,
 		Size:        size,
 		ContentType: contentType,
-		ACL:         s.cfg.DefaultACL,
+		ACL:         ACL(s.cfg.DefaultACL),
 	}, nil
 }
 

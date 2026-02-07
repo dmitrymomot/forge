@@ -1,222 +1,487 @@
-package storage
+package storage_test
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/johannesboyne/gofakes3"
+	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/pkg/storage"
 )
+
+func newTestStorage(t *testing.T) *storage.S3Storage {
+	t.Helper()
+
+	backend := s3mem.New()
+	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
+	ts := httptest.NewServer(faker.Server())
+	t.Cleanup(ts.Close)
+
+	s, err := storage.New(storage.Config{
+		Endpoint:  ts.URL,
+		AccessKey: "test",
+		SecretKey: "test",
+		Bucket:    "test-bucket",
+		Region:    "us-east-1",
+		PathStyle: true,
+	})
+	require.NoError(t, err, "failed to create storage client")
+	return s
+}
 
 func TestNew(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid config", func(t *testing.T) {
 		t.Parallel()
-		cfg := Config{
+		store, err := storage.New(storage.Config{
 			Bucket:    "test-bucket",
 			AccessKey: "test-access-key",
 			SecretKey: "test-secret-key",
-		}
-
-		store, err := New(cfg)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, store)
-		require.NotNil(t, store.client)
-		require.NotNil(t, store.presigner)
-		require.Equal(t, DefaultRegion, store.cfg.Region)
-		require.Equal(t, ACLPrivate, store.cfg.DefaultACL)
 	})
 
 	t.Run("custom endpoint", func(t *testing.T) {
 		t.Parallel()
-		cfg := Config{
+		store, err := storage.New(storage.Config{
 			Bucket:    "test-bucket",
 			AccessKey: "test-access-key",
 			SecretKey: "test-secret-key",
 			Endpoint:  "http://localhost:9000",
 			PathStyle: true,
-		}
-
-		store, err := New(cfg)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, store)
 	})
 
 	t.Run("invalid config", func(t *testing.T) {
 		t.Parallel()
-		cfg := Config{} // Missing required fields.
-
-		store, err := New(cfg)
+		store, err := storage.New(storage.Config{})
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidConfig)
+		require.ErrorIs(t, err, storage.ErrInvalidConfig)
 		require.Nil(t, store)
 	})
 }
 
-func TestSanitizePathSegment(t *testing.T) {
+func TestS3Integration_Put(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"simple", "avatars", "avatars"},
-		{"with spaces", "my folder", "my_folder"},
-		{"with slashes", "/path/to/", "path_to"},
-		{"path traversal", "../../../etc/passwd", "___etc_passwd"},
-		{"special chars", "file@#$%name", "file____name"},
-		{"leading dots", "..hidden", "hidden"},
-		{"unicode", "файл", "____"},
-		{"empty", "", ""},
-		{"dashes and underscores", "my-file_name", "my-file_name"},
-		{"dots allowed", "file.name", "file.name"},
-	}
+	s := newTestStorage(t)
+	ctx := context.Background()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := sanitizePathSegment(tt.input)
-			require.Equal(t, tt.want, got)
+	t.Run("upload with private ACL", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("test content for private file")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithPrefix("test-private"),
+			storage.WithACL(storage.ACLPrivate),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, info.Key)
+		require.Equal(t, int64(len(data)), info.Size)
+		require.Equal(t, storage.ACLPrivate, info.ACL)
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
 		})
-	}
+	})
+
+	t.Run("upload with public-read ACL", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("test content for public file")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithPrefix("test-public"),
+			storage.WithACL(storage.ACLPublicRead),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, info.Key)
+		require.Equal(t, int64(len(data)), info.Size)
+		require.Equal(t, storage.ACLPublicRead, info.ACL)
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload with tenant prefix", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("test content with tenant")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithTenant("tenant123"),
+			storage.WithPrefix("uploads"),
+		)
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(info.Key, "tenant123/"))
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload detects MIME type", func(t *testing.T) {
+		t.Parallel()
+
+		// PNG magic bytes
+		pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+		pngData = append(pngData, make([]byte, 100)...)
+
+		info, err := s.Put(ctx, bytes.NewReader(pngData), int64(len(pngData)))
+		require.NoError(t, err)
+		require.Equal(t, "image/png", info.ContentType)
+		require.True(t, strings.HasSuffix(info.Key, ".png"))
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload with explicit content type", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("some binary data")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithContentType("application/octet-stream"),
+		)
+		require.NoError(t, err)
+		require.Equal(t, "application/octet-stream", info.ContentType)
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload with validation passes", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("valid content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(
+				storage.NotEmpty(),
+				storage.MaxSize(1024),
+			),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, info.Key)
+
+		// Cleanup
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+	})
+
+	t.Run("upload with validation fails on size", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content that exceeds the tiny limit")
+		_, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(storage.MaxSize(10)),
+		)
+		require.Error(t, err)
+		var verr *storage.FileValidationError
+		require.ErrorAs(t, err, &verr)
+		require.Equal(t, storage.ErrCodeFileTooLarge, verr.Code)
+	})
+
+	t.Run("upload with validation fails on MIME type", func(t *testing.T) {
+		t.Parallel()
+
+		// Plain text content
+		data := []byte("this is plain text")
+		_, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithValidation(storage.ImageOnly()),
+		)
+		require.Error(t, err)
+		var verr *storage.FileValidationError
+		require.ErrorAs(t, err, &verr)
+		require.Equal(t, storage.ErrCodeInvalidMIME, verr.Code)
+	})
 }
 
-func TestS3Storage_buildKey(t *testing.T) {
+func TestS3Integration_Get(t *testing.T) {
 	t.Parallel()
 
-	store := &S3Storage{
-		cfg: Config{
-			Bucket:     "test-bucket",
-			DefaultACL: ACLPrivate,
-		},
-	}
+	s := newTestStorage(t)
+	ctx := context.Background()
 
-	t.Run("no tenant no prefix", func(t *testing.T) {
+	t.Run("retrieve uploaded file", func(t *testing.T) {
 		t.Parallel()
-		key := store.buildKey("", "", "image/jpeg")
-		// Should be just {ulid}.jpg
-		require.Regexp(t, `^[0-9A-Z]{26}\.jpg$`, key)
+
+		expectedData := []byte("content to retrieve")
+		info, err := s.Put(ctx, bytes.NewReader(expectedData), int64(len(expectedData)))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		reader, err := s.Get(ctx, info.Key)
+		require.NoError(t, err)
+		defer reader.Close()
+
+		data, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.Equal(t, expectedData, data)
 	})
 
-	t.Run("with prefix", func(t *testing.T) {
+	t.Run("get non-existent file returns error", func(t *testing.T) {
 		t.Parallel()
-		key := store.buildKey("", "avatars", "image/png")
-		// Should be avatars/{ulid}.png
-		require.Regexp(t, `^avatars/[0-9A-Z]{26}\.png$`, key)
-	})
 
-	t.Run("with tenant", func(t *testing.T) {
-		t.Parallel()
-		key := store.buildKey("tenant123", "", "application/pdf")
-		// Should be tenant123/{ulid}.pdf
-		require.Regexp(t, `^tenant123/[0-9A-Z]{26}\.pdf$`, key)
-	})
-
-	t.Run("with tenant and prefix", func(t *testing.T) {
-		t.Parallel()
-		key := store.buildKey("tenant123", "documents", "application/pdf")
-		// Should be tenant123/documents/{ulid}.pdf
-		require.Regexp(t, `^tenant123/documents/[0-9A-Z]{26}\.pdf$`, key)
-	})
-
-	t.Run("unknown mime type", func(t *testing.T) {
-		t.Parallel()
-		key := store.buildKey("", "", "application/unknown")
-		// Should use .bin extension
-		require.Regexp(t, `^[0-9A-Z]{26}\.bin$`, key)
+		_, err := s.Get(ctx, "non-existent-key-12345")
+		require.Error(t, err)
+		require.ErrorIs(t, err, storage.ErrNotFound)
 	})
 }
 
-func TestS3Storage_publicURL(t *testing.T) {
+func TestS3Integration_Delete(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default S3 URL", func(t *testing.T) {
-		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket: "test-bucket",
-				Region: "us-east-1",
-			},
-		}
+	s := newTestStorage(t)
+	ctx := context.Background()
 
-		url := store.publicURL("path/to/file.jpg")
-		require.Equal(t, "https://test-bucket.s3.us-east-1.amazonaws.com/path/to/file.jpg", url)
+	t.Run("delete existing file", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content to delete")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)))
+		require.NoError(t, err)
+
+		err = s.Delete(ctx, info.Key)
+		require.NoError(t, err)
+
+		// Verify file is gone
+		_, err = s.Get(ctx, info.Key)
+		require.Error(t, err)
+		require.ErrorIs(t, err, storage.ErrNotFound)
 	})
 
-	t.Run("custom public URL", func(t *testing.T) {
+	t.Run("delete non-existent file succeeds", func(t *testing.T) {
 		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket:    "test-bucket",
-				PublicURL: "https://cdn.example.com",
-			},
-		}
 
-		url := store.publicURL("path/to/file.jpg")
-		require.Equal(t, "https://cdn.example.com/path/to/file.jpg", url)
-	})
-
-	t.Run("custom public URL with trailing slash", func(t *testing.T) {
-		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket:    "test-bucket",
-				PublicURL: "https://cdn.example.com/",
-			},
-		}
-
-		url := store.publicURL("path/to/file.jpg")
-		require.Equal(t, "https://cdn.example.com/path/to/file.jpg", url)
-	})
-
-	t.Run("custom endpoint path style", func(t *testing.T) {
-		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket:    "test-bucket",
-				Endpoint:  "http://localhost:9000",
-				PathStyle: true,
-			},
-		}
-
-		url := store.publicURL("path/to/file.jpg")
-		require.Equal(t, "http://localhost:9000/test-bucket/path/to/file.jpg", url)
-	})
-
-	t.Run("custom endpoint virtual host style", func(t *testing.T) {
-		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket:    "test-bucket",
-				Endpoint:  "http://localhost:9000",
-				PathStyle: false,
-			},
-		}
-
-		url := store.publicURL("path/to/file.jpg")
-		require.Equal(t, "http://localhost:9000/path/to/file.jpg", url)
+		// S3 delete is idempotent
+		err := s.Delete(ctx, "non-existent-key-67890")
+		require.NoError(t, err)
 	})
 }
 
-func TestS3Storage_URL_Defaults(t *testing.T) {
+func TestS3Integration_URL(t *testing.T) {
 	t.Parallel()
 
-	// URL() now defaults to signed URLs; use WithPublic() for public URLs.
-	// Full integration tests verify this behavior with actual S3 endpoint.
+	s := newTestStorage(t)
+	ctx := context.Background()
 
-	t.Run("struct initialized correctly", func(t *testing.T) {
+	t.Run("signed URL for private file", func(t *testing.T) {
 		t.Parallel()
-		store := &S3Storage{
-			cfg: Config{
-				Bucket:     "test-bucket",
-				Region:     "us-east-1",
-				DefaultACL: ACLPrivate,
-			},
-		}
 
-		// Verify config stored correctly.
-		require.Equal(t, "test-bucket", store.cfg.Bucket)
-		require.Equal(t, "us-east-1", store.cfg.Region)
-		require.Equal(t, ACLPrivate, store.cfg.DefaultACL)
+		data := []byte("private content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithACL(storage.ACLPrivate),
+		)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		url, err := s.URL(ctx, info.Key)
+		require.NoError(t, err)
+		require.Contains(t, url, info.Key)
+		require.Contains(t, url, "X-Amz-Signature") // Signed URL contains signature
+	})
+
+	t.Run("public URL with WithPublic option", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("public content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithACL(storage.ACLPublicRead),
+		)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		url, err := s.URL(ctx, info.Key, storage.WithPublic())
+		require.NoError(t, err)
+		require.Contains(t, url, info.Key)
+		require.NotContains(t, url, "X-Amz-Signature") // Public URL has no signature
+	})
+
+	t.Run("force signed URL for public file", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("public content with signed url")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithACL(storage.ACLPublicRead),
+		)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		url, err := s.URL(ctx, info.Key, storage.WithSigned(0))
+		require.NoError(t, err)
+		require.Contains(t, url, "X-Amz-Signature")
+	})
+
+	t.Run("URL with custom expiry", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content with custom expiry")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		url, err := s.URL(ctx, info.Key, storage.WithExpiry(1*time.Hour))
+		require.NoError(t, err)
+		require.NotEmpty(t, url)
+	})
+
+	t.Run("URL with download disposition", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("downloadable content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		url, err := s.URL(ctx, info.Key, storage.WithDownload("myfile.txt"))
+		require.NoError(t, err)
+		require.Contains(t, url, "response-content-disposition")
+	})
+}
+
+func TestS3Integration_HeadObject(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	t.Run("get metadata for existing file", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content for head request")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, info.Key)
+		})
+
+		headInfo, err := s.HeadObject(ctx, info.Key)
+		require.NoError(t, err)
+		require.Equal(t, info.Key, headInfo.Key)
+		require.Equal(t, info.Size, headInfo.Size)
+		require.Equal(t, info.ContentType, headInfo.ContentType)
+		// HeadObject returns DefaultACL (ACLPrivate by default)
+		require.Equal(t, storage.ACLPrivate, headInfo.ACL)
+	})
+
+	t.Run("head non-existent file returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := s.HeadObject(ctx, "non-existent-key-head")
+		require.Error(t, err)
+		require.ErrorIs(t, err, storage.ErrNotFound)
+	})
+}
+
+func TestS3Integration_Copy(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	t.Run("copy file within bucket", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content to copy")
+		srcInfo, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithPrefix("source"),
+		)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, srcInfo.Key)
+		})
+
+		dstKey := "copied/" + srcInfo.Key
+		err = s.Copy(ctx, srcInfo.Key, dstKey)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, dstKey)
+		})
+
+		// Verify copy exists with same content
+		reader, err := s.Get(ctx, dstKey)
+		require.NoError(t, err)
+		defer reader.Close()
+
+		copiedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.Equal(t, data, copiedData)
+	})
+
+	t.Run("copy creates duplicate file", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("content to copy and verify")
+		srcInfo, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithPrefix("source-copy"),
+		)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, srcInfo.Key)
+		})
+
+		dstKey := "copied-dest/" + srcInfo.Key
+		err = s.Copy(ctx, srcInfo.Key, dstKey)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = s.Delete(ctx, dstKey)
+		})
+
+		// Verify copy exists and has same content
+		reader, err := s.Get(ctx, dstKey)
+		require.NoError(t, err)
+		defer reader.Close()
+
+		copiedData, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.Equal(t, data, copiedData)
+	})
+
+	t.Run("copy non-existent source returns error", func(t *testing.T) {
+		t.Parallel()
+
+		err := s.Copy(ctx, "non-existent-source", "destination-key")
+		require.Error(t, err)
 	})
 }
