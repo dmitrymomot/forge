@@ -8,12 +8,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// RedisConfig configures the Redis cache.
+type RedisConfig struct {
+	Prefix     string        `env:"PREFIX"`
+	DefaultTTL time.Duration `env:"DEFAULT_TTL" envDefault:"5m"`
+}
+
 // Redis is a cache backed by Redis.
 // It serializes values using the configured Marshaler (default: JSON).
 type Redis[V any] struct {
-	client    redis.UniversalClient
-	opts      *redisOptions
-	marshaler Marshaler[V]
+	client     redis.UniversalClient
+	marshaler  Marshaler[V]
+	prefix     string
+	defaultTTL time.Duration
 }
 
 // NewRedis creates a new Redis-backed cache.
@@ -25,14 +32,13 @@ type Redis[V any] struct {
 // Example:
 //
 //	client := redis.MustOpen(ctx, os.Getenv("REDIS_URL"))
-//	c := cache.NewRedis[User](client, nil,
-//	    cache.WithPrefix("users"),
-//	    cache.WithRedisDefaultTTL(30 * time.Minute),
-//	)
-func NewRedis[V any](client redis.UniversalClient, m Marshaler[V], opts ...RedisOption) *Redis[V] {
-	o := defaultRedisOptions()
-	for _, opt := range opts {
-		opt(o)
+//	c := cache.NewRedis[User](client, nil, cache.RedisConfig{
+//	    Prefix:     "users",
+//	    DefaultTTL: 30 * time.Minute,
+//	})
+func NewRedis[V any](client redis.UniversalClient, m Marshaler[V], cfg RedisConfig) *Redis[V] {
+	if cfg.DefaultTTL == 0 {
+		cfg.DefaultTTL = 5 * time.Minute
 	}
 
 	if m == nil {
@@ -40,9 +46,10 @@ func NewRedis[V any](client redis.UniversalClient, m Marshaler[V], opts ...Redis
 	}
 
 	return &Redis[V]{
-		client:    client,
-		opts:      o,
-		marshaler: m,
+		client:     client,
+		marshaler:  m,
+		prefix:     cfg.Prefix,
+		defaultTTL: cfg.DefaultTTL,
 	}
 }
 
@@ -78,7 +85,7 @@ func (r *Redis[V]) Set(ctx context.Context, key string, value V, ttl time.Durati
 
 	// Resolve TTL.
 	if ttl == 0 {
-		ttl = r.opts.defaultTTL
+		ttl = r.defaultTTL
 	}
 
 	// Redis interprets 0 as no expiration.
@@ -106,7 +113,7 @@ func (r *Redis[V]) Has(ctx context.Context, key string) (bool, error) {
 // If a prefix is configured, only keys matching the prefix are removed using SCAN.
 // If no prefix is configured, FLUSHDB is used.
 func (r *Redis[V]) Clear(ctx context.Context) error {
-	if r.opts.prefix == "" {
+	if r.prefix == "" {
 		return r.client.FlushDB(ctx).Err()
 	}
 	return r.clearByPrefix(ctx)
@@ -120,16 +127,16 @@ func (r *Redis[V]) Close() error {
 
 // prefixedKey returns the full Redis key with prefix.
 func (r *Redis[V]) prefixedKey(key string) string {
-	if r.opts.prefix == "" {
+	if r.prefix == "" {
 		return key
 	}
-	return r.opts.prefix + ":" + key
+	return r.prefix + ":" + key
 }
 
 // clearByPrefix removes all keys matching the configured prefix using SCAN.
 // This is safe for production use as SCAN does not block the server.
 func (r *Redis[V]) clearByPrefix(ctx context.Context) error {
-	pattern := r.opts.prefix + ":*"
+	pattern := r.prefix + ":*"
 	var cursor uint64
 
 	for {
