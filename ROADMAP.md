@@ -58,6 +58,7 @@ This document outlines planned features for the Forge framework.
 - `cache` — Generic `Cache` interface + in-memory (LRU) and Redis implementations
 - `i18n` — Translations: JSON/YAML/embed.FS loaders, CLDR plural rules, locale-aware formatting (numbers, currency, dates, percentages), templ helpers via context
 - `jwt` — RFC 7519 JWT generation and validation (HMAC-SHA256), standard/custom claims, constant-time signature verification
+- `oauth` — OAuth2 authorization code flow with `Provider` interface, Google/GitHub implementations, custom HTTP client injection
 
 ---
 
@@ -65,7 +66,6 @@ This document outlines planned features for the Forge framework.
 
 ### Utility Packages (`pkg/`)
 - `featureflag` — `Provider` interface, strategies, memory impl
-- `oauth` — `Provider` interface, Google/GitHub implementations
 - `ratelimit` — Token bucket, sliding window + memory/Redis stores
 - `secrets` — AES-256-GCM encryption with key derivation
 - `sse` — SSE writer, event encoding, flush helpers
