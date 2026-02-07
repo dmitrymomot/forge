@@ -104,6 +104,11 @@ type Context interface {
 	// The role is extracted lazily and cached for the lifetime of the request.
 	Can(permission Permission) bool
 
+	// Role returns the current user's role string.
+	// The role is extracted lazily and cached for the lifetime of the request.
+	// Returns empty string if RBAC is not configured.
+	Role() string
+
 	// Domain returns the normalized domain from the request Host header.
 	// Strips port, handles IPv6, and converts to lowercase.
 	Domain() string
@@ -275,9 +280,13 @@ type Context interface {
 	// Returns storage.ErrNotConfigured if WithStorage was not called.
 	Storage() (storage.Storage, error)
 
-	// Upload stores data and returns file info.
+	// Upload extracts the named form file from the request and stores it.
 	// Returns storage.ErrNotConfigured if WithStorage was not called.
-	Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error)
+	Upload(field string, opts ...storage.Option) (*storage.FileInfo, error)
+
+	// UploadFromURL downloads a file from sourceURL and stores it.
+	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	UploadFromURL(sourceURL string, opts ...storage.Option) (*storage.FileInfo, error)
 
 	// Download retrieves a file from storage.
 	// Returns storage.ErrNotConfigured if WithStorage was not called.
@@ -457,11 +466,11 @@ func (c *requestContext) IsCurrentUser(id string) bool {
 	return uid != "" && uid == id
 }
 
-func (c *requestContext) Can(permission Permission) bool {
-	if c.rolePermissions == nil || c.roleExtractor == nil {
-		return false
+// resolveRole triggers lazy role extraction and returns the cached result.
+func (c *requestContext) resolveRole() string {
+	if c.roleExtractor == nil {
+		return ""
 	}
-
 	c.roleOnce.Do(func() {
 		// Sentinel prevents infinite recursion if the extractor calls Can().
 		empty := ""
@@ -469,13 +478,25 @@ func (c *requestContext) Can(permission Permission) bool {
 		role := c.roleExtractor(c)
 		c.cachedRole = &role
 	})
+	return *c.cachedRole
+}
 
-	perms, ok := c.rolePermissions[*c.cachedRole]
+func (c *requestContext) Can(permission Permission) bool {
+	if c.rolePermissions == nil || c.roleExtractor == nil {
+		return false
+	}
+
+	role := c.resolveRole()
+	perms, ok := c.rolePermissions[role]
 	if !ok {
 		return false
 	}
 
 	return slices.Contains(perms, permission)
+}
+
+func (c *requestContext) Role() string {
+	return c.resolveRole()
 }
 
 func (c *requestContext) Domain() string {
@@ -872,11 +893,22 @@ func (c *requestContext) Storage() (storage.Storage, error) {
 	return c.storage, nil
 }
 
-func (c *requestContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
+func (c *requestContext) Upload(field string, opts ...storage.Option) (*storage.FileInfo, error) {
 	if c.storage == nil {
 		return nil, storage.ErrNotConfigured
 	}
-	return c.storage.Put(c.Context(), r, size, opts...)
+	_, fh, err := c.request.FormFile(field)
+	if err != nil {
+		return nil, fmt.Errorf("upload: %w", err)
+	}
+	return storage.PutFile(c.Context(), c.storage, fh, opts...)
+}
+
+func (c *requestContext) UploadFromURL(sourceURL string, opts ...storage.Option) (*storage.FileInfo, error) {
+	if c.storage == nil {
+		return nil, storage.ErrNotConfigured
+	}
+	return storage.PutFromURL(c.Context(), c.storage, sourceURL, 0, opts...)
 }
 
 func (c *requestContext) Download(key string) (io.ReadCloser, error) {
