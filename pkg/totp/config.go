@@ -1,5 +1,5 @@
 package totp
 
 type Config struct {
-	EncryptionKey string `env:"TOTP_ENCRYPTION_KEY,required"`
+	EncryptionKey string `env:"ENCRYPTION_KEY,required"`
 }
