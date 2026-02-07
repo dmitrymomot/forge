@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"slices"
 	"time"
@@ -66,6 +67,15 @@ type Context interface {
 
 	// QueryDefault returns the query parameter value or a default.
 	QueryDefault(name, defaultValue string) string
+
+	// Form returns the form value by name.
+	// Calls ParseForm/ParseMultipartForm internally on first access.
+	// Returns empty string if the field doesn't exist.
+	Form(name string) string
+
+	// FormFile returns the first file for the given form key.
+	// Returns the file, its header, and any error.
+	FormFile(name string) (multipart.File, *multipart.FileHeader, error)
 
 	// UserID returns the authenticated user's ID from the session.
 	// Loads the session lazily on first call.
@@ -346,6 +356,14 @@ func (c *requestContext) QueryDefault(name, defaultValue string) string {
 		return defaultValue
 	}
 	return v
+}
+
+func (c *requestContext) Form(name string) string {
+	return c.request.FormValue(name)
+}
+
+func (c *requestContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
+	return c.request.FormFile(name)
 }
 
 func (c *requestContext) Deadline() (time.Time, bool) {
