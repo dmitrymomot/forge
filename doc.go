@@ -1,9 +1,10 @@
 // Package forge provides a simple, opinionated framework for building
 // B2B micro-SaaS applications in Go.
 //
-// Forge is designed around the principle of "no magic" - it generates explicit,
-// readable code that you own and can modify. The framework provides a thin
-// orchestration layer while keeping business logic in plain Go handlers.
+// Forge is designed around the principle of "no magic" - it uses explicit,
+// readable code with no reflection or service containers. The framework
+// provides a thin orchestration layer while keeping business logic in
+// plain Go handlers.
 //
 // # Quick Start
 //
@@ -20,6 +21,94 @@
 //	if err := app.Run(":8080", forge.Logger(logger)); err != nil {
 //	    log.Fatal(err)
 //	}
+//
+// # Context as context.Context
+//
+// The [Context] interface embeds [context.Context], so it can be passed
+// directly to any function that expects a standard library context:
+//
+//	func (h *Handler) getUser(c forge.Context) error {
+//	    // c satisfies context.Context — pass it to DB calls, HTTP clients, etc.
+//	    user, err := h.repo.GetUser(c, userID)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    return c.JSON(200, user)
+//	}
+//
+// # Identity and Authentication
+//
+// Context provides convenience methods for checking the current user.
+// These are shortcuts over the session system and return safe defaults
+// when no session is configured:
+//
+//	func (h *Handler) showProfile(c forge.Context) error {
+//	    if !c.IsAuthenticated() {
+//	        return c.Redirect(302, "/login")
+//	    }
+//
+//	    user, err := h.repo.GetUser(c, c.UserID())
+//	    if err != nil {
+//	        return err
+//	    }
+//
+//	    // Only allow users to edit their own profile
+//	    canEdit := c.IsCurrentUser(user.ID)
+//	    return c.Render(200, views.Profile(user, canEdit))
+//	}
+//
+// # Role-Based Access Control (RBAC)
+//
+// Configure permissions with [WithRoles]. The role extractor is called
+// lazily on the first [Context.Can] call and cached for the request:
+//
+//	app := forge.New(
+//	    forge.WithRoles(
+//	        forge.RolePermissions{
+//	            "admin":  {"users.read", "users.write", "billing.manage"},
+//	            "member": {"users.read"},
+//	        },
+//	        func(c forge.Context) string {
+//	            return forge.ContextValue[string](c, roleKey{})
+//	        },
+//	    ),
+//	)
+//
+// Check permissions in handlers:
+//
+//	func (h *Handler) deleteUser(c forge.Context) error {
+//	    if !c.Can("users.write") {
+//	        return c.Error(403, "forbidden")
+//	    }
+//	    return h.repo.DeleteUser(c, forge.Param[string](c, "id"))
+//	}
+//
+// # Type-Safe Parameter Helpers
+//
+// Generic helper functions provide type-safe access to URL and query
+// parameters. They use strconv for conversion and return zero values
+// on parse failure:
+//
+//	func (h *Handler) listItems(c forge.Context) error {
+//	    page := forge.QueryDefault[int](c, "page", 1)
+//	    limit := forge.QueryDefault[int](c, "limit", 20)
+//	    items, err := h.repo.ListItems(c, page, limit)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    return c.JSON(200, items)
+//	}
+//
+//	func (h *Handler) getItem(c forge.Context) error {
+//	    id := forge.Param[int64](c, "id")
+//	    item, err := h.repo.GetItem(c, id)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    return c.JSON(200, item)
+//	}
+//
+// Supported types: ~string, ~int, ~int64, ~float64, ~bool.
 //
 // # Multi-Domain Routing
 //
