@@ -10,8 +10,7 @@
 //
 // Create an I18n instance with translations and retrieve localized text:
 //
-//	i18nInstance, err := i18n.New(
-//		i18n.WithDefaultLanguage("en"),
+//	i18nInstance, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 //		i18n.WithTranslations("en", "app", map[string]any{
 //			"welcome": "Welcome to our application",
 //			"goodbye": "Goodbye, {{name}}!",
@@ -36,8 +35,7 @@
 //	var translationsFS embed.FS
 //
 //	subFS, _ := fs.Sub(translationsFS, "translations")
-//	i18nInstance, err := i18n.New(
-//		i18n.WithDefaultLanguage("en"),
+//	i18nInstance, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 //		i18n.WithJSONDir(subFS),
 //		i18n.WithYAMLDir(subFS),
 //	)
@@ -49,7 +47,7 @@
 // Nested translation structures are automatically flattened for efficient
 // lookups using dot notation:
 //
-//	i18nInstance, _ := i18n.New(
+//	i18nInstance, _ := i18n.New(i18n.Config{},
 //		i18n.WithTranslations("en", "ui", map[string]any{
 //			"buttons": map[string]any{
 //				"save":   "Save",
@@ -65,7 +63,7 @@
 //
 // Use Tn() for pluralized translations with CLDR-compliant plural rules:
 //
-//	i18nInstance, _ := i18n.New(
+//	i18nInstance, _ := i18n.New(i18n.Config{},
 //		i18n.WithTranslations("en", "items", map[string]any{
 //			"count": map[string]string{
 //				"zero":  "No items",
