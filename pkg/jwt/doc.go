@@ -18,13 +18,7 @@
 // Basic JWT service setup:
 //
 //	// Create service with signing key (should be cryptographically secure)
-//	service, err := jwt.New([]byte("your-256-bit-secret"))
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//
-//	// Or from string
-//	service, err := jwt.NewFromString("your-secret-key")
+//	service, err := jwt.New(jwt.Config{SigningKey: "your-256-bit-secret"})
 //	if err != nil {
 //		log.Fatal(err)
 //	}

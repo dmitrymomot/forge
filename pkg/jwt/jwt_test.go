@@ -20,29 +20,13 @@ type TestClaims struct {
 func TestNew(t *testing.T) {
 	t.Parallel()
 	t.Run("with valid signing key", func(t *testing.T) {
-		service, err := jwt.New([]byte("secret"))
+		service, err := jwt.New(jwt.Config{SigningKey: "secret"})
 		require.NoError(t, err)
 		require.NotNil(t, service)
 	})
 
 	t.Run("with empty signing key", func(t *testing.T) {
-		service, err := jwt.New([]byte{})
-		require.Error(t, err)
-		require.Equal(t, jwt.ErrMissingSigningKey, err)
-		require.Nil(t, service)
-	})
-}
-
-func TestNewFromString(t *testing.T) {
-	t.Parallel()
-	t.Run("with valid signing key", func(t *testing.T) {
-		service, err := jwt.NewFromString("secret")
-		require.NoError(t, err)
-		require.NotNil(t, service)
-	})
-
-	t.Run("with empty signing key", func(t *testing.T) {
-		service, err := jwt.NewFromString("")
+		service, err := jwt.New(jwt.Config{})
 		require.Error(t, err)
 		require.Equal(t, jwt.ErrMissingSigningKey, err)
 		require.Nil(t, service)
@@ -51,7 +35,7 @@ func TestNewFromString(t *testing.T) {
 
 func TestGenerate(t *testing.T) {
 	t.Parallel()
-	service, err := jwt.New([]byte("secret"))
+	service, err := jwt.New(jwt.Config{SigningKey: "secret"})
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
@@ -97,7 +81,7 @@ func TestGenerate(t *testing.T) {
 
 func TestParse(t *testing.T) {
 	t.Parallel()
-	service, err := jwt.New([]byte("secret"))
+	service, err := jwt.New(jwt.Config{SigningKey: "secret"})
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
@@ -219,10 +203,10 @@ func TestParse(t *testing.T) {
 func TestSigningKeyDifference(t *testing.T) {
 	t.Parallel()
 	// Create two services with different keys
-	service1, err := jwt.New([]byte("secret1"))
+	service1, err := jwt.New(jwt.Config{SigningKey: "secret1"})
 	require.NoError(t, err)
 
-	service2, err := jwt.New([]byte("secret2"))
+	service2, err := jwt.New(jwt.Config{SigningKey: "secret2"})
 	require.NoError(t, err)
 
 	claims := jwt.StandardClaims{

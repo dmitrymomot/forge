@@ -51,33 +51,26 @@ func (c StandardClaims) Valid() error {
 	return nil
 }
 
+// Config holds JWT service configuration.
+type Config struct {
+	SigningKey string `env:"SIGNING_KEY,required"`
+}
+
 // Service handles JWT token generation and validation using HMAC-SHA256.
 // The signing key is kept in memory only and should be cryptographically secure.
 type Service struct {
 	signingKey []byte
 }
 
-// New creates a new JWT service with the provided signing key.
-// The key should be at least 32 bytes for adequate security with HMAC-SHA256.
-func New(signingKey []byte) (*Service, error) {
-	if len(signingKey) == 0 {
+// New creates a new JWT service with the provided configuration.
+// The signing key should be at least 32 bytes for adequate security with HMAC-SHA256.
+func New(cfg Config) (*Service, error) {
+	if cfg.SigningKey == "" {
 		return nil, ErrMissingSigningKey
 	}
 
 	return &Service{
-		signingKey: signingKey,
-	}, nil
-}
-
-// NewFromString creates a new JWT service from a string signing key.
-// Convenience wrapper around New() for string-based configuration.
-func NewFromString(signingKey string) (*Service, error) {
-	if signingKey == "" {
-		return nil, ErrMissingSigningKey
-	}
-
-	return &Service{
-		signingKey: []byte(signingKey),
+		signingKey: []byte(cfg.SigningKey),
 	}, nil
 }
 
@@ -175,21 +168,12 @@ func (s *Service) sign(payload string) string {
 	return base64URLEncode(h.Sum(nil))
 }
 
-// base64URLEncode encodes data using base64url encoding without padding.
-// Padding removal is required by RFC 7515 for JWT tokens.
+// base64URLEncode encodes data using base64url encoding without padding (RFC 7515).
 func base64URLEncode(data []byte) string {
-	return strings.TrimRight(base64.URLEncoding.EncodeToString(data), "=")
+	return base64.RawURLEncoding.EncodeToString(data)
 }
 
-// base64URLDecode decodes base64url-encoded data, restoring padding as needed.
-// JWT tokens omit padding per RFC 7515, but Go's decoder requires it.
+// base64URLDecode decodes unpadded base64url-encoded data (RFC 7515).
 func base64URLDecode(s string) ([]byte, error) {
-	switch len(s) % 4 {
-	case 2:
-		s += strings.Repeat("=", 2)
-	case 3:
-		s += strings.Repeat("=", 1)
-	}
-
-	return base64.URLEncoding.DecodeString(s)
+	return base64.RawURLEncoding.DecodeString(s)
 }
