@@ -25,7 +25,7 @@ func requestVia(t *testing.T, req *http.Request, opts []internal.Option, fn func
 
 	h := &captureHandler{fn: fn}
 	opts = append(opts, internal.WithHandlers(h))
-	app := internal.New(opts...)
+	app := internal.New(internal.AppConfig{}, opts...)
 
 	w := httptest.NewRecorder()
 	app.Router().ServeHTTP(w, req)
@@ -247,7 +247,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.Equal(t, "", c.UserID())
@@ -268,7 +268,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.False(t, c.IsAuthenticated())
@@ -292,7 +292,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.Equal(t, "user-456", c.UserID())
@@ -316,7 +316,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.True(t, c.IsAuthenticated())
@@ -340,7 +340,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.True(t, c.IsCurrentUser("user-abc"))
@@ -364,7 +364,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.False(t, c.IsCurrentUser("user-different"))
@@ -385,7 +385,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-1"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.False(t, c.IsCurrentUser("any-id"))
@@ -405,7 +405,7 @@ func TestIdentityMethods(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "__sid", Value: "tok-invalid"})
 
 		opts := []internal.Option{
-			internal.WithSession(store),
+			internal.WithSession(store, internal.SessionConfig{}),
 		}
 		requestVia(t, req, opts, func(c internal.Context) {
 			require.Equal(t, "", c.UserID())
@@ -437,7 +437,7 @@ func TestAuthenticateSessionRotatesToken(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "__sid", Value: oldToken})
 
 	opts := []internal.Option{
-		internal.WithSession(store),
+		internal.WithSession(store, internal.SessionConfig{}),
 	}
 
 	w := requestVia(t, req, opts, func(c internal.Context) {
