@@ -22,6 +22,7 @@ This document outlines planned features for the Forge framework.
 - `Context.IsAuthenticated()` — checks session exists with user ID
 - `Context.IsCurrentUser(id)` — compares `UserID()` to a given ID
 - `Context.Can(permission)` — checks if current user's role has the permission (lazy role extraction, cached per request)
+- `Context.Role()` — returns the resolved role string (lazy extraction, cached per request, shared with `Can()`)
 - `WithRoles(permissions, extractorFn)` — app option to configure role-to-permission map and role extractor function
 
 **Context — Request & Response:**
@@ -54,7 +55,7 @@ This document outlines planned features for the Forge framework.
 
 **Context — File Storage:**
 - `Context.Storage()` — access configured storage backend
-- `Context.Upload(r, size, opts...)` / `Context.Download(key)` / `Context.DeleteFile(key)` / `Context.FileURL(key, opts...)` — file operations
+- `Context.Upload(field, opts...)` / `Context.UploadFromURL(sourceURL, opts...)` / `Context.Download(key)` / `Context.DeleteFile(key)` / `Context.FileURL(key, opts...)` — file operations
 
 **Context — Internationalization:**
 - `Context.T(key, placeholders...)` / `Context.Tn(key, n, placeholders...)` — translation with plural support
@@ -83,6 +84,8 @@ This document outlines planned features for the Forge framework.
 - `cors` — Cross-Origin Resource Sharing headers
 - `i18n` — language resolution from Accept-Language/cookie/query, translator injection into context
 - `jwt` — JWT authentication middleware with generic claims, configurable token extraction, context storage
+- `auth` — Authentication gate (`RequireAuthenticated`)
+- `rbac` — AND-permission gate (`RequirePermission`), OR-permission gate (`RequireAnyPermission`); uses `WithRoles` config
 
 ### Utility Packages (`pkg/`)
 
@@ -129,12 +132,10 @@ This document outlines planned features for the Forge framework.
 
 Part of framework core, configurable via options:
 
-- `timeout` — request timeout enforcement
 - `csrf` — CSRF protection (double-submit cookie)
-- `errorlog` — Log 5xx errors with request context
 - `audit` — Audit log writer (configurable sink)
 - `ratelimit` — Rate limiting (uses `pkg/ratelimit`)
-- `rbac` — Coarse-grained role/permission gate for route groups (uses `WithRoles` config)
+
 
 ---
 
