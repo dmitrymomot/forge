@@ -7,49 +7,49 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInQueue(t *testing.T) {
+func TestWithQueue_Enqueue(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := InQueue("email")
+	opt := WithQueue("email")
 	opt(cfg)
 
 	assert.Equal(t, "email", cfg.queue)
 }
 
-func TestInQueue_Empty(t *testing.T) {
+func TestWithQueue_Enqueue_Empty(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{queue: "existing"}
 
-	opt := InQueue("")
+	opt := WithQueue("")
 	opt(cfg)
 
 	// Should not change if empty
 	assert.Equal(t, "existing", cfg.queue)
 }
 
-func TestScheduledAt(t *testing.T) {
+func TestWithScheduledAt(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
 	future := time.Now().Add(24 * time.Hour)
-	opt := ScheduledAt(future)
+	opt := WithScheduledAt(future)
 	opt(cfg)
 
 	assert.NotNil(t, cfg.scheduledAt)
 	assert.Equal(t, future, *cfg.scheduledAt)
 }
 
-func TestScheduledIn(t *testing.T) {
+func TestWithScheduledIn(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
 	before := time.Now()
-	opt := ScheduledIn(time.Hour)
+	opt := WithScheduledIn(time.Hour)
 	opt(cfg)
 	after := time.Now()
 
@@ -58,119 +58,119 @@ func TestScheduledIn(t *testing.T) {
 	assert.True(t, cfg.scheduledAt.Before(after.Add(time.Hour+time.Second)))
 }
 
-func TestMaxAttempts(t *testing.T) {
+func TestWithMaxAttempts(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := MaxAttempts(5)
+	opt := WithMaxAttempts(5)
 	opt(cfg)
 
 	assert.Equal(t, 5, cfg.maxAttempts)
 }
 
-func TestMaxAttempts_Zero(t *testing.T) {
+func TestWithMaxAttempts_Zero(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{maxAttempts: 10}
 
-	opt := MaxAttempts(0)
+	opt := WithMaxAttempts(0)
 	opt(cfg)
 
 	// Should not change if 0
 	assert.Equal(t, 10, cfg.maxAttempts)
 }
 
-func TestMaxAttempts_Negative(t *testing.T) {
+func TestWithMaxAttempts_Negative(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{maxAttempts: 10}
 
-	opt := MaxAttempts(-1)
+	opt := WithMaxAttempts(-1)
 	opt(cfg)
 
 	// Should not change if negative
 	assert.Equal(t, 10, cfg.maxAttempts)
 }
 
-func TestUniqueFor(t *testing.T) {
+func TestWithUniqueFor(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := UniqueFor(time.Hour)
+	opt := WithUniqueFor(time.Hour)
 	opt(cfg)
 
 	assert.Equal(t, time.Hour, cfg.uniqueFor)
 }
 
-func TestUniqueKey(t *testing.T) {
+func TestWithUniqueKey(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := UniqueKey("user:123")
+	opt := WithUniqueKey("user:123")
 	opt(cfg)
 
 	assert.Equal(t, "user:123", cfg.uniqueKey)
 }
 
-func TestPriority(t *testing.T) {
+func TestWithPriority(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := Priority(5)
+	opt := WithPriority(5)
 	opt(cfg)
 
 	assert.Equal(t, 5, cfg.priority)
 }
 
-func TestTags(t *testing.T) {
+func TestWithTags(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := Tags("email", "marketing")
+	opt := WithTags("email", "marketing")
 	opt(cfg)
 
 	assert.Equal(t, []string{"email", "marketing"}, cfg.tags)
 }
 
-func TestTags_Append(t *testing.T) {
+func TestWithTags_Append(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{tags: []string{"existing"}}
 
-	opt := Tags("new")
+	opt := WithTags("new")
 	opt(cfg)
 
 	assert.Equal(t, []string{"existing", "new"}, cfg.tags)
 }
 
-func TestTags_Empty(t *testing.T) {
+func TestWithTags_Empty(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
-	opt := Tags()
+	opt := WithTags()
 	opt(cfg)
 
 	assert.Empty(t, cfg.tags)
 }
 
-func TestCombinedOptions(t *testing.T) {
+func TestCombinedEnqueueOptions(t *testing.T) {
 	t.Parallel()
 
 	cfg := &enqueueConfig{}
 
 	opts := []EnqueueOption{
-		InQueue("email"),
-		MaxAttempts(3),
-		Priority(2),
-		Tags("urgent"),
-		UniqueFor(time.Hour),
-		UniqueKey("email:user:123"),
+		WithQueue("email"),
+		WithMaxAttempts(3),
+		WithPriority(2),
+		WithTags("urgent"),
+		WithUniqueFor(time.Hour),
+		WithUniqueKey("email:user:123"),
 	}
 
 	for _, opt := range opts {

@@ -103,8 +103,8 @@
 //	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
 //	        job.WithTask(tasks.NewProcessPayment(stripe, repo)),
 //	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
-//	        job.WithQueue("email", 10),
-//	        job.WithQueue("payments", 5),
+//	        job.WithQueueWorkers("email", 10),
+//	        job.WithQueueWorkers("payments", 5),
 //	        job.WithLogger(slog.Default()),
 //	    ),
 //	)
@@ -123,9 +123,9 @@
 //
 //	    // With options
 //	    err := c.Enqueue("send_reminder", payload,
-//	        job.ScheduledIn(24*time.Hour),
-//	        job.InQueue("email"),
-//	        job.MaxAttempts(3),
+//	        job.WithScheduledIn(24*time.Hour),
+//	        job.WithQueue("email"),
+//	        job.WithMaxAttempts(3),
 //	    )
 //
 //	    return c.JSON(http.StatusCreated, user)
@@ -153,8 +153,8 @@
 //
 //	// Only one password reset per user per hour
 //	c.Enqueue("send_password_reset", payload,
-//	    job.UniqueFor(time.Hour),
-//	    job.UniqueKey(userID),
+//	    job.WithUniqueFor(time.Hour),
+//	    job.WithUniqueKey(userID),
 //	)
 //
 // # Health Checks
@@ -162,8 +162,8 @@
 // Add job manager health check to readiness probes:
 //
 //	forge.WithHealthChecks(
-//	    forge.WithReadinessCheck("db", db.Healthcheck(pool)),
-//	    forge.WithReadinessCheck("jobs", job.Healthcheck(manager)),
+//	    forge.HealthCheck("db", db.Healthcheck(pool)),
+//	    forge.HealthCheck("jobs", job.Healthcheck(manager)),
 //	)
 //
 // # Error Handling

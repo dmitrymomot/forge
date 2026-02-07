@@ -62,35 +62,35 @@ func TestWithScheduledTask(t *testing.T) {
 	assert.NotNil(t, cfg.schedules[0].handler)
 }
 
-func TestWithQueue(t *testing.T) {
+func TestWithQueueWorkers(t *testing.T) {
 	t.Parallel()
 
 	cfg := newConfig()
 
-	opt := WithQueue("email", 10)
+	opt := WithQueueWorkers("email", 10)
 	opt(cfg)
 
 	assert.Equal(t, 10, cfg.queues["email"])
 }
 
-func TestWithQueue_ZeroWorkers(t *testing.T) {
+func TestWithQueueWorkers_ZeroWorkers(t *testing.T) {
 	t.Parallel()
 
 	cfg := newConfig()
 
-	opt := WithQueue("email", 0)
+	opt := WithQueueWorkers("email", 0)
 	opt(cfg)
 
 	_, ok := cfg.queues["email"]
 	assert.False(t, ok, "queue with 0 workers should not be added")
 }
 
-func TestWithQueue_NegativeWorkers(t *testing.T) {
+func TestWithQueueWorkers_NegativeWorkers(t *testing.T) {
 	t.Parallel()
 
 	cfg := newConfig()
 
-	opt := WithQueue("email", -5)
+	opt := WithQueueWorkers("email", -5)
 	opt(cfg)
 
 	_, ok := cfg.queues["email"]
@@ -120,43 +120,6 @@ func TestWithLogger_Nil(t *testing.T) {
 
 	// Should not change if nil
 	assert.Same(t, slog.Default(), cfg.logger)
-}
-
-func TestWithMaxWorkers(t *testing.T) {
-	t.Parallel()
-
-	cfg := newConfig()
-
-	opt := WithMaxWorkers(50)
-	opt(cfg)
-
-	assert.Equal(t, 50, cfg.maxWorkers)
-}
-
-func TestWithMaxWorkers_Zero(t *testing.T) {
-	t.Parallel()
-
-	cfg := newConfig()
-	cfg.maxWorkers = 100
-
-	opt := WithMaxWorkers(0)
-	opt(cfg)
-
-	// Should not change if 0
-	assert.Equal(t, 100, cfg.maxWorkers)
-}
-
-func TestWithMaxWorkers_Negative(t *testing.T) {
-	t.Parallel()
-
-	cfg := newConfig()
-	cfg.maxWorkers = 100
-
-	opt := WithMaxWorkers(-10)
-	opt(cfg)
-
-	// Should not change if negative
-	assert.Equal(t, 100, cfg.maxWorkers)
 }
 
 func TestNewConfig(t *testing.T) {

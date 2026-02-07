@@ -11,7 +11,7 @@ import (
 func TestNewManager_NilPool(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewManager(nil)
+	_, err := NewManager(nil, Config{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pool is required")
 }

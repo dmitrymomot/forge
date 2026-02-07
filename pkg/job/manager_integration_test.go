@@ -40,7 +40,7 @@ func TestBuildJobArgs(t *testing.T) {
 	t.Run("with queue option", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, InQueue("email"))
+		args, opts, err := buildJobArgs("test", nil, WithQueue("email"))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, "email", opts.Queue)
@@ -50,7 +50,7 @@ func TestBuildJobArgs(t *testing.T) {
 		t.Parallel()
 
 		scheduledTime := time.Now().Add(time.Hour)
-		args, opts, err := buildJobArgs("test", nil, ScheduledAt(scheduledTime))
+		args, opts, err := buildJobArgs("test", nil, WithScheduledAt(scheduledTime))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, scheduledTime, opts.ScheduledAt)
@@ -59,7 +59,7 @@ func TestBuildJobArgs(t *testing.T) {
 	t.Run("with max attempts", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, MaxAttempts(5))
+		args, opts, err := buildJobArgs("test", nil, WithMaxAttempts(5))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, 5, opts.MaxAttempts)
@@ -68,7 +68,7 @@ func TestBuildJobArgs(t *testing.T) {
 	t.Run("with priority", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, Priority(10))
+		args, opts, err := buildJobArgs("test", nil, WithPriority(10))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, 10, opts.Priority)
@@ -77,7 +77,7 @@ func TestBuildJobArgs(t *testing.T) {
 	t.Run("with tags", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, Tags("tag1", "tag2"))
+		args, opts, err := buildJobArgs("test", nil, WithTags("tag1", "tag2"))
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
 		assert.Equal(t, []string{"tag1", "tag2"}, opts.Tags)
@@ -87,8 +87,8 @@ func TestBuildJobArgs(t *testing.T) {
 		t.Parallel()
 
 		args, opts, err := buildJobArgs("test", nil,
-			UniqueFor(time.Hour),
-			UniqueKey("custom-key"),
+			WithUniqueFor(time.Hour),
+			WithUniqueKey("custom-key"),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)
@@ -101,12 +101,12 @@ func TestBuildJobArgs(t *testing.T) {
 
 		payload := testPayload{Message: "test", Count: 1}
 		args, opts, err := buildJobArgs("test", payload,
-			InQueue("email"),
-			MaxAttempts(3),
-			Priority(5),
-			Tags("urgent", "email"),
-			UniqueFor(time.Minute),
-			UniqueKey("email:123"),
+			WithQueue("email"),
+			WithMaxAttempts(3),
+			WithPriority(5),
+			WithTags("urgent", "email"),
+			WithUniqueFor(time.Minute),
+			WithUniqueKey("email:123"),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "test", args.TaskName)

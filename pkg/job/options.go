@@ -5,6 +5,11 @@ import (
 	"log/slog"
 )
 
+// Config holds exported job manager configuration.
+type Config struct {
+	MaxWorkers int `env:"MAX_WORKERS" envDefault:"100"`
+}
+
 // config holds job manager configuration.
 type config struct {
 	registry   *taskRegistry
@@ -94,14 +99,14 @@ func WithScheduledTask[T interface {
 	}
 }
 
-// WithQueue configures a named queue with the specified number of workers.
+// WithQueueWorkers configures a named queue with the specified number of workers.
 // If not specified, tasks use the default queue with default worker count.
 //
 // Example:
 //
-//	job.WithQueue("email", 10)      // 10 workers for email queue
-//	job.WithQueue("reports", 2)    // 2 workers for heavy report generation
-func WithQueue(name string, workers int) Option {
+//	job.WithQueueWorkers("email", 10)      // 10 workers for email queue
+//	job.WithQueueWorkers("reports", 2)    // 2 workers for heavy report generation
+func WithQueueWorkers(name string, workers int) Option {
 	return func(c *config) {
 		if workers > 0 {
 			c.queues[name] = workers
@@ -119,21 +124,6 @@ func WithLogger(l *slog.Logger) Option {
 	return func(c *config) {
 		if l != nil {
 			c.logger = l
-		}
-	}
-}
-
-// WithMaxWorkers sets the default maximum number of workers.
-// This applies to the default queue and any queue without explicit worker count.
-// Defaults to 100 if not set.
-//
-// Example:
-//
-//	job.WithMaxWorkers(50) // Limit concurrent job processing
-func WithMaxWorkers(n int) Option {
-	return func(c *config) {
-		if n > 0 {
-			c.maxWorkers = n
 		}
 	}
 }
