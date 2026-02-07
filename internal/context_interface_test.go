@@ -659,6 +659,60 @@ func TestRBAC(t *testing.T) {
 			require.False(t, c.Can("read"))
 		})
 	})
+
+	t.Run("Role returns empty when RBAC not configured", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		requestVia(t, req, nil, func(c internal.Context) {
+			require.Equal(t, "", c.Role())
+		})
+	})
+
+	t.Run("Role returns correct value when configured", func(t *testing.T) {
+		t.Parallel()
+
+		perms := internal.RolePermissions{
+			"admin":  {"read", "write"},
+			"viewer": {"read"},
+		}
+		extractor := func(ctx internal.Context) string { return "admin" }
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		opts := []internal.Option{
+			internal.WithRoles(perms, extractor),
+		}
+		requestVia(t, req, opts, func(c internal.Context) {
+			require.Equal(t, "admin", c.Role())
+		})
+	})
+
+	t.Run("Role caching is shared with Can", func(t *testing.T) {
+		t.Parallel()
+
+		var callCount atomic.Int32
+		perms := internal.RolePermissions{
+			"admin": {"read", "write"},
+		}
+		extractor := func(ctx internal.Context) string {
+			callCount.Add(1)
+			return "admin"
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		opts := []internal.Option{
+			internal.WithRoles(perms, extractor),
+		}
+		requestVia(t, req, opts, func(c internal.Context) {
+			// Trigger extraction via Role()
+			require.Equal(t, "admin", c.Role())
+			// Can() should reuse cached role
+			require.True(t, c.Can("read"))
+			require.True(t, c.Can("write"))
+
+			require.Equal(t, int32(1), callCount.Load(), "extractor should be called exactly once across Role() and Can()")
+		})
+	})
 }
 
 func TestCanExtractorCalledOnce(t *testing.T) {
