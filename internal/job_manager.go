@@ -13,9 +13,9 @@ type JobManager struct {
 	manager *job.Manager
 }
 
-// NewJobManager creates a new JobManager with the given pool and options.
-func NewJobManager(pool *pgxpool.Pool, opts ...job.Option) (*JobManager, error) {
-	m, err := job.NewManager(pool, opts...)
+// NewJobManager creates a new JobManager with the given pool, config, and options.
+func NewJobManager(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) (*JobManager, error) {
+	m, err := job.NewManager(pool, cfg, opts...)
 	if err != nil {
 		return nil, err
 	}

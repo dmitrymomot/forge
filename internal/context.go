@@ -109,7 +109,7 @@ type Context interface {
 	Domain() string
 
 	// Subdomain extracts the subdomain from the request.
-	// Uses the base domain configured via WithBaseDomain.
+	// Uses the base domain configured via AppConfig.BaseDomain.
 	// Returns empty string if no base domain configured or host doesn't match.
 	Subdomain() string
 

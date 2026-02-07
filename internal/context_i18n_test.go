@@ -17,7 +17,7 @@ import (
 func newTestI18nService(t *testing.T) *i18n.I18n {
 	t.Helper()
 	svc, err := i18n.New(
-		i18n.WithDefaultLanguage("en"),
+		i18n.Config{DefaultLanguage: "en"},
 		i18n.WithLanguages("en", "de"),
 		i18n.WithTranslations("en", "common", map[string]any{
 			"hello":   "Hello",
@@ -301,7 +301,7 @@ func TestBindAutoTranslatesWithTranslator(t *testing.T) {
 		t.Parallel()
 
 		svc, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+			i18n.Config{DefaultLanguage: "en"},
 			i18n.WithLanguages("en"),
 			i18n.WithTranslations("en", "common", map[string]any{
 				"validation.required": "{{field}} is required",

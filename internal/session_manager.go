@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dmitrymomot/forge/pkg/clientip"
@@ -51,6 +52,19 @@ const (
 	FingerprintReject
 )
 
+// SessionConfig holds session manager configuration.
+type SessionConfig struct {
+	CookieName            string `env:"COOKIE_NAME"             envDefault:"__sid"`
+	Domain                string `env:"DOMAIN"`
+	Path                  string `env:"PATH"                    envDefault:"/"`
+	SameSite              string `env:"SAME_SITE"               envDefault:"lax"`
+	FingerprintMode       string `env:"FINGERPRINT_MODE"        envDefault:"disabled"`
+	FingerprintStrictness string `env:"FINGERPRINT_STRICTNESS"  envDefault:"warn"`
+	MaxAge                int    `env:"MAX_AGE"                 envDefault:"2592000"`
+	Secure                bool   `env:"SECURE"                  envDefault:"false"`
+	HTTPOnly              bool   `env:"HTTP_ONLY"               envDefault:"true"`
+}
+
 // SessionManager handles session lifecycle and cookie management.
 type SessionManager struct {
 	store                 session.Store
@@ -66,96 +80,67 @@ type SessionManager struct {
 	httpOnly              bool
 }
 
-// SessionOption configures the SessionManager.
-type SessionOption func(*SessionManager)
-
-// NewSessionManager creates a new SessionManager with the given store and options.
-func NewSessionManager(store session.Store, opts ...SessionOption) *SessionManager {
-	sm := &SessionManager{
-		store:      store,
-		cookieName: defaultSessionCookieName,
-		maxAge:     defaultSessionMaxAge,
-		path:       "/",
-		httpOnly:   true,
-		sameSite:   http.SameSiteLaxMode,
+// NewSessionManager creates a new SessionManager with the given store and config.
+func NewSessionManager(store session.Store, cfg SessionConfig) *SessionManager {
+	if cfg.CookieName == "" {
+		cfg.CookieName = defaultSessionCookieName
+	}
+	if cfg.Path == "" {
+		cfg.Path = "/"
+	}
+	if cfg.MaxAge == 0 {
+		cfg.MaxAge = defaultSessionMaxAge
 	}
 
-	for _, opt := range opts {
-		opt(sm)
-	}
-
-	return sm
-}
-
-// WithSessionCookieName sets the session cookie name.
-func WithSessionCookieName(name string) SessionOption {
-	return func(sm *SessionManager) {
-		if name != "" {
-			sm.cookieName = name
-		}
+	return &SessionManager{
+		store:                 store,
+		cookieName:            cfg.CookieName,
+		domain:                cfg.Domain,
+		path:                  cfg.Path,
+		maxAge:                cfg.MaxAge,
+		sameSite:              parseSameSite(cfg.SameSite),
+		secure:                cfg.Secure,
+		httpOnly:              cfg.HTTPOnly,
+		fingerprintMode:       parseFingerprintMode(cfg.FingerprintMode),
+		fingerprintStrictness: parseFingerprintStrictness(cfg.FingerprintStrictness),
 	}
 }
 
-// WithSessionMaxAge sets the session max age in seconds.
-func WithSessionMaxAge(seconds int) SessionOption {
-	return func(sm *SessionManager) {
-		if seconds > 0 {
-			sm.maxAge = seconds
-		}
+// parseSameSite converts a string to http.SameSite.
+func parseSameSite(s string) http.SameSite {
+	switch strings.ToLower(s) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
 	}
 }
 
-// WithSessionDomain sets the session cookie domain.
-func WithSessionDomain(domain string) SessionOption {
-	return func(sm *SessionManager) {
-		sm.domain = domain
+// parseFingerprintMode converts a string to FingerprintMode.
+func parseFingerprintMode(s string) FingerprintMode {
+	switch strings.ToLower(s) {
+	case "cookie":
+		return FingerprintCookie
+	case "jwt":
+		return FingerprintJWT
+	case "htmx":
+		return FingerprintHTMX
+	case "strict":
+		return FingerprintStrict
+	default:
+		return FingerprintDisabled
 	}
 }
 
-// WithSessionPath sets the session cookie path.
-func WithSessionPath(path string) SessionOption {
-	return func(sm *SessionManager) {
-		if path != "" {
-			sm.path = path
-		}
-	}
-}
-
-// WithSessionSecure sets the session cookie Secure flag.
-func WithSessionSecure(secure bool) SessionOption {
-	return func(sm *SessionManager) {
-		sm.secure = secure
-	}
-}
-
-// WithSessionHTTPOnly sets the session cookie HttpOnly flag.
-func WithSessionHTTPOnly(httpOnly bool) SessionOption {
-	return func(sm *SessionManager) {
-		sm.httpOnly = httpOnly
-	}
-}
-
-// WithSessionSameSite sets the session cookie SameSite attribute.
-func WithSessionSameSite(sameSite http.SameSite) SessionOption {
-	return func(sm *SessionManager) {
-		sm.sameSite = sameSite
-	}
-}
-
-// WithSessionFingerprint enables device fingerprinting for session hijacking detection.
-// Mode determines which components are included in the fingerprint:
-//   - FingerprintCookie: Default, excludes IP (recommended for most apps)
-//   - FingerprintJWT: Minimal, excludes Accept headers (for JWT apps)
-//   - FingerprintHTMX: User-Agent only (for HTMX apps)
-//   - FingerprintStrict: Includes IP (high-security, causes false positives)
-//
-// Strictness determines behavior on mismatch:
-//   - FingerprintWarn: Log warning but allow session (visibility without disruption)
-//   - FingerprintReject: Invalidate session (strict security)
-func WithSessionFingerprint(mode FingerprintMode, strictness FingerprintStrictness) SessionOption {
-	return func(sm *SessionManager) {
-		sm.fingerprintMode = mode
-		sm.fingerprintStrictness = strictness
+// parseFingerprintStrictness converts a string to FingerprintStrictness.
+func parseFingerprintStrictness(s string) FingerprintStrictness {
+	switch strings.ToLower(s) {
+	case "reject":
+		return FingerprintReject
+	default:
+		return FingerprintWarn
 	}
 }
 
