@@ -138,6 +138,9 @@ type (
 	// LanguageKey is the context key used to store the resolved language string.
 	LanguageKey = internal.LanguageKey
 
+	// JWTClaimsKey is the context key used to store parsed JWT claims.
+	JWTClaimsKey = internal.JWTClaimsKey
+
 	// Extractor tries multiple sources in order and returns the first match.
 	// Use with FromHeader, FromQuery, FromCookie, etc. to compose extraction chains.
 	Extractor = internal.Extractor
@@ -1017,6 +1020,9 @@ type (
 	// I18nOption configures the I18n middleware.
 	I18nOption = middlewares.I18nOption
 
+	// JWTOption configures the JWT middleware.
+	JWTOption = middlewares.JWTOption
+
 	// Translator provides a simplified translation interface with a fixed language and namespace context.
 	Translator = i18n.Translator
 
@@ -1096,6 +1102,19 @@ func Tn(c Context, key string, n int, placeholders ...TranslationMap) string {
 // header and matches against the available languages.
 func FromAcceptLanguage(available []string) ExtractorSource {
 	return middlewares.FromAcceptLanguage(available)
+}
+
+// JWT middleware helpers
+
+// GetJWTClaims extracts parsed JWT claims from the context.
+// Returns nil if the JWT middleware is not applied or the type doesn't match.
+func GetJWTClaims[T any](c Context) *T {
+	return middlewares.GetJWTClaims[T](c)
+}
+
+// WithJWTExtractor sets a custom token extractor for the JWT middleware.
+func WithJWTExtractor(ext Extractor) JWTOption {
+	return middlewares.WithJWTExtractor(ext)
 }
 
 // I18n middleware option constructors

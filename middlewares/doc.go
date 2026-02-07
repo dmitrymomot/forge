@@ -93,6 +93,64 @@
 //	    ),
 //	)
 //
+// # JWT
+//
+// JWT middleware extracts a JWT from the request, validates it, and stores
+// the parsed claims in the context. It uses generics so handlers can work
+// with custom claims types.
+//
+// Basic usage with standard claims:
+//
+//	jwtSvc, _ := jwt.NewFromString(os.Getenv("JWT_SECRET"))
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.JWT[jwt.StandardClaims](jwtSvc),
+//	    ),
+//	)
+//
+// Access claims in a handler:
+//
+//	func (h *Handler) Routes(r forge.Router) {
+//	    r.GET("/me", h.me)
+//	}
+//
+//	func (h *Handler) me(c forge.Context) error {
+//	    claims := forge.GetJWTClaims[jwt.StandardClaims](c)
+//	    return c.JSON(200, map[string]string{"user": claims.Subject})
+//	}
+//
+// Custom claims with additional fields:
+//
+//	type MyClaims struct {
+//	    jwt.StandardClaims
+//	    Role   string `json:"role"`
+//	    TeamID string `json:"team_id"`
+//	}
+//
+//	func (c MyClaims) Valid() error { return c.StandardClaims.Valid() }
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.JWT[MyClaims](jwtSvc),
+//	    ),
+//	)
+//
+//	// In handler:
+//	claims := forge.GetJWTClaims[MyClaims](c)
+//	if claims.Role == "admin" { ... }
+//
+// Custom token extractor (e.g., from query parameter):
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.JWT[jwt.StandardClaims](jwtSvc,
+//	            middlewares.WithJWTExtractor(
+//	                forge.NewExtractor(forge.FromQuery("token")),
+//	            ),
+//	        ),
+//	    ),
+//	)
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:

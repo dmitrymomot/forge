@@ -44,6 +44,9 @@ type TranslatorKey struct{}
 // LanguageKey is the context key used to store the resolved language string.
 type LanguageKey struct{}
 
+// JWTClaimsKey is the context key used to store parsed JWT claims.
+type JWTClaimsKey struct{}
+
 // Component is the interface for renderable templates.
 // This is compatible with templ.Component.
 type Component interface {
