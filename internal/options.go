@@ -297,6 +297,31 @@ func WithJobWorker(pool *pgxpool.Pool, opts ...job.Option) Option {
 	}
 }
 
+// WithRoles configures role-based access control for the application.
+// The permissions map defines which permissions each role grants.
+// The extractor function determines the current user's role from the request context.
+// Roles are extracted lazily (once per request) and cached.
+//
+// Example:
+//
+//	forge.New(
+//	    forge.WithRoles(
+//	        forge.RolePermissions{
+//	            "admin":  {"users.read", "users.write", "billing.manage"},
+//	            "member": {"users.read"},
+//	        },
+//	        func(c forge.Context) string {
+//	            return c.Get(roleKey{}).(string)
+//	        },
+//	    ),
+//	)
+func WithRoles(permissions RolePermissions, extractor RoleExtractorFunc) Option {
+	return func(a *App) {
+		a.rolePermissions = permissions
+		a.roleExtractor = extractor
+	}
+}
+
 // WithStorage configures file storage for the application.
 // A storage.Storage implementation must be provided (e.g., S3Client).
 // Enables c.Upload(), c.Download(), c.DeleteFile(), and c.FileURL().

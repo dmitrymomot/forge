@@ -87,17 +87,23 @@ func (w *ResponseWriter) Write(b []byte) (int, error) {
 	}
 
 	n, err := w.ResponseWriter.Write(b)
+	w.mu.Lock()
 	w.size += int64(n)
+	w.mu.Unlock()
 	return n, err
 }
 
 // Status returns the HTTP status code of the response.
 func (w *ResponseWriter) Status() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.status
 }
 
 // Size returns the number of bytes written to the response body.
 func (w *ResponseWriter) Size() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.size
 }
 

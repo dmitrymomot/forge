@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +27,15 @@ import (
 // ValidationErrors is a collection of validation errors.
 type ValidationErrors = validator.ValidationErrors
 
+// Permission represents a named permission string.
+type Permission string
+
+// RolePermissions maps role names to their granted permissions.
+type RolePermissions = map[string][]Permission
+
+// RoleExtractorFunc extracts the current user's role from the request context.
+type RoleExtractorFunc = func(Context) string
+
 // Component is the interface for renderable templates.
 // This is compatible with templ.Component.
 type Component interface {
@@ -32,7 +43,10 @@ type Component interface {
 }
 
 // Context provides request/response access and helper methods.
+// It also implements context.Context by delegating to the underlying request context.
 type Context interface {
+	context.Context
+
 	// Request returns the underlying *http.Request.
 	Request() *http.Request
 
@@ -52,6 +66,22 @@ type Context interface {
 
 	// QueryDefault returns the query parameter value or a default.
 	QueryDefault(name, defaultValue string) string
+
+	// UserID returns the authenticated user's ID from the session.
+	// Loads the session lazily on first call.
+	// Returns empty string if no session, no session manager, or no user.
+	UserID() string
+
+	// IsAuthenticated returns true if a user is associated with the session.
+	IsAuthenticated() bool
+
+	// IsCurrentUser returns true if the authenticated user's ID matches the given id.
+	IsCurrentUser(id string) bool
+
+	// Can returns true if the current user's role grants the given permission.
+	// Returns false if RBAC is not configured or the user has no matching permission.
+	// The role is extracted lazily and cached for the lifetime of the request.
+	Can(permission Permission) bool
 
 	// Domain returns the normalized domain from the request Host header.
 	// Strips port, handles IPv6, and converts to lowercase.
@@ -259,6 +289,11 @@ type requestContext struct {
 	// Storage
 	storage storage.Storage
 
+	// RBAC
+	rolePermissions RolePermissions
+	roleExtractor   RoleExtractorFunc
+	cachedRole      *string
+
 	baseDomain string
 
 	sessionLoaded         bool
@@ -266,49 +301,45 @@ type requestContext struct {
 }
 
 // newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, logger *slog.Logger, cm *cookie.Manager, sm *SessionManager, je *JobEnqueuer, s storage.Storage, baseDomain string) *requestContext {
+func newContext(w http.ResponseWriter, r *http.Request, app *App) *requestContext {
 	// Create response wrapper
 	rw := NewResponseWriter(w, htmx.IsHTMX(r))
 
 	return &requestContext{
-		request:        r,
-		response:       rw,
-		responseWriter: rw,
-		logger:         logger,
-		cookieManager:  cm,
-		sessionManager: sm,
-		jobEnqueuer:    je,
-		storage:        s,
-		baseDomain:     baseDomain,
+		request:         r,
+		response:        rw,
+		responseWriter:  rw,
+		logger:          app.logger,
+		cookieManager:   app.cookieManager,
+		sessionManager:  app.sessionManager,
+		jobEnqueuer:     app.jobEnqueuer,
+		storage:         app.storage,
+		baseDomain:      app.baseDomain,
+		rolePermissions: app.rolePermissions,
+		roleExtractor:   app.roleExtractor,
 	}
 }
 
-// Request returns the underlying *http.Request.
 func (c *requestContext) Request() *http.Request {
 	return c.request
 }
 
-// Response returns the underlying http.ResponseWriter.
 func (c *requestContext) Response() http.ResponseWriter {
 	return c.response
 }
 
-// Context returns the request's context.Context.
 func (c *requestContext) Context() context.Context {
 	return c.request.Context()
 }
 
-// Param returns the URL parameter value by name.
 func (c *requestContext) Param(name string) string {
 	return chi.URLParam(c.request, name)
 }
 
-// Query returns the query parameter value by name.
 func (c *requestContext) Query(name string) string {
 	return c.request.URL.Query().Get(name)
 }
 
-// QueryDefault returns the query parameter value or a default.
 func (c *requestContext) QueryDefault(name, defaultValue string) string {
 	v := c.request.URL.Query().Get(name)
 	if v == "" {
@@ -317,12 +348,74 @@ func (c *requestContext) QueryDefault(name, defaultValue string) string {
 	return v
 }
 
-// Domain returns the normalized domain from the request Host header.
+func (c *requestContext) Deadline() (time.Time, bool) {
+	return c.request.Context().Deadline()
+}
+
+func (c *requestContext) Done() <-chan struct{} {
+	return c.request.Context().Done()
+}
+
+func (c *requestContext) Err() error {
+	return c.request.Context().Err()
+}
+
+func (c *requestContext) Value(key any) any {
+	return c.request.Context().Value(key)
+}
+
+func (c *requestContext) UserID() string {
+	// Use cached session if already loaded, otherwise try loading via Session()
+	sess := c.session
+	if !c.sessionLoaded {
+		var err error
+		sess, err = c.Session()
+		if err != nil {
+			return ""
+		}
+	}
+	if sess == nil || sess.UserID == nil {
+		return ""
+	}
+	return *sess.UserID
+}
+
+func (c *requestContext) IsAuthenticated() bool {
+	return c.UserID() != ""
+}
+
+func (c *requestContext) IsCurrentUser(id string) bool {
+	uid := c.UserID()
+	return uid != "" && uid == id
+}
+
+func (c *requestContext) Can(permission Permission) bool {
+	if c.rolePermissions == nil || c.roleExtractor == nil {
+		return false
+	}
+
+	// Lazy role extraction, cached per request.
+	// Set sentinel before calling extractor to prevent infinite recursion
+	// if the extractor itself calls Can().
+	if c.cachedRole == nil {
+		empty := ""
+		c.cachedRole = &empty
+		role := c.roleExtractor(c)
+		c.cachedRole = &role
+	}
+
+	perms, ok := c.rolePermissions[*c.cachedRole]
+	if !ok {
+		return false
+	}
+
+	return slices.Contains(perms, permission)
+}
+
 func (c *requestContext) Domain() string {
 	return hostrouter.GetDomain(c.request)
 }
 
-// Subdomain extracts the subdomain from the request.
 func (c *requestContext) Subdomain() string {
 	if c.baseDomain == "" {
 		return ""
@@ -330,24 +423,20 @@ func (c *requestContext) Subdomain() string {
 	return hostrouter.GetSubdomain(c.request, c.baseDomain)
 }
 
-// Header returns the request header value by name.
 func (c *requestContext) Header(name string) string {
 	return c.request.Header.Get(name)
 }
 
-// SetHeader sets a response header.
 func (c *requestContext) SetHeader(name, value string) {
 	c.response.Header().Set(name, value)
 }
 
-// JSON writes a JSON response with the given status code.
 func (c *requestContext) JSON(code int, v any) error {
 	c.response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.response.WriteHeader(code)
 	return json.NewEncoder(c.response).Encode(v)
 }
 
-// String writes a plain text response with the given status code.
 func (c *requestContext) String(code int, s string) error {
 	c.response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.response.WriteHeader(code)
@@ -355,21 +444,16 @@ func (c *requestContext) String(code int, s string) error {
 	return err
 }
 
-// NoContent writes a response with no body.
 func (c *requestContext) NoContent(code int) error {
 	c.response.WriteHeader(code)
 	return nil
 }
 
-// Redirect redirects to the given URL with the given status code.
-// Handles both regular HTTP redirects and HTMX requests.
 func (c *requestContext) Redirect(code int, url string) error {
 	htmx.RedirectWithStatus(c.response, c.request, url, code)
 	return nil
 }
 
-// Error creates and returns an HTTPError without writing a response.
-// The error should be returned from the handler to trigger the error handler.
 func (c *requestContext) Error(code int, message string, opts ...HTTPErrorOption) *HTTPError {
 	err := NewHTTPError(code, message)
 	for _, opt := range opts {
@@ -378,7 +462,6 @@ func (c *requestContext) Error(code int, message string, opts ...HTTPErrorOption
 	return err
 }
 
-// IsHTMX returns true if the request originated from HTMX.
 func (c *requestContext) IsHTMX() bool {
 	return htmx.IsHTMX(c.request)
 }
@@ -388,6 +471,7 @@ func (c *requestContext) IsHTMX() bool {
 // For regular requests: uses the provided status code.
 // Optional render options configure HTMX response headers.
 func (c *requestContext) Render(code int, component Component, opts ...htmx.RenderOption) error {
+
 	c.response.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	// Build config from options
@@ -431,44 +515,22 @@ func (c *requestContext) RenderPartial(code int, fullPage, partial Component, op
 	return c.Render(code, fullPage) // opts ignored for non-HTMX (graceful degradation)
 }
 
-// Bind binds form data, sanitizes, and validates into a struct.
 func (c *requestContext) Bind(v any) (ValidationErrors, error) {
-	if err := binder.Form()(c.request, v); err != nil {
-		return nil, fmt.Errorf("bind form: %w", err)
-	}
-	if err := sanitizer.SanitizeStruct(v); err != nil {
-		return nil, fmt.Errorf("sanitize: %w", err)
-	}
-	if err := validator.ValidateStruct(v); err != nil {
-		if validator.IsValidationError(err) {
-			return validator.ExtractValidationErrors(err), nil
-		}
-		return nil, fmt.Errorf("validate: %w", err)
-	}
-	return nil, nil
+	return c.bindAndValidate(binder.Form(), v, "bind form")
 }
 
-// BindQuery binds query parameters, sanitizes, and validates into a struct.
 func (c *requestContext) BindQuery(v any) (ValidationErrors, error) {
-	if err := binder.Query()(c.request, v); err != nil {
-		return nil, fmt.Errorf("bind query: %w", err)
-	}
-	if err := sanitizer.SanitizeStruct(v); err != nil {
-		return nil, fmt.Errorf("sanitize: %w", err)
-	}
-	if err := validator.ValidateStruct(v); err != nil {
-		if validator.IsValidationError(err) {
-			return validator.ExtractValidationErrors(err), nil
-		}
-		return nil, fmt.Errorf("validate: %w", err)
-	}
-	return nil, nil
+	return c.bindAndValidate(binder.Query(), v, "bind query")
 }
 
-// BindJSON binds JSON body, sanitizes, and validates into a struct.
 func (c *requestContext) BindJSON(v any) (ValidationErrors, error) {
-	if err := binder.JSON()(c.request, v); err != nil {
-		return nil, fmt.Errorf("bind json: %w", err)
+	return c.bindAndValidate(binder.JSON(), v, "bind json")
+}
+
+// bindAndValidate binds request data, sanitizes, and validates into a struct.
+func (c *requestContext) bindAndValidate(bind func(*http.Request, any) error, v any, label string) (ValidationErrors, error) {
+	if err := bind(c.request, v); err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	if err := sanitizer.SanitizeStruct(v); err != nil {
 		return nil, fmt.Errorf("sanitize: %w", err)
@@ -482,88 +544,71 @@ func (c *requestContext) BindJSON(v any) (ValidationErrors, error) {
 	return nil, nil
 }
 
-// Written returns true if a response has already been written.
 func (c *requestContext) Written() bool {
 	return c.responseWriter.Written()
 }
 
-// Logger returns the logger for advanced usage.
 func (c *requestContext) Logger() *slog.Logger {
 	return c.logger
 }
 
-// LogDebug logs a debug message with optional attributes.
 func (c *requestContext) LogDebug(msg string, attrs ...any) {
 	c.logger.DebugContext(c.request.Context(), msg, attrs...)
 }
 
-// LogInfo logs an info message with optional attributes.
 func (c *requestContext) LogInfo(msg string, attrs ...any) {
 	c.logger.InfoContext(c.request.Context(), msg, attrs...)
 }
 
-// LogWarn logs a warning message with optional attributes.
 func (c *requestContext) LogWarn(msg string, attrs ...any) {
 	c.logger.WarnContext(c.request.Context(), msg, attrs...)
 }
 
-// LogError logs an error message with optional attributes.
 func (c *requestContext) LogError(msg string, attrs ...any) {
 	c.logger.ErrorContext(c.request.Context(), msg, attrs...)
 }
 
-// Set stores a value in the request context.
 func (c *requestContext) Set(key, value any) {
 	ctx := context.WithValue(c.request.Context(), key, value)
 	c.request = c.request.WithContext(ctx)
 }
 
-// Get retrieves a value from the request context.
 func (c *requestContext) Get(key any) any {
 	return c.request.Context().Value(key)
 }
 
-// Cookie returns a plain cookie value.
 func (c *requestContext) Cookie(name string) (string, error) {
 	return c.cookieManager.Get(c.request, name)
 }
 
-// SetCookie sets a plain cookie.
 func (c *requestContext) SetCookie(name, value string, maxAge int) {
 	c.cookieManager.Set(c.response, name, value, maxAge)
 }
 
-// DeleteCookie removes a cookie.
 func (c *requestContext) DeleteCookie(name string) {
 	c.cookieManager.Delete(c.response, name)
 }
 
-// CookieSigned returns a signed cookie value.
 func (c *requestContext) CookieSigned(name string) (string, error) {
 	return c.cookieManager.GetSigned(c.request, name)
 }
 
-// SetCookieSigned sets a signed cookie.
 func (c *requestContext) SetCookieSigned(name, value string, maxAge int) error {
 	return c.cookieManager.SetSigned(c.response, name, value, maxAge)
 }
 
-// CookieEncrypted returns an encrypted cookie value.
 func (c *requestContext) CookieEncrypted(name string) (string, error) {
 	return c.cookieManager.GetEncrypted(c.request, name)
 }
 
-// SetCookieEncrypted sets an encrypted cookie.
 func (c *requestContext) SetCookieEncrypted(name, value string, maxAge int) error {
 	return c.cookieManager.SetEncrypted(c.response, name, value, maxAge)
 }
 
-// Flash reads and deletes a flash message.
 func (c *requestContext) Flash(key string, dest any) error {
 	return c.cookieManager.Flash(c.response, c.request, key, dest)
 }
 
-// SetFlash sets a flash message.
 func (c *requestContext) SetFlash(key string, value any) error {
 	return c.cookieManager.SetFlash(c.response, key, value)
 }
@@ -669,9 +714,6 @@ func (c *requestContext) AuthenticateSession(userID string) error {
 	return nil
 }
 
-// SessionValue retrieves a value from the session.
-// Returns session.ErrNotConfigured if WithSession was not called.
-// Returns session.ErrNotFound if no session exists.
 func (c *requestContext) SessionValue(key string) (any, error) {
 	sess, err := c.Session()
 	if err != nil {
@@ -688,9 +730,6 @@ func (c *requestContext) SessionValue(key string) (any, error) {
 	return val, nil
 }
 
-// SetSessionValue stores a value in the session.
-// Returns session.ErrNotConfigured if WithSession was not called.
-// Returns session.ErrNotFound if no session exists.
 func (c *requestContext) SetSessionValue(key string, val any) error {
 	sess, err := c.Session()
 	if err != nil {
@@ -704,9 +743,6 @@ func (c *requestContext) SetSessionValue(key string, val any) error {
 	return nil
 }
 
-// DeleteSessionValue removes a value from the session.
-// Returns session.ErrNotConfigured if WithSession was not called.
-// Returns session.ErrNotFound if no session exists.
 func (c *requestContext) DeleteSessionValue(key string) error {
 	sess, err := c.Session()
 	if err != nil {
@@ -720,8 +756,6 @@ func (c *requestContext) DeleteSessionValue(key string) error {
 	return nil
 }
 
-// DestroySession removes the session and clears the cookie.
-// Returns session.ErrNotConfigured if WithSession was not called.
 func (c *requestContext) DestroySession() error {
 	if c.sessionManager == nil {
 		return session.ErrNotConfigured
@@ -744,13 +778,10 @@ func (c *requestContext) DestroySession() error {
 	return nil
 }
 
-// ResponseWriter returns the underlying ResponseWriter for advanced usage.
 func (c *requestContext) ResponseWriter() *ResponseWriter {
 	return c.responseWriter
 }
 
-// Enqueue adds a job to the queue for background processing.
-// Returns job.ErrNotConfigured if WithJobs or WithJobEnqueuer was not called.
 func (c *requestContext) Enqueue(name string, payload any, opts ...job.EnqueueOption) error {
 	if c.jobEnqueuer == nil {
 		return job.ErrNotConfigured
@@ -760,7 +791,6 @@ func (c *requestContext) Enqueue(name string, payload any, opts ...job.EnqueueOp
 
 // EnqueueTx adds a job to the queue within a transaction.
 // The job is only visible after the transaction commits.
-// Returns job.ErrNotConfigured if WithJobs or WithJobEnqueuer was not called.
 func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
 	if c.jobEnqueuer == nil {
 		return job.ErrNotConfigured
@@ -768,8 +798,6 @@ func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...
 	return c.jobEnqueuer.EnqueueTx(c.Context(), tx, name, payload, opts...)
 }
 
-// Storage returns the configured storage client.
-// Returns storage.ErrNotConfigured if WithStorage was not called.
 func (c *requestContext) Storage() (storage.Storage, error) {
 	if c.storage == nil {
 		return nil, storage.ErrNotConfigured
@@ -777,8 +805,6 @@ func (c *requestContext) Storage() (storage.Storage, error) {
 	return c.storage, nil
 }
 
-// Upload stores data and returns file info.
-// Returns storage.ErrNotConfigured if WithStorage was not called.
 func (c *requestContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*storage.FileInfo, error) {
 	if c.storage == nil {
 		return nil, storage.ErrNotConfigured
@@ -786,8 +812,6 @@ func (c *requestContext) Upload(r io.Reader, size int64, opts ...storage.Option)
 	return c.storage.Put(c.Context(), r, size, opts...)
 }
 
-// Download retrieves a file from storage.
-// Returns storage.ErrNotConfigured if WithStorage was not called.
 func (c *requestContext) Download(key string) (io.ReadCloser, error) {
 	if c.storage == nil {
 		return nil, storage.ErrNotConfigured
@@ -795,8 +819,6 @@ func (c *requestContext) Download(key string) (io.ReadCloser, error) {
 	return c.storage.Get(c.Context(), key)
 }
 
-// DeleteFile removes a file from storage.
-// Returns storage.ErrNotConfigured if WithStorage was not called.
 func (c *requestContext) DeleteFile(key string) error {
 	if c.storage == nil {
 		return storage.ErrNotConfigured
@@ -804,8 +826,6 @@ func (c *requestContext) DeleteFile(key string) error {
 	return c.storage.Delete(c.Context(), key)
 }
 
-// FileURL generates a URL for accessing the file.
-// Returns storage.ErrNotConfigured if WithStorage was not called.
 func (c *requestContext) FileURL(key string, opts ...storage.URLOption) (string, error) {
 	if c.storage == nil {
 		return "", storage.ErrNotConfigured
