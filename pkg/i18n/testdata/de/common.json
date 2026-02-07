@@ -1,0 +1,8 @@
+{
+  "hello": "Hallo",
+  "welcome": "Willkommen, {{name}}!",
+  "buttons": {
+    "save": "Speichern",
+    "cancel": "Abbrechen"
+  }
+}

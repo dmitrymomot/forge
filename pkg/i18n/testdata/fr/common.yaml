@@ -1,0 +1,5 @@
+hello: "Bonjour"
+welcome: "Bienvenue, {{name}}!"
+buttons:
+  save: "Enregistrer"
+  cancel: "Annuler"

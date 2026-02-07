@@ -1,0 +1,6 @@
+{
+  "not_found": "Resource not found",
+  "validation": {
+    "required": "Field {{field}} is required"
+  }
+}
