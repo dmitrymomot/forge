@@ -4,7 +4,6 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,9 +11,11 @@ import (
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
+	db "github.com/dmitrymomot/forge/pkg/db"
 	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
+	redis "github.com/dmitrymomot/forge/pkg/redis"
 	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
@@ -24,6 +25,30 @@ type (
 	// App orchestrates the application lifecycle.
 	// It manages HTTP routing, middleware, and graceful shutdown.
 	App = internal.App
+
+	// AppConfig holds externally configurable application settings.
+	AppConfig = internal.AppConfig
+
+	// RunConfig holds externally configurable runtime settings.
+	RunConfig = internal.RunConfig
+
+	// SessionConfig holds session manager configuration.
+	SessionConfig = internal.SessionConfig
+
+	// HealthCheckOption adds a readiness check to the health configuration.
+	HealthCheckOption = internal.HealthCheckOption
+
+	// CookieConfig holds cookie manager configuration.
+	CookieConfig = cookie.Config
+
+	// DBConfig holds database connection configuration.
+	DBConfig = db.Config
+
+	// RedisConfig holds Redis connection configuration.
+	RedisConfig = redis.Config
+
+	// JobConfig holds job manager configuration.
+	JobConfig = job.Config
 
 	// Router is the interface handlers use to declare routes.
 	Router = internal.Router
@@ -55,21 +80,12 @@ type (
 	// ValidationErrors is a collection of validation errors.
 	ValidationErrors = internal.ValidationErrors
 
-	// HealthOption configures health check endpoints.
-	HealthOption = internal.HealthOption
-
 	// CheckFunc is the standard health check function signature.
 	CheckFunc = internal.CheckFunc
 
 	// ContextExtractor extracts a slog attribute from context.
 	// Used with WithLogger to add request-scoped values to logs.
 	ContextExtractor = logger.ContextExtractor
-
-	// CookieOption configures the cookie manager.
-	CookieOption = cookie.Option
-
-	// SessionOption configures the session manager.
-	SessionOption = internal.SessionOption
 
 	// Session represents a user session.
 	Session = session.Session
@@ -154,45 +170,24 @@ type (
 
 // Constructors
 
-// New creates a new application with the given options.
+// New creates a new application with the given config and options.
 // The App is immutable after creation.
-//
-// Example:
-//
-//	app := forge.New(
-//	    forge.WithMiddleware(middlewares.Logger(log)),
-//	    forge.WithHandlers(
-//	        handlers.NewAuth(repo),
-//	        handlers.NewPages(repo),
-//	    ),
-//	)
-//
-//	err := app.Run(":8080", forge.Logger(slog))
-func New(opts ...Option) *App {
-	return internal.New(opts...)
+func New(cfg AppConfig, opts ...Option) *App {
+	return internal.New(cfg, opts...)
 }
 
 // Run starts a multi-domain HTTP server and blocks until shutdown.
 // Use this for composing multiple Apps under different domain patterns.
-//
-// Example:
-//
-//	api := forge.New(
-//	    forge.WithHandlers(handlers.NewAPIHandler()),
-//	)
-//
-//	website := forge.New(
-//	    forge.WithHandlers(handlers.NewLandingHandler()),
-//	)
-//
-//	err := forge.Run(
-//	    forge.Domain("api.acme.com", api),
-//	    forge.Domain("*.acme.com", website),
-//	    forge.Address(":8080"),
-//	    forge.Logger(slog),
-//	)
-func Run(opts ...RunOption) error {
-	return internal.Run(opts...)
+func Run(cfg RunConfig, opts ...RunOption) error {
+	return internal.Run(cfg, opts...)
+}
+
+// LoadConfig parses environment variables into dst using struct tags.
+// It loads .env from the working directory automatically.
+// Struct fields use `env:"KEY"`, `envDefault:"value"`, and `envSeparator:","`
+// tags to declare their bindings.
+func LoadConfig(dst any) error {
+	return internal.LoadConfig(dst)
 }
 
 // App options
@@ -211,15 +206,6 @@ func WithHandlers(h ...Handler) Option {
 
 // WithStaticFiles mounts a static file handler at the given pattern.
 // Directory listings are disabled. Files are served with default cache headers.
-//
-// Example:
-//
-//	//go:embed public
-//	var assets embed.FS
-//
-//	forge.New(
-//	    forge.WithStaticFiles("/static/", assets, "public"),
-//	)
 func WithStaticFiles(pattern string, fsys fs.FS, subDir string) Option {
 	return internal.WithStaticFiles(pattern, fsys, subDir)
 }
@@ -240,181 +226,84 @@ func WithMethodNotAllowedHandler(h HandlerFunc) Option {
 	return internal.WithMethodNotAllowedHandler(h)
 }
 
-// WithHealthChecks enables health check endpoints with optional configuration.
-// Liveness (/health/live): Always returns OK if process is running.
-// Readiness (/health/ready): Runs all configured checks.
-//
-// Example:
-//
-//	forge.WithHealthChecks(
-//	    forge.WithReadinessCheck("db", db.Healthcheck(pool)),
-//	)
-func WithHealthChecks(opts ...HealthOption) Option {
-	return internal.WithHealthChecks(opts...)
+// WithHealthChecks enables health check endpoints.
+// Liveness: /_live — always returns OK if process is running.
+// Readiness: /_ready — runs all configured checks.
+func WithHealthChecks(checks ...HealthCheckOption) Option {
+	return internal.WithHealthChecks(checks...)
+}
+
+// HealthCheck creates a named readiness check for use with WithHealthChecks.
+func HealthCheck(name string, fn CheckFunc) HealthCheckOption {
+	return internal.HealthCheck(name, fn)
 }
 
 // WithLogger creates a logger with a component name and optional extractors.
 // The component name is added to every log entry for easy filtering.
 // Extractors pull values from context (e.g., request_id, user_id).
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithLogger("api", requestIDExtractor, userIDExtractor),
-//	)
 func WithLogger(component string, extractors ...ContextExtractor) Option {
 	return internal.WithLogger(component, extractors...)
 }
 
 // WithCustomLogger sets a fully custom logger.
 // Use this when you need complete control over logging configuration.
-//
-// Example:
-//
-//	customLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-//	forge.New(
-//	    forge.WithCustomLogger(customLogger),
-//	)
 func WithCustomLogger(l *slog.Logger) Option {
 	return internal.WithCustomLogger(l)
-}
-
-// WithBaseDomain configures the base domain for subdomain extraction.
-// This enables c.Subdomain() to work without parameters.
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithBaseDomain("example.com"),
-//	)
-func WithBaseDomain(domain string) Option {
-	return internal.WithBaseDomain(domain)
 }
 
 // WithRoles configures role-based access control for the application.
 // The permissions map defines which permissions each role grants.
 // The extractor function determines the current user's role from the request context.
 // Roles are extracted lazily (once per request) and cached.
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithRoles(
-//	        forge.RolePermissions{
-//	            "admin":  {"users.read", "users.write", "billing.manage"},
-//	            "member": {"users.read"},
-//	        },
-//	        func(c forge.Context) string {
-//	            return forge.ContextValue[string](c, roleKey{})
-//	        },
-//	    ),
-//	)
 func WithRoles(permissions RolePermissions, extractor RoleExtractorFunc) Option {
 	return internal.WithRoles(permissions, extractor)
 }
 
-// WithCookieOptions configures the cookie manager.
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithCookieOptions(
-//	        forge.WithCookieSecret(os.Getenv("COOKIE_SECRET")),
-//	        forge.WithCookieSecure(true),
-//	    ),
-//	)
-func WithCookieOptions(opts ...CookieOption) Option {
-	return internal.WithCookieOptions(opts...)
+// WithCookieConfig configures the cookie manager.
+func WithCookieConfig(cfg CookieConfig) Option {
+	return internal.WithCookieConfig(cfg)
 }
 
-// Health check options
-
-// WithLivenessPath sets a custom liveness endpoint path.
-// Defaults to "/health/live".
-func WithLivenessPath(path string) HealthOption {
-	return internal.WithLivenessPath(path)
-}
-
-// WithReadinessPath sets a custom readiness endpoint path.
-// Defaults to "/health/ready".
-func WithReadinessPath(path string) HealthOption {
-	return internal.WithReadinessPath(path)
-}
-
-// WithReadinessCheck adds a named readiness check.
-// Checks run in parallel during readiness probe.
-func WithReadinessCheck(name string, fn CheckFunc) HealthOption {
-	return internal.WithReadinessCheck(name, fn)
+// WithSession enables server-side session management.
+// A SessionStore implementation must be provided (e.g., PostgresStore).
+// Sessions are loaded lazily and saved automatically before the response is written.
+func WithSession(store SessionStore, cfg SessionConfig) Option {
+	return internal.WithSession(store, cfg)
 }
 
 // Run options
 
-// Address sets the HTTP server address.
-// Defaults to ":8080".
-func Address(addr string) RunOption {
-	return internal.Address(addr)
-}
-
-// Logger sets the application logger.
+// WithRunLogger sets the application logger for the runtime.
 // If nil, logging is disabled.
-func Logger(l *slog.Logger) RunOption {
-	return internal.Logger(l)
+func WithRunLogger(l *slog.Logger) RunOption {
+	return internal.WithRunLogger(l)
 }
 
-// ShutdownTimeout sets the timeout for graceful shutdown.
-// This applies to both the HTTP server and shutdown hooks.
-// Defaults to 30 seconds.
-func ShutdownTimeout(d time.Duration) RunOption {
-	return internal.ShutdownTimeout(d)
-}
-
-// StartupHook registers a function to run during server startup.
+// WithStartupHook registers a function to run during server startup.
 // Hooks are called in the order they were registered, after the port is bound
 // but before serving requests. If any hook fails, the server stops and
 // returns the error.
-//
-// Example:
-//
-//	forge.StartupHook(worker.Start)
-func StartupHook(fn func(context.Context) error) RunOption {
-	return internal.StartupHook(fn)
+func WithStartupHook(fn func(context.Context) error) RunOption {
+	return internal.WithStartupHook(fn)
 }
 
-// ShutdownHook registers a cleanup function to run during shutdown.
+// WithShutdownHook registers a cleanup function to run during shutdown.
 // Hooks are called in the order they were registered.
 // Each hook receives a context with the shutdown timeout.
-//
-// Example:
-//
-//	forge.ShutdownHook(db.Shutdown(pool))
-func ShutdownHook(fn func(context.Context) error) RunOption {
-	return internal.ShutdownHook(fn)
+func WithShutdownHook(fn func(context.Context) error) RunOption {
+	return internal.WithShutdownHook(fn)
 }
 
-// Domain maps a host pattern to an App.
+// WithDomain maps a host pattern to an App.
 // Patterns: "api.example.com" (exact) or "*.example.com" (wildcard)
-//
-// Example:
-//
-//	forge.Run(
-//	    forge.Domain("api.acme.com", apiApp),
-//	    forge.Domain("*.acme.com", tenantApp),
-//	)
-func Domain(pattern string, app *App) RunOption {
-	return internal.Domain(pattern, app)
+func WithDomain(pattern string, app *App) RunOption {
+	return internal.WithDomain(pattern, app)
 }
 
-// Fallback sets the default App for requests that don't match any domain.
+// WithFallback sets the default App for requests that don't match any domain.
 // If no domains are configured, the fallback becomes the main handler.
-//
-// Example:
-//
-//	forge.Run(
-//	    forge.Domain("api.acme.com", apiApp),
-//	    forge.Fallback(landingApp),
-//	)
-func Fallback(app *App) RunOption {
-	return internal.Fallback(app)
+func WithFallback(app *App) RunOption {
+	return internal.WithFallback(app)
 }
 
 // WithContext sets a custom base context for signal handling.
@@ -428,46 +317,24 @@ func WithContext(ctx context.Context) RunOption {
 
 // ContextValue retrieves a typed value from the context.
 // Returns the zero value of T if the key is not found or type assertion fails.
-//
-// Example:
-//
-//	type tenantKey struct{}
-//
-//	tenant := forge.ContextValue[string](c, tenantKey{})
-//	user := forge.ContextValue[*User](c, userKey{})
 func ContextValue[T any](c Context, key any) T {
 	return internal.ContextValue[T](c, key)
 }
 
 // Param retrieves a typed URL parameter from the request.
 // Uses strconv for type conversion. Returns the zero value of T on parse error.
-//
-// Example:
-//
-//	id := forge.Param[int64](c, "id")
-//	slug := forge.Param[string](c, "slug")
 func Param[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string) T {
 	return internal.Param[T](c, name)
 }
 
 // Query retrieves a typed query parameter from the request.
 // Uses strconv for type conversion. Returns the zero value of T on parse error.
-//
-// Example:
-//
-//	page := forge.Query[int](c, "page")
-//	verbose := forge.Query[bool](c, "verbose")
 func Query[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string) T {
 	return internal.Query[T](c, name)
 }
 
 // QueryDefault retrieves a typed query parameter with a default value.
 // Returns defaultValue if the parameter is empty or cannot be parsed.
-//
-// Example:
-//
-//	page := forge.QueryDefault[int](c, "page", 1)
-//	limit := forge.QueryDefault[int](c, "limit", 20)
 func QueryDefault[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name string, defaultValue T) T {
 	return internal.QueryDefault[T](c, name, defaultValue)
 }
@@ -476,15 +343,6 @@ func QueryDefault[T ~string | ~int | ~int64 | ~float64 | ~bool](c Context, name 
 
 // NewExtractor creates an Extractor that tries the given sources in order.
 // Returns the first non-empty value found.
-//
-// Example:
-//
-//	ext := forge.NewExtractor(
-//	    forge.FromHeader("X-API-Key"),
-//	    forge.FromQuery("api_key"),
-//	    forge.FromCookie("api_key"),
-//	)
-//	value, ok := ext.Extract(c)
 func NewExtractor(sources ...ExtractorSource) Extractor {
 	return internal.NewExtractor(sources...)
 }
@@ -536,39 +394,6 @@ func FromBearerToken() ExtractorSource {
 	return internal.FromBearerToken()
 }
 
-// Cookie options
-
-// WithCookieSecret sets the secret for signing and encryption.
-// Must be at least 32 bytes.
-func WithCookieSecret(secret string) CookieOption {
-	return cookie.WithSecret(secret)
-}
-
-// WithCookieDomain sets the cookie domain.
-func WithCookieDomain(domain string) CookieOption {
-	return cookie.WithDomain(domain)
-}
-
-// WithCookiePath sets the cookie path.
-func WithCookiePath(path string) CookieOption {
-	return cookie.WithPath(path)
-}
-
-// WithCookieSecure sets the Secure flag.
-func WithCookieSecure(secure bool) CookieOption {
-	return cookie.WithSecure(secure)
-}
-
-// WithCookieHTTPOnly sets the HttpOnly flag.
-func WithCookieHTTPOnly(httpOnly bool) CookieOption {
-	return cookie.WithHTTPOnly(httpOnly)
-}
-
-// WithCookieSameSite sets the SameSite attribute.
-func WithCookieSameSite(ss http.SameSite) CookieOption {
-	return cookie.WithSameSite(ss)
-}
-
 // Cookie errors for checking return values.
 var (
 	ErrCookieNotFound  = cookie.ErrNotFound
@@ -577,90 +402,6 @@ var (
 	ErrCookieBadSig    = cookie.ErrBadSig
 	ErrCookieDecrypt   = cookie.ErrDecrypt
 )
-
-// Session options
-
-// WithSession enables server-side session management.
-// A SessionStore implementation must be provided (e.g., PostgresStore).
-// Sessions are loaded lazily and saved automatically before the response is written.
-//
-// Example:
-//
-//	pgStore := postgres.NewSessionStore(pool)
-//	forge.New(
-//	    forge.WithSession(pgStore,
-//	        forge.WithSessionCookieName("__sid"),
-//	        forge.WithSessionMaxAge(86400 * 30),
-//	    ),
-//	)
-func WithSession(store SessionStore, opts ...SessionOption) Option {
-	return internal.WithSession(store, opts...)
-}
-
-// WithSessionCookieName sets the session cookie name.
-// Defaults to "__sid".
-func WithSessionCookieName(name string) SessionOption {
-	return internal.WithSessionCookieName(name)
-}
-
-// WithSessionMaxAge sets the session max age in seconds.
-// Defaults to 30 days.
-func WithSessionMaxAge(seconds int) SessionOption {
-	return internal.WithSessionMaxAge(seconds)
-}
-
-// WithSessionDomain sets the session cookie domain.
-func WithSessionDomain(domain string) SessionOption {
-	return internal.WithSessionDomain(domain)
-}
-
-// WithSessionPath sets the session cookie path.
-// Defaults to "/".
-func WithSessionPath(path string) SessionOption {
-	return internal.WithSessionPath(path)
-}
-
-// WithSessionSecure sets the session cookie Secure flag.
-// Defaults to false (should be true in production with HTTPS).
-func WithSessionSecure(secure bool) SessionOption {
-	return internal.WithSessionSecure(secure)
-}
-
-// WithSessionHTTPOnly sets the session cookie HttpOnly flag.
-// Defaults to true (recommended for security).
-func WithSessionHTTPOnly(httpOnly bool) SessionOption {
-	return internal.WithSessionHTTPOnly(httpOnly)
-}
-
-// WithSessionSameSite sets the session cookie SameSite attribute.
-// Defaults to SameSiteLaxMode.
-func WithSessionSameSite(sameSite http.SameSite) SessionOption {
-	return internal.WithSessionSameSite(sameSite)
-}
-
-// WithSessionFingerprint enables device fingerprinting for session hijacking detection.
-// The session manager automatically uses the app's logger for warnings.
-//
-// Mode determines which components are included in the fingerprint:
-//   - FingerprintCookie: Default, excludes IP (recommended for most apps)
-//   - FingerprintJWT: Minimal, excludes Accept headers (for JWT apps)
-//   - FingerprintHTMX: User-Agent only (for HTMX apps)
-//   - FingerprintStrict: Includes IP (high-security, causes false positives)
-//
-// Strictness determines behavior on mismatch:
-//   - FingerprintWarn: Log warning but allow session (visibility without disruption)
-//   - FingerprintReject: Invalidate session (strict security)
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithSession(store,
-//	        forge.WithSessionFingerprint(forge.FingerprintCookie, forge.FingerprintReject),
-//	    ),
-//	)
-func WithSessionFingerprint(mode FingerprintMode, strictness FingerprintStrictness) SessionOption {
-	return internal.WithSessionFingerprint(mode, strictness)
-}
 
 // Fingerprint types for session configuration.
 type (
@@ -707,33 +448,14 @@ var (
 // WithJobs enables both job enqueueing and worker processing using River.
 // A pgxpool.Pool is required for the job queue. Workers are started automatically
 // when the app runs and stopped gracefully during shutdown.
-// Use this for monolith deployments or workers that need to enqueue follow-up tasks.
-//
-// Example:
-//
-//	forge.New(
-//	    forge.WithJobs(pool,
-//	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
-//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo)),
-//	        job.WithQueue("email", 10),
-//	    ),
-//	)
-func WithJobs(pool *pgxpool.Pool, opts ...JobOption) Option {
-	return internal.WithJobs(pool, opts...)
+func WithJobs(pool *pgxpool.Pool, cfg JobConfig, opts ...JobOption) Option {
+	return internal.WithJobs(pool, cfg, opts...)
 }
 
 // WithJobEnqueuer enables job enqueueing without worker processing.
 // Use this for web servers that dispatch work to separate worker processes.
 // Workers must be running elsewhere to process the enqueued jobs.
-//
-// Example:
-//
-//	// Web server - only enqueues jobs
-//	forge.New(
-//	    forge.WithJobEnqueuer(pool),
-//	)
-//	// c.Enqueue("send_email", payload) works
-func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
+func WithJobEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) Option {
 	return internal.WithJobEnqueuer(pool, opts...)
 }
 
@@ -741,21 +463,8 @@ func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
 // Use this for dedicated background worker processes that don't need
 // to dispatch additional jobs. Workers are started automatically when
 // the app runs and stopped gracefully during shutdown.
-//
-// If workers need to enqueue follow-up tasks, use WithJobs instead.
-//
-// Example:
-//
-//	// Dedicated worker process
-//	forge.New(
-//	    forge.WithJobWorker(pool,
-//	        job.WithTask(tasks.NewSendEmail(mailer)),
-//	        job.WithScheduledTask(tasks.NewCleanup(repo)),
-//	    ),
-//	)
-//	// c.Enqueue() returns job.ErrNotConfigured
-func WithJobWorker(pool *pgxpool.Pool, opts ...JobOption) Option {
-	return internal.WithJobWorker(pool, opts...)
+func WithJobWorker(pool *pgxpool.Pool, cfg JobConfig, opts ...JobOption) Option {
+	return internal.WithJobWorker(pool, cfg, opts...)
 }
 
 // Job registration options - re-exported from pkg/job
@@ -779,9 +488,9 @@ func WithScheduledTask[T interface {
 	return job.WithScheduledTask[T](task)
 }
 
-// WithJobQueue configures a named queue with the specified number of workers.
-func WithJobQueue(name string, workers int) JobOption {
-	return job.WithQueue(name, workers)
+// WithJobQueueWorkers configures a named queue with the specified number of workers.
+func WithJobQueueWorkers(name string, workers int) JobOption {
+	return job.WithQueueWorkers(name, workers)
 }
 
 // WithJobLogger sets the logger for job processing.
@@ -789,51 +498,46 @@ func WithJobLogger(l *slog.Logger) JobOption {
 	return job.WithLogger(l)
 }
 
-// WithJobMaxWorkers sets the default maximum number of workers.
-func WithJobMaxWorkers(n int) JobOption {
-	return job.WithMaxWorkers(n)
-}
-
 // Enqueue options - re-exported from pkg/job
 
-// InQueue specifies which queue to use for the job.
-func InQueue(name string) EnqueueOption {
-	return job.InQueue(name)
+// WithQueue specifies which queue to use for the job.
+func WithQueue(name string) EnqueueOption {
+	return job.WithQueue(name)
 }
 
-// ScheduledAt schedules the job to run at a specific time.
-func ScheduledAt(t time.Time) EnqueueOption {
-	return job.ScheduledAt(t)
+// WithScheduledAt schedules the job to run at a specific time.
+func WithScheduledAt(t time.Time) EnqueueOption {
+	return job.WithScheduledAt(t)
 }
 
-// ScheduledIn schedules the job to run after a duration.
-func ScheduledIn(d time.Duration) EnqueueOption {
-	return job.ScheduledIn(d)
+// WithScheduledIn schedules the job to run after a duration.
+func WithScheduledIn(d time.Duration) EnqueueOption {
+	return job.WithScheduledIn(d)
 }
 
-// MaxAttempts sets the maximum number of retry attempts for the job.
-func MaxAttempts(n int) EnqueueOption {
-	return job.MaxAttempts(n)
+// WithMaxAttempts sets the maximum number of retry attempts for the job.
+func WithMaxAttempts(n int) EnqueueOption {
+	return job.WithMaxAttempts(n)
 }
 
-// UniqueFor ensures only one job with this key exists for the specified duration.
-func UniqueFor(d time.Duration) EnqueueOption {
-	return job.UniqueFor(d)
+// WithUniqueFor ensures only one job with this key exists for the specified duration.
+func WithUniqueFor(d time.Duration) EnqueueOption {
+	return job.WithUniqueFor(d)
 }
 
-// UniqueKey sets a custom unique key for deduplication.
-func UniqueKey(key string) EnqueueOption {
-	return job.UniqueKey(key)
+// WithUniqueKey sets a custom unique key for deduplication.
+func WithUniqueKey(key string) EnqueueOption {
+	return job.WithUniqueKey(key)
 }
 
-// JobPriority sets the job priority (lower numbers = higher priority).
-func JobPriority(p int) EnqueueOption {
-	return job.Priority(p)
+// WithJobPriority sets the job priority (lower numbers = higher priority).
+func WithJobPriority(p int) EnqueueOption {
+	return job.WithPriority(p)
 }
 
-// JobTags adds metadata tags to the job.
-func JobTags(tags ...string) EnqueueOption {
-	return job.Tags(tags...)
+// WithJobTags adds metadata tags to the job.
+func WithJobTags(tags ...string) EnqueueOption {
+	return job.WithTags(tags...)
 }
 
 // Job errors for checking return values.
@@ -852,20 +556,12 @@ func JobHealthcheck(m *JobManager) CheckFunc {
 
 // SessionValue is a typed helper to retrieve session values with type safety.
 // Returns an error if the key doesn't exist or type assertion fails.
-//
-// Example:
-//
-//	theme, err := forge.SessionValue[string](sess, "theme")
 func SessionValue[T any](sess *Session, key string) (T, error) {
 	return session.Value[T](sess, key)
 }
 
 // SessionValueOr is a typed helper that returns a default value if the key
 // doesn't exist or type assertion fails.
-//
-// Example:
-//
-//	theme := forge.SessionValueOr(sess, "theme", "light")
 func SessionValueOr[T any](sess *Session, key string, defaultVal T) T {
 	return session.ValueOr(sess, key, defaultVal)
 }
@@ -884,17 +580,6 @@ const (
 // WithStorage configures file storage for the application.
 // A storage.Storage implementation must be provided (e.g., S3Client).
 // Enables c.Upload(), c.Download(), c.DeleteFile(), and c.FileURL().
-//
-// Example:
-//
-//	s3 := storage.NewS3Client(storage.Config{
-//	    Bucket:    "my-bucket",
-//	    AccessKey: os.Getenv("AWS_ACCESS_KEY"),
-//	    SecretKey: os.Getenv("AWS_SECRET_KEY"),
-//	})
-//	forge.New(
-//	    forge.WithStorage(s3),
-//	)
 func WithStorage(s Storage) Option {
 	return internal.WithStorage(s)
 }
@@ -1013,9 +698,6 @@ type (
 	// PanicError represents a recovered panic.
 	PanicError = middlewares.PanicError
 
-	// TimeoutError represents a request timeout.
-	TimeoutError = middlewares.TimeoutError
-
 	// TranslationMap is a map of placeholder keys to values for translation interpolation.
 	TranslationMap = i18n.M
 
@@ -1051,19 +733,9 @@ func IsPanicError(err error) bool {
 	return middlewares.IsPanicError(err)
 }
 
-// IsTimeoutError returns true if the error is a TimeoutError.
-func IsTimeoutError(err error) bool {
-	return middlewares.IsTimeoutError(err)
-}
-
 // AsPanicError extracts the PanicError from an error if present.
 func AsPanicError(err error) (*PanicError, bool) {
 	return middlewares.AsPanicError(err)
-}
-
-// AsTimeoutError extracts the TimeoutError from an error if present.
-func AsTimeoutError(err error) (*TimeoutError, bool) {
-	return middlewares.AsTimeoutError(err)
 }
 
 // I18n middleware helpers
@@ -1120,11 +792,6 @@ func WithJWTExtractor(ext Extractor) JWTOption {
 }
 
 // I18n middleware option constructors
-
-// WithI18nNamespace sets the default namespace for the context translator.
-func WithI18nNamespace(ns string) I18nOption {
-	return middlewares.WithI18nNamespace(ns)
-}
 
 // WithI18nExtractor sets a custom language extractor chain.
 func WithI18nExtractor(ext Extractor) I18nOption {
