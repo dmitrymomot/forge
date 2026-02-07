@@ -59,9 +59,12 @@ go test -v -run TestName ./...    # Run tests matching pattern
 - **Assertions:** Use `require` (not `assert`) for critical checks
 - **Subtests:** Use `t.Run("descriptive name", ...)`; table-driven only for simple functions
 - **Integration:** Code requiring River/pgxpool uses integration tests (`make test-integration`)
+- **Internal tests:** Use `requestVia()` helper in `context_interface_test.go` to exercise real `requestContext` via the App/Router. Mock dependencies with `mockSessionStore`, `mockStorage`, etc.
 
 ## Gotchas
 
+- **requestContext is single-goroutine:** `internal.requestContext` is NOT goroutine-safe (e.g., `Can()` caches role without synchronization). Don't spawn goroutines calling Context methods in tests.
+- **panic(nil) in Go 1.21+:** `recover()` returns `*runtime.PanicNilError`, not nil. Account for this in panic recovery tests.
 - **Loop variables (Go 1.22+):** No need for `v := v` captures in closures; remove if found during review
 - **Import ordering:** Run `make fmt` to organize imports (stdlib, external, local)
 - **Struct alignment:** `betteralign` may reorder struct fields for memory efficiency
