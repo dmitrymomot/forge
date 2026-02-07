@@ -20,7 +20,7 @@ var (
 // Example:
 //
 //	forge.WithHealthChecks(
-//	    forge.WithReadinessCheck("jobs", job.Healthcheck(manager)),
+//	    forge.HealthCheck("jobs", job.Healthcheck(manager)),
 //	)
 func Healthcheck(m *Manager) func(ctx context.Context) error {
 	return func(ctx context.Context) error {

@@ -34,15 +34,16 @@ type Manager struct {
 	started bool
 }
 
-// NewManager creates a new job manager with the given options.
+// NewManager creates a new job manager with the given config and options.
 // The River client is created immediately, allowing jobs to be enqueued
 // before Start() is called. Call Start() to begin processing jobs.
-func NewManager(pool *pgxpool.Pool, opts ...Option) (*Manager, error) {
+func NewManager(pool *pgxpool.Pool, userCfg Config, opts ...Option) (*Manager, error) {
 	if pool == nil {
 		return nil, ErrPoolRequired
 	}
 
 	cfg := newConfig()
+	cfg.maxWorkers = userCfg.MaxWorkers
 	for _, opt := range opts {
 		opt(cfg)
 	}
