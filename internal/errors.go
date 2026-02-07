@@ -1,6 +1,9 @@
 package internal
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
 
 // HTTPError represents an HTTP error with all data needed for rendering.
 // It implements the error interface and provides structured data for
@@ -154,18 +157,16 @@ func ErrServiceUnavailable(message string, opts ...HTTPErrorOption) *HTTPError {
 // Helper functions for error inspection.
 
 func IsHTTPError(err error) bool {
-	_, ok := err.(*HTTPError)
-	return ok
+	var target *HTTPError
+	return errors.As(err, &target)
 }
 
 // AsHTTPError extracts the HTTPError from an error if present.
 // Returns nil if the error is not an HTTPError.
 func AsHTTPError(err error) *HTTPError {
-	if err == nil {
-		return nil
-	}
-	if httpErr, ok := err.(*HTTPError); ok {
-		return httpErr
+	var target *HTTPError
+	if errors.As(err, &target) {
+		return target
 	}
 	return nil
 }
