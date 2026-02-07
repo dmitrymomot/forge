@@ -2,6 +2,7 @@ package middlewares_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/pkg/htmx"
+	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
@@ -155,15 +157,26 @@ func (c *testContext) Upload(r io.Reader, size int64, opts ...storage.Option) (*
 func (c *testContext) Download(key string) (io.ReadCloser, error)                    { return nil, nil }
 func (c *testContext) DeleteFile(key string) error                                   { return nil }
 func (c *testContext) FileURL(key string, opts ...storage.URLOption) (string, error) { return "", nil }
-func (c *testContext) Deadline() (time.Time, bool)                                   { return c.request.Context().Deadline() }
-func (c *testContext) Done() <-chan struct{}                                         { return c.request.Context().Done() }
-func (c *testContext) Err() error                                                    { return c.request.Context().Err() }
-func (c *testContext) Value(key any) any                                             { return c.request.Context().Value(key) }
-func (c *testContext) UserID() string                                                { return "" }
-func (c *testContext) IsAuthenticated() bool                                         { return false }
-func (c *testContext) IsCurrentUser(id string) bool                                  { return false }
-func (c *testContext) Can(permission internal.Permission) bool                       { return false }
-func (c *testContext) Form(name string) string                                       { return c.request.FormValue(name) }
+func (c *testContext) T(key string, _ ...i18n.M) string                              { return key }
+func (c *testContext) Tn(key string, _ int, _ ...i18n.M) string                      { return key }
+func (c *testContext) Language() string                                              { return "" }
+func (c *testContext) FormatNumber(n float64) string                                 { return fmt.Sprintf("%g", n) }
+func (c *testContext) FormatCurrency(amount float64) string                          { return fmt.Sprintf("%.2f", amount) }
+func (c *testContext) FormatPercent(n float64) string                                { return fmt.Sprintf("%.0f%%", n*100) }
+func (c *testContext) FormatDate(date time.Time) string                              { return date.Format("2006-01-02") }
+func (c *testContext) FormatTime(t time.Time) string                                 { return t.Format("15:04:05") }
+func (c *testContext) FormatDateTime(datetime time.Time) string {
+	return datetime.Format("2006-01-02 15:04:05")
+}
+func (c *testContext) Deadline() (time.Time, bool)             { return c.request.Context().Deadline() }
+func (c *testContext) Done() <-chan struct{}                   { return c.request.Context().Done() }
+func (c *testContext) Err() error                              { return c.request.Context().Err() }
+func (c *testContext) Value(key any) any                       { return c.request.Context().Value(key) }
+func (c *testContext) UserID() string                          { return "" }
+func (c *testContext) IsAuthenticated() bool                   { return false }
+func (c *testContext) IsCurrentUser(id string) bool            { return false }
+func (c *testContext) Can(permission internal.Permission) bool { return false }
+func (c *testContext) Form(name string) string                 { return c.request.FormValue(name) }
 func (c *testContext) FormFile(name string) (multipart.File, *multipart.FileHeader, error) {
 	return c.request.FormFile(name)
 }
