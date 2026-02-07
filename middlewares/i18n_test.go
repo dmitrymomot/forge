@@ -15,7 +15,7 @@ import (
 func newI18nService(t *testing.T) *i18n.I18n {
 	t.Helper()
 	svc, err := i18n.New(
-		i18n.WithDefaultLanguage("en"),
+		i18n.Config{DefaultLanguage: "en"},
 		i18n.WithLanguages("en", "de", "pl"),
 		i18n.WithTranslations("en", "common", map[string]any{
 			"hello": "Hello",
@@ -45,7 +45,7 @@ func TestI18nMiddleware(t *testing.T) {
 	t.Run("stores translator in context", func(t *testing.T) {
 		t.Parallel()
 		svc := newI18nService(t)
-		mw := middlewares.I18n(svc, middlewares.WithI18nNamespace("common"))
+		mw := middlewares.I18n(svc, middlewares.I18nConfig{Namespace: "common"})
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Accept-Language", "en")
@@ -67,7 +67,7 @@ func TestI18nMiddleware(t *testing.T) {
 	t.Run("stores language in context", func(t *testing.T) {
 		t.Parallel()
 		svc := newI18nService(t)
-		mw := middlewares.I18n(svc, middlewares.WithI18nNamespace("common"))
+		mw := middlewares.I18n(svc, middlewares.I18nConfig{Namespace: "common"})
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Accept-Language", "de")
@@ -88,7 +88,7 @@ func TestI18nMiddleware(t *testing.T) {
 	t.Run("default extractor uses cookie then accept-language", func(t *testing.T) {
 		t.Parallel()
 		svc := newI18nService(t)
-		mw := middlewares.I18n(svc, middlewares.WithI18nNamespace("common"))
+		mw := middlewares.I18n(svc, middlewares.I18nConfig{Namespace: "common"})
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(&http.Cookie{Name: "lang", Value: "pl"})
@@ -110,7 +110,7 @@ func TestI18nMiddleware(t *testing.T) {
 	t.Run("default extractor falls back to accept-language when no cookie", func(t *testing.T) {
 		t.Parallel()
 		svc := newI18nService(t)
-		mw := middlewares.I18n(svc, middlewares.WithI18nNamespace("common"))
+		mw := middlewares.I18n(svc, middlewares.I18nConfig{Namespace: "common"})
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Accept-Language", "de-DE,de;q=0.9")
@@ -135,7 +135,7 @@ func TestI18nMiddleware(t *testing.T) {
 			internal.FromQuery("locale"),
 		)
 		mw := middlewares.I18n(svc,
-			middlewares.WithI18nNamespace("common"),
+			middlewares.I18nConfig{Namespace: "common"},
 			middlewares.WithI18nExtractor(ext),
 		)
 
@@ -159,7 +159,7 @@ func TestI18nMiddleware(t *testing.T) {
 		svc := newI18nService(t)
 		deFormat := i18n.FormatDeDE()
 		mw := middlewares.I18n(svc,
-			middlewares.WithI18nNamespace("common"),
+			middlewares.I18nConfig{Namespace: "common"},
 			middlewares.WithI18nFormatMap(map[string]*i18n.LocaleFormat{
 				"de": deFormat,
 			}),
@@ -187,7 +187,7 @@ func TestI18nMiddleware(t *testing.T) {
 		svc := newI18nService(t)
 		customDefault := i18n.FormatEnGB()
 		mw := middlewares.I18n(svc,
-			middlewares.WithI18nNamespace("common"),
+			middlewares.I18nConfig{Namespace: "common"},
 			middlewares.WithI18nDefaultFormat(customDefault),
 			middlewares.WithI18nFormatMap(map[string]*i18n.LocaleFormat{
 				"de": i18n.FormatDeDE(),
@@ -214,7 +214,7 @@ func TestI18nMiddleware(t *testing.T) {
 	t.Run("fallback to default language when no extractor matches", func(t *testing.T) {
 		t.Parallel()
 		svc := newI18nService(t)
-		mw := middlewares.I18n(svc, middlewares.WithI18nNamespace("common"))
+		mw := middlewares.I18n(svc, middlewares.I18nConfig{Namespace: "common"})
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		w := httptest.NewRecorder()

@@ -12,52 +12,44 @@ import (
 // requestIDKey is the context key for storing the request ID.
 type requestIDKey struct{}
 
-// DefaultRequestIDHeaders are the headers checked (in order) for an existing request ID.
-var DefaultRequestIDHeaders = []string{"X-Request-ID", "X-Correlation-ID"}
-
 // RequestIDConfig configures the request ID middleware.
 type RequestIDConfig struct {
-	Generator      func() string // ID generator function
-	ResponseHeader string        // Response header name
-	Headers        []string      // Headers to check for existing ID (in order)
+	ResponseHeader string   `env:"RESPONSE_HEADER" envDefault:"X-Request-ID"`
+	Headers        []string `env:"HEADERS"         envSeparator:"," envDefault:"X-Request-ID,X-Correlation-ID"`
 }
 
-// RequestIDOption configures RequestIDConfig.
-type RequestIDOption func(*RequestIDConfig)
-
-// WithRequestIDHeaders sets the headers to check for existing request IDs.
-func WithRequestIDHeaders(headers ...string) RequestIDOption {
-	return func(cfg *RequestIDConfig) {
-		cfg.Headers = headers
-	}
+type requestIDOptions struct {
+	generator func() string
 }
+
+// RequestIDOption configures runtime dependencies for the request ID middleware.
+type RequestIDOption func(*requestIDOptions)
 
 // WithRequestIDGenerator sets a custom ID generator function.
 func WithRequestIDGenerator(gen func() string) RequestIDOption {
-	return func(cfg *RequestIDConfig) {
-		cfg.Generator = gen
-	}
-}
-
-// WithRequestIDResponseHeader sets the response header name.
-func WithRequestIDResponseHeader(header string) RequestIDOption {
-	return func(cfg *RequestIDConfig) {
-		cfg.ResponseHeader = header
+	return func(o *requestIDOptions) {
+		o.generator = gen
 	}
 }
 
 // RequestID returns middleware that assigns a unique request ID to each request.
 // The ID is extracted from request headers (if present) or generated.
 // The ID is stored in the context and set as a response header.
-func RequestID(opts ...RequestIDOption) internal.Middleware {
-	cfg := &RequestIDConfig{
-		Headers:        DefaultRequestIDHeaders,
-		Generator:      id.NewULID,
-		ResponseHeader: "X-Request-ID",
+func RequestID(cfg RequestIDConfig, opts ...RequestIDOption) internal.Middleware {
+	o := &requestIDOptions{}
+	for _, opt := range opts {
+		opt(o)
 	}
 
-	for _, opt := range opts {
-		opt(cfg)
+	// Apply runtime defaults
+	if cfg.ResponseHeader == "" {
+		cfg.ResponseHeader = "X-Request-ID"
+	}
+	if len(cfg.Headers) == 0 {
+		cfg.Headers = []string{"X-Request-ID", "X-Correlation-ID"}
+	}
+	if o.generator == nil {
+		o.generator = id.NewULID
 	}
 
 	return func(next internal.HandlerFunc) internal.HandlerFunc {
@@ -72,7 +64,7 @@ func RequestID(opts ...RequestIDOption) internal.Middleware {
 			}
 
 			if reqID == "" {
-				reqID = cfg.Generator()
+				reqID = o.generator()
 			}
 
 			c.Set(requestIDKey{}, reqID)

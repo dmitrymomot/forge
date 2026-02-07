@@ -21,16 +21,19 @@ import (
 )
 
 type testContext struct {
-	response http.ResponseWriter
-	request  *http.Request
-	values   map[any]any
+	response       http.ResponseWriter
+	responseWriter *internal.ResponseWriter
+	request        *http.Request
+	values         map[any]any
 }
 
 func newTestContext(w http.ResponseWriter, r *http.Request) *testContext {
+	rw := internal.NewResponseWriter(w, false)
 	return &testContext{
-		response: w,
-		request:  r,
-		values:   make(map[any]any),
+		response:       rw,
+		responseWriter: rw,
+		request:        r,
+		values:         make(map[any]any),
 	}
 }
 
@@ -67,7 +70,7 @@ func (c *testContext) Redirect(code int, url string) error {
 	return nil
 }
 func (c *testContext) IsHTMX() bool                      { return htmx.IsHTMX(c.request) }
-func (c *testContext) Written() bool                     { return false }
+func (c *testContext) Written() bool                     { return c.responseWriter.Written() }
 func (c *testContext) Logger() *slog.Logger              { return slog.Default() }
 func (c *testContext) LogDebug(msg string, attrs ...any) {}
 func (c *testContext) LogInfo(msg string, attrs ...any)  {}
@@ -145,7 +148,7 @@ func (c *testContext) SessionValue(key string) (any, error)                     
 func (c *testContext) SetSessionValue(key string, val any) error                         { return nil }
 func (c *testContext) DeleteSessionValue(key string) error                               { return nil }
 func (c *testContext) DestroySession() error                                             { return nil }
-func (c *testContext) ResponseWriter() *internal.ResponseWriter                          { return nil }
+func (c *testContext) ResponseWriter() *internal.ResponseWriter                          { return c.responseWriter }
 func (c *testContext) Enqueue(name string, payload any, opts ...job.EnqueueOption) error { return nil }
 func (c *testContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
 	return nil

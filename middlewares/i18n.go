@@ -7,42 +7,38 @@ import (
 
 // I18nConfig configures the I18n middleware.
 type I18nConfig struct {
-	FormatMap     map[string]*i18n.LocaleFormat
-	DefaultFormat *i18n.LocaleFormat
-	Namespace     string
-	Extractor     internal.Extractor
+	Namespace string `env:"NAMESPACE"`
+}
+
+type i18nOptions struct {
+	formatMap     map[string]*i18n.LocaleFormat
+	defaultFormat *i18n.LocaleFormat
+	extractor     internal.Extractor
 	extractorSet  bool
 }
 
-// I18nOption configures I18nConfig.
-type I18nOption func(*I18nConfig)
-
-// WithI18nNamespace sets the default namespace for the context translator.
-func WithI18nNamespace(ns string) I18nOption {
-	return func(cfg *I18nConfig) {
-		cfg.Namespace = ns
-	}
-}
+// I18nOption configures runtime dependencies for the I18n middleware.
+type I18nOption func(*i18nOptions)
 
 // WithI18nExtractor sets a custom language extractor chain.
 func WithI18nExtractor(ext internal.Extractor) I18nOption {
-	return func(cfg *I18nConfig) {
-		cfg.Extractor = ext
-		cfg.extractorSet = true
+	return func(o *i18nOptions) {
+		o.extractor = ext
+		o.extractorSet = true
 	}
 }
 
 // WithI18nFormatMap sets the language-to-format mapping.
 func WithI18nFormatMap(m map[string]*i18n.LocaleFormat) I18nOption {
-	return func(cfg *I18nConfig) {
-		cfg.FormatMap = m
+	return func(o *i18nOptions) {
+		o.formatMap = m
 	}
 }
 
 // WithI18nDefaultFormat sets the fallback locale format.
 func WithI18nDefaultFormat(f *i18n.LocaleFormat) I18nOption {
-	return func(cfg *I18nConfig) {
-		cfg.DefaultFormat = f
+	return func(o *i18nOptions) {
+		o.defaultFormat = f
 	}
 }
 
@@ -61,34 +57,34 @@ func FromAcceptLanguage(available []string) internal.ExtractorSource {
 
 // I18n returns middleware that resolves the user's language, creates a Translator,
 // and stores both in the request context.
-func I18n(svc *i18n.I18n, opts ...I18nOption) internal.Middleware {
-	cfg := &I18nConfig{}
+func I18n(svc *i18n.I18n, cfg I18nConfig, opts ...I18nOption) internal.Middleware {
+	o := &i18nOptions{}
 	for _, opt := range opts {
-		opt(cfg)
+		opt(o)
 	}
 
-	// Default extractor: cookie → accept-language
-	if !cfg.extractorSet {
-		cfg.Extractor = internal.NewExtractor(
+	// Default extractor: cookie -> accept-language
+	if !o.extractorSet {
+		o.extractor = internal.NewExtractor(
 			internal.FromCookie("lang"),
 			FromAcceptLanguage(svc.Languages()),
 		)
 	}
 
-	if cfg.DefaultFormat == nil {
-		cfg.DefaultFormat = i18n.FormatEnUS()
+	if o.defaultFormat == nil {
+		o.defaultFormat = i18n.FormatEnUS()
 	}
 
 	return func(next internal.HandlerFunc) internal.HandlerFunc {
 		return func(c internal.Context) error {
-			lang, ok := cfg.Extractor.Extract(c)
+			lang, ok := o.extractor.Extract(c)
 			if !ok || lang == "" {
 				lang = svc.DefaultLanguage()
 			}
 
-			format := cfg.DefaultFormat
-			if cfg.FormatMap != nil {
-				if f, exists := cfg.FormatMap[lang]; exists {
+			format := o.defaultFormat
+			if o.formatMap != nil {
+				if f, exists := o.formatMap[lang]; exists {
 					format = f
 				}
 			}

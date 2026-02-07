@@ -6,43 +6,20 @@ import (
 	"github.com/dmitrymomot/forge/internal"
 )
 
-// DefaultStackSize is the default maximum stack trace size in bytes.
-// Stack traces are truncated to prevent memory exhaustion from large call stacks.
-const DefaultStackSize = 4096
+const defaultStackSize = 4096
 
 // RecoverConfig configures the recover middleware.
 type RecoverConfig struct {
-	StackSize         int  // Max stack trace size (default: 4096)
-	DisablePrintStack bool // Disable stack trace in logs
-}
-
-// RecoverOption configures RecoverConfig.
-type RecoverOption func(*RecoverConfig)
-
-// WithRecoverStackSize sets the maximum stack trace size.
-func WithRecoverStackSize(size int) RecoverOption {
-	return func(cfg *RecoverConfig) {
-		cfg.StackSize = size
-	}
-}
-
-// WithRecoverDisablePrintStack disables including stack trace in logs.
-func WithRecoverDisablePrintStack() RecoverOption {
-	return func(cfg *RecoverConfig) {
-		cfg.DisablePrintStack = true
-	}
+	StackSize         int  `env:"STACK_SIZE"          envDefault:"4096"`
+	DisablePrintStack bool `env:"DISABLE_PRINT_STACK" envDefault:"false"`
 }
 
 // Recover returns middleware that recovers from panics.
 // It logs the panic and returns a PanicError to be handled by the global ErrorHandler.
 // Request ID is automatically included via RequestIDExtractor() if configured.
-func Recover(opts ...RecoverOption) internal.Middleware {
-	cfg := &RecoverConfig{
-		StackSize: DefaultStackSize,
-	}
-
-	for _, opt := range opts {
-		opt(cfg)
+func Recover(cfg RecoverConfig) internal.Middleware {
+	if cfg.StackSize <= 0 {
+		cfg.StackSize = defaultStackSize
 	}
 
 	return func(next internal.HandlerFunc) internal.HandlerFunc {

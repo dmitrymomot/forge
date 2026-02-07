@@ -18,7 +18,7 @@ const testJWTSecret = "test-secret-key-at-least-32-bytes!"
 
 func newJWTService(t *testing.T) *jwt.Service {
 	t.Helper()
-	svc, err := jwt.NewFromString(testJWTSecret)
+	svc, err := jwt.New(jwt.Config{SigningKey: testJWTSecret})
 	require.NoError(t, err)
 	return svc
 }
@@ -182,7 +182,7 @@ func TestJWTMiddleware(t *testing.T) {
 	t.Run("invalid signature", func(t *testing.T) {
 		t.Parallel()
 		// Generate token with a different key
-		otherSvc, err := jwt.NewFromString("a-completely-different-secret-key!!")
+		otherSvc, err := jwt.New(jwt.Config{SigningKey: "a-completely-different-secret-key!!"})
 		require.NoError(t, err)
 		claims := jwt.StandardClaims{
 			Subject:   "user-000",
