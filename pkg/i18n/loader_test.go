@@ -21,8 +21,7 @@ func TestWithJSONDir(t *testing.T) {
 
 	t.Run("loads JSON translations from fs.FS", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithJSONDir(subFS),
 		)
 		require.NoError(t, err)
@@ -35,8 +34,7 @@ func TestWithJSONDir(t *testing.T) {
 
 	t.Run("loads multiple namespaces", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithJSONDir(subFS),
 		)
 		require.NoError(t, err)
@@ -47,8 +45,7 @@ func TestWithJSONDir(t *testing.T) {
 
 	t.Run("loads multiple languages", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithJSONDir(subFS),
 		)
 		require.NoError(t, err)
@@ -60,8 +57,7 @@ func TestWithJSONDir(t *testing.T) {
 
 	t.Run("combines with WithTranslations", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithJSONDir(subFS),
 			i18n.WithTranslations("en", "extra", map[string]any{
 				"test": "Test value",
@@ -82,8 +78,7 @@ func TestWithYAMLDir(t *testing.T) {
 
 	t.Run("loads YAML translations from fs.FS", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("fr"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "fr"},
 			i18n.WithYAMLDir(subFS),
 		)
 		require.NoError(t, err)
@@ -103,8 +98,7 @@ func TestWithJSONDirAndYAMLDir(t *testing.T) {
 
 	t.Run("loads both JSON and YAML", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithJSONDir(subFS),
 			i18n.WithYAMLDir(subFS),
 		)

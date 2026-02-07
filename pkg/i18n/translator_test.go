@@ -12,8 +12,7 @@ import (
 func TestNewTranslator(t *testing.T) {
 	t.Parallel()
 
-	inst, err := i18n.New(
-		i18n.WithDefaultLanguage("en"),
+	inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 		i18n.WithTranslations("en", "test", map[string]any{
 			"hello":   "Hello",
 			"welcome": "Welcome, {{name}}!",
@@ -93,7 +92,7 @@ func TestNewTranslator(t *testing.T) {
 func TestTranslatorFormatting(t *testing.T) {
 	t.Parallel()
 
-	inst, err := i18n.New(
+	inst, err := i18n.New(i18n.Config{},
 		i18n.WithTranslations("en", "test", map[string]any{"x": "x"}),
 	)
 	require.NoError(t, err)

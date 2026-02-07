@@ -19,7 +19,7 @@
 //
 //	func loginHandler(w http.ResponseWriter, r *http.Request) {
 //		// Generate fingerprint for new session (uses safe defaults)
-//		fp := fingerprint.Generate(r)
+//		fp := fingerprint.Generate(r, fingerprint.DefaultConfig())
 //		// Returns: "v1:a1b2c3d4e5f6..." (35 characters)
 //
 //		// Store with session data
@@ -31,8 +31,8 @@
 //		storedFP := session.Get("fingerprint")
 //
 //		// Validate current request against stored fingerprint
-//		// IMPORTANT: Use the same options that were used during generation
-//		if err := fingerprint.Validate(r, storedFP); err != nil {
+//		// IMPORTANT: Use the same Config that was used during generation
+//		if err := fingerprint.Validate(r, storedFP, fingerprint.DefaultConfig()); err != nil {
 //			if errors.Is(err, fingerprint.ErrMismatch) {
 //				// Fingerprint mismatch - potential session hijacking
 //				session.Destroy()
@@ -69,36 +69,26 @@
 //
 // # Custom Configuration
 //
-// Use functional options to customize fingerprint generation. When validating,
-// use the SAME options that were used during generation:
+// Use Config struct to customize fingerprint generation. When validating,
+// use the SAME Config that was used during generation:
 //
 //	// Include IP address (high-security mode)
-//	fp := fingerprint.Generate(r, fingerprint.WithIP())
-//	err := fingerprint.Validate(r, storedFP, fingerprint.WithIP())
+//	cfg := fingerprint.DefaultConfig()
+//	cfg.IncludeIP = true
+//	fp := fingerprint.Generate(r, cfg)
+//	err := fingerprint.Validate(r, storedFP, cfg)
 //
 //	// Exclude specific components
-//	fp := fingerprint.Generate(r, fingerprint.WithoutAcceptHeaders())
-//	err := fingerprint.Validate(r, storedFP, fingerprint.WithoutAcceptHeaders())
-//
-//	// Combine multiple options
-//	fp := fingerprint.Generate(r,
-//		fingerprint.WithIP(),
-//		fingerprint.WithoutAcceptHeaders(),
-//	)
-//	err := fingerprint.Validate(r, storedFP,
-//		fingerprint.WithIP(),
-//		fingerprint.WithoutAcceptHeaders(),
-//	)
-//
-//	// Explicitly exclude IP (default behavior, for clarity)
-//	fp := fingerprint.Generate(r, fingerprint.WithoutIP())
-//	err := fingerprint.Validate(r, storedFP, fingerprint.WithoutIP())
+//	cfg := fingerprint.DefaultConfig()
+//	cfg.IncludeAcceptHeaders = false
+//	fp := fingerprint.Generate(r, cfg)
+//	err := fingerprint.Validate(r, storedFP, cfg)
 //
 // # Error Handling
 //
 // The Validate function returns errors that can be checked with errors.Is():
 //
-//	err := fingerprint.Validate(r, storedFP)
+//	err := fingerprint.Validate(r, storedFP, fingerprint.DefaultConfig())
 //	switch {
 //	case err == nil:
 //		// Fingerprint matches - request is valid
@@ -114,28 +104,6 @@
 //		// Consider logging for security monitoring and re-authenticating user
 //	}
 //
-// The simplified validation returns ErrMismatch without identifying which specific
-// component changed. If you need to handle different changes differently, use
-// separate fingerprints with different options:
-//
-//	// Generate two fingerprints: one with IP, one without
-//	fpWithIP := fingerprint.Generate(r, fingerprint.WithIP())
-//	fpWithoutIP := fingerprint.Generate(r)
-//
-//	// Store both
-//	session.Set("fp_strict", fpWithIP)
-//	session.Set("fp_relaxed", fpWithoutIP)
-//
-//	// Later, check both to identify if only IP changed
-//	if err := fingerprint.Validate(r, storedStrictFP, fingerprint.WithIP()); err != nil {
-//		// Strict check failed, try relaxed
-//		if err := fingerprint.Validate(r, storedRelaxedFP); err == nil {
-//			// Only IP changed - handle gracefully
-//		} else {
-//			// Something else changed - potential hijacking
-//		}
-//	}
-//
 // # Fingerprint Components
 //
 // Default configuration includes:
@@ -148,9 +116,8 @@
 // Optional components:
 //   - Client IP address (via github.com/dmitrymomot/forge/pkg/clientip)
 //
-// Components can be excluded using functional options (WithoutUserAgent,
-// WithoutAcceptHeaders, WithoutHeaderSet). IP is excluded by default but
-// can be included with WithIP().
+// Components can be toggled via Config fields. IP is excluded by default but
+// can be included by setting IncludeIP to true.
 //
 // # Fingerprint Format
 //

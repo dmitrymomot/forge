@@ -15,29 +15,22 @@ func TestNew(t *testing.T) {
 
 	t.Run("creates instance with defaults", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New()
+		inst, err := i18n.New(i18n.Config{})
 		require.NoError(t, err)
 		require.NotNil(t, inst)
 		require.Equal(t, "en", inst.DefaultLanguage())
 	})
 
-	t.Run("sets custom default language", func(t *testing.T) {
+	t.Run("sets custom default language via config", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(i18n.WithDefaultLanguage("pl"))
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "pl"})
 		require.NoError(t, err)
 		require.Equal(t, "pl", inst.DefaultLanguage())
 	})
 
-	t.Run("returns error for empty default language", func(t *testing.T) {
-		t.Parallel()
-		_, err := i18n.New(i18n.WithDefaultLanguage(""))
-		require.Error(t, err)
-		require.ErrorIs(t, err, i18n.ErrEmptyLanguage)
-	})
-
 	t.Run("loads translations", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
+		inst, err := i18n.New(i18n.Config{},
 			i18n.WithTranslations("en", "general", map[string]any{
 				"hello": "Hello",
 			}),
@@ -48,7 +41,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("returns error for empty language in translations", func(t *testing.T) {
 		t.Parallel()
-		_, err := i18n.New(
+		_, err := i18n.New(i18n.Config{},
 			i18n.WithTranslations("", "general", map[string]any{"hello": "Hello"}),
 		)
 		require.Error(t, err)
@@ -57,7 +50,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("returns error for empty namespace in translations", func(t *testing.T) {
 		t.Parallel()
-		_, err := i18n.New(
+		_, err := i18n.New(i18n.Config{},
 			i18n.WithTranslations("en", "", map[string]any{"hello": "Hello"}),
 		)
 		require.Error(t, err)
@@ -66,7 +59,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("allows empty translations map", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
+		inst, err := i18n.New(i18n.Config{},
 			i18n.WithTranslations("en", "general", map[string]any{}),
 		)
 		require.NoError(t, err)
@@ -81,14 +74,14 @@ func TestNew(t *testing.T) {
 			}
 			return "other"
 		}
-		inst, err := i18n.New(i18n.WithPluralRule("en", customRule))
+		inst, err := i18n.New(i18n.Config{}, i18n.WithPluralRule("en", customRule))
 		require.NoError(t, err)
 		require.NotNil(t, inst)
 	})
 
 	t.Run("returns error for nil plural rule", func(t *testing.T) {
 		t.Parallel()
-		_, err := i18n.New(i18n.WithPluralRule("en", nil))
+		_, err := i18n.New(i18n.Config{}, i18n.WithPluralRule("en", nil))
 		require.Error(t, err)
 		require.ErrorIs(t, err, i18n.ErrNilPluralRule)
 	})
@@ -100,7 +93,7 @@ func TestNew(t *testing.T) {
 			missingKeys = append(missingKeys, fmt.Sprintf("%s:%s:%s", lang, namespace, key))
 		}
 
-		inst, err := i18n.New(
+		inst, err := i18n.New(i18n.Config{},
 			i18n.WithMissingKeyHandler(handler),
 			i18n.WithTranslations("en", "test", map[string]any{
 				"existing": "Exists",
@@ -119,8 +112,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("sets languages list", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithLanguages("en", "pl", "de"),
 		)
 		require.NoError(t, err)
@@ -132,8 +124,7 @@ func TestT(t *testing.T) {
 	t.Parallel()
 
 	setup := func() *i18n.I18n {
-		inst, _ := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, _ := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithTranslations("en", "general", map[string]any{
 				"hello":   "Hello",
 				"welcome": "Welcome, {{name}}!",
@@ -259,8 +250,7 @@ func TestTn(t *testing.T) {
 	t.Parallel()
 
 	setup := func() *i18n.I18n {
-		inst, _ := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, _ := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithPluralRule("en", i18n.EnglishPluralRule),
 			i18n.WithPluralRule("pl", i18n.SlavicPluralRule),
 			i18n.WithTranslations("en", "general", map[string]any{
@@ -324,7 +314,7 @@ func TestTn(t *testing.T) {
 
 	t.Run("merges additional placeholders with count", func(t *testing.T) {
 		t.Parallel()
-		inst, _ := i18n.New(
+		inst, _ := i18n.New(i18n.Config{},
 			i18n.WithTranslations("en", "general", map[string]any{
 				"files": map[string]any{
 					"one":   "{{count}} file in {{folder}}",
@@ -363,7 +353,7 @@ func TestTn(t *testing.T) {
 			missingKeys = append(missingKeys, fmt.Sprintf("%s:%s:%s", lang, namespace, key))
 		}
 
-		inst, err := i18n.New(
+		inst, err := i18n.New(i18n.Config{},
 			i18n.WithMissingKeyHandler(handler),
 			i18n.WithTranslations("en", "test", map[string]any{
 				"items": map[string]any{
@@ -385,7 +375,7 @@ func TestTn(t *testing.T) {
 
 	t.Run("uses auto-assigned plural rule based on language code", func(t *testing.T) {
 		t.Parallel()
-		inst, _ := i18n.New(
+		inst, _ := i18n.New(i18n.Config{},
 			i18n.WithTranslations("fr", "general", map[string]any{
 				"items": map[string]any{
 					"one":   "{{count}} \u00e9l\u00e9ment",
@@ -415,8 +405,7 @@ func TestBaseLanguageFallback(t *testing.T) {
 	t.Parallel()
 
 	setup := func() *i18n.I18n {
-		inst, _ := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, _ := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithTranslations("en", "common", map[string]any{
 				"hello":   "Hello",
 				"welcome": "Welcome, {{name}}!",
@@ -510,7 +499,7 @@ func TestFlattenTranslations(t *testing.T) {
 
 	t.Run("flattens nested structures correctly", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
+		inst, err := i18n.New(i18n.Config{},
 			i18n.WithTranslations("en", "test", map[string]any{
 				"simple": "Simple value",
 				"nested": map[string]any{
@@ -548,8 +537,7 @@ func TestConcurrency(t *testing.T) {
 
 	t.Run("concurrent reads are safe", func(t *testing.T) {
 		t.Parallel()
-		inst, err := i18n.New(
-			i18n.WithDefaultLanguage("en"),
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
 			i18n.WithTranslations("en", "general", map[string]any{
 				"hello": "Hello",
 				"world": "World",

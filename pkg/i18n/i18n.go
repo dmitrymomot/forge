@@ -3,7 +3,7 @@ package i18n
 import (
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -31,17 +31,26 @@ type I18n struct {
 	languages []string
 }
 
+// Config holds i18n configuration.
+type Config struct {
+	DefaultLanguage string `env:"DEFAULT_LANGUAGE" envDefault:"en"`
+}
+
 // Option configures the I18n instance during construction.
 type Option func(*I18n) error
 
-// New creates a new I18n instance with the given options.
+// New creates a new I18n instance with the given config and options.
 // All configuration happens during construction, making the instance
 // immutable and thread-safe from creation.
-func New(opts ...Option) (*I18n, error) {
+func New(cfg Config, opts ...Option) (*I18n, error) {
+	if cfg.DefaultLanguage == "" {
+		cfg.DefaultLanguage = DefaultLang
+	}
+
 	i := &I18n{
 		translations: make(map[string]string),
 		pluralRules:  make(map[string]PluralRule),
-		defaultLang:  DefaultLang,
+		defaultLang:  cfg.DefaultLanguage,
 	}
 
 	for _, opt := range opts {
@@ -57,17 +66,6 @@ func New(opts ...Option) (*I18n, error) {
 	i.languages = i.buildLanguagesList()
 
 	return i, nil
-}
-
-// WithDefaultLanguage sets the default/fallback language.
-func WithDefaultLanguage(lang string) Option {
-	return func(i *I18n) error {
-		if lang == "" {
-			return ErrEmptyLanguage
-		}
-		i.defaultLang = lang
-		return nil
-	}
 }
 
 // WithLanguages sets the supported languages for the I18n instance.
@@ -96,7 +94,7 @@ func WithLanguages(langs ...string) Option {
 			for lang := range langSet {
 				otherLangs = append(otherLangs, lang)
 			}
-			sort.Strings(otherLangs)
+			slices.Sort(otherLangs)
 			i.languages = append(i.languages, otherLangs...)
 		}
 
