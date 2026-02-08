@@ -1,0 +1,13 @@
+with-expecter: true
+dir: "{{.InterfaceDir}}/mocks"
+filename: "{{lower .InterfaceName}}.go"
+mockname: "{{.InterfaceName}}"
+outpkg: "mocks"
+
+packages:
+  github.com/dmitrymomot/forge/internal:
+    interfaces:
+      Store:
+        config:
+          filename: "session_store.go"
+          mockname: "SessionStore"
