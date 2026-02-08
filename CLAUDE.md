@@ -25,6 +25,7 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 - Don't expose fields users already have (no redundant accessors)
 - Use `sync.Once` for lazy-initialized write-once fields
 - Framework provides utility packages; business logic belongs in consumer repos
+- All IDs must be generated exclusively using `pkg/id/` — no exceptions, no `uuid.New()`, no `ulid.Make()`, no custom ID generation
 
 ## Testing
 
