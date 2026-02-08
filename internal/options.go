@@ -12,7 +12,6 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
-	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
@@ -133,11 +132,40 @@ func WithCookieConfig(cfg cookie.Config) Option {
 }
 
 // WithSession enables server-side session management.
-// A session.Store implementation must be provided (e.g., PostgresStore).
+// A Store implementation must be provided (e.g., PostgresStore).
 // Sessions are loaded lazily and saved automatically before the response is written.
-func WithSession(store session.Store, cfg SessionConfig) Option {
+// Additional configuration can be provided via SessionOption functions.
+func WithSession(store Store, opts ...SessionOption) Option {
 	return func(a *App) {
-		a.sessionManager = NewSessionManager(store, cfg)
+		// Build config with defaults
+		cfg := &sessionConfig{
+			ttl:                   defaultSessionTTL,
+			maxSessionsPerUser:    defaultMaxSessionsPerUser,
+			touchThreshold:        defaultTouchThreshold,
+			cookieName:            defaultCookieName,
+			cookiePath:            "/",
+			cookieSecure:          true,
+			cookieHTTPOnly:        true,
+			cookieSameSite:        http.SameSiteLaxMode,
+			fingerprintMode:       FingerprintCookie,
+			fingerprintStrictness: FingerprintWarn,
+		}
+
+		// Apply options
+		for _, opt := range opts {
+			opt(cfg)
+		}
+
+		// FIX #3: Validation - ensure maxSessionsPerUser is at least 1
+		if cfg.maxSessionsPerUser < 1 {
+			cfg.maxSessionsPerUser = 1
+		}
+		if cfg.maxSessionsPerUser > maxAllowedSessionsPerUser {
+			cfg.maxSessionsPerUser = maxAllowedSessionsPerUser
+		}
+
+		a.sessionStore = store
+		a.sessionConfig = cfg
 	}
 }
 

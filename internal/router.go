@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/dmitrymomot/forge/pkg/htmx"
 )
 
 // Router is the interface handlers use to declare routes.
@@ -114,7 +116,20 @@ func (r *routerAdapter) wrap(h HandlerFunc, mw ...Middleware) http.HandlerFunc {
 
 func (r *routerAdapter) adaptHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		c := newContext(w, req, r.app)
+		rw := NewResponseWriter(w, htmx.IsHTMX(req))
+		c := &requestContext{
+			request:         req,
+			response:        rw,
+			responseWriter:  rw,
+			app:             r.app,
+			logger:          r.app.logger,
+			cookieManager:   r.app.cookieManager,
+			storage:         r.app.storage,
+			jobEnqueuer:     r.app.jobEnqueuer,
+			baseDomain:      r.app.baseDomain,
+			rolePermissions: r.app.rolePermissions,
+			roleExtractor:   r.app.roleExtractor,
+		}
 		if err := h(c); err != nil {
 			r.app.handleError(c, err)
 		}
@@ -135,7 +150,20 @@ func (a *App) adaptMiddleware(mw Middleware) func(http.Handler) http.Handler {
 			// Apply the forge middleware
 			wrapped := mw(nextFunc)
 			// Execute with a new context
-			c := newContext(w, r, a)
+			rw := NewResponseWriter(w, htmx.IsHTMX(r))
+			c := &requestContext{
+				request:         r,
+				response:        rw,
+				responseWriter:  rw,
+				app:             a,
+				logger:          a.logger,
+				cookieManager:   a.cookieManager,
+				storage:         a.storage,
+				jobEnqueuer:     a.jobEnqueuer,
+				baseDomain:      a.baseDomain,
+				rolePermissions: a.rolePermissions,
+				roleExtractor:   a.roleExtractor,
+			}
 			if err := wrapped(c); err != nil {
 				a.handleError(c, err)
 			}

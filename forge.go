@@ -16,7 +16,6 @@ import (
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	redis "github.com/dmitrymomot/forge/pkg/redis"
-	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
@@ -32,8 +31,11 @@ type (
 	// RunConfig holds externally configurable runtime settings.
 	RunConfig = internal.RunConfig
 
-	// SessionConfig holds session manager configuration.
-	SessionConfig = internal.SessionConfig
+	// Session represents a user session with metadata and data.
+	Session = internal.Session
+
+	// SessionOption configures the session manager.
+	SessionOption = internal.SessionOption
 
 	// HealthCheckOption adds a readiness check to the health configuration.
 	HealthCheckOption = internal.HealthCheckOption
@@ -87,11 +89,8 @@ type (
 	// Used with WithLogger to add request-scoped values to logs.
 	ContextExtractor = logger.ContextExtractor
 
-	// Session represents a user session.
-	Session = session.Session
-
 	// SessionStore defines the interface for session persistence.
-	SessionStore = session.Store
+	SessionStore = internal.Store
 
 	// ResponseWriter wraps http.ResponseWriter with hooks and HTMX support.
 	ResponseWriter = internal.ResponseWriter
@@ -267,8 +266,23 @@ func WithCookieConfig(cfg CookieConfig) Option {
 // WithSession enables server-side session management.
 // A SessionStore implementation must be provided (e.g., PostgresStore).
 // Sessions are loaded lazily and saved automatically before the response is written.
-func WithSession(store SessionStore, cfg SessionConfig) Option {
-	return internal.WithSession(store, cfg)
+//
+// Example:
+//
+//	app := forge.New(
+//	    forge.WithSession(postgresStore,
+//	        forge.WithSessionTTL(7 * 24 * time.Hour),        // 7 days
+//	        forge.WithMaxSessionsPerUser(3),                  // Max 3 devices
+//	        forge.WithSessionFingerprint(
+//	            forge.FingerprintCookie,                     // Mode
+//	            forge.FingerprintWarn,                       // Strictness
+//	        ),
+//	    ),
+//	)
+//
+// Sessions auto-create on first access. No manual c.InitSession() required.
+func WithSession(store SessionStore, opts ...SessionOption) Option {
+	return internal.WithSession(store, opts...)
 }
 
 // Run options
@@ -436,12 +450,74 @@ const (
 
 // Session errors for checking return values.
 var (
-	ErrSessionNotConfigured       = session.ErrNotConfigured
-	ErrSessionNotFound            = session.ErrNotFound
-	ErrSessionExpired             = session.ErrExpired
-	ErrSessionInvalidToken        = session.ErrInvalidToken
-	ErrSessionFingerprintMismatch = session.ErrFingerprintMismatch
+	ErrSessionNotConfigured       = internal.ErrSessionNotConfigured
+	ErrSessionNotFound            = internal.ErrSessionNotFound
+	ErrSessionExpired             = internal.ErrSessionExpired
+	ErrSessionInvalidToken        = internal.ErrSessionInvalidToken
+	ErrSessionFingerprintMismatch = internal.ErrSessionFingerprintMismatch
 )
+
+// Session option re-exports
+var (
+	WithSessionTTL            = internal.WithSessionTTL
+	WithMaxSessionsPerUser    = internal.WithMaxSessionsPerUser
+	WithSessionTouchThreshold = internal.WithSessionTouchThreshold
+	WithSessionCookieName     = internal.WithSessionCookieName
+	WithSessionCookieDomain   = internal.WithSessionCookieDomain
+	WithSessionCookiePath     = internal.WithSessionCookiePath
+	WithSessionCookieSecure   = internal.WithSessionCookieSecure
+	WithSessionCookieHTTPOnly = internal.WithSessionCookieHTTPOnly
+	WithSessionCookieSameSite = internal.WithSessionCookieSameSite
+	WithSessionFingerprint    = internal.WithSessionFingerprint
+	WithSessionLogger         = internal.WithSessionLogger
+)
+
+// SessionGet retrieves a typed value from the session.
+// Returns (value, true) if found and type matches, (zero, false) otherwise.
+//
+// Example:
+//
+//	func Handler(c forge.Context) error {
+//	    userID, ok := forge.SessionGet[string](c, "user_id")
+//	    if !ok {
+//	        return c.Redirect(http.StatusSeeOther, "/login")
+//	    }
+//	    // Use userID...
+//	}
+//
+// This automatically creates the session if it doesn't exist.
+func SessionGet[T any](c Context, key string) (T, bool) {
+	var zero T
+	val, err := c.SessionValue(key)
+	if err != nil {
+		return zero, false
+	}
+	typed, ok := val.(T)
+	if !ok {
+		return zero, false
+	}
+	return typed, true
+}
+
+// SessionSet stores a typed value in the session.
+//
+// Example:
+//
+//	func LoginHandler(c forge.Context) error {
+//	    // After validating credentials...
+//	    if err := forge.SessionSet(c, "user_id", user.ID); err != nil {
+//	        return err
+//	    }
+//	    if err := forge.SessionSet(c, "login_time", time.Now()); err != nil {
+//	        return err
+//	    }
+//	    return c.Redirect(http.StatusSeeOther, "/dashboard")
+//	}
+//
+// This automatically creates the session if it doesn't exist and marks it dirty for saving.
+func SessionSet[T any](c Context, key string, value T) error {
+	return c.SetSessionValue(key, value)
+}
 
 // Job options
 
@@ -552,18 +628,6 @@ var (
 // JobHealthcheck returns a health check function for the job manager.
 func JobHealthcheck(m *JobManager) CheckFunc {
 	return job.Healthcheck(m)
-}
-
-// SessionValue is a typed helper to retrieve session values with type safety.
-// Returns an error if the key doesn't exist or type assertion fails.
-func SessionValue[T any](sess *Session, key string) (T, error) {
-	return session.Value[T](sess, key)
-}
-
-// SessionValueOr is a typed helper that returns a default value if the key
-// doesn't exist or type assertion fails.
-func SessionValueOr[T any](sess *Session, key string, defaultVal T) T {
-	return session.ValueOr(sess, key, defaultVal)
 }
 
 // Storage ACL constants.

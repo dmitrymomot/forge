@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/dmitrymomot/forge/pkg/cookie"
+	"github.com/dmitrymomot/forge/pkg/htmx"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
@@ -52,7 +53,8 @@ type App struct {
 	healthConfig            *healthConfig
 	logger                  *slog.Logger
 	cookieManager           *cookie.Manager
-	sessionManager          *SessionManager
+	sessionStore            Store          // Direct store reference
+	sessionConfig           *sessionConfig // Session configuration
 	jobEnqueuer             *JobEnqueuer
 	jobWorker               *JobManager
 	baseDomain              string
@@ -84,10 +86,7 @@ func New(cfg AppConfig, opts ...Option) *App {
 		opt(a)
 	}
 
-	// Inject app's logger into session manager
-	if a.sessionManager != nil {
-		a.sessionManager.SetLogger(a.logger)
-	}
+	// Note: Session manager logger should be configured via WithSessionLogger option
 
 	a.setupRoutes()
 	return a
@@ -179,7 +178,20 @@ func (a *App) setupRoutes() {
 
 func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := newContext(w, r, a)
+		rw := NewResponseWriter(w, htmx.IsHTMX(r))
+		c := &requestContext{
+			request:         r,
+			response:        rw,
+			responseWriter:  rw,
+			app:             a, // Pass app reference for lazy sessionManager init
+			logger:          a.logger,
+			cookieManager:   a.cookieManager,
+			storage:         a.storage,
+			jobEnqueuer:     a.jobEnqueuer,
+			baseDomain:      a.baseDomain,
+			rolePermissions: a.rolePermissions,
+			roleExtractor:   a.roleExtractor,
+		}
 		if err := h(c); err != nil {
 			a.handleError(c, err)
 		}

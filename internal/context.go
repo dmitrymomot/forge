@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,7 +23,6 @@ import (
 	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
-	"github.com/dmitrymomot/forge/pkg/session"
 	"github.com/dmitrymomot/forge/pkg/storage"
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
@@ -228,76 +228,89 @@ type Context interface {
 	// Returns cookie.ErrNoSecret if no secret is configured.
 	SetFlash(key string, value any) error
 
-	// Session returns the current session, loading or creating it as needed.
-	// Returns session.ErrNotConfigured if WithSession was not called.
-	// Returns nil, nil if no session exists and lazy loading is disabled.
-	Session() (*session.Session, error)
+	// Session returns the current session, auto-creating an anonymous session if needed.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
+	Session() (*Session, error)
 
 	// InitSession creates a new session for this request.
-	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Idempotent - no-op if session already exists.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	InitSession() error
 
 	// AuthenticateSession associates a user with the session and rotates the token.
-	// Creates a new session if one doesn't exist.
-	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Auto-creates a session if one doesn't exist.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	AuthenticateSession(userID string) error
 
-	// SessionValue retrieves a typed value from the session.
-	// Returns session.ErrNotConfigured if WithSession was not called.
-	// Returns session.ErrNotFound if no session exists.
+	// SessionValue retrieves a value from the session.
+	// Auto-creates an anonymous session if needed.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	SessionValue(key string) (any, error)
 
 	// SetSessionValue stores a value in the session.
-	// Returns session.ErrNotConfigured if WithSession was not called.
-	// Returns session.ErrNotFound if no session exists.
+	// Auto-creates an anonymous session if needed.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	SetSessionValue(key string, val any) error
 
 	// DeleteSessionValue removes a value from the session.
-	// Returns session.ErrNotConfigured if WithSession was not called.
-	// Returns session.ErrNotFound if no session exists.
+	// Auto-creates an anonymous session if needed.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	DeleteSessionValue(key string) error
 
 	// DestroySession removes the session and clears the cookie.
-	// Returns session.ErrNotConfigured if WithSession was not called.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
 	DestroySession() error
+
+	// DestroyOtherSessions removes all sessions for the current user except this one.
+	// No-op if the session is not authenticated.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
+	DestroyOtherSessions() error
+
+	// DestroyAllSessions removes all sessions for the given user.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
+	DestroyAllSessions(userID string) error
+
+	// ListSessions returns all sessions for the given user.
+	// Returns ErrSessionNotConfigured if WithSession was not called.
+	ListSessions(userID string) ([]*Session, error)
 
 	// ResponseWriter returns the underlying ResponseWriter for advanced usage.
 	// Returns nil if not using the wrapped response writer.
 	ResponseWriter() *ResponseWriter
 
 	// Enqueue adds a job to the queue for background processing.
-	// Returns job.ErrNotConfigured if WithJobs was not called.
+	// Returns job.ErrSessionNotConfigured if WithJobs was not called.
 	// Returns job.ErrUnknownTask if the task name is not registered.
 	Enqueue(name string, payload any, opts ...job.EnqueueOption) error
 
 	// EnqueueTx adds a job to the queue within a transaction.
 	// The job is only visible after the transaction commits.
-	// Returns job.ErrNotConfigured if WithJobs was not called.
+	// Returns job.ErrSessionNotConfigured if WithJobs was not called.
 	// Returns job.ErrUnknownTask if the task name is not registered.
 	EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error
 
 	// Storage returns the configured storage client.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	Storage() (storage.Storage, error)
 
 	// Upload extracts the named form file from the request and stores it.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	Upload(field string, opts ...storage.Option) (*storage.FileInfo, error)
 
 	// UploadFromURL downloads a file from sourceURL and stores it.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	UploadFromURL(sourceURL string, opts ...storage.Option) (*storage.FileInfo, error)
 
 	// Download retrieves a file from storage.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	Download(key string) (io.ReadCloser, error)
 
 	// DeleteFile removes a file from storage.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	DeleteFile(key string) error
 
 	// FileURL generates a URL for accessing the file.
-	// Returns storage.ErrNotConfigured if WithStorage was not called.
+	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
 	FileURL(key string, opts ...storage.URLOption) (string, error)
 
 	// T translates a key using the Translator stored in context by the I18n middleware.
@@ -349,8 +362,10 @@ type requestContext struct {
 	cookieManager  *cookie.Manager
 
 	// Session management
-	sessionManager *SessionManager
-	session        *session.Session
+	app            *App            // Reference to app for config access
+	sessionManager *sessionManager // Lazy-initialized helper
+	session        *Session
+	sessionToken   string // Plain token for cookie updates
 
 	// Job management
 	jobEnqueuer *JobEnqueuer
@@ -369,24 +384,15 @@ type requestContext struct {
 	sessionLoaded bool
 }
 
-// newContext creates a new context with the response wrapper.
-func newContext(w http.ResponseWriter, r *http.Request, app *App) *requestContext {
-	// Create response wrapper
-	rw := NewResponseWriter(w, htmx.IsHTMX(r))
-
-	return &requestContext{
-		request:         r,
-		response:        rw,
-		responseWriter:  rw,
-		logger:          app.logger,
-		cookieManager:   app.cookieManager,
-		sessionManager:  app.sessionManager,
-		jobEnqueuer:     app.jobEnqueuer,
-		storage:         app.storage,
-		baseDomain:      app.baseDomain,
-		rolePermissions: app.rolePermissions,
-		roleExtractor:   app.roleExtractor,
+// getSessionManager returns the session manager, creating it lazily if needed.
+func (c *requestContext) getSessionManager() *sessionManager {
+	if c.sessionManager == nil && c.app.sessionStore != nil {
+		c.sessionManager = &sessionManager{
+			store:  c.app.sessionStore,
+			config: c.app.sessionConfig,
+		}
 	}
+	return c.sessionManager
 }
 
 func (c *requestContext) Request() *http.Request {
@@ -707,7 +713,8 @@ func (c *requestContext) SetFlash(key string, value any) error {
 // registerSessionHook registers a hook to save dirty sessions before response write.
 // Uses sync.Once to ensure the hook is registered only once per request.
 func (c *requestContext) registerSessionHook() {
-	if c.sessionManager == nil || c.responseWriter == nil {
+	sm := c.getSessionManager()
+	if sm == nil || c.responseWriter == nil {
 		return
 	}
 	c.sessionHookOnce.Do(func() {
@@ -715,21 +722,20 @@ func (c *requestContext) registerSessionHook() {
 			if c.session != nil && c.session.IsDirty() {
 				// Best-effort save; errors are logged but not propagated
 				// to avoid interrupting response rendering
-				if err := c.sessionManager.Store().Update(c.Context(), c.session); err != nil {
+				if err := sm.updateSession(c, c.session); err != nil {
 					c.logger.ErrorContext(c.Context(), "failed to save session", "error", err)
-					return
 				}
-				c.session.ClearDirty()
 			}
 		})
 	})
 }
 
-// Session returns the current session, loading it from the store if needed.
-// Returns session.ErrNotConfigured if WithSession was not called.
-func (c *requestContext) Session() (*session.Session, error) {
-	if c.sessionManager == nil {
-		return nil, session.ErrNotConfigured
+// Session returns the current session, auto-creating an anonymous session if needed.
+// Returns ErrSessionNotConfigured if WithSession was not called.
+func (c *requestContext) Session() (*Session, error) {
+	sm := c.getSessionManager()
+	if sm == nil {
+		return nil, ErrSessionNotConfigured
 	}
 
 	c.registerSessionHook()
@@ -738,10 +744,24 @@ func (c *requestContext) Session() (*session.Session, error) {
 		return c.session, nil
 	}
 
-	// Load from store
-	sess, err := c.sessionManager.LoadSession(c.request)
-	if err != nil {
+	// Try loading from store
+	// FIX #2: Use errors.Is for wrapped errors
+	sess, err := sm.loadSession(c)
+	if err != nil && !errors.Is(err, ErrSessionNotFound) {
 		return nil, err
+	}
+
+	// Auto-create anonymous session if none exists
+	if sess == nil {
+		sess, token, err := sm.createSession(c)
+		if err != nil {
+			return nil, err
+		}
+		c.session = sess
+		c.sessionToken = token
+		c.sessionLoaded = true
+		sm.saveSessionCookie(c, token)
+		return c.session, nil
 	}
 
 	c.session = sess
@@ -750,56 +770,59 @@ func (c *requestContext) Session() (*session.Session, error) {
 }
 
 // InitSession creates a new session for this request.
-// Returns session.ErrNotConfigured if WithSession was not called.
+// Idempotent - no-op if session already exists.
+// Returns ErrSessionNotConfigured if WithSession was not called.
 func (c *requestContext) InitSession() error {
-	if c.sessionManager == nil {
-		return session.ErrNotConfigured
+	sm := c.getSessionManager()
+	if sm == nil {
+		return ErrSessionNotConfigured
 	}
 
 	c.registerSessionHook()
 
-	sess, err := c.sessionManager.CreateSession(c.Context(), c.request)
+	// If we already have a session, this is a no-op
+	if c.sessionLoaded && c.session != nil {
+		return nil
+	}
+
+	sess, token, err := sm.createSession(c)
 	if err != nil {
 		return err
 	}
 
 	c.session = sess
+	c.sessionToken = token
 	c.sessionLoaded = true
-	c.sessionManager.SaveSession(c.response, sess)
+	sm.saveSessionCookie(c, token)
 	return nil
 }
 
 // AuthenticateSession associates a user with the session and rotates the token.
-// Creates a new session if one doesn't exist.
-// Returns session.ErrNotConfigured if WithSession was not called.
+// Auto-creates a session if one doesn't exist.
+// Returns ErrSessionNotConfigured if WithSession was not called.
 func (c *requestContext) AuthenticateSession(userID string) error {
-	if c.sessionManager == nil {
-		return session.ErrNotConfigured
+	sm := c.getSessionManager()
+	if sm == nil {
+		return ErrSessionNotConfigured
 	}
 
 	// Get or create session
 	sess, err := c.Session()
 	if err != nil {
-		c.logger.WarnContext(c.Context(), "failed to load session", "error", err)
-	}
-	if sess == nil {
-		if err := c.InitSession(); err != nil {
-			return err
-		}
-		sess = c.session
-	}
-
-	// Set user ID
-	sess.UserID = &userID
-	sess.MarkDirty()
-
-	// CRITICAL: Rotate token to prevent session fixation attacks
-	if err := c.sessionManager.RotateToken(c.Context(), sess); err != nil {
 		return err
 	}
 
-	// Update cookie with new token
-	c.sessionManager.SaveSession(c.response, sess)
+	// Use manager's authenticateSession for proper token rotation and limit enforcement
+	newToken, err := sm.authenticateSession(c, sess, userID)
+	if err != nil {
+		return err
+	}
+
+	if newToken != "" {
+		c.sessionToken = newToken
+		sm.saveSessionCookie(c, newToken)
+	}
+
 	return nil
 }
 
@@ -807,9 +830,6 @@ func (c *requestContext) SessionValue(key string) (any, error) {
 	sess, err := c.Session()
 	if err != nil {
 		return nil, err
-	}
-	if sess == nil {
-		return nil, session.ErrNotFound
 	}
 
 	val, ok := sess.GetValue(key)
@@ -824,9 +844,6 @@ func (c *requestContext) SetSessionValue(key string, val any) error {
 	if err != nil {
 		return err
 	}
-	if sess == nil {
-		return session.ErrNotFound
-	}
 
 	sess.SetValue(key, val)
 	return nil
@@ -837,33 +854,67 @@ func (c *requestContext) DeleteSessionValue(key string) error {
 	if err != nil {
 		return err
 	}
-	if sess == nil {
-		return session.ErrNotFound
-	}
 
 	sess.DeleteValue(key)
 	return nil
 }
 
 func (c *requestContext) DestroySession() error {
-	if c.sessionManager == nil {
-		return session.ErrNotConfigured
+	sm := c.getSessionManager()
+	if sm == nil {
+		return ErrSessionNotConfigured
 	}
 
 	// Delete from store if we have a session
 	if c.session != nil {
-		if err := c.sessionManager.Store().Delete(c.Context(), c.session.ID); err != nil {
+		if err := sm.destroySession(c.Context(), c.session.ID); err != nil {
 			return err
 		}
+		c.session = nil
+		c.sessionLoaded = false
 	}
 
-	// Clear cookie
-	c.sessionManager.DeleteSession(c.response)
-
-	c.session = nil
-	c.sessionLoaded = true // Mark as loaded (with nil) to prevent reload
-
+	sm.deleteSessionCookie(c)
 	return nil
+}
+
+func (c *requestContext) DestroyOtherSessions() error {
+	sm := c.getSessionManager()
+	if sm == nil {
+		return ErrSessionNotConfigured
+	}
+
+	// Get current session to check authentication
+	sess, err := c.Session()
+	if err != nil {
+		return err
+	}
+
+	// No-op if not authenticated
+	if sess.UserID == nil || *sess.UserID == "" {
+		return nil
+	}
+
+	// FIX #6 & #7: Use batch delete via DeleteByUserIDExcept
+	return sm.destroyOtherSessions(c.Context(), *sess.UserID, sess.ID)
+}
+
+func (c *requestContext) DestroyAllSessions(userID string) error {
+	sm := c.getSessionManager()
+	if sm == nil {
+		return ErrSessionNotConfigured
+	}
+
+	return sm.destroyAllUserSessions(c.Context(), userID)
+}
+
+func (c *requestContext) ListSessions(userID string) ([]*Session, error) {
+	sm := c.getSessionManager()
+	if sm == nil {
+		return nil, ErrSessionNotConfigured
+	}
+
+	return sm.listUserSessions(c.Context(), userID)
 }
 
 func (c *requestContext) ResponseWriter() *ResponseWriter {
