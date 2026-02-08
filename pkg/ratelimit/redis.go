@@ -84,6 +84,8 @@ func (r *RedisCounter) Close() error {
 }
 
 // redisKey formats the full Redis key with prefix and window timestamp.
+// When no prefix is configured, "rl" is used as a default namespace
+// to avoid collisions with other application keys.
 func (r *RedisCounter) redisKey(key string, window time.Time) string {
 	ts := strconv.FormatInt(window.Unix(), 10)
 	if r.prefix == "" {

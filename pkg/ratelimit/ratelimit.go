@@ -163,6 +163,8 @@ func (l *Limiter) retryAfter(prevCount, currCount int64, now time.Time, currWind
 	t := l.window - time.Duration(float64(l.window)*needed/float64(prevCount))
 	retryAt := currWindow.Add(t)
 
+	// Guard against floating-point edge cases where the solved time
+	// lands slightly before now due to rounding.
 	if retryAt.Before(now) {
 		return 0
 	}

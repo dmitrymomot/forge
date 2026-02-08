@@ -9,6 +9,8 @@ import (
 
 // MemoryConfig configures the in-memory counter.
 type MemoryConfig struct {
+	// CleanupInterval controls how often expired windows are removed.
+	// Zero uses the default (1 minute). Negative disables cleanup.
 	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" envDefault:"1m"`
 }
 
