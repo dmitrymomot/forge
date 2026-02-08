@@ -289,7 +289,7 @@ func TestTenantIsolation(t *testing.T) {
 		require.NoError(t, err)
 		enc2, err := secrets.EncryptString("same plaintext", appKey, wsKey2)
 		require.NoError(t, err)
-		assert.NotEqual(t, enc1, enc2)
+		require.NotEqual(t, enc1, enc2)
 	})
 
 	t.Run("cross-tenant decrypt fails", func(t *testing.T) {
@@ -327,5 +327,5 @@ func TestEncryptString_Uniqueness(t *testing.T) {
 	enc2, err := secrets.EncryptString("same plaintext", appKey, wsKey)
 	require.NoError(t, err)
 
-	assert.NotEqual(t, enc1, enc2, "same plaintext should produce different ciphertext due to random nonce")
+	require.NotEqual(t, enc1, enc2, "same plaintext should produce different ciphertext due to random nonce")
 }
