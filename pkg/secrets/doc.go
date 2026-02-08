@@ -72,6 +72,7 @@
 //   - [ErrEncryptionFailed]: encryption operation failed (wraps cause)
 //   - [ErrDecryptionFailed]: decryption operation failed (wraps cause)
 //   - [ErrInvalidCiphertext]: ciphertext is malformed or too short
+//   - [ErrKeyGenerationFailed]: random key generation failed
 //   - [ErrKeyDerivationFailed]: HKDF key derivation failed
 //
 // Errors are joined so both the operation and cause can be matched:

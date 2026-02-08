@@ -26,7 +26,7 @@ var hkdfInfo = []byte("forge-secrets-v1")
 func GenerateKey() ([]byte, error) {
 	key := make([]byte, KeySize)
 	if _, err := rand.Read(key); err != nil {
-		return nil, errors.Join(ErrKeyDerivationFailed, err)
+		return nil, errors.Join(ErrKeyGenerationFailed, err)
 	}
 	return key, nil
 }
