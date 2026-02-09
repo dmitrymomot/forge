@@ -23,15 +23,15 @@ This document outlines planned features for the Forge framework.
 
 ### Middlewares (`middlewares/`)
 
-- `requestid`, `recover`, `cors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`)
+- `requestid`, `recover`, `cors`, `csrf`, `errors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`)
 
 ### Utility Packages (`pkg/`)
 
 **Core:** `binder`, `id`, `logger`, `db`, `redis`, `cache` (memory, Redis)
-**Auth & Security:** `cookie`, `jwt`, `session`, `oauth`, `totp`, `fingerprint`, `dnsverify`
-**Request/Response:** `clientip`, `hostrouter`, `htmx`, `useragent`
-**Data:** `validator`, `sanitizer`, `slug`, `randomname`
-**Integration:** `mailer`, `storage` (local, S3), `job` scheduling
+**Auth & Security:** `cookie`, `jwt`, `session`, `oauth`, `totp`, `fingerprint`, `dnsverify`, `secrets`, `token`, `ratelimit`
+**Request/Response:** `clientip`, `hostrouter`, `htmx`, `useragent`, `geolocation`
+**Data:** `validator`, `sanitizer`, `slug`, `randomname`, `qrcode`
+**Integration:** `mailer`, `storage` (local, S3), `job` scheduling, `webhook`
 
 ---
 
@@ -48,9 +48,8 @@ This document outlines planned features for the Forge framework.
 
 Part of framework core, configurable via options:
 
-- `csrf` — CSRF protection (double-submit cookie)
 - `audit` — Audit log writer (configurable sink)
-- `ratelimit` — Rate limiting (uses `pkg/ratelimit`)
+- `ratelimit` — Rate limiting middleware (uses `pkg/ratelimit`)
 
 ---
 
