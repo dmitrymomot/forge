@@ -163,6 +163,40 @@
 //	    r.GET("/users", h.listUsers)
 //	})
 //
+// # CSRF
+//
+// CSRF middleware protects against Cross-Site Request Forgery using the
+// double-submit cookie pattern with signed cookies. Unsafe methods
+// (POST/PUT/PATCH/DELETE) must submit a token matching the signed cookie.
+//
+// Basic usage:
+//
+//	app := forge.New(
+//	    forge.WithCookieConfig(forge.CookieConfig{Secret: os.Getenv("COOKIE_SECRET")}),
+//	    forge.WithMiddleware(
+//	        middlewares.CSRF(middlewares.CSRFConfig{}),
+//	    ),
+//	)
+//
+// In templates, include the token as a hidden field:
+//
+//	<form method="POST" action="/submit">
+//	    <input type="hidden" name="_csrf" value="{{ forge.GetCSRFToken(c) }}">
+//	    <!-- other fields -->
+//	</form>
+//
+// For HTMX, set the token as a request header on the body element:
+//
+//	<body hx-headers='{"X-CSRF-Token": "{{ forge.GetCSRFToken(c) }}"}'>
+//
+// Skip CSRF for webhook endpoints:
+//
+//	middlewares.CSRF(middlewares.CSRFConfig{},
+//	    middlewares.WithCSRFSkipFunc(func(c forge.Context) bool {
+//	        return strings.HasPrefix(c.Request().URL.Path, "/webhooks/")
+//	    }),
+//	)
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:
@@ -171,8 +205,9 @@
 //	    middlewares.CORS(),                // First: handle preflight before other processing
 //	    middlewares.RequestID(),           // Second: assign ID for all subsequent logging
 //	    middlewares.Recover(),             // Third: catch panics from handlers
-//	    // middlewares.RequireAuthenticated(), // Fourth: auth gate (on protected groups)
-//	    // middlewares.RequirePermission(...), // Fifth: permission gate (on protected groups)
+//	    middlewares.CSRF(middlewares.CSRFConfig{}), // Fourth: validate CSRF tokens
+//	    // middlewares.RequireAuthenticated(), // Fifth: auth gate (on protected groups)
+//	    // middlewares.RequirePermission(...), // Sixth: permission gate (on protected groups)
 //	)
 //
 // # Complete Example
