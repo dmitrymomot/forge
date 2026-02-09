@@ -166,6 +166,9 @@ type (
 	// ExtractorSource extracts a value from the request context.
 	// Returns the value and true if found, or ("", false) if not present.
 	ExtractorSource = internal.ExtractorSource
+
+	// SSEEvent represents a Server-Sent Event to be streamed to the client.
+	SSEEvent = internal.SSEEvent
 )
 
 // Constructors
@@ -458,6 +461,20 @@ var (
 	ErrSessionFingerprintMismatch = internal.ErrSessionFingerprintMismatch
 )
 
+// SSE event constructors
+var (
+	// SSEString creates a string SSE event.
+	SSEString = internal.SSEString
+	// SSEJSON creates a JSON SSE event.
+	SSEJSON = internal.SSEJSON
+	// SSETempl creates an HTML SSE event from a templ Component.
+	SSETempl = internal.SSETempl
+	// SSEComment creates an SSE comment (keepalive, etc.).
+	SSEComment = internal.SSEComment
+	// SSERetry creates an SSE retry directive.
+	SSERetry = internal.SSERetry
+)
+
 // Session option re-exports
 var (
 	WithSessionTTL            = internal.WithSessionTTL
@@ -636,6 +653,12 @@ const (
 )
 
 // Storage options
+
+// WithSSEKeepAlive sets the interval for SSE keepalive comments.
+// Defaults to 30 seconds if not set or if d <= 0.
+func WithSSEKeepAlive(d time.Duration) Option {
+	return internal.WithSSEKeepAlive(d)
+}
 
 // WithStorage configures file storage for the application.
 // A storage.Storage implementation must be provided (e.g., S3Client).
