@@ -463,11 +463,6 @@ var (
 	WithMaxSessionsPerUser    = internal.WithMaxSessionsPerUser
 	WithSessionTouchThreshold = internal.WithSessionTouchThreshold
 	WithSessionCookieName     = internal.WithSessionCookieName
-	WithSessionCookieDomain   = internal.WithSessionCookieDomain
-	WithSessionCookiePath     = internal.WithSessionCookiePath
-	WithSessionCookieSecure   = internal.WithSessionCookieSecure
-	WithSessionCookieHTTPOnly = internal.WithSessionCookieHTTPOnly
-	WithSessionCookieSameSite = internal.WithSessionCookieSameSite
 	WithSessionFingerprint    = internal.WithSessionFingerprint
 	WithSessionLogger         = internal.WithSessionLogger
 )

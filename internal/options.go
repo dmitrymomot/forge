@@ -143,10 +143,6 @@ func WithSession(store Store, opts ...SessionOption) Option {
 			maxSessionsPerUser:    defaultMaxSessionsPerUser,
 			touchThreshold:        defaultTouchThreshold,
 			cookieName:            defaultCookieName,
-			cookiePath:            "/",
-			cookieSecure:          true,
-			cookieHTTPOnly:        true,
-			cookieSameSite:        http.SameSiteLaxMode,
 			fingerprintMode:       FingerprintCookie,
 			fingerprintStrictness: FingerprintWarn,
 		}

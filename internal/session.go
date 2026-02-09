@@ -188,6 +188,25 @@ type Session struct {
 //	DELETE FROM sessions WHERE expires_at < NOW();
 //
 // Run this hourly or daily depending on your traffic.
+//
+// # Cookie Configuration
+//
+// Session cookies inherit security settings from the global cookie manager
+// configured via WithCookieConfig(). Only the cookie name is session-specific
+// and can be customized via WithSessionCookieName().
+//
+// Example cookie configuration:
+//
+//	app := forge.New(
+//	    forge.AppConfig{},
+//	    forge.WithCookieConfig(cookie.Config{
+//	        Domain:   ".example.com",
+//	        Secure:   true,      // All cookies (including sessions) are secure
+//	        HTTPOnly: true,      // All cookies are httpOnly
+//	        SameSite: "strict",  // All cookies use strict sameSite
+//	    }),
+//	    forge.WithSession(store),
+//	)
 type Store interface {
 	// Create persists a new session.
 	// The Store is responsible for serializing Session.Data to JSON.
@@ -383,16 +402,11 @@ const (
 type sessionConfig struct {
 	logger                *slog.Logger
 	cookieName            string
-	cookiePath            string
-	cookieDomain          string
 	ttl                   time.Duration
 	touchThreshold        time.Duration
-	cookieSameSite        http.SameSite
 	fingerprintMode       FingerprintMode
 	fingerprintStrictness FingerprintStrictness
 	maxSessionsPerUser    int
-	cookieSecure          bool
-	cookieHTTPOnly        bool
 }
 
 // sessionManager is an unexported helper for session operations.
@@ -454,44 +468,30 @@ func WithSessionTouchThreshold(threshold time.Duration) SessionOption {
 }
 
 // WithSessionCookieName sets the session cookie name.
+//
+// This is the ONLY session-specific cookie setting. All other cookie settings
+// (domain, path, secure, httpOnly, sameSite) are inherited from the global
+// cookie manager configured via WithCookieConfig().
+//
+// Example:
+//
+//	app := forge.New(
+//	    forge.AppConfig{},
+//	    // Configure cookie security globally
+//	    forge.WithCookieConfig(cookie.Config{
+//	        Domain:   ".example.com",
+//	        Secure:   true,
+//	        HTTPOnly: true,
+//	        SameSite: "lax",
+//	    }),
+//	    // Configure session with custom cookie name
+//	    forge.WithSession(store,
+//	        forge.WithSessionCookieName("__session"), // Only name is customizable
+//	    ),
+//	)
 func WithSessionCookieName(name string) SessionOption {
 	return func(cfg *sessionConfig) {
 		cfg.cookieName = name
-	}
-}
-
-// WithSessionCookieDomain sets the session cookie domain.
-func WithSessionCookieDomain(domain string) SessionOption {
-	return func(cfg *sessionConfig) {
-		cfg.cookieDomain = domain
-	}
-}
-
-// WithSessionCookiePath sets the session cookie path.
-func WithSessionCookiePath(path string) SessionOption {
-	return func(cfg *sessionConfig) {
-		cfg.cookiePath = path
-	}
-}
-
-// WithSessionCookieSecure sets the session cookie secure flag.
-func WithSessionCookieSecure(secure bool) SessionOption {
-	return func(cfg *sessionConfig) {
-		cfg.cookieSecure = secure
-	}
-}
-
-// WithSessionCookieHTTPOnly sets the session cookie httpOnly flag.
-func WithSessionCookieHTTPOnly(httpOnly bool) SessionOption {
-	return func(cfg *sessionConfig) {
-		cfg.cookieHTTPOnly = httpOnly
-	}
-}
-
-// WithSessionCookieSameSite sets the session cookie sameSite attribute.
-func WithSessionCookieSameSite(sameSite http.SameSite) SessionOption {
-	return func(cfg *sessionConfig) {
-		cfg.cookieSameSite = sameSite
 	}
 }
 
@@ -547,7 +547,33 @@ func (sm *sessionManager) loadSession(c Context) (*Session, error) {
 		}
 	}
 
+	// Touch session to update activity if threshold exceeded
+	// Best-effort: ignore errors to avoid breaking session loading
+	_ = sm.touchSession(c, sess)
+
 	return sess, nil
+}
+
+// touchSession updates the LastActiveAt timestamp if the threshold has been exceeded.
+// This is called after loading a session to track activity without full session updates.
+// Touch failures are best-effort (logged but ignored) to avoid breaking session loading.
+func (sm *sessionManager) touchSession(c Context, sess *Session) error {
+	now := time.Now()
+	timeSinceLastActive := now.Sub(sess.LastActiveAt)
+
+	// Only touch if threshold exceeded
+	if timeSinceLastActive < sm.config.touchThreshold {
+		return nil
+	}
+
+	// Use lightweight Touch instead of full Update
+	if err := sm.store.Touch(c.Context(), sess.ID, now); err != nil {
+		return err
+	}
+
+	// Update in-memory timestamp to match
+	sess.LastActiveAt = now
+	return nil
 }
 
 // createSession creates a new anonymous session using Context interface.
@@ -558,13 +584,14 @@ func (sm *sessionManager) createSession(c Context) (*Session, string, error) {
 		return nil, "", err
 	}
 
+	now := time.Now()
 	fp := sm.generateFingerprint(c)
 	sess := &Session{
 		ID:           id.NewULID(),
 		TokenHash:    hashToken(token),
-		CreatedAt:    time.Now(),
-		LastActiveAt: time.Now(),
-		ExpiresAt:    time.Now().Add(sm.config.ttl),
+		CreatedAt:    now,
+		LastActiveAt: now,
+		ExpiresAt:    now.Add(sm.config.ttl),
 		Fingerprint:  fp,
 		IP:           clientip.GetIP(c.Request()),
 		UserAgent:    c.Request().UserAgent(),
