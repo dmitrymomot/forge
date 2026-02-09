@@ -261,6 +261,48 @@
 //	    return c.JSON(200, data)
 //	}
 //
+// # Audit Log
+//
+// AuditLog middleware records business audit trail entries asynchronously.
+// It captures who did what, when, and whether it succeeded. Entries are
+// written in a goroutine after the handler completes, so audit logging
+// never blocks HTTP responses.
+//
+// The Entry struct is a flat, SQL-friendly record. Storage is abstracted
+// behind the Store interface — implementations (PostgreSQL, file, queue)
+// live in the consumer application.
+//
+// Basic usage:
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.AuditLog(auditStore),
+//	    ),
+//	)
+//
+// Enrich audit entries from handlers:
+//
+//	func (h *Handler) createUser(c forge.Context) error {
+//	    forge.SetAuditMetadata(c, "target_user", user.ID)
+//	    return c.JSON(201, user)
+//	}
+//
+// Skip health checks and static files:
+//
+//	middlewares.AuditLog(store,
+//	    middlewares.WithAuditSkipFunc(func(c forge.Context) bool {
+//	        return strings.HasPrefix(c.Request().URL.Path, "/_")
+//	    }),
+//	)
+//
+// Custom action and resource extraction:
+//
+//	middlewares.AuditLog(store,
+//	    middlewares.WithAuditActionFunc(func(c forge.Context) string {
+//	        return c.Request().Method + " " + c.Request().URL.Path
+//	    }),
+//	)
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:
@@ -270,9 +312,10 @@
 //	    middlewares.RateLimit(limiter),              // Second: reject early before spending cycles
 //	    middlewares.RequestID(),                     // Third: assign ID for all subsequent logging
 //	    middlewares.Recover(),                       // Fourth: catch panics from handlers
-//	    middlewares.CSRF(middlewares.CSRFConfig{}),   // Fifth: validate CSRF tokens
-//	    // middlewares.RequireAuthenticated(),        // Sixth: auth gate (on protected groups)
-//	    // middlewares.RequirePermission(...),        // Seventh: permission gate (on protected groups)
+//	    middlewares.AuditLog(store),                 // Fifth: audit after ID assigned, catches panics
+//	    middlewares.CSRF(middlewares.CSRFConfig{}),   // Sixth: validate CSRF tokens (audits rejections)
+//	    // middlewares.RequireAuthenticated(),        // Seventh: auth gate (on protected groups)
+//	    // middlewares.RequirePermission(...),        // Eighth: permission gate (on protected groups)
 //	)
 //
 // # Complete Example

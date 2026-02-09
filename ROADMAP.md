@@ -23,7 +23,7 @@ This document outlines planned features for the Forge framework.
 
 ### Middlewares (`middlewares/`)
 
-- `requestid`, `recover`, `cors`, `csrf`, `errors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`), `ratelimit`
+- `requestid`, `recover`, `cors`, `csrf`, `errors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`), `ratelimit`, `audit`
 
 ### Utility Packages (`pkg/`)
 
@@ -43,12 +43,6 @@ This document outlines planned features for the Forge framework.
 - `sse` — Server-sent events writer, event marshaling, flush helpers, client reconnection
 - `websocket` — HTTP upgrader wrapper, connection lifecycle, message routing
 - `compress` — Response compression negotiation (`gzip`, `zstd`), `Accept-Encoding` parsing, min-size threshold
-
-### Standard Middlewares
-
-Part of framework core, configurable via options:
-
-- `audit` — Audit log writer (configurable sink)
 
 ---
 
