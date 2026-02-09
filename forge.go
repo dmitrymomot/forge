@@ -781,6 +781,15 @@ type (
 
 	// RateLimitOption configures the RateLimit middleware.
 	RateLimitOption = middlewares.RateLimitOption
+
+	// AuditEntry represents a single audit log record.
+	AuditEntry = middlewares.Entry
+
+	// AuditStore defines the interface for persisting audit log entries.
+	AuditStore = middlewares.Store
+
+	// AuditOption configures the AuditLog middleware.
+	AuditOption = middlewares.AuditOption
 )
 
 // Middleware helpers - re-exported from middlewares
@@ -888,6 +897,30 @@ var (
 	WithRateLimitKeyFunc      = middlewares.WithRateLimitKeyFunc
 	WithRateLimitErrorHandler = middlewares.WithRateLimitErrorHandler
 	WithRateLimitSkipFunc     = middlewares.WithRateLimitSkipFunc
+)
+
+// Audit middleware helpers
+
+// GetAuditEntry extracts the audit entry from the context.
+// Returns nil if the AuditLog middleware is not applied.
+func GetAuditEntry(c Context) *AuditEntry {
+	return middlewares.GetAuditEntry(c)
+}
+
+// SetAuditMetadata adds a key-value pair to the audit entry metadata.
+// No-op if the AuditLog middleware is not applied.
+func SetAuditMetadata(c Context, key, value string) {
+	middlewares.SetAuditMetadata(c, key, value)
+}
+
+// Audit option constructor re-exports
+var (
+	WithAuditLogger       = middlewares.WithAuditLogger
+	WithAuditSkipFunc     = middlewares.WithAuditSkipFunc
+	WithAuditActionFunc   = middlewares.WithAuditActionFunc
+	WithAuditResourceFunc = middlewares.WithAuditResourceFunc
+	WithAuditMetadataFunc = middlewares.WithAuditMetadataFunc
+	WithAuditTimeout      = middlewares.WithAuditTimeout
 )
 
 // I18n middleware option constructors
