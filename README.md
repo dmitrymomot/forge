@@ -78,16 +78,35 @@ func (h *AuthHandler) showLogin(c forge.Context) error {
 
 ### Context
 
-The `Context` interface embeds `context.Context`, so it can be passed directly to any function expecting a standard library context:
+The `Context` interface embeds `context.Context`, so it can be passed directly to any function expecting a standard library context. It also provides built-in helpers for common tasks:
 
 ```go
 func (h *Handler) getUser(c forge.Context) error {
-    // c satisfies context.Context
-    user, err := h.repo.GetUser(c, userID)
+    // c satisfies context.Context — pass it to DB calls, HTTP clients, etc.
+    user, err := h.repo.GetUser(c, c.UserID())
     if err != nil {
         return err
     }
     return c.JSON(200, user)
+}
+```
+
+Context carries everything you need for a request — logging, cookies, flash messages, domain info:
+
+```go
+func (h *Handler) updateSettings(c forge.Context) error {
+    c.LogInfo("updating settings", "user", c.UserID(), "domain", c.Domain())
+
+    // Flash messages for post-redirect-get
+    c.SetFlash("success", "Settings saved!")
+    return c.Redirect(http.StatusSeeOther, "/settings")
+}
+
+func (h *Handler) showSettings(c forge.Context) error {
+    var msg string
+    c.Flash("success", &msg) // reads and deletes flash
+
+    return c.Render(http.StatusOK, views.Settings(msg))
 }
 ```
 
@@ -111,7 +130,32 @@ func (h *Handler) listItems(c forge.Context) error {
 
 Supported types: `~string`, `~int`, `~int64`, `~float64`, `~bool`.
 
-### Sessions
+### Data Binding & Validation
+
+Bind request data into structs with automatic sanitization and validation:
+
+```go
+type CreateContact struct {
+    Name  string `form:"name"  validate:"required;max:100"`
+    Email string `form:"email" validate:"required;email"`
+    Phone string `form:"phone" sanitize:"trim;numeric"`
+}
+
+func (h *Handler) createContact(c forge.Context) error {
+    var req CreateContact
+    if errs, err := c.Bind(&req); err != nil {
+        return err
+    } else if errs != nil {
+        return c.Render(http.StatusUnprocessableEntity, views.Form(errs))
+    }
+    // req is sanitized and validated
+    return h.repo.CreateContact(c, req.Name, req.Email, req.Phone)
+}
+```
+
+Also available: `c.BindJSON()` for API endpoints and `c.BindQuery()` for query parameters.
+
+### Sessions & Authentication
 
 Enable server-side session management with automatic creation:
 
@@ -129,41 +173,51 @@ app := forge.New(
 )
 ```
 
-Use `SessionGet` and `SessionSet` for type-safe access:
+Authenticate users with `AuthenticateSession` — it sets the user ID, rotates the session token, and marks the session as authenticated in one call:
 
 ```go
 func (h *Handler) login(c forge.Context) error {
-    if err := forge.SessionSet(c, "user_id", user.ID); err != nil {
+    // ...validate credentials...
+    if err := c.AuthenticateSession(user.ID); err != nil {
         return err
     }
     return c.Redirect(http.StatusSeeOther, "/dashboard")
 }
-
-func (h *Handler) dashboard(c forge.Context) error {
-    userID, ok := forge.SessionGet[string](c, "user_id")
-    if !ok {
-        return c.Redirect(http.StatusSeeOther, "/login")
-    }
-    return c.Render(http.StatusOK, views.Dashboard())
-}
 ```
 
-Identity helpers:
+Then use the built-in identity methods — no need to manually read session keys:
 
 ```go
-func (h *Handler) profile(c forge.Context) error {
+func (h *Handler) dashboard(c forge.Context) error {
     if !c.IsAuthenticated() {
         return c.Redirect(http.StatusSeeOther, "/login")
     }
 
+    // c.UserID() returns the authenticated user's ID
     user, err := h.repo.GetUser(c, c.UserID())
     if err != nil {
         return err
     }
 
     canEdit := c.IsCurrentUser(user.ID)
-    return c.Render(http.StatusOK, views.Profile(user, canEdit))
+    return c.Render(http.StatusOK, views.Dashboard(user, canEdit))
 }
+```
+
+For custom session data, use `SessionGet` and `SessionSet`:
+
+```go
+forge.SessionSet(c, "theme", "dark")
+theme, ok := forge.SessionGet[string](c, "theme")
+```
+
+Session management:
+
+```go
+c.DestroySession()                // Logout current device
+c.DestroyOtherSessions()          // Logout all other devices
+c.DestroyAllSessions(c.UserID())  // Logout everywhere
+sessions, _ := c.ListSessions(c.UserID()) // Show active sessions
 ```
 
 ### RBAC
@@ -193,6 +247,11 @@ func (h *Handler) deleteUser(c forge.Context) error {
         return forge.ErrForbidden("You do not have permission")
     }
     return h.repo.DeleteUser(c, forge.Param[string](c, "id"))
+}
+
+func (h *Handler) adminPanel(c forge.Context) error {
+    c.LogInfo("admin access", "role", c.Role(), "user", c.UserID())
+    return c.Render(http.StatusOK, views.Admin())
 }
 ```
 
@@ -262,12 +321,13 @@ app := forge.New(
 )
 ```
 
-Upload files with validation:
+Upload, download, and manage files directly from handlers:
 
 ```go
 func (h *Handler) uploadAvatar(c forge.Context) error {
     info, err := c.Upload("avatar",
         forge.WithStoragePrefix("avatars"),
+        forge.WithStorageTenant(c.UserID()),
         forge.WithStorageValidation(
             forge.MaxFileSize(5*1024*1024),
             forge.ImageFilesOnly(),
@@ -276,12 +336,40 @@ func (h *Handler) uploadAvatar(c forge.Context) error {
     if err != nil {
         return err
     }
+    // Save info.Key to database, generate URLs later
+    return c.JSON(http.StatusOK, map[string]string{"key": info.Key})
+}
 
-    return c.JSON(http.StatusOK, map[string]string{
-        "url": info.URL,
-    })
+func (h *Handler) getAvatarURL(c forge.Context) error {
+    url, err := c.FileURL(avatarKey, forge.WithURLExpiry(1*time.Hour))
+    if err != nil {
+        return err
+    }
+    return c.JSON(http.StatusOK, map[string]string{"url": url})
 }
 ```
+
+### HTMX-Aware Rendering
+
+Context automatically detects HTMX requests and renders accordingly:
+
+```go
+func (h *Handler) contacts(c forge.Context) error {
+    contacts, err := h.repo.ListContacts(c)
+    if err != nil {
+        return err
+    }
+
+    // HTMX request → renders just the partial
+    // Regular request → renders the full page with layout
+    return c.RenderPartial(http.StatusOK,
+        views.ContactsPage(contacts), // full page
+        views.ContactsList(contacts), // partial for HTMX
+    )
+}
+```
+
+Check HTMX state: `c.IsHTMX()` returns `true` for HTMX-initiated requests. Redirects automatically use `HX-Redirect` headers when appropriate.
 
 ### Server-Sent Events
 
@@ -307,22 +395,24 @@ func (h *Handler) streamEvents(c forge.Context) error {
 
 ### Error Handling
 
-Return `HTTPError` from handlers:
+Return errors from handlers using convenience constructors or the context helper:
 
 ```go
 func (h *Handler) getUser(c forge.Context) error {
+    id := forge.Param[string](c, "id")
     user, err := h.repo.GetUser(c, id)
     if err == sql.ErrNoRows {
         return forge.ErrNotFound("User not found")
     }
     if err != nil {
-        return forge.ErrInternal("Failed to fetch user")
+        // c.Error() creates an HTTPError with the given status and message
+        return c.Error(500, "Failed to fetch user", forge.WithError(err))
     }
     return c.JSON(http.StatusOK, user)
 }
 ```
 
-Customize error handling:
+Customize error handling globally:
 
 ```go
 app := forge.New(
