@@ -348,6 +348,12 @@ type Context interface {
 	// FormatDateTime formats a datetime using locale-specific formatting.
 	// Falls back to time.Format if no translator is in context.
 	FormatDateTime(datetime time.Time) string
+
+	// SSE streams Server-Sent Events from the channel to the client.
+	// Blocks until the channel closes or the request context is cancelled.
+	// Sends keepalive comments at the configured interval (default 30s).
+	// Returns nil on clean exit, or an error on marshal/render failure.
+	SSE(events <-chan SSEEvent) error
 }
 
 type requestContext struct {
@@ -745,7 +751,6 @@ func (c *requestContext) Session() (*Session, error) {
 	}
 
 	// Try loading from store
-	// FIX #2: Use errors.Is for wrapped errors
 	sess, err := sm.loadSession(c)
 	if err != nil && !errors.Is(err, ErrSessionNotFound) {
 		return nil, err
@@ -895,7 +900,6 @@ func (c *requestContext) DestroyOtherSessions() error {
 		return nil
 	}
 
-	// FIX #6 & #7: Use batch delete via DeleteByUserIDExcept
 	return sm.destroyOtherSessions(c.Context(), *sess.UserID, sess.ID)
 }
 
@@ -1051,4 +1055,35 @@ func (c *requestContext) FormatDateTime(datetime time.Time) string {
 		return tr.FormatDateTime(datetime)
 	}
 	return datetime.Format("2006-01-02 15:04:05")
+}
+
+func (c *requestContext) SSE(events <-chan SSEEvent) error {
+	initSSEHeaders(c.response)
+	c.response.WriteHeader(http.StatusOK)
+
+	keepAlive := c.app.sseKeepAlive
+	if keepAlive <= 0 {
+		keepAlive = defaultSSEKeepAlive
+	}
+	ticker := time.NewTicker(keepAlive)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.request.Context().Done():
+			return nil
+		case <-ticker.C:
+			if _, err := fmt.Fprint(c.response, ": keepalive\n\n"); err != nil {
+				return nil
+			}
+			c.responseWriter.Flush()
+		case evt, ok := <-events:
+			if !ok {
+				return nil
+			}
+			if err := writeSSEEvent(c.responseWriter, c.request.Context(), evt); err != nil {
+				return err
+			}
+		}
+	}
 }

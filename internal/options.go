@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -152,7 +153,6 @@ func WithSession(store Store, opts ...SessionOption) Option {
 			opt(cfg)
 		}
 
-		// FIX #3: Validation - ensure maxSessionsPerUser is at least 1
 		if cfg.maxSessionsPerUser < 1 {
 			cfg.maxSessionsPerUser = 1
 		}
@@ -214,6 +214,14 @@ func WithRoles(permissions RolePermissions, extractor RoleExtractorFunc) Option 
 	return func(a *App) {
 		a.rolePermissions = permissions
 		a.roleExtractor = extractor
+	}
+}
+
+// WithSSEKeepAlive sets the interval for SSE keepalive comments.
+// Defaults to 30 seconds if not set or if d <= 0.
+func WithSSEKeepAlive(d time.Duration) Option {
+	return func(a *App) {
+		a.sseKeepAlive = d
 	}
 }
 

@@ -62,6 +62,7 @@ type App struct {
 	handlers                []Handler
 	staticRoutes            []staticRoute
 	requestTimeout          time.Duration
+	sseKeepAlive            time.Duration
 }
 
 // staticRoute represents a static file handler mount point.
@@ -85,8 +86,6 @@ func New(cfg AppConfig, opts ...Option) *App {
 	for _, opt := range opts {
 		opt(a)
 	}
-
-	// Note: Session manager logger should be configured via WithSessionLogger option
 
 	a.setupRoutes()
 	return a
@@ -183,7 +182,7 @@ func (a *App) wrapHandler(h HandlerFunc) http.HandlerFunc {
 			request:         r,
 			response:        rw,
 			responseWriter:  rw,
-			app:             a, // Pass app reference for lazy sessionManager init
+			app:             a,
 			logger:          a.logger,
 			cookieManager:   a.cookieManager,
 			storage:         a.storage,
