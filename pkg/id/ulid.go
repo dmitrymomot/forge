@@ -1,4 +1,3 @@
-// Package id provides sortable ID generation utilities.
 package id
 
 import (
