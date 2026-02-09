@@ -1,0 +1,41 @@
+name: Bug Report
+description: Report a bug in Forge
+labels: ["bug"]
+body:
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      placeholder: "e.g., 1.25.7"
+    validations:
+      required: true
+  - type: input
+    id: forge-version
+    attributes:
+      label: Forge version
+      placeholder: "e.g., v0.1.0 or commit hash"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Create a handler that...
+        2. Send a request to...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Logs, stack traces, or any other relevant information.
