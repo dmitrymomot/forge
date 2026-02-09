@@ -23,7 +23,7 @@ This document outlines planned features for the Forge framework.
 
 ### Middlewares (`middlewares/`)
 
-- `requestid`, `recover`, `cors`, `csrf`, `errors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`)
+- `requestid`, `recover`, `cors`, `csrf`, `errors`, `i18n`, `jwt`, `auth` (`RequireAuthenticated`), `rbac` (`RequirePermission`, `RequireAnyPermission`), `ratelimit`
 
 ### Utility Packages (`pkg/`)
 
@@ -49,7 +49,6 @@ This document outlines planned features for the Forge framework.
 Part of framework core, configurable via options:
 
 - `audit` — Audit log writer (configurable sink)
-- `ratelimit` — Rate limiting middleware (uses `pkg/ratelimit`)
 
 ---
 

@@ -197,17 +197,82 @@
 //	    }),
 //	)
 //
+// # Rate Limit
+//
+// RateLimit middleware enforces request rate limits using the pkg/ratelimit
+// sliding window algorithm. It accepts a *ratelimit.Limiter as a dependency
+// and sets standard rate limit headers on every response.
+//
+// Basic usage with in-memory counter:
+//
+//	counter := ratelimit.NewMemoryCounter(ratelimit.MemoryConfig{})
+//	defer counter.Close()
+//
+//	limiter, _ := ratelimit.New(counter, 100, time.Minute) // 100 req/min
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.RateLimit(limiter),
+//	    ),
+//	)
+//
+// With Redis counter for distributed deployments:
+//
+//	redisCounter := ratelimit.NewRedisCounter(redisClient, ratelimit.RedisConfig{
+//	    KeyPrefix: "rl:",
+//	})
+//
+//	limiter, _ := ratelimit.New(redisCounter, 100, time.Minute)
+//
+//	app := forge.New(
+//	    forge.WithMiddleware(
+//	        middlewares.RateLimit(limiter),
+//	    ),
+//	)
+//
+// Custom key function (e.g., by API key header):
+//
+//	middlewares.RateLimit(limiter,
+//	    middlewares.WithRateLimitKeyFunc(ratelimit.KeyByHeader("X-API-Key")),
+//	)
+//
+// Skip rate limiting for webhook endpoints:
+//
+//	middlewares.RateLimit(limiter,
+//	    middlewares.WithRateLimitSkipFunc(func(c forge.Context) bool {
+//	        return strings.HasPrefix(c.Request().URL.Path, "/webhooks/")
+//	    }),
+//	)
+//
+// Per-route rate limiting using route groups:
+//
+//	r.Group(func(r forge.Router) {
+//	    r.Use(middlewares.RateLimit(strictLimiter))
+//	    r.POST("/login", h.login)
+//	})
+//
+// Access rate limit info in handlers:
+//
+//	func (h *Handler) status(c forge.Context) error {
+//	    info := middlewares.GetRateLimitInfo(c)
+//	    if info != nil {
+//	        // info.Limit, info.Remaining, info.ResetAt
+//	    }
+//	    return c.JSON(200, data)
+//	}
+//
 // # Recommended Middleware Order
 //
 // Apply middlewares in this order for best results:
 //
 //	forge.WithMiddleware(
-//	    middlewares.CORS(),                // First: handle preflight before other processing
-//	    middlewares.RequestID(),           // Second: assign ID for all subsequent logging
-//	    middlewares.Recover(),             // Third: catch panics from handlers
-//	    middlewares.CSRF(middlewares.CSRFConfig{}), // Fourth: validate CSRF tokens
-//	    // middlewares.RequireAuthenticated(), // Fifth: auth gate (on protected groups)
-//	    // middlewares.RequirePermission(...), // Sixth: permission gate (on protected groups)
+//	    middlewares.CORS(),                         // First: handle preflight before other processing
+//	    middlewares.RateLimit(limiter),              // Second: reject early before spending cycles
+//	    middlewares.RequestID(),                     // Third: assign ID for all subsequent logging
+//	    middlewares.Recover(),                       // Fourth: catch panics from handlers
+//	    middlewares.CSRF(middlewares.CSRFConfig{}),   // Fifth: validate CSRF tokens
+//	    // middlewares.RequireAuthenticated(),        // Sixth: auth gate (on protected groups)
+//	    // middlewares.RequirePermission(...),        // Seventh: permission gate (on protected groups)
 //	)
 //
 // # Complete Example
