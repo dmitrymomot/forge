@@ -16,6 +16,7 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 ## Architecture
 
 `forge.go` re-exports types from `internal/` — import the root module for `App`, `Context`, `Router`, `Handler`. Utility packages live in `pkg/`. Middlewares in `middlewares/`.
+`doc.go` has package-level godoc — examples must match actual signatures in `internal/`.
 
 ## Design Rules
 
@@ -43,3 +44,4 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 - Validator/sanitizer tags use semicolons as separators, colons for params: `validate:"required;max:100"`
 - Never `go build` into repo — use `go build -o /dev/null ./...`
 - `make lint` excludes `examples/` from modernize
+- Doc examples: never guess struct fields or method names — read the actual `internal/` source first
