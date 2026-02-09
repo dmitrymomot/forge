@@ -63,7 +63,6 @@ func I18n(svc *i18n.I18n, cfg I18nConfig, opts ...I18nOption) internal.Middlewar
 		opt(o)
 	}
 
-	// Default extractor: cookie -> accept-language
 	if !o.extractorSet {
 		o.extractor = internal.NewExtractor(
 			internal.FromCookie("lang"),

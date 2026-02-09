@@ -43,7 +43,6 @@ func CORS(cfg CORSConfig, opts ...CORSOption) internal.Middleware {
 		opt(o)
 	}
 
-	// Apply runtime defaults for zero/nil fields
 	if len(cfg.AllowOrigins) == 0 {
 		cfg.AllowOrigins = []string{"*"}
 	}
@@ -71,25 +70,19 @@ func CORS(cfg CORSConfig, opts ...CORSOption) internal.Middleware {
 
 			origin := c.Header("Origin")
 
-			// Not a CORS request — continue without adding headers
 			if origin == "" {
 				return next(c)
 			}
 
-			// Check if origin is allowed
 			allowed := isOriginAllowed(origin, &cfg, o, hasWildcard)
 			if !allowed {
-				// Continue without CORS headers; browser's same-origin policy prevents credential access from rejected origins
+				// Browser's same-origin policy prevents credential access from rejected origins
 				return next(c)
 			}
 
-			// Set CORS headers
 			headers := c.Response().Header()
-
-			// Vary header for proper caching
 			headers.Add("Vary", "Origin")
 
-			// Set Access-Control-Allow-Origin
 			// When credentials are enabled or specific origins are configured, echo the actual origin
 			if cfg.AllowCredentials || !hasWildcard {
 				headers.Set("Access-Control-Allow-Origin", origin)
@@ -97,17 +90,14 @@ func CORS(cfg CORSConfig, opts ...CORSOption) internal.Middleware {
 				headers.Set("Access-Control-Allow-Origin", "*")
 			}
 
-			// Set credentials header if enabled
 			if cfg.AllowCredentials {
 				headers.Set("Access-Control-Allow-Credentials", "true")
 			}
 
-			// Set expose headers if configured
 			if exposeHeadersStr != "" {
 				headers.Set("Access-Control-Expose-Headers", exposeHeadersStr)
 			}
 
-			// Handle preflight request
 			if c.Request().Method == http.MethodOptions {
 				headers.Add("Vary", "Access-Control-Request-Method")
 				headers.Add("Vary", "Access-Control-Request-Headers")

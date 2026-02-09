@@ -41,7 +41,6 @@ func RequestID(cfg RequestIDConfig, opts ...RequestIDOption) internal.Middleware
 		opt(o)
 	}
 
-	// Apply runtime defaults
 	if cfg.ResponseHeader == "" {
 		cfg.ResponseHeader = "X-Request-ID"
 	}

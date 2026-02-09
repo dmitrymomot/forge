@@ -33,7 +33,6 @@ func JWT[T any](svc *jwt.Service, opts ...JWTOption) internal.Middleware {
 		opt(cfg)
 	}
 
-	// Default extractor: Bearer token from Authorization header
 	if !cfg.extractorSet {
 		cfg.Extractor = internal.NewExtractor(
 			internal.FromBearerToken(),
