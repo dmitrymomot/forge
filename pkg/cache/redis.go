@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 // RedisConfig configures the Redis cache.
@@ -19,6 +20,7 @@ type RedisConfig struct {
 type Redis[V any] struct {
 	client     redis.UniversalClient
 	marshaler  Marshaler[V]
+	sf         singleflight.Group
 	prefix     string
 	defaultTTL time.Duration
 }
@@ -158,6 +160,11 @@ func (r *Redis[V]) clearByPrefix(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (r *Redis[V]) sfDo(key string, fn func() (any, error)) (any, error) {
+	v, err, _ := r.sf.Do(key, fn)
+	return v, err
 }
 
 var _ Cache[any] = (*Redis[any])(nil)

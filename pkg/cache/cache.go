@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 )
 
 // Cache is a generic key-value cache with TTL support.
@@ -61,7 +59,11 @@ func (jsonMarshaler[V]) Unmarshal(data []byte) (V, error) {
 	return v, nil
 }
 
-var sfGroup singleflight.Group
+// deduper is implemented by cache backends to provide per-instance
+// singleflight deduplication for GetOrSet.
+type deduper interface {
+	sfDo(key string, fn func() (any, error)) (any, error)
+}
 
 type getOrSetResult[V any] struct {
 	val V
@@ -80,14 +82,25 @@ func GetOrSet[V any](ctx context.Context, c Cache[V], key string, fn func(ctx co
 		return v, nil
 	}
 
-	// Slow path: use singleflight to deduplicate concurrent misses.
-	v, err, _ := sfGroup.Do(key, func() (any, error) {
-		val, ttl, err := fn(ctx)
-		if err != nil {
-			return nil, err
+	// Slow path: deduplicate concurrent misses via per-instance singleflight.
+	var v any
+	var err error
+	if d, ok := c.(deduper); ok {
+		v, err = d.sfDo(key, func() (any, error) {
+			val, ttl, fnErr := fn(ctx)
+			if fnErr != nil {
+				return nil, fnErr
+			}
+			return getOrSetResult[V]{val: val, ttl: ttl}, nil
+		})
+	} else {
+		val, ttl, fnErr := fn(ctx)
+		if fnErr != nil {
+			var zero V
+			return zero, fnErr
 		}
-		return getOrSetResult[V]{val: val, ttl: ttl}, nil
-	})
+		v = getOrSetResult[V]{val: val, ttl: ttl}
+	}
 	if err != nil {
 		var zero V
 		return zero, err

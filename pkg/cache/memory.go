@@ -5,6 +5,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // MemoryConfig configures the in-memory cache.
@@ -36,6 +38,7 @@ func (e *entry[V]) isExpired() bool {
 // LRU eviction ordering. The most recently accessed items are at the
 // front of the list; the least recently used are at the back.
 type Memory[V any] struct {
+	sf       singleflight.Group
 	items    map[string]*list.Element
 	eviction *list.List
 	onEvict  func(key string, value V)
@@ -280,6 +283,11 @@ func (m *Memory[V]) removeElement(elem *list.Element) {
 	if m.onEvict != nil {
 		m.onEvict(e.key, e.value)
 	}
+}
+
+func (m *Memory[V]) sfDo(key string, fn func() (any, error)) (any, error) {
+	v, err, _ := m.sf.Do(key, fn)
+	return v, err
 }
 
 var _ Cache[any] = (*Memory[any])(nil)
