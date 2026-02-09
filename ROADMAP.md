@@ -19,6 +19,7 @@ This document outlines planned features for the Forge framework.
 - **Background Jobs:** enqueue with transactional support
 - **File Storage:** upload/download/delete operations with configurable backends
 - **i18n:** translations, pluralization, locale-aware formatting (numbers, currency, dates)
+- **SSE:** built-in `c.SSE(events)` with channel-based API, typed events (string, JSON, templ), keepalive, context cancellation
 - **App Config:** middleware/handler registration, static files, health checks, lifecycle hooks, multi-domain routing
 
 ### Middlewares (`middlewares/`)
@@ -40,7 +41,6 @@ This document outlines planned features for the Forge framework.
 ### Utility Packages (`pkg/`)
 
 - `featureflag` — `Provider` interface with strategy pattern; memory store implementation
-- `sse` — Server-sent events writer, event marshaling, flush helpers, client reconnection
 - `websocket` — HTTP upgrader wrapper, connection lifecycle, message routing
 - `compress` — Response compression negotiation (`gzip`, `zstd`), `Accept-Encoding` parsing, min-size threshold
 
