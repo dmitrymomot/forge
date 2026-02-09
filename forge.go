@@ -15,6 +15,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
+	"github.com/dmitrymomot/forge/pkg/ratelimit"
 	redis "github.com/dmitrymomot/forge/pkg/redis"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
@@ -777,6 +778,9 @@ type (
 
 	// LocaleFormat contains formatting rules for locale-specific formatting.
 	LocaleFormat = i18n.LocaleFormat
+
+	// RateLimitOption configures the RateLimit middleware.
+	RateLimitOption = middlewares.RateLimitOption
 )
 
 // Middleware helpers - re-exported from middlewares
@@ -871,6 +875,21 @@ var (
 	WithCSRFSkipFunc       = middlewares.WithCSRFSkipFunc
 )
 
+// Rate limit middleware helpers
+
+// GetRateLimitInfo returns the rate limit info stored in the context by the RateLimit middleware.
+// Returns nil if the middleware was not applied or the request was skipped.
+func GetRateLimitInfo(c Context) *ratelimit.Info {
+	return middlewares.GetRateLimitInfo(c)
+}
+
+// Rate limit option constructor re-exports
+var (
+	WithRateLimitKeyFunc      = middlewares.WithRateLimitKeyFunc
+	WithRateLimitErrorHandler = middlewares.WithRateLimitErrorHandler
+	WithRateLimitSkipFunc     = middlewares.WithRateLimitSkipFunc
+)
+
 // I18n middleware option constructors
 
 // WithI18nExtractor sets a custom language extractor chain.
@@ -950,6 +969,11 @@ func ErrConflict(message string, opts ...HTTPErrorOption) *HTTPError {
 // ErrUnprocessable creates a 422 Unprocessable Entity error.
 func ErrUnprocessable(message string, opts ...HTTPErrorOption) *HTTPError {
 	return internal.ErrUnprocessable(message, opts...)
+}
+
+// ErrTooManyRequests creates a 429 Too Many Requests error.
+func ErrTooManyRequests(message string, opts ...HTTPErrorOption) *HTTPError {
+	return internal.ErrTooManyRequests(message, opts...)
 }
 
 // ErrInternal creates a 500 Internal Server Error.

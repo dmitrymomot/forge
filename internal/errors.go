@@ -146,6 +146,14 @@ func ErrInternal(message string, opts ...HTTPErrorOption) *HTTPError {
 	return e
 }
 
+func ErrTooManyRequests(message string, opts ...HTTPErrorOption) *HTTPError {
+	e := NewHTTPError(http.StatusTooManyRequests, message)
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
 func ErrServiceUnavailable(message string, opts ...HTTPErrorOption) *HTTPError {
 	e := NewHTTPError(http.StatusServiceUnavailable, message)
 	for _, opt := range opts {
