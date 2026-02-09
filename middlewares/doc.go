@@ -9,7 +9,7 @@
 //
 //	app := forge.New(
 //	    forge.WithMiddleware(
-//	        middlewares.RequestID(),
+//	        middlewares.RequestID(middlewares.RequestIDConfig{}),
 //	    ),
 //	)
 //
@@ -18,7 +18,7 @@
 //	app := forge.New(
 //	    forge.WithLogger("api", forge.RequestIDExtractor()),
 //	    forge.WithMiddleware(
-//	        middlewares.RequestID(),
+//	        middlewares.RequestID(middlewares.RequestIDConfig{}),
 //	    ),
 //	)
 //
@@ -29,7 +29,7 @@
 //
 //	app := forge.New(
 //	    forge.WithMiddleware(
-//	        middlewares.Recover(),
+//	        middlewares.Recover(middlewares.RecoverConfig{}),
 //	    ),
 //	    forge.WithErrorHandler(func(c forge.Context, err error) error {
 //	        if forge.IsPanicError(err) {
@@ -48,7 +48,7 @@
 //
 //	app := forge.New(
 //	    forge.WithMiddleware(
-//	        middlewares.CORS(),  // Allow all origins (default)
+//	        middlewares.CORS(middlewares.CORSConfig{}),  // Allow all origins (default)
 //	    ),
 //	)
 //
@@ -56,10 +56,10 @@
 //
 //	app := forge.New(
 //	    forge.WithMiddleware(
-//	        middlewares.CORS(
-//	            middlewares.WithAllowOrigins("https://app.example.com"),
-//	            middlewares.WithAllowCredentials(),
-//	        ),
+//	        middlewares.CORS(middlewares.CORSConfig{
+//	            AllowOrigins:     []string{"https://app.example.com"},
+//	            AllowCredentials: true,
+//	        }),
 //	    ),
 //	)
 //
@@ -67,7 +67,7 @@
 //
 //	app := forge.New(
 //	    forge.WithMiddleware(
-//	        middlewares.CORS(
+//	        middlewares.CORS(middlewares.CORSConfig{},
 //	            middlewares.WithAllowOriginFunc(func(origin string) bool {
 //	                // Custom logic to validate origin
 //	                return strings.HasSuffix(origin, ".example.com")
@@ -308,10 +308,10 @@
 // Apply middlewares in this order for best results:
 //
 //	forge.WithMiddleware(
-//	    middlewares.CORS(),                         // First: handle preflight before other processing
+//	    middlewares.CORS(middlewares.CORSConfig{}),  // First: handle preflight before other processing
 //	    middlewares.RateLimit(limiter),              // Second: reject early before spending cycles
-//	    middlewares.RequestID(),                     // Third: assign ID for all subsequent logging
-//	    middlewares.Recover(),                       // Fourth: catch panics from handlers
+//	    middlewares.RequestID(middlewares.RequestIDConfig{}), // Third: assign ID for all subsequent logging
+//	    middlewares.Recover(middlewares.RecoverConfig{}),     // Fourth: catch panics from handlers
 //	    middlewares.AuditLog(store),                 // Fifth: audit after ID assigned, catches panics
 //	    middlewares.CSRF(middlewares.CSRFConfig{}),   // Sixth: validate CSRF tokens (audits rejections)
 //	    // middlewares.RequireAuthenticated(),        // Seventh: auth gate (on protected groups)
@@ -328,9 +328,9 @@
 //	app := forge.New(
 //	    forge.WithLogger("api", forge.RequestIDExtractor()),
 //	    forge.WithMiddleware(
-//	        middlewares.CORS(),
-//	        middlewares.RequestID(),
-//	        middlewares.Recover(),
+//	        middlewares.CORS(middlewares.CORSConfig{}),
+//	        middlewares.RequestID(middlewares.RequestIDConfig{}),
+//	        middlewares.Recover(middlewares.RecoverConfig{}),
 //	    ),
 //	    forge.WithErrorHandler(func(c forge.Context, err error) error {
 //	        switch {

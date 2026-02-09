@@ -55,7 +55,7 @@
 // Requires a [github.com/redis/go-redis/v9.UniversalClient]
 // from [github.com/dmitrymomot/forge/pkg/redis]:
 //
-//	client := redis.MustOpen(ctx, os.Getenv("REDIS_URL"))
+//	client := redis.MustOpen(ctx, redis.Config{URL: os.Getenv("REDIS_URL")})
 //	c := cache.NewRedis[User](client, nil, cache.RedisConfig{
 //	    Prefix:     "users",
 //	    DefaultTTL: 30 * time.Minute,

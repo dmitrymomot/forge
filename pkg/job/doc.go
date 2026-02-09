@@ -99,10 +99,10 @@
 //	)
 //
 //	app := forge.New(
-//	    forge.WithJobs(pool,
+//	    forge.WithJobs(pool, forge.JobConfig{},
 //	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
 //	        job.WithTask(tasks.NewProcessPayment(stripe, repo)),
-//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo), "cleanup_sessions"),
+//	        job.WithScheduledTask(tasks.NewCleanupSessions(repo)),
 //	        job.WithQueueWorkers("email", 10),
 //	        job.WithQueueWorkers("payments", 5),
 //	        job.WithLogger(slog.Default()),

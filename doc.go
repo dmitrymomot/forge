@@ -202,8 +202,8 @@
 //	    forge.AppConfig{},
 //	    forge.WithMiddleware(
 //	        RequestLogger(logger),
-//	        middlewares.RequestID(),
-//	        middlewares.Recover(),
+//	        middlewares.RequestID(middlewares.RequestIDConfig{}),
+//	        middlewares.Recover(middlewares.RecoverConfig{}),
 //	    ),
 //	)
 //

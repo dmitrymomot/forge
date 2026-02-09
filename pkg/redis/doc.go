@@ -83,9 +83,15 @@
 //	)
 //
 //	client := redis.MustOpen(ctx, redis.Config{URL: redisURL})
-//	app := forge.New(
+//	app := forge.New(forge.AppConfig{})
+//
+//	if err := forge.Run(
+//		forge.RunConfig{},
+//		forge.WithFallback(app),
 //		forge.WithShutdownHook(redis.Shutdown(client)),
-//	)
+//	); err != nil {
+//		log.Fatal(err)
+//	}
 //
 // # Error Handling
 //

@@ -135,7 +135,7 @@
 //	        return c.Error(http.StatusBadRequest, "invalid form")
 //	    }
 //	    if len(validationErrs) > 0 {
-//	        return c.Render(http.StatusOK, loginTemplate, validationErrs)
+//	        return c.Render(http.StatusUnprocessableEntity, loginTemplate)
 //	    }
 //
 //	    // Process login...
@@ -176,7 +176,7 @@
 // Start the server with Run() or use Run() for multi-domain deployments:
 //
 //	// Single app
-//	err := app.Run(internal.RunConfig{Address: ":8080"}, internal.WithLogger(log))
+//	err := app.Run(internal.RunConfig{Address: ":8080"}, internal.WithRunLogger(log))
 //
 //	// Multi-domain
 //	err := internal.Run(internal.RunConfig{Address: ":8080"},
