@@ -607,7 +607,6 @@ func (sm *sessionManager) createSession(c Context) (*Session, string, error) {
 }
 
 // updateSession persists session changes to the store.
-// FIX #1: Always use Update when session is dirty - removed buggy touchOnly optimization.
 func (sm *sessionManager) updateSession(c Context, sess *Session) error {
 	if !sess.IsDirty() {
 		return nil
@@ -624,7 +623,6 @@ func (sm *sessionManager) updateSession(c Context, sess *Session) error {
 }
 
 // authenticateSession promotes an anonymous session to an authenticated one.
-// FIX #5: Single update after all changes instead of split writes.
 // Always rotates tokens on authentication to prevent session fixation attacks.
 func (sm *sessionManager) authenticateSession(c Context, sess *Session, userID string) (string, error) {
 	sess.UserID = &userID
@@ -641,7 +639,6 @@ func (sm *sessionManager) authenticateSession(c Context, sess *Session, userID s
 		return "", err
 	}
 
-	// FIX #5: Single update after all changes
 	if err := sm.updateSession(c, sess); err != nil {
 		return "", err
 	}
@@ -650,7 +647,6 @@ func (sm *sessionManager) authenticateSession(c Context, sess *Session, userID s
 }
 
 // rotateToken generates a new token for the session without persisting.
-// FIX #5: Don't persist here - let caller handle it.
 func (sm *sessionManager) rotateToken(ctx context.Context, sess *Session) (string, error) {
 	newToken, err := generateToken()
 	if err != nil {
@@ -664,14 +660,12 @@ func (sm *sessionManager) rotateToken(ctx context.Context, sess *Session) (strin
 }
 
 // saveSessionCookie writes the session cookie using Context.SetCookie.
-// FIX #4: Use Context.SetCookie instead of building http.Cookie.
 func (sm *sessionManager) saveSessionCookie(c Context, token string) {
 	maxAge := int(sm.config.ttl.Seconds())
 	c.SetCookie(sm.config.cookieName, token, maxAge)
 }
 
 // deleteSessionCookie removes the session cookie using Context.SetCookie.
-// FIX #4: Use Context.SetCookie with negative maxAge.
 func (sm *sessionManager) deleteSessionCookie(c Context) {
 	c.SetCookie(sm.config.cookieName, "", -1)
 }
@@ -682,7 +676,6 @@ func (sm *sessionManager) destroySession(ctx context.Context, sessionID string) 
 }
 
 // destroyOtherSessions removes all sessions for a user except the specified one.
-// FIX #6: Use batch delete via DeleteByUserIDExcept.
 func (sm *sessionManager) destroyOtherSessions(ctx context.Context, userID, exceptID string) error {
 	return sm.store.DeleteByUserIDExcept(ctx, userID, exceptID)
 }
