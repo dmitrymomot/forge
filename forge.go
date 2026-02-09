@@ -766,6 +766,12 @@ type (
 	// JWTOption configures the JWT middleware.
 	JWTOption = middlewares.JWTOption
 
+	// CSRFConfig configures the CSRF middleware.
+	CSRFConfig = middlewares.CSRFConfig
+
+	// CSRFOption configures runtime dependencies for the CSRF middleware.
+	CSRFOption = middlewares.CSRFOption
+
 	// Translator provides a simplified translation interface with a fixed language and namespace context.
 	Translator = i18n.Translator
 
@@ -849,6 +855,21 @@ func GetJWTClaims[T any](c Context) *T {
 func WithJWTExtractor(ext Extractor) JWTOption {
 	return middlewares.WithJWTExtractor(ext)
 }
+
+// CSRF middleware helpers
+
+// GetCSRFToken extracts the CSRF token from the context.
+// Returns an empty string if no token is set.
+func GetCSRFToken(c Context) string {
+	return middlewares.GetCSRFToken(c)
+}
+
+// CSRF option constructor re-exports
+var (
+	WithCSRFTokenGenerator = middlewares.WithCSRFTokenGenerator
+	WithCSRFErrorHandler   = middlewares.WithCSRFErrorHandler
+	WithCSRFSkipFunc       = middlewares.WithCSRFSkipFunc
+)
 
 // I18n middleware option constructors
 
