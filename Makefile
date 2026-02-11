@@ -4,7 +4,7 @@ test: ## Run all tests with race detection and coverage
 	@go clean -testcache && go test -race -cover ./...
 
 bench: ## Run all benchmarks
-	@go test -bench=. -benchmem ./...
+	@go clean -testcache && go test -bench=. -benchmem ./...
 
 lint: ## Run code linters
 	@go vet ./...
@@ -27,5 +27,5 @@ test-down: ## Stop and remove test infrastructure
 	@docker compose down -v --remove-orphans
 
 test-integration: test-up ## Run integration tests with docker infrastructure
-	@go test -tags=integration -race -cover ./... || ($(MAKE) test-down && exit 1)
+	@go test -tags=integration -count=1 -race -cover $$(grep -rl '//go:build integration' . --include='*_test.go' | xargs -I{} dirname {} | sort -u) || ($(MAKE) test-down && exit 1)
 	@$(MAKE) test-down

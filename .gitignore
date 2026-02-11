@@ -32,3 +32,5 @@ go.work.sum
 # .vscode/
 
 _example
+README_TESTS.md
+TEST_REVIEW.md
