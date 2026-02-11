@@ -9,10 +9,14 @@
 //
 //	import (
 //		"context"
+//		"embed"
 //
 //		"github.com/dmitrymomot/forge/pkg/mailer"
 //		"github.com/dmitrymomot/forge/pkg/mailer/smtp"
 //	)
+//
+//	//go:embed templates/*.md
+//	var templates embed.FS
 //
 //	func main() {
 //		ctx := context.Background()
@@ -23,8 +27,8 @@
 //			SenderName:  "Team",
 //		})
 //
-//		// Create renderer and mailer
-//		renderer := mailer.NewRenderer(emails.FS, mailer.RendererConfig{})
+//		// Create renderer with your embedded templates
+//		renderer := mailer.NewRenderer(templates, mailer.RendererConfig{})
 //		m := mailer.New(sender, renderer, mailer.Config{
 //			FallbackSubject: "Notification",
 //		})
@@ -32,7 +36,7 @@
 //		// Send email
 //		err := m.Send(ctx, mailer.SendParams{
 //			To:       "user@example.com",
-//			Template: "welcome.md",
+//			Template: "templates/welcome.md",
 //			Data:     map[string]any{"Name": "John"},
 //		})
 //		if err != nil {
@@ -59,6 +63,8 @@
 // # Production Setup
 //
 // For production SMTP servers, configure authentication and TLS:
+//
+//	import "os"
 //
 //	sender := smtp.New(smtp.Config{
 //		Host:        "smtp.example.com",
