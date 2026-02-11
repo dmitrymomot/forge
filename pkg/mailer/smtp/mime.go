@@ -124,7 +124,6 @@ func writeAlternativeBody(buf *bytes.Buffer, text, html string) error {
 // writeAlternativePart writes a multipart/alternative body as a nested part
 // inside a parent multipart writer (used when attachments are present).
 func writeAlternativePart(parent *multipart.Writer, text, html string) error {
-	// Generate boundary for the nested part.
 	boundary := multipart.NewWriter(io.Discard).Boundary()
 
 	h := make(textproto.MIMEHeader)

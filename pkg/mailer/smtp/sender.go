@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"net/smtp"
 	"strconv"
+	"time"
 
 	"github.com/dmitrymomot/forge/pkg/mailer"
 )
@@ -50,7 +51,7 @@ func (s *Sender) Send(ctx context.Context, email *mailer.Email) error {
 
 	addr := net.JoinHostPort(s.config.Host, strconv.Itoa(s.config.Port))
 
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	conn, err := (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp: dial %s: %w", addr, err)
 	}
@@ -62,7 +63,6 @@ func (s *Sender) Send(ctx context.Context, email *mailer.Email) error {
 	}
 	defer client.Close()
 
-	// STARTTLS if configured.
 	if s.config.TLS {
 		tlsConfig := &tls.Config{ServerName: s.config.Host}
 		if err := client.StartTLS(tlsConfig); err != nil {
@@ -70,7 +70,6 @@ func (s *Sender) Send(ctx context.Context, email *mailer.Email) error {
 		}
 	}
 
-	// Auth when credentials are provided.
 	if s.config.Username != "" && s.config.Password != "" {
 		auth := smtp.PlainAuth("", s.config.Username, s.config.Password, s.config.Host)
 		if err := client.Auth(auth); err != nil {
