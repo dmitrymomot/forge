@@ -15,8 +15,8 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 
 ## Architecture
 
-`forge.go` re-exports types from `internal/` — import the root module for `App`, `Context`, `Router`, `Handler`. Utility packages live in `pkg/`. Middlewares in `middlewares/`.
-`doc.go` has package-level godoc — examples must match actual signatures in `internal/`.
+`forge.go` re-exports types from `internal/` — import the root module for `App`, `Context`, `Router`, `Handler`. `pkg/` packages are imported directly (no re-exports in `forge.go`). Middlewares in `middlewares/`.
+`doc.go` and `README.md` have examples — must match actual signatures. When `forge.go` or `pkg/` APIs change, update both.
 
 ## Design Rules
 
@@ -35,6 +35,8 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 - Table-driven only for simple functions; use `t.Run("descriptive name", ...)` otherwise
 - Integration tests for anything requiring River/pgxpool (`make test-integration`)
 - Internal tests: use `requestVia()` helper to exercise real `requestContext` via App/Router
+- Prefer in-process mocks over Docker: miniredis for Redis (`pkg/cache`), go-smtp-mock for SMTP (`pkg/mailer/smtp`)
+- Tests must assert behavior (message content, headers, side effects), not just `require.NoError`
 
 ## Gotchas
 
