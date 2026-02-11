@@ -31,6 +31,16 @@ func newTestSMTPServer(t *testing.T) (*smtpmock.Server, smtp.Config) {
 	}
 }
 
+// waitForMessages polls the mock server for the expected number of messages,
+// avoiding races between the SMTP session closing and the mock recording the message.
+func waitForMessages(t *testing.T, server *smtpmock.Server, count int) []smtpmock.Message {
+	t.Helper()
+	msgs, err := server.WaitForMessages(count, 5*time.Second)
+	require.NoError(t, err, "timed out waiting for %d message(s)", count)
+	require.Len(t, msgs, count)
+	return msgs
+}
+
 func TestSend(t *testing.T) {
 	t.Parallel()
 
@@ -47,8 +57,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 		require.True(t, msgs[0].IsConsistent())
 
 		body := msgs[0].MsgRequest()
@@ -69,8 +78,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "text/html")
@@ -91,8 +99,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "multipart/alternative")
@@ -120,8 +127,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "multipart/mixed")
@@ -143,8 +149,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		rcpts := msgs[0].RcpttoRequestResponse()
 		// 2 To + 1 CC + 2 BCC = 5 recipients
@@ -176,8 +181,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 		require.Contains(t, msgs[0].MailfromRequest(), "test@example.com")
 	})
 
@@ -195,8 +199,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "From: Custom Name <custom@example.com>")
@@ -217,8 +220,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 		require.Contains(t, msgs[0].MsgRequest(), "Reply-To: replies@example.com")
 	})
 
@@ -239,8 +241,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "X-Priority: 1")
@@ -328,8 +329,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		body := msgs[0].MsgRequest()
 		// Non-ASCII subjects get Q-encoded
@@ -350,8 +350,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 
 		rcpts := msgs[0].RcpttoRequestResponse()
 		require.Len(t, rcpts, 3)
@@ -397,8 +396,7 @@ func TestSend(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		msgs := server.Messages()
-		require.Len(t, msgs, 1)
+		msgs := waitForMessages(t, server, 1)
 		require.True(t, msgs[0].IsConsistent())
 	})
 }

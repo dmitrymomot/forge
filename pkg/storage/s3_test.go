@@ -20,7 +20,8 @@ func newTestStorage(t *testing.T) *storage.S3Storage {
 	t.Helper()
 
 	backend := s3mem.New()
-	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
+	require.NoError(t, backend.CreateBucket("test-bucket"))
+	faker := gofakes3.New(backend)
 	ts := httptest.NewServer(faker.Server())
 	t.Cleanup(ts.Close)
 
