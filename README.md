@@ -263,9 +263,9 @@ Enable background job processing with River:
 app := forge.New(
     forge.AppConfig{},
     forge.WithJobs(pgxPool,
-        forge.JobConfig{Workers: 2},
-        forge.WithTask(EmailTask{}),
-        forge.WithScheduledTask(CleanupTask{}),
+        job.Config{Workers: 2},
+        job.WithTask(EmailTask{}),
+        job.WithScheduledTask(CleanupTask{}),
     ),
 )
 ```
@@ -289,8 +289,8 @@ Enqueue jobs from handlers:
 func (h *Handler) signup(c forge.Context) error {
     err := c.Enqueue("send_email",
         struct{ Email string }{Email: user.Email},
-        forge.WithQueue("emails"),
-        forge.WithScheduledIn(1*time.Minute),
+        job.WithQueue("emails"),
+        job.WithScheduledIn(1*time.Minute),
     )
     if err != nil {
         return err
@@ -304,7 +304,7 @@ func (h *Handler) signup(c forge.Context) error {
 Enable S3-compatible file storage:
 
 ```go
-storage, err := forge.NewS3Storage(forge.StorageConfig{
+s, err := storage.New(storage.Config{
     Endpoint:  "s3.amazonaws.com",
     AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
     SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
@@ -317,7 +317,7 @@ if err != nil {
 
 app := forge.New(
     forge.AppConfig{},
-    forge.WithStorage(storage),
+    forge.WithStorage(s),
 )
 ```
 
@@ -326,11 +326,11 @@ Upload, download, and manage files directly from handlers:
 ```go
 func (h *Handler) uploadAvatar(c forge.Context) error {
     info, err := c.Upload("avatar",
-        forge.WithStoragePrefix("avatars"),
-        forge.WithStorageTenant(c.UserID()),
-        forge.WithStorageValidation(
-            forge.MaxFileSize(5*1024*1024),
-            forge.ImageFilesOnly(),
+        storage.WithPrefix("avatars"),
+        storage.WithTenant(c.UserID()),
+        storage.WithValidation(
+            storage.MaxSize(5*1024*1024),
+            storage.ImageOnly(),
         ),
     )
     if err != nil {
@@ -341,7 +341,7 @@ func (h *Handler) uploadAvatar(c forge.Context) error {
 }
 
 func (h *Handler) getAvatarURL(c forge.Context) error {
-    url, err := c.FileURL(avatarKey, forge.WithURLExpiry(1*time.Hour))
+    url, err := c.FileURL(avatarKey, storage.WithExpiry(1*time.Hour))
     if err != nil {
         return err
     }

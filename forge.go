@@ -11,12 +11,10 @@ import (
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
-	db "github.com/dmitrymomot/forge/pkg/db"
 	"github.com/dmitrymomot/forge/pkg/i18n"
 	"github.com/dmitrymomot/forge/pkg/job"
 	"github.com/dmitrymomot/forge/pkg/logger"
 	"github.com/dmitrymomot/forge/pkg/ratelimit"
-	redis "github.com/dmitrymomot/forge/pkg/redis"
 	"github.com/dmitrymomot/forge/pkg/storage"
 )
 
@@ -40,18 +38,6 @@ type (
 
 	// HealthCheckOption adds a readiness check to the health configuration.
 	HealthCheckOption = internal.HealthCheckOption
-
-	// CookieConfig holds cookie manager configuration.
-	CookieConfig = cookie.Config
-
-	// DBConfig holds database connection configuration.
-	DBConfig = db.Config
-
-	// RedisConfig holds Redis connection configuration.
-	RedisConfig = redis.Config
-
-	// JobConfig holds job manager configuration.
-	JobConfig = job.Config
 
 	// Router is the interface handlers use to declare routes.
 	Router = internal.Router
@@ -86,54 +72,11 @@ type (
 	// CheckFunc is the standard health check function signature.
 	CheckFunc = internal.CheckFunc
 
-	// ContextExtractor extracts a slog attribute from context.
-	// Used with WithLogger to add request-scoped values to logs.
-	ContextExtractor = logger.ContextExtractor
-
 	// SessionStore defines the interface for session persistence.
 	SessionStore = internal.Store
 
 	// ResponseWriter wraps http.ResponseWriter with hooks and HTMX support.
 	ResponseWriter = internal.ResponseWriter
-
-	// JobOption configures the job manager.
-	JobOption = job.Option
-
-	// EnqueueOption configures job enqueueing.
-	EnqueueOption = job.EnqueueOption
-
-	// EnqueuerOption configures the job enqueuer.
-	EnqueuerOption = job.EnqueuerOption
-
-	// JobManager handles background job processing.
-	JobManager = job.Manager
-
-	// JobEnqueuer provides job enqueueing without worker processing.
-	JobEnqueuer = job.Enqueuer
-
-	// Storage defines the interface for file storage operations.
-	Storage = storage.Storage
-
-	// StorageConfig holds S3-compatible storage configuration.
-	StorageConfig = storage.Config
-
-	// FileInfo contains metadata about an uploaded file.
-	FileInfo = storage.FileInfo
-
-	// StorageOption configures Put operations.
-	StorageOption = storage.Option
-
-	// URLOption configures URL generation.
-	URLOption = storage.URLOption
-
-	// ACL represents access control levels for stored files.
-	ACL = storage.ACL
-
-	// ValidationRule defines a validation check for file uploads.
-	ValidationRule = storage.ValidationRule
-
-	// FileValidationError represents a file validation failure.
-	FileValidationError = storage.FileValidationError
 
 	// HTTPError represents an HTTP error with all data needed for rendering.
 	HTTPError = internal.HTTPError
@@ -244,7 +187,7 @@ func HealthCheck(name string, fn CheckFunc) HealthCheckOption {
 // WithLogger creates a logger with a component name and optional extractors.
 // The component name is added to every log entry for easy filtering.
 // Extractors pull values from context (e.g., request_id, user_id).
-func WithLogger(component string, extractors ...ContextExtractor) Option {
+func WithLogger(component string, extractors ...logger.ContextExtractor) Option {
 	return internal.WithLogger(component, extractors...)
 }
 
@@ -263,7 +206,7 @@ func WithRoles(permissions RolePermissions, extractor RoleExtractorFunc) Option 
 }
 
 // WithCookieConfig configures the cookie manager.
-func WithCookieConfig(cfg CookieConfig) Option {
+func WithCookieConfig(cfg cookie.Config) Option {
 	return internal.WithCookieConfig(cfg)
 }
 
@@ -537,14 +480,14 @@ func SessionSet[T any](c Context, key string, value T) error {
 // WithJobs enables both job enqueueing and worker processing using River.
 // A pgxpool.Pool is required for the job queue. Workers are started automatically
 // when the app runs and stopped gracefully during shutdown.
-func WithJobs(pool *pgxpool.Pool, cfg JobConfig, opts ...JobOption) Option {
+func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 	return internal.WithJobs(pool, cfg, opts...)
 }
 
 // WithJobEnqueuer enables job enqueueing without worker processing.
 // Use this for web servers that dispatch work to separate worker processes.
 // Workers must be running elsewhere to process the enqueued jobs.
-func WithJobEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) Option {
+func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
 	return internal.WithJobEnqueuer(pool, opts...)
 }
 
@@ -552,81 +495,8 @@ func WithJobEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) Option {
 // Use this for dedicated background worker processes that don't need
 // to dispatch additional jobs. Workers are started automatically when
 // the app runs and stopped gracefully during shutdown.
-func WithJobWorker(pool *pgxpool.Pool, cfg JobConfig, opts ...JobOption) Option {
+func WithJobWorker(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 	return internal.WithJobWorker(pool, cfg, opts...)
-}
-
-// Job registration options - re-exported from pkg/job
-
-// WithTask registers a task handler using structural typing.
-// The task must implement Name() and Handle(ctx, P) methods.
-func WithTask[P any, T interface {
-	Name() string
-	Handle(context.Context, P) error
-}](task T) JobOption {
-	return job.WithTask[P, T](task)
-}
-
-// WithScheduledTask registers a periodic task.
-// The task must implement Name(), Schedule(), and Handle(ctx) methods.
-func WithScheduledTask[T interface {
-	Name() string
-	Schedule() string
-	Handle(context.Context) error
-}](task T) JobOption {
-	return job.WithScheduledTask[T](task)
-}
-
-// WithJobQueueWorkers configures a named queue with the specified number of workers.
-func WithJobQueueWorkers(name string, workers int) JobOption {
-	return job.WithQueueWorkers(name, workers)
-}
-
-// WithJobLogger sets the logger for job processing.
-func WithJobLogger(l *slog.Logger) JobOption {
-	return job.WithLogger(l)
-}
-
-// Enqueue options - re-exported from pkg/job
-
-// WithQueue specifies which queue to use for the job.
-func WithQueue(name string) EnqueueOption {
-	return job.WithQueue(name)
-}
-
-// WithScheduledAt schedules the job to run at a specific time.
-func WithScheduledAt(t time.Time) EnqueueOption {
-	return job.WithScheduledAt(t)
-}
-
-// WithScheduledIn schedules the job to run after a duration.
-func WithScheduledIn(d time.Duration) EnqueueOption {
-	return job.WithScheduledIn(d)
-}
-
-// WithMaxAttempts sets the maximum number of retry attempts for the job.
-func WithMaxAttempts(n int) EnqueueOption {
-	return job.WithMaxAttempts(n)
-}
-
-// WithUniqueFor ensures only one job with this key exists for the specified duration.
-func WithUniqueFor(d time.Duration) EnqueueOption {
-	return job.WithUniqueFor(d)
-}
-
-// WithUniqueKey sets a custom unique key for deduplication.
-func WithUniqueKey(key string) EnqueueOption {
-	return job.WithUniqueKey(key)
-}
-
-// WithJobPriority sets the job priority (lower numbers = higher priority).
-func WithJobPriority(p int) EnqueueOption {
-	return job.WithPriority(p)
-}
-
-// WithJobTags adds metadata tags to the job.
-func WithJobTags(tags ...string) EnqueueOption {
-	return job.WithTags(tags...)
 }
 
 // Job errors for checking return values.
@@ -638,22 +508,6 @@ var (
 	ErrJobPoolRequired      = job.ErrPoolRequired
 )
 
-// JobHealthcheck returns a health check function for the job manager.
-func JobHealthcheck(m *JobManager) CheckFunc {
-	return job.Healthcheck(m)
-}
-
-// Storage ACL constants.
-const (
-	// ACLPrivate makes the file accessible only via signed URLs.
-	ACLPrivate = storage.ACLPrivate
-
-	// ACLPublicRead makes the file publicly readable.
-	ACLPublicRead = storage.ACLPublicRead
-)
-
-// Storage options
-
 // WithSSEKeepAlive sets the interval for SSE keepalive comments.
 // Defaults to 30 seconds if not set or if d <= 0.
 func WithSSEKeepAlive(d time.Duration) Option {
@@ -663,100 +517,8 @@ func WithSSEKeepAlive(d time.Duration) Option {
 // WithStorage configures file storage for the application.
 // A storage.Storage implementation must be provided (e.g., S3Client).
 // Enables c.Upload(), c.UploadFromURL(), c.Download(), c.DeleteFile(), and c.FileURL().
-func WithStorage(s Storage) Option {
+func WithStorage(s storage.Storage) Option {
 	return internal.WithStorage(s)
-}
-
-// Storage Put options - re-exported from pkg/storage
-
-// WithStorageKey sets an explicit storage key, replacing the auto-generated ULID-based key.
-func WithStorageKey(key string) StorageOption {
-	return storage.WithKey(key)
-}
-
-// WithStoragePrefix sets a path prefix for the uploaded file.
-func WithStoragePrefix(prefix string) StorageOption {
-	return storage.WithPrefix(prefix)
-}
-
-// WithStorageTenant sets a tenant ID for multi-tenant isolation.
-func WithStorageTenant(id string) StorageOption {
-	return storage.WithTenant(id)
-}
-
-// WithStorageContentType overrides the auto-detected content type.
-func WithStorageContentType(ct string) StorageOption {
-	return storage.WithContentType(ct)
-}
-
-// WithStorageACL overrides the default ACL for this upload.
-func WithStorageACL(acl ACL) StorageOption {
-	return storage.WithACL(acl)
-}
-
-// WithStorageValidation adds validation rules to be applied before upload.
-func WithStorageValidation(rules ...ValidationRule) StorageOption {
-	return storage.WithValidation(rules...)
-}
-
-// Storage URL options - re-exported from pkg/storage
-
-// WithURLExpiry sets the expiry duration for signed URLs.
-func WithURLExpiry(d time.Duration) URLOption {
-	return storage.WithExpiry(d)
-}
-
-// WithURLDownload sets the filename for Content-Disposition: attachment header.
-func WithURLDownload(filename string) URLOption {
-	return storage.WithDownload(filename)
-}
-
-// WithURLSigned forces a signed URL regardless of the file's ACL.
-func WithURLSigned(expiry time.Duration) URLOption {
-	return storage.WithSigned(expiry)
-}
-
-// WithURLPublic forces a public URL regardless of the file's ACL.
-func WithURLPublic() URLOption {
-	return storage.WithPublic()
-}
-
-// Storage validation rules - re-exported from pkg/storage
-
-// MaxFileSize returns a rule that rejects files larger than the specified size.
-func MaxFileSize(bytes int64) ValidationRule {
-	return storage.MaxSize(bytes)
-}
-
-// MinFileSize returns a rule that rejects files smaller than the specified size.
-func MinFileSize(bytes int64) ValidationRule {
-	return storage.MinSize(bytes)
-}
-
-// FileNotEmpty returns a rule that rejects empty files.
-func FileNotEmpty() ValidationRule {
-	return storage.NotEmpty()
-}
-
-// AllowedFileTypes returns a rule that only accepts files matching the given MIME patterns.
-// Supports wildcards like "image/*".
-func AllowedFileTypes(patterns ...string) ValidationRule {
-	return storage.AllowedTypes(patterns...)
-}
-
-// ImageFilesOnly returns a rule that only accepts image files.
-func ImageFilesOnly() ValidationRule {
-	return storage.ImageOnly()
-}
-
-// DocumentFilesOnly returns a rule that only accepts document files.
-func DocumentFilesOnly() ValidationRule {
-	return storage.DocumentsOnly()
-}
-
-// NewS3Storage creates a new S3-compatible storage client.
-func NewS3Storage(cfg StorageConfig) (Storage, error) {
-	return storage.New(cfg)
 }
 
 // Storage errors for checking return values.
@@ -776,13 +538,10 @@ var (
 	ErrStorageDownloadFailed = storage.ErrDownloadFailed
 )
 
-// Middleware error types - re-exported from middlewares
+// Middleware type aliases - re-exported from middlewares
 type (
 	// PanicError represents a recovered panic.
 	PanicError = middlewares.PanicError
-
-	// TranslationMap is a map of placeholder keys to values for translation interpolation.
-	TranslationMap = i18n.M
 
 	// I18nOption configures the I18n middleware.
 	I18nOption = middlewares.I18nOption
@@ -795,12 +554,6 @@ type (
 
 	// CSRFOption configures runtime dependencies for the CSRF middleware.
 	CSRFOption = middlewares.CSRFOption
-
-	// Translator provides a simplified translation interface with a fixed language and namespace context.
-	Translator = i18n.Translator
-
-	// LocaleFormat contains formatting rules for locale-specific formatting.
-	LocaleFormat = i18n.LocaleFormat
 
 	// RateLimitOption configures the RateLimit middleware.
 	RateLimitOption = middlewares.RateLimitOption
@@ -825,7 +578,7 @@ func GetRequestID(c Context) string {
 
 // RequestIDExtractor returns a ContextExtractor for use with WithLogger.
 // Automatically adds "request_id" to all log entries.
-func RequestIDExtractor() ContextExtractor {
+func RequestIDExtractor() logger.ContextExtractor {
 	return middlewares.RequestIDExtractor()
 }
 
@@ -843,7 +596,7 @@ func AsPanicError(err error) (*PanicError, bool) {
 
 // GetTranslator extracts the Translator from the context.
 // Returns nil if the I18n middleware is not used.
-func GetTranslator(c Context) *Translator {
+func GetTranslator(c Context) *i18n.Translator {
 	return middlewares.GetTranslator(c)
 }
 
@@ -855,7 +608,7 @@ func GetLanguage(c Context) string {
 
 // T translates a key using the Translator stored in context by the I18n middleware.
 // Returns the key itself if no translator is in context.
-func T(c Context, key string, placeholders ...TranslationMap) string {
+func T(c Context, key string, placeholders ...i18n.M) string {
 	tr := middlewares.GetTranslator(c)
 	if tr == nil {
 		return key
@@ -865,7 +618,7 @@ func T(c Context, key string, placeholders ...TranslationMap) string {
 
 // Tn translates a key with pluralization using the Translator stored in context.
 // Returns the key itself if no translator is in context.
-func Tn(c Context, key string, n int, placeholders ...TranslationMap) string {
+func Tn(c Context, key string, n int, placeholders ...i18n.M) string {
 	tr := middlewares.GetTranslator(c)
 	if tr == nil {
 		return key
@@ -954,12 +707,12 @@ func WithI18nExtractor(ext Extractor) I18nOption {
 }
 
 // WithI18nFormatMap sets the language-to-format mapping.
-func WithI18nFormatMap(m map[string]*LocaleFormat) I18nOption {
+func WithI18nFormatMap(m map[string]*i18n.LocaleFormat) I18nOption {
 	return middlewares.WithI18nFormatMap(m)
 }
 
 // WithI18nDefaultFormat sets the fallback locale format.
-func WithI18nDefaultFormat(f *LocaleFormat) I18nOption {
+func WithI18nDefaultFormat(f *i18n.LocaleFormat) I18nOption {
 	return middlewares.WithI18nDefaultFormat(f)
 }
 

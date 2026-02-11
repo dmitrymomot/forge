@@ -226,11 +226,11 @@
 //	app := forge.New(
 //	    forge.AppConfig{},
 //	    forge.WithJobs(pgxPool,
-//	        forge.JobConfig{
+//	        job.Config{
 //	            Workers: 2,
 //	        },
-//	        forge.WithTask(EmailTask{}),
-//	        forge.WithScheduledTask(CleanupTask{}),
+//	        job.WithTask(EmailTask{}),
+//	        job.WithScheduledTask(CleanupTask{}),
 //	    ),
 //	)
 //
@@ -250,8 +250,8 @@
 //	    // ...validation...
 //	    err := c.Enqueue("send_email",
 //	        struct{ Email string }{Email: user.Email},
-//	        forge.WithQueue("emails"),
-//	        forge.WithScheduledIn(1*time.Minute),
+//	        job.WithQueue("emails"),
+//	        job.WithScheduledIn(1*time.Minute),
 //	    )
 //	    if err != nil {
 //	        return err
@@ -263,7 +263,7 @@
 //
 // Enable S3-compatible file storage:
 //
-//	storage, err := forge.NewS3Storage(forge.StorageConfig{
+//	s, err := storage.New(storage.Config{
 //	    Endpoint:  "s3.amazonaws.com",
 //	    AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
 //	    SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
@@ -276,17 +276,17 @@
 //
 //	app := forge.New(
 //	    forge.AppConfig{},
-//	    forge.WithStorage(storage),
+//	    forge.WithStorage(s),
 //	)
 //
 // Upload and download files from handlers:
 //
 //	func (h *Handler) uploadAvatar(c forge.Context) error {
 //	    info, err := c.Upload("avatar",
-//	        forge.WithStoragePrefix("avatars"),
-//	        forge.WithStorageValidation(
-//	            forge.MaxFileSize(5*1024*1024),
-//	            forge.ImageFilesOnly(),
+//	        storage.WithPrefix("avatars"),
+//	        storage.WithValidation(
+//	            storage.MaxSize(5*1024*1024),
+//	            storage.ImageOnly(),
 //	        ),
 //	    )
 //	    if err != nil {
