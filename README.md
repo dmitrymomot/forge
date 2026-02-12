@@ -529,6 +529,21 @@ make fmt              # Format + organize imports
 make test-integration # Docker-based integration tests
 ```
 
+## Claude Code Plugin
+
+[forge-skills](https://github.com/dmitrymomot/forge-skills) is a Claude Code plugin that accelerates Forge development with three skills:
+
+- **`/forge-init <app-name>`** — Scaffold a complete project (config, Docker, env, task runner) with selectable subsystems (Postgres, Redis, sessions, jobs, storage, templ, HTMX, Tailwind, mailer, OAuth)
+- **`/forge-build <feature>`** — Generate handlers, DB migrations + sqlc queries, background jobs, auth flows, email templates, storage integration, SSE endpoints, and templ views
+- **`/templui <description>`** — Generate Go templ templates using the [templui](https://www.templui.com/) component library (41 components, Tailwind + HTMX-ready)
+
+Install inside Claude Code (v1.0.33+):
+
+```
+/plugin marketplace add dmitrymomot/forge-skills
+/plugin install forge-skills@forge-skills
+```
+
 ## Documentation
 
 Full API documentation is available via:
