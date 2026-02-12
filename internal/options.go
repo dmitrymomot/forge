@@ -170,6 +170,9 @@ func WithSession(store Store, opts ...SessionOption) Option {
 // when the app runs and stopped gracefully during shutdown.
 func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 	return func(a *App) {
+		if err := job.Migrate(pool); err != nil {
+			panic(fmt.Sprintf("job migrate: %v", err))
+		}
 		jm, err := NewJobManager(pool, cfg, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job manager: %v", err))
@@ -184,6 +187,9 @@ func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 // Workers must be running elsewhere to process the enqueued jobs.
 func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
 	return func(a *App) {
+		if err := job.Migrate(pool); err != nil {
+			panic(fmt.Sprintf("job migrate: %v", err))
+		}
 		je, err := NewJobEnqueuer(pool, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job enqueuer: %v", err))
@@ -198,6 +204,9 @@ func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
 // the app runs and stopped gracefully during shutdown.
 func WithJobWorker(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 	return func(a *App) {
+		if err := job.Migrate(pool); err != nil {
+			panic(fmt.Sprintf("job migrate: %v", err))
+		}
 		jm, err := NewJobManager(pool, cfg, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job worker: %v", err))

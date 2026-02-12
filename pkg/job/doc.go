@@ -179,11 +179,13 @@
 //
 // # Database Migrations
 //
-// River requires database tables. Run River migrations before using:
+// River schema migrations run automatically when using WithJobs, WithJobEnqueuer,
+// or WithJobWorker. Already-applied migrations are skipped, so this is safe to call
+// on every startup. No manual SQL or migration tooling is needed.
 //
-//	CREATE TABLE river_job (...);
-//	CREATE TABLE river_leader (...);
-//	CREATE TABLE river_queue (...);
+// For standalone or testing use, call [Migrate] directly:
 //
-// See River documentation for migration SQL: https://riverqueue.com/docs/migrations
+//	if err := job.Migrate(pool); err != nil {
+//	    log.Fatal(err)
+//	}
 package job
