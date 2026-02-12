@@ -50,7 +50,7 @@ func WithLogger(log *slog.Logger) Option {
 //
 // Example:
 //
-//	//go:embed migrations/*.sql
+//	//go:embed *.sql
 //	var migrations embed.FS
 //
 //	pool, err := db.Open(ctx, db.Config{URL: "postgres://user:pass@host:5432/db"},

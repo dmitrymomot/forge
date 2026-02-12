@@ -15,12 +15,12 @@ import (
 
 // Default migration settings.
 const (
-	defaultMigrationsDir   = "migrations"
+	defaultMigrationsDir   = "."
 	defaultMigrationsTable = "schema_migrations"
 )
 
 // Migrate runs database migrations using the embedded SQL files.
-// Uses hardcoded defaults: "migrations" directory and "schema_migrations" table.
+// Uses hardcoded defaults: FS root (".") directory and "schema_migrations" table.
 // Pass nil for log to disable migration logging.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, log *slog.Logger) error {
 	// Bridge pgx connection pool to database/sql interface required by goose.

@@ -23,7 +23,6 @@
 //	DATABASE_MAX_CONN_LIFETIME  - Maximum connection lifetime (default: 30m)
 //	DATABASE_RETRY_ATTEMPTS     - Connection retry attempts (default: 3)
 //	DATABASE_RETRY_INTERVAL     - Base retry interval (default: 5s)
-//	DATABASE_MIGRATIONS_PATH    - Migrations directory (default: internal/db/migrations)
 //	DATABASE_MIGRATIONS_TABLE   - Migrations table name (default: schema_migrations)
 //
 // # Usage
@@ -104,10 +103,10 @@
 //		"github.com/dmitrymomot/forge/pkg/db"
 //	)
 //
-//	//go:embed migrations/*.sql
+//	//go:embed *.sql
 //	var migrations embed.FS
 //
-//	err := db.Migrate(ctx, pool, migrations, "schema_migrations", logger)
+//	err := db.Migrate(ctx, pool, migrations, logger)
 //	if err != nil {
 //		log.Fatal(err)
 //	}
