@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/dmitrymomot/forge/pkg/logger"
 )
 
 // runtimeConfig holds configuration for running the HTTP server.
@@ -35,9 +36,9 @@ func runServer(cfg runtimeConfig) error {
 		cfg.shutdownTimeout = defaultShutdownTimeout
 	}
 
-	logger := cfg.logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := cfg.logger
+	if log == nil {
+		log = logger.New()
 	}
 
 	server := &http.Server{
@@ -72,7 +73,7 @@ func runServer(cfg runtimeConfig) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("server starting", slog.String("address", ln.Addr().String()))
+		log.Info("server starting", slog.String("address", ln.Addr().String()))
 		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -85,7 +86,7 @@ func runServer(cfg runtimeConfig) error {
 	case <-ctx.Done():
 	}
 
-	logger.Info("shutting down server")
+	log.Info("shutting down server")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.shutdownTimeout)
 	defer shutdownCancel()
 
@@ -98,15 +99,15 @@ func runServer(cfg runtimeConfig) error {
 	for _, hook := range cfg.shutdownHooks {
 		if err := hook(shutdownCtx); err != nil {
 			errs = append(errs, err)
-			logger.Error("shutdown hook failed", slog.Any("error", err))
+			log.Error("shutdown hook failed", slog.Any("error", err))
 		}
 	}
 
 	if len(errs) > 0 {
-		logger.Error("shutdown completed with errors")
+		log.Error("shutdown completed with errors")
 		return errors.Join(errs...)
 	}
 
-	logger.Info("shutdown completed")
+	log.Info("shutdown completed")
 	return nil
 }

@@ -77,7 +77,7 @@ func New(cfg AppConfig, opts ...Option) *App {
 	cm, _ := cookie.New(cookie.Config{})
 	a := &App{
 		router:         chi.NewRouter(),
-		logger:         logger.NewNope(),
+		logger:         logger.New(),
 		cookieManager:  cm,
 		baseDomain:     cfg.BaseDomain,
 		requestTimeout: cfg.RequestTimeout,
