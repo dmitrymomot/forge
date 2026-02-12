@@ -156,18 +156,17 @@ func (r *Request) Do() *Response {
 	return &Response{rec: rec, t: r.t}
 }
 
-// buildSession creates a session in the store and attaches the cookie.
+// buildSession creates a test session directly in the store, bypassing
+// normal authentication flows to simulate an already-authenticated user.
 func (r *Request) buildSession() {
 	r.t.Helper()
 
-	// Generate token matching internal/session.go:276-282.
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		r.t.Fatalf("forgetest: generate token: %v", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 
-	// Hash matching internal/session.go:302-305.
 	h := sha256.Sum256([]byte(token))
 	tokenHash := base64.URLEncoding.EncodeToString(h[:])
 
@@ -184,7 +183,6 @@ func (r *Request) buildSession() {
 		ExpiresAt:    now.Add(30 * 24 * time.Hour),
 	}
 
-	// Copy session data.
 	maps.Copy(sess.Data, r.sessionData)
 
 	if err := r.app.store.Create(context.Background(), sess); err != nil {
@@ -194,7 +192,8 @@ func (r *Request) buildSession() {
 	r.cookies = append(r.cookies, &http.Cookie{Name: "__sid", Value: token})
 }
 
-// buildHTTPRequest constructs the *http.Request from the builder state.
+// buildHTTPRequest constructs the *http.Request, handling JSON, form-encoded,
+// and empty bodies with appropriate Content-Type headers.
 func (r *Request) buildHTTPRequest() *http.Request {
 	r.t.Helper()
 

@@ -7,10 +7,8 @@ import (
 	"github.com/dmitrymomot/forge/pkg/cookie"
 )
 
-// testCookieSecret is a 32-byte secret for test cookie encryption/signing.
 const testCookieSecret = "forgetest-secret-key-32-bytes!!!" // exactly 32 bytes
 
-// roleDataKey is the session data key used to store the role for RBAC testing.
 const roleDataKey = "__forgetest_role"
 
 // App wraps a forge.App with test helpers.
