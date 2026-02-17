@@ -7,18 +7,18 @@ Thank you for your interest in contributing to Forge.
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes
-4. Run `make fmt && make lint && make test`
+4. Run `just fmt && just lint && just test`
 5. Open a pull request
 
 ## Development Commands
 
 | Command               | Description                                |
 |-----------------------|--------------------------------------------|
-| `make test`           | Tests with race detection + coverage       |
-| `make bench`          | Benchmarks with memory stats               |
-| `make lint`           | vet, golangci-lint, nilaway, betteralign, modernize |
-| `make fmt`            | Format + organize imports                  |
-| `make test-integration` | Docker-based integration tests           |
+| `just test`           | Tests with race detection + coverage       |
+| `just bench`          | Benchmarks with memory stats               |
+| `just lint`           | vet, golangci-lint, nilaway, betteralign, modernize |
+| `just fmt`            | Format + organize imports                  |
+| `just test-integration` | Docker-based integration tests           |
 
 ## Commit Messages
 
@@ -43,8 +43,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Pull Request Checklist
 
-- [ ] `make lint` passes
-- [ ] `make test` passes
+- [ ] `just lint` passes
+- [ ] `just test` passes
 - [ ] New code has tests
 - [ ] Commit messages follow conventional commits
 

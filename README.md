@@ -522,11 +522,11 @@ if err := forge.Run(
 ## Commands
 
 ```bash
-make test             # Tests with race detection + coverage
-make bench            # Benchmarks with memory stats
-make lint             # vet, golangci-lint, nilaway, betteralign, modernize
-make fmt              # Format + organize imports
-make test-integration # Docker-based integration tests
+just test             # Tests with race detection + coverage
+just bench            # Benchmarks with memory stats
+just lint             # vet, golangci-lint, nilaway, betteralign, modernize
+just fmt              # Format + organize imports
+just test-integration # Docker-based integration tests
 ```
 
 ## Claude Code Plugin

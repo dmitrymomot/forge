@@ -6,11 +6,11 @@ Module: `github.com/dmitrymomot/forge`
 ## Commands
 
 ```bash
-make test             # Tests with race detection + coverage
-make bench            # Benchmarks with memory stats
-make lint             # vet, golangci-lint, nilaway, betteralign, modernize
-make fmt              # Format + organize imports
-make test-integration # Docker-based integration tests (postgres, redis, mailpit, rustfs)
+just test             # Tests with race detection + coverage
+just bench            # Benchmarks with memory stats
+just lint             # vet, golangci-lint, nilaway, betteralign, modernize
+just fmt              # Format + organize imports
+just test-integration # Docker-based integration tests (postgres, redis, mailpit, rustfs)
 ```
 
 ## Architecture
@@ -33,7 +33,7 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 - All tests use `t.Parallel()` at function and subtest level
 - Use `require` (not `assert`) for critical checks
 - Table-driven only for simple functions; use `t.Run("descriptive name", ...)` otherwise
-- Integration tests for anything requiring River/pgxpool (`make test-integration`)
+- Integration tests for anything requiring River/pgxpool (`just test-integration`)
 - Internal tests: use `requestVia()` helper to exercise real `requestContext` via App/Router
 - Prefer in-process mocks over Docker: miniredis for Redis (`pkg/cache`), go-smtp-mock for SMTP (`pkg/mailer/smtp`)
 - Tests must assert behavior (message content, headers, side effects), not just `require.NoError`
@@ -45,5 +45,5 @@ make test-integration # Docker-based integration tests (postgres, redis, mailpit
 - No `v := v` captures needed (Go 1.22+ loop variables)
 - Validator/sanitizer tags use semicolons as separators, colons for params: `validate:"required;max:100"`
 - Never `go build` into repo — use `go build -o /dev/null ./...`
-- `make lint` excludes `examples/` from modernize
+- `just lint` excludes `examples/` from modernize
 - Doc examples: never guess struct fields or method names — read the actual `internal/` source first
