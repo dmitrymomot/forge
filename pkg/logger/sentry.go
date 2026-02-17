@@ -74,7 +74,7 @@ func NewWithSentry(cfg SentryConfig, extractors ...ContextExtractor) *slog.Logge
 	}.NewSentryHandler(context.Background())
 
 	// Combine stdout + Sentry handlers
-	combinedHandler := newMultiHandler(stdoutHandler, sentryHandler)
+	combinedHandler := slog.NewMultiHandler(stdoutHandler, sentryHandler)
 
 	// Wrap with decorator so context extractors work for both destinations
 	return slog.New(NewLogHandlerDecorator(combinedHandler, extractors...))
