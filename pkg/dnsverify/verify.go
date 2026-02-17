@@ -29,8 +29,7 @@ func VerifyDomainOwnership(ctx context.Context, domain, projectID string) error 
 	resolver := &net.Resolver{}
 	records, err := resolver.LookupTXT(ctx, domain)
 	if err != nil {
-		var dnsErr *net.DNSError
-		if errors.As(err, &dnsErr) {
+		if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
 			if dnsErr.IsNotFound {
 				return ErrTXTRecordNotFound
 			}

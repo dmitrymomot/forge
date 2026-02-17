@@ -163,15 +163,14 @@ func ErrServiceUnavailable(message string, opts ...HTTPErrorOption) *HTTPError {
 }
 
 func IsHTTPError(err error) bool {
-	var target *HTTPError
-	return errors.As(err, &target)
+	_, ok := errors.AsType[*HTTPError](err)
+	return ok
 }
 
 // AsHTTPError extracts the HTTPError from an error if present.
 // Returns nil if the error is not an HTTPError.
 func AsHTTPError(err error) *HTTPError {
-	var target *HTTPError
-	if errors.As(err, &target) {
+	if target, ok := errors.AsType[*HTTPError](err); ok {
 		return target
 	}
 	return nil

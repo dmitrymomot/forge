@@ -18,15 +18,11 @@ func (e *PanicError) Error() string {
 
 // IsPanicError returns true if the error is a PanicError.
 func IsPanicError(err error) bool {
-	var pe *PanicError
-	return errors.As(err, &pe)
+	_, ok := errors.AsType[*PanicError](err)
+	return ok
 }
 
 // AsPanicError extracts the PanicError from an error if present.
 func AsPanicError(err error) (*PanicError, bool) {
-	var pe *PanicError
-	if errors.As(err, &pe) {
-		return pe, true
-	}
-	return nil, false
+	return errors.AsType[*PanicError](err)
 }

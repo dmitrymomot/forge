@@ -118,8 +118,7 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Struct:
-		for i := range rv.NumField() {
-			field := rv.Field(i)
+		for _, field := range rv.Fields() {
 			if field.CanSet() {
 				if err := sanitizeReflectValue(field); err != nil {
 					return err

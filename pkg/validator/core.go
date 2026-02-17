@@ -131,8 +131,7 @@ func ExtractValidationErrors(err error) ValidationErrors {
 		return nil
 	}
 
-	var validationErr ValidationErrors
-	if errors.As(err, &validationErr) {
+	if validationErr, ok := errors.AsType[ValidationErrors](err); ok {
 		return validationErr
 	}
 
@@ -144,6 +143,6 @@ func IsValidationError(err error) bool {
 		return false
 	}
 
-	var validationErr ValidationErrors
-	return errors.As(err, &validationErr)
+	_, ok := errors.AsType[ValidationErrors](err)
+	return ok
 }

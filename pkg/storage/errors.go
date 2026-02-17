@@ -31,8 +31,7 @@ var (
 // Note: Uses %v (not %w) for the original error to normalize error types -
 // callers should use errors.Is() with sentinel errors, not errors.As() for AWS types.
 func wrapS3Error(err error, fallback error) error {
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		switch apiErr.ErrorCode() {
 		case "NoSuchKey", "NotFound":
 			return fmt.Errorf("%w: %v", ErrNotFound, err)
@@ -42,8 +41,7 @@ func wrapS3Error(err error, fallback error) error {
 	}
 
 	// Check for S3 typed errors.
-	var notFound *types.NoSuchKey
-	if errors.As(err, &notFound) {
+	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
 		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 
