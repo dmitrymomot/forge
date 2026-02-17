@@ -1,6 +1,6 @@
 module github.com/dmitrymomot/forge
 
-go 1.25
+go 1.26
 
 tool (
 	github.com/dkorunic/betteralign/cmd/betteralign
