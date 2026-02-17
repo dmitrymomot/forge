@@ -6,7 +6,7 @@ body:
     id: go-version
     attributes:
       label: Go version
-      placeholder: "e.g., 1.25.7"
+      placeholder: "e.g., 1.26.0"
     validations:
       required: true
   - type: input
