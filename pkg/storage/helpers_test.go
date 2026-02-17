@@ -137,8 +137,8 @@ func TestPutFile(t *testing.T) {
 			WithValidation(MaxSize(5)), // File is 11 bytes, limit is 5
 		)
 		require.Error(t, err)
-		var verr *FileValidationError
-		require.True(t, errors.As(err, &verr))
+		verr, ok := errors.AsType[*FileValidationError](err)
+		require.True(t, ok)
 		require.Equal(t, ErrCodeFileTooLarge, verr.Code)
 	})
 
@@ -184,8 +184,8 @@ func TestPutFile(t *testing.T) {
 			WithValidation(ImageOnly()),
 		)
 		require.Error(t, err)
-		var verr *FileValidationError
-		require.True(t, errors.As(err, &verr))
+		verr, ok := errors.AsType[*FileValidationError](err)
+		require.True(t, ok)
 		require.Equal(t, ErrCodeInvalidMIME, verr.Code)
 	})
 

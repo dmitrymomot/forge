@@ -44,8 +44,8 @@ func TestMaxSize(t *testing.T) {
 
 			if tt.wantError {
 				require.Error(t, err)
-				var verr *FileValidationError
-				require.True(t, errors.As(err, &verr))
+				verr, ok := errors.AsType[*FileValidationError](err)
+				require.True(t, ok)
 				require.Equal(t, tt.wantCode, verr.Code)
 				require.Contains(t, verr.Details, "limit")
 				require.Contains(t, verr.Details, "got")
@@ -82,8 +82,8 @@ func TestMinSize(t *testing.T) {
 
 			if tt.wantError {
 				require.Error(t, err)
-				var verr *FileValidationError
-				require.True(t, errors.As(err, &verr))
+				verr, ok := errors.AsType[*FileValidationError](err)
+				require.True(t, ok)
 				require.Equal(t, tt.wantCode, verr.Code)
 				require.Contains(t, verr.Details, "minimum")
 				require.Contains(t, verr.Details, "got")
@@ -116,8 +116,8 @@ func TestNotEmpty(t *testing.T) {
 
 			if tt.wantError {
 				require.Error(t, err)
-				var verr *FileValidationError
-				require.True(t, errors.As(err, &verr))
+				verr, ok := errors.AsType[*FileValidationError](err)
+				require.True(t, ok)
 				require.Equal(t, ErrCodeEmptyFile, verr.Code)
 			} else {
 				require.NoError(t, err)
@@ -153,8 +153,8 @@ func TestAllowedTypes(t *testing.T) {
 
 			if tt.wantError {
 				require.Error(t, err)
-				var verr *FileValidationError
-				require.True(t, errors.As(err, &verr))
+				verr, ok := errors.AsType[*FileValidationError](err)
+				require.True(t, ok)
 				require.Equal(t, ErrCodeInvalidMIME, verr.Code)
 				require.Contains(t, verr.Details, "type")
 				require.Contains(t, verr.Details, "allowed")
