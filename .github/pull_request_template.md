@@ -4,7 +4,7 @@
 
 ## Checklist
 
-- [ ] `make lint` passes
-- [ ] `make test` passes
+- [ ] `just lint` passes
+- [ ] `just test` passes
 - [ ] New code has tests
 - [ ] Commit messages follow conventional commits
