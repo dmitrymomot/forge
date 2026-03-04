@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/dmitrymomot/forge/internal"
 	"github.com/dmitrymomot/forge/middlewares"
 	"github.com/dmitrymomot/forge/pkg/cookie"
@@ -477,26 +475,26 @@ func SessionSet[T any](c Context, key string, value T) error {
 
 // Job options
 
-// WithJobs enables both job enqueueing and worker processing using River.
-// A pgxpool.Pool is required for the job queue. Workers are started automatically
-// when the app runs and stopped gracefully during shutdown.
-func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
-	return internal.WithJobs(pool, cfg, opts...)
+// WithJobs enables both job enqueueing and worker processing.
+// A job.Driver is required for the job queue backend. Workers are started
+// automatically when the app runs and stopped gracefully during shutdown.
+func WithJobs(driver job.Driver, cfg job.Config, opts ...job.Option) Option {
+	return internal.WithJobs(driver, cfg, opts...)
 }
 
 // WithJobEnqueuer enables job enqueueing without worker processing.
 // Use this for web servers that dispatch work to separate worker processes.
 // Workers must be running elsewhere to process the enqueued jobs.
-func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
-	return internal.WithJobEnqueuer(pool, opts...)
+func WithJobEnqueuer(driver job.Driver, opts ...job.EnqueuerOption) Option {
+	return internal.WithJobEnqueuer(driver, opts...)
 }
 
 // WithJobWorker enables job processing without enqueueing capability.
 // Use this for dedicated background worker processes that don't need
 // to dispatch additional jobs. Workers are started automatically when
 // the app runs and stopped gracefully during shutdown.
-func WithJobWorker(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
-	return internal.WithJobWorker(pool, cfg, opts...)
+func WithJobWorker(driver job.Driver, cfg job.Config, opts ...job.Option) Option {
+	return internal.WithJobWorker(driver, cfg, opts...)
 }
 
 // Job errors for checking return values.
@@ -505,7 +503,12 @@ var (
 	ErrJobUnknownTask       = job.ErrUnknownTask
 	ErrJobInvalidPayload    = job.ErrInvalidPayload
 	ErrJobHealthcheckFailed = job.ErrHealthcheckFailed
-	ErrJobPoolRequired      = job.ErrPoolRequired
+	ErrJobDriverRequired    = job.ErrDriverRequired
+	ErrJobInvalidTx         = job.ErrInvalidTx
+
+	// ErrJobPoolRequired is kept for backward compatibility.
+	// Deprecated: Use ErrJobDriverRequired instead.
+	ErrJobPoolRequired = job.ErrPoolRequired
 )
 
 // WithSSEKeepAlive sets the interval for SSE keepalive comments.

@@ -3,9 +3,6 @@ package internal
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/dmitrymomot/forge/pkg/job"
 )
 
@@ -15,9 +12,9 @@ type JobEnqueuer struct {
 	enqueuer *job.Enqueuer
 }
 
-// NewJobEnqueuer creates a new JobEnqueuer with the given pool and options.
-func NewJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) (*JobEnqueuer, error) {
-	e, err := job.NewEnqueuer(pool, opts...)
+// NewJobEnqueuer creates a new JobEnqueuer with the given driver and options.
+func NewJobEnqueuer(driver job.Driver, opts ...job.EnqueuerOption) (*JobEnqueuer, error) {
+	e, err := job.NewEnqueuer(driver, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +27,8 @@ func (je *JobEnqueuer) Enqueue(ctx context.Context, name string, payload any, op
 }
 
 // EnqueueTx adds a job to the queue within a transaction.
-func (je *JobEnqueuer) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
+// The tx type depends on the driver (pgx.Tx for River, *sql.Tx for SQLite).
+func (je *JobEnqueuer) EnqueueTx(ctx context.Context, tx any, name string, payload any, opts ...job.EnqueueOption) error {
 	return je.enqueuer.EnqueueTx(ctx, tx, name, payload, opts...)
 }
 

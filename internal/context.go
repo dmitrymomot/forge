@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/dmitrymomot/forge/pkg/binder"
 	"github.com/dmitrymomot/forge/pkg/cookie"
@@ -287,7 +286,7 @@ type Context interface {
 	// The job is only visible after the transaction commits.
 	// Returns job.ErrSessionNotConfigured if WithJobs was not called.
 	// Returns job.ErrUnknownTask if the task name is not registered.
-	EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error
+	EnqueueTx(tx any, name string, payload any, opts ...job.EnqueueOption) error
 
 	// Storage returns the configured storage client.
 	// Returns storage.ErrSessionNotConfigured if WithStorage was not called.
@@ -934,7 +933,7 @@ func (c *requestContext) Enqueue(name string, payload any, opts ...job.EnqueueOp
 
 // EnqueueTx adds a job to the queue within a transaction.
 // The job is only visible after the transaction commits.
-func (c *requestContext) EnqueueTx(tx pgx.Tx, name string, payload any, opts ...job.EnqueueOption) error {
+func (c *requestContext) EnqueueTx(tx any, name string, payload any, opts ...job.EnqueueOption) error {
 	if c.jobEnqueuer == nil {
 		return job.ErrNotConfigured
 	}

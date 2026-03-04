@@ -3,8 +3,6 @@ package internal
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/dmitrymomot/forge/pkg/job"
 )
 
@@ -13,9 +11,9 @@ type JobManager struct {
 	manager *job.Manager
 }
 
-// NewJobManager creates a new JobManager with the given pool, config, and options.
-func NewJobManager(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) (*JobManager, error) {
-	m, err := job.NewManager(pool, cfg, opts...)
+// NewJobManager creates a new JobManager with the given driver, config, and options.
+func NewJobManager(driver job.Driver, cfg job.Config, opts ...job.Option) (*JobManager, error) {
+	m, err := job.NewManager(driver, cfg, opts...)
 	if err != nil {
 		return nil, err
 	}

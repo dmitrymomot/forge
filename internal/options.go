@@ -1,14 +1,13 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/pkg/cookie"
 	"github.com/dmitrymomot/forge/pkg/job"
@@ -165,15 +164,15 @@ func WithSession(store Store, opts ...SessionOption) Option {
 	}
 }
 
-// WithJobs enables both job enqueueing and worker processing using River.
-// A pgxpool.Pool is required for the job queue. Workers are started automatically
-// when the app runs and stopped gracefully during shutdown.
-func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
+// WithJobs enables both job enqueueing and worker processing.
+// A job.Driver is required for the job queue backend. Workers are started
+// automatically when the app runs and stopped gracefully during shutdown.
+func WithJobs(driver job.Driver, cfg job.Config, opts ...job.Option) Option {
 	return func(a *App) {
-		if err := job.Migrate(pool); err != nil {
+		if err := driver.Migrate(context.Background()); err != nil {
 			panic(fmt.Sprintf("job migrate: %v", err))
 		}
-		jm, err := NewJobManager(pool, cfg, opts...)
+		jm, err := NewJobManager(driver, cfg, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job manager: %v", err))
 		}
@@ -185,12 +184,12 @@ func WithJobs(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
 // WithJobEnqueuer enables job enqueueing without worker processing.
 // Use this for web servers that dispatch work to separate worker processes.
 // Workers must be running elsewhere to process the enqueued jobs.
-func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
+func WithJobEnqueuer(driver job.Driver, opts ...job.EnqueuerOption) Option {
 	return func(a *App) {
-		if err := job.Migrate(pool); err != nil {
+		if err := driver.Migrate(context.Background()); err != nil {
 			panic(fmt.Sprintf("job migrate: %v", err))
 		}
-		je, err := NewJobEnqueuer(pool, opts...)
+		je, err := NewJobEnqueuer(driver, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job enqueuer: %v", err))
 		}
@@ -202,12 +201,12 @@ func WithJobEnqueuer(pool *pgxpool.Pool, opts ...job.EnqueuerOption) Option {
 // Use this for dedicated background worker processes that don't need
 // to dispatch additional jobs. Workers are started automatically when
 // the app runs and stopped gracefully during shutdown.
-func WithJobWorker(pool *pgxpool.Pool, cfg job.Config, opts ...job.Option) Option {
+func WithJobWorker(driver job.Driver, cfg job.Config, opts ...job.Option) Option {
 	return func(a *App) {
-		if err := job.Migrate(pool); err != nil {
+		if err := driver.Migrate(context.Background()); err != nil {
 			panic(fmt.Sprintf("job migrate: %v", err))
 		}
-		jm, err := NewJobManager(pool, cfg, opts...)
+		jm, err := NewJobManager(driver, cfg, opts...)
 		if err != nil {
 			panic(fmt.Sprintf("job worker: %v", err))
 		}
