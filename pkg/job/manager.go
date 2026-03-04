@@ -6,40 +6,37 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"sync"
-	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/robfig/cron/v3"
 )
 
 const (
 	defaultMaxWorkers = 100
-	defaultQueue      = river.QueueDefault
+	defaultQueue      = "default"
 )
 
-// Manager handles background job processing using River.
+// Manager handles background job processing.
 // It combines enqueueing and worker processing capabilities.
 // Manager embeds Enqueuer for job enqueueing methods.
 type Manager struct {
 	*Enqueuer
-	registry *taskRegistry
-	workers  *river.Workers
-	logger   *slog.Logger
+	driver    Driver
+	registry  *taskRegistry
+	logger    *slog.Logger
+	queues    map[string]int
+	schedules []scheduleConfig
 
-	mu      sync.Mutex
-	started bool
+	maxWorkersCfg int
+	mu            sync.Mutex
+	started       bool
 }
 
-// NewManager creates a new job manager with the given config and options.
-// The River client is created immediately, allowing jobs to be enqueued
-// before Start() is called. Call Start() to begin processing jobs.
-func NewManager(pool *pgxpool.Pool, userCfg Config, opts ...Option) (*Manager, error) {
-	if pool == nil {
-		return nil, ErrPoolRequired
+// NewManager creates a new job manager with the given driver, config, and options.
+// Jobs can be enqueued immediately via the embedded Enqueuer.
+// Call Start() to begin processing jobs.
+func NewManager(driver Driver, userCfg Config, opts ...Option) (*Manager, error) {
+	if driver == nil {
+		return nil, ErrDriverRequired
 	}
 
 	cfg := newConfig()
@@ -56,64 +53,24 @@ func NewManager(pool *pgxpool.Pool, userCfg Config, opts ...Option) (*Manager, e
 		cfg.maxWorkers = defaultMaxWorkers
 	}
 
-	queues := map[string]river.QueueConfig{
-		defaultQueue: {MaxWorkers: cfg.maxWorkers},
-	}
-	for name, workers := range cfg.queues {
-		queues[name] = river.QueueConfig{MaxWorkers: workers}
-	}
-
-	var periodicJobs []*river.PeriodicJob
+	// Register scheduled task executors in the registry.
 	for _, sched := range cfg.schedules {
-		cronSchedule, err := parseCronSchedule(sched.schedule)
-		if err != nil {
-			return nil, fmt.Errorf("job: invalid cron schedule %q: %w", sched.schedule, err)
-		}
-
-		periodicJobs = append(periodicJobs, river.NewPeriodicJob(
-			cronSchedule,
-			func() (river.JobArgs, *river.InsertOpts) {
-				return &forgeTaskArgs{
-					TaskName: sched.name,
-					Payload:  nil,
-				}, nil
-			},
-			&river.PeriodicJobOpts{
-				RunOnStart: false,
-			},
-		))
-
 		cfg.registry.register(sched.name, &scheduledTaskExecutor{
 			handler: sched.handler,
 		})
 	}
 
-	workers := river.NewWorkers()
-	river.AddWorker(workers, &forgeTaskWorker{
-		registry: cfg.registry,
-		logger:   cfg.logger,
-	})
-
-	// Client created immediately, allowing enqueue() before Start().
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       queues,
-		Workers:      workers,
-		PeriodicJobs: periodicJobs,
-		Logger:       cfg.logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("job: create client: %w", err)
-	}
-
 	return &Manager{
 		Enqueuer: &Enqueuer{
-			pool:   pool,
-			client: client,
+			driver: driver,
 			logger: cfg.logger,
 		},
-		registry: cfg.registry,
-		workers:  workers,
-		logger:   cfg.logger,
+		driver:        driver,
+		registry:      cfg.registry,
+		logger:        cfg.logger,
+		queues:        cfg.queues,
+		schedules:     cfg.schedules,
+		maxWorkersCfg: cfg.maxWorkers,
 	}, nil
 }
 
@@ -128,8 +85,39 @@ func (m *Manager) Start(ctx context.Context) error {
 		return ErrAlreadyStarted
 	}
 
-	if err := m.client.Start(ctx); err != nil {
-		return fmt.Errorf("job: start client: %w", err)
+	// Build queues map for the driver.
+	queues := map[string]int{
+		defaultQueue: m.maxWorkersCfg,
+	}
+	maps.Copy(queues, m.queues)
+
+	// Build periodic jobs config.
+	var periodicJobs []PeriodicJobConfig
+	for _, sched := range m.schedules {
+		periodicJobs = append(periodicJobs, PeriodicJobConfig{
+			TaskName: sched.name,
+			Schedule: sched.schedule,
+		})
+	}
+
+	// Create executor that routes through the task registry.
+	executor := func(ctx context.Context, taskName string, payload json.RawMessage) error {
+		exec, ok := m.registry.get(taskName)
+		if !ok || exec == nil {
+			return fmt.Errorf("%w: %s", ErrUnknownTask, taskName)
+		}
+		return exec.Execute(ctx, payload)
+	}
+
+	wcfg := WorkerConfig{
+		Executor:     executor,
+		Queues:       queues,
+		PeriodicJobs: periodicJobs,
+		Logger:       m.logger,
+	}
+
+	if err := m.driver.Start(ctx, wcfg); err != nil {
+		return fmt.Errorf("job: start: %w", err)
 	}
 
 	m.started = true
@@ -150,8 +138,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 		return ErrNotStarted
 	}
 
-	if err := m.client.Stop(ctx); err != nil {
-		return fmt.Errorf("job: stop client: %w", err)
+	if err := m.driver.Stop(ctx); err != nil {
+		return fmt.Errorf("job: stop: %w", err)
 	}
 
 	m.started = false
@@ -173,62 +161,14 @@ func (m *Manager) Enqueue(ctx context.Context, name string, payload any, opts ..
 // EnqueueTx adds a job to the queue within a transaction.
 // The job is only visible after the transaction commits.
 // This ensures atomicity between database changes and job enqueueing.
+// The tx type depends on the driver (pgx.Tx for River, *sql.Tx for SQLite).
 // Jobs can be enqueued before Start() is called; they will be processed
 // once the manager starts.
-func (m *Manager) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload any, opts ...EnqueueOption) error {
+func (m *Manager) EnqueueTx(ctx context.Context, tx any, name string, payload any, opts ...EnqueueOption) error {
 	if _, ok := m.registry.get(name); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
 	}
 	return m.Enqueuer.EnqueueTx(ctx, tx, name, payload, opts...)
-}
-
-// forgeTaskArgs is the River job arguments type for all Forge tasks.
-// It uses a unified format with task name and JSON payload.
-type forgeTaskArgs struct {
-	TaskName  string          `json:"task_name"`
-	UniqueKey string          `json:"unique_key,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-}
-
-func (forgeTaskArgs) Kind() string {
-	return "forge:task"
-}
-
-// forgeTaskWorker processes all Forge tasks through the registry.
-type forgeTaskWorker struct {
-	river.WorkerDefaults[forgeTaskArgs]
-	registry *taskRegistry
-	logger   *slog.Logger
-}
-
-func (w *forgeTaskWorker) Work(ctx context.Context, job *river.Job[forgeTaskArgs]) error {
-	executor, ok := w.registry.get(job.Args.TaskName)
-	if !ok || executor == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownTask, job.Args.TaskName)
-	}
-
-	w.logger.DebugContext(ctx, "executing task",
-		slog.String("task", job.Args.TaskName),
-		slog.Int64("job_id", job.ID),
-		slog.Int("attempt", job.Attempt),
-	)
-
-	if err := executor.Execute(ctx, job.Args.Payload); err != nil {
-		w.logger.ErrorContext(ctx, "task failed",
-			slog.String("task", job.Args.TaskName),
-			slog.Int64("job_id", job.ID),
-			slog.Int("attempt", job.Attempt),
-			slog.Any("error", err),
-		)
-		return err
-	}
-
-	w.logger.DebugContext(ctx, "task completed",
-		slog.String("task", job.Args.TaskName),
-		slog.Int64("job_id", job.ID),
-	)
-
-	return nil
 }
 
 type scheduledTaskExecutor struct {
@@ -237,23 +177,6 @@ type scheduledTaskExecutor struct {
 
 func (e *scheduledTaskExecutor) Execute(ctx context.Context, _ json.RawMessage) error {
 	return e.handler(ctx)
-}
-
-type cronScheduleAdapter struct {
-	schedule cron.Schedule
-}
-
-func (a *cronScheduleAdapter) Next(current time.Time) time.Time {
-	return a.schedule.Next(current)
-}
-
-func parseCronSchedule(expr string) (river.PeriodicSchedule, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	schedule, err := parser.Parse(expr)
-	if err != nil {
-		return nil, err
-	}
-	return &cronScheduleAdapter{schedule: schedule}, nil
 }
 
 // Shutdown returns a shutdown function for the job manager.

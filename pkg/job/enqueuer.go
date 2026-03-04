@@ -6,19 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
 // Enqueuer provides job enqueueing without worker processing.
 // Use this for applications that only need to dispatch jobs to be processed
 // by separate worker processes.
 type Enqueuer struct {
-	pool   *pgxpool.Pool
-	client *river.Client[pgx.Tx]
+	driver Driver
 	logger *slog.Logger
 }
 
@@ -39,10 +33,10 @@ func WithEnqueuerLogger(l *slog.Logger) EnqueuerOption {
 }
 
 // NewEnqueuer creates a new enqueue-only client.
-// The River client is created in insert-only mode (no workers).
-func NewEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) (*Enqueuer, error) {
-	if pool == nil {
-		return nil, ErrPoolRequired
+// The driver is used directly for inserting jobs without worker processing.
+func NewEnqueuer(driver Driver, opts ...EnqueuerOption) (*Enqueuer, error) {
+	if driver == nil {
+		return nil, ErrDriverRequired
 	}
 
 	cfg := &enqueuerConfig{}
@@ -54,17 +48,8 @@ func NewEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) (*Enqueuer, error) 
 		cfg.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
-	// Create River client in insert-only mode (no Workers, no Queues)
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Logger: cfg.logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("job: create enqueuer client: %w", err)
-	}
-
 	return &Enqueuer{
-		pool:   pool,
-		client: client,
+		driver: driver,
 		logger: cfg.logger,
 	}, nil
 }
@@ -73,13 +58,12 @@ func NewEnqueuer(pool *pgxpool.Pool, opts ...EnqueuerOption) (*Enqueuer, error) 
 // The job will be executed by a registered task handler on a worker process.
 // Note: Task name validation happens on the worker side.
 func (e *Enqueuer) Enqueue(ctx context.Context, name string, payload any, opts ...EnqueueOption) error {
-	args, insertOpts, err := buildJobArgs(name, payload, opts...)
+	ji, err := buildJobInsert(name, payload, opts...)
 	if err != nil {
 		return err
 	}
 
-	_, err = e.client.Insert(ctx, args, insertOpts)
-	if err != nil {
+	if err := e.driver.Insert(ctx, ji); err != nil {
 		return fmt.Errorf("job: enqueue: %w", err)
 	}
 
@@ -89,35 +73,29 @@ func (e *Enqueuer) Enqueue(ctx context.Context, name string, payload any, opts .
 // EnqueueTx adds a job to the queue within a transaction.
 // The job is only visible after the transaction commits.
 // This ensures atomicity between database changes and job enqueueing.
-func (e *Enqueuer) EnqueueTx(ctx context.Context, tx pgx.Tx, name string, payload any, opts ...EnqueueOption) error {
-	args, insertOpts, err := buildJobArgs(name, payload, opts...)
+// The tx type depends on the driver (pgx.Tx for River, *sql.Tx for SQLite).
+func (e *Enqueuer) EnqueueTx(ctx context.Context, tx any, name string, payload any, opts ...EnqueueOption) error {
+	ji, err := buildJobInsert(name, payload, opts...)
 	if err != nil {
 		return err
 	}
 
-	_, err = e.client.InsertTx(ctx, tx, args, insertOpts)
-	if err != nil {
+	if err := e.driver.InsertTx(ctx, tx, ji); err != nil {
 		return fmt.Errorf("job: enqueue tx: %w", err)
 	}
 
 	return nil
 }
 
-// buildJobArgs creates River job arguments from the task name and payload.
-// This is shared between Enqueuer and Manager.
-func buildJobArgs(name string, payload any, opts ...EnqueueOption) (*forgeTaskArgs, *river.InsertOpts, error) {
+// buildJobInsert creates a driver-agnostic JobInsert from the task name, payload, and options.
+func buildJobInsert(name string, payload any, opts ...EnqueueOption) (*JobInsert, error) {
 	var payloadBytes json.RawMessage
 	if payload != nil {
 		var err error
 		payloadBytes, err = json.Marshal(payload)
 		if err != nil {
-			return nil, nil, fmt.Errorf("job: marshal payload: %w", err)
+			return nil, fmt.Errorf("job: marshal payload: %w", err)
 		}
-	}
-
-	args := &forgeTaskArgs{
-		TaskName: name,
-		Payload:  payloadBytes,
 	}
 
 	enqCfg := &enqueueConfig{}
@@ -125,30 +103,30 @@ func buildJobArgs(name string, payload any, opts ...EnqueueOption) (*forgeTaskAr
 		opt(enqCfg)
 	}
 
-	insertOpts := &river.InsertOpts{}
-	if enqCfg.queue != "" {
-		insertOpts.Queue = enqCfg.queue
+	ji := &JobInsert{
+		TaskName: name,
+		Payload:  payloadBytes,
+		Queue:    enqCfg.queue,
 	}
+
 	if enqCfg.scheduledAt != nil {
-		insertOpts.ScheduledAt = *enqCfg.scheduledAt
+		ji.ScheduledAt = enqCfg.scheduledAt
 	}
 	if enqCfg.maxAttempts > 0 {
-		insertOpts.MaxAttempts = enqCfg.maxAttempts
+		ji.MaxAttempts = enqCfg.maxAttempts
 	}
 	if enqCfg.priority > 0 {
-		insertOpts.Priority = enqCfg.priority
+		ji.Priority = enqCfg.priority
 	}
 	if len(enqCfg.tags) > 0 {
-		insertOpts.Tags = enqCfg.tags
+		ji.Tags = enqCfg.tags
 	}
 	if enqCfg.uniqueFor > 0 {
-		insertOpts.UniqueOpts = river.UniqueOpts{
-			ByPeriod: enqCfg.uniqueFor,
-		}
+		ji.UniqueFor = enqCfg.uniqueFor
 		if enqCfg.uniqueKey != "" {
-			args.UniqueKey = enqCfg.uniqueKey
+			ji.UniqueKey = enqCfg.uniqueKey
 		}
 	}
 
-	return args, insertOpts, nil
+	return ji, nil
 }

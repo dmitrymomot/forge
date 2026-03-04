@@ -36,9 +36,7 @@ func Healthcheck(m *Manager) func(ctx context.Context) error {
 			return errors.Join(ErrHealthcheckFailed, errManagerNotStarted)
 		}
 
-		// Pool.Ping verifies both database connectivity and River's ability
-		// to access required tables, since River uses the same pool.
-		if err := m.pool.Ping(ctx); err != nil {
+		if err := m.driver.Healthcheck(ctx); err != nil {
 			return errors.Join(ErrHealthcheckFailed, err)
 		}
 

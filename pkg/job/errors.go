@@ -24,7 +24,16 @@ var (
 	// that is not running.
 	ErrNotStarted = errors.New("job: not started")
 
-	// ErrPoolRequired is returned when attempting to create a manager
-	// or enqueuer without providing a database pool.
-	ErrPoolRequired = errors.New("job: pool is required")
+	// ErrDriverRequired is returned when attempting to create a manager
+	// or enqueuer without providing a driver.
+	ErrDriverRequired = errors.New("job: driver is required")
+
+	// ErrInvalidTx is returned when the wrong transaction type is passed
+	// to InsertTx. Each driver expects its own transaction type
+	// (e.g., pgx.Tx for River, *sql.Tx for SQLite).
+	ErrInvalidTx = errors.New("job: invalid transaction type for this driver")
+
+	// ErrPoolRequired is kept for backward compatibility.
+	// Deprecated: Use ErrDriverRequired instead.
+	ErrPoolRequired = ErrDriverRequired
 )
