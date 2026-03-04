@@ -34,3 +34,6 @@ go.work.sum
 _example
 README_TESTS.md
 TEST_REVIEW.md
+
+# Worktrees
+.worktrees/
