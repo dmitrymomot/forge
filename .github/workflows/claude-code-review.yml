@@ -3,7 +3,6 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
     paths:
       - "internal/*.go"
       - "middlewares/*.go"
@@ -12,17 +11,11 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-      issues: read
+      issues: write
       id-token: write
 
     steps:
@@ -36,8 +29,17 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
-          plugins: "code-review@claude-code-plugins"
-          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          track_progress: true
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            Focus on:
+            1. Code quality, Go idioms, and best practices
+            2. Security vulnerabilities
+            3. Performance issues
+            4. Test coverage gaps
+            5. Adherence to project conventions in CLAUDE.md
+
+            Use inline comments for specific issues. Use a top-level comment for general observations.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
