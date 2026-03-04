@@ -9,98 +9,97 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildJobArgs(t *testing.T) {
+func TestBuildJobInsert(t *testing.T) {
 	t.Parallel()
 
 	t.Run("nil payload", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil)
+		ji, err := buildJobInsert("test", nil)
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Empty(t, args.Payload)
-		assert.NotNil(t, opts)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Empty(t, ji.Payload)
 	})
 
 	t.Run("valid payload", func(t *testing.T) {
 		t.Parallel()
 
 		payload := testPayload{Message: "hello", Count: 42}
-		args, opts, err := buildJobArgs("test", payload)
+		ji, err := buildJobInsert("test", payload)
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
+		assert.Equal(t, "test", ji.TaskName)
 
 		var decoded testPayload
-		err = json.Unmarshal(args.Payload, &decoded)
+		err = json.Unmarshal(ji.Payload, &decoded)
 		require.NoError(t, err)
 		assert.Equal(t, payload, decoded)
-		assert.NotNil(t, opts)
 	})
 
 	t.Run("with queue option", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, WithQueue("email"))
+		ji, err := buildJobInsert("test", nil, WithQueue("email"))
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, "email", opts.Queue)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, "email", ji.Queue)
 	})
 
 	t.Run("with schedule option", func(t *testing.T) {
 		t.Parallel()
 
 		scheduledTime := time.Now().Add(time.Hour)
-		args, opts, err := buildJobArgs("test", nil, WithScheduledAt(scheduledTime))
+		ji, err := buildJobInsert("test", nil, WithScheduledAt(scheduledTime))
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, scheduledTime, opts.ScheduledAt)
+		assert.Equal(t, "test", ji.TaskName)
+		require.NotNil(t, ji.ScheduledAt)
+		assert.Equal(t, scheduledTime, *ji.ScheduledAt)
 	})
 
 	t.Run("with max attempts", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, WithMaxAttempts(5))
+		ji, err := buildJobInsert("test", nil, WithMaxAttempts(5))
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, 5, opts.MaxAttempts)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, 5, ji.MaxAttempts)
 	})
 
 	t.Run("with priority", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, WithPriority(10))
+		ji, err := buildJobInsert("test", nil, WithPriority(10))
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, 10, opts.Priority)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, 10, ji.Priority)
 	})
 
 	t.Run("with tags", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil, WithTags("tag1", "tag2"))
+		ji, err := buildJobInsert("test", nil, WithTags("tag1", "tag2"))
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, []string{"tag1", "tag2"}, opts.Tags)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, []string{"tag1", "tag2"}, ji.Tags)
 	})
 
 	t.Run("with unique options", func(t *testing.T) {
 		t.Parallel()
 
-		args, opts, err := buildJobArgs("test", nil,
+		ji, err := buildJobInsert("test", nil,
 			WithUniqueFor(time.Hour),
 			WithUniqueKey("custom-key"),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, "custom-key", args.UniqueKey)
-		assert.Equal(t, time.Hour, opts.UniqueOpts.ByPeriod)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, "custom-key", ji.UniqueKey)
+		assert.Equal(t, time.Hour, ji.UniqueFor)
 	})
 
 	t.Run("combined options", func(t *testing.T) {
 		t.Parallel()
 
 		payload := testPayload{Message: "test", Count: 1}
-		args, opts, err := buildJobArgs("test", payload,
+		ji, err := buildJobInsert("test", payload,
 			WithQueue("email"),
 			WithMaxAttempts(3),
 			WithPriority(5),
@@ -109,24 +108,17 @@ func TestBuildJobArgs(t *testing.T) {
 			WithUniqueKey("email:123"),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, "test", args.TaskName)
-		assert.Equal(t, "email:123", args.UniqueKey)
-		assert.Equal(t, "email", opts.Queue)
-		assert.Equal(t, 3, opts.MaxAttempts)
-		assert.Equal(t, 5, opts.Priority)
-		assert.Equal(t, []string{"urgent", "email"}, opts.Tags)
-		assert.Equal(t, time.Minute, opts.UniqueOpts.ByPeriod)
+		assert.Equal(t, "test", ji.TaskName)
+		assert.Equal(t, "email:123", ji.UniqueKey)
+		assert.Equal(t, "email", ji.Queue)
+		assert.Equal(t, 3, ji.MaxAttempts)
+		assert.Equal(t, 5, ji.Priority)
+		assert.Equal(t, []string{"urgent", "email"}, ji.Tags)
+		assert.Equal(t, time.Minute, ji.UniqueFor)
 
 		var decoded testPayload
-		err = json.Unmarshal(args.Payload, &decoded)
+		err = json.Unmarshal(ji.Payload, &decoded)
 		require.NoError(t, err)
 		assert.Equal(t, payload, decoded)
 	})
-}
-
-func TestForgeTaskArgs_Kind(t *testing.T) {
-	t.Parallel()
-
-	args := forgeTaskArgs{TaskName: "test"}
-	assert.Equal(t, "forge:task", args.Kind())
 }
