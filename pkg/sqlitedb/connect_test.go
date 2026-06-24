@@ -2,7 +2,9 @@ package sqlitedb
 
 import (
 	"context"
+	"database/sql"
 	"embed"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,6 +110,46 @@ func TestOpen_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	// ForeignKeys defaults to false (zero value), so foreign_keys=0
 	assert.Equal(t, 0, foreignKeys)
+}
+
+func TestOpen_PragmasAppliedToAllConnections(t *testing.T) {
+	t.Parallel()
+
+	// File-based (not :memory:) so a single *sql.DB can back multiple physical
+	// connections. This is the regression guard for per-connection PRAGMAs being
+	// applied to only one pooled connection.
+	dbPath := filepath.Join(t.TempDir(), "multiconn.db")
+	ctx := context.Background()
+
+	db, err := Open(ctx, Config{
+		Path:          dbPath,
+		MaxOpenConns:  2,
+		MaxIdleConns:  2,
+		BusyTimeoutMS: 7000,
+		ForeignKeys:   true,
+	})
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Pin two distinct physical connections at the same time so the pool is
+	// forced to open a second one; holding both prevents reuse of the first.
+	conn1, err := db.Conn(ctx)
+	require.NoError(t, err)
+	defer conn1.Close()
+
+	conn2, err := db.Conn(ctx)
+	require.NoError(t, err)
+	defer conn2.Close()
+
+	for i, c := range []*sql.Conn{conn1, conn2} {
+		var foreignKeys int
+		require.NoError(t, c.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys))
+		require.Equalf(t, 1, foreignKeys, "foreign_keys must be enabled on connection %d", i+1)
+
+		var busyTimeout int
+		require.NoError(t, c.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout))
+		require.Equalf(t, 7000, busyTimeout, "busy_timeout must be set on connection %d", i+1)
+	}
 }
 
 func TestOpen_WithMigrations(t *testing.T) {

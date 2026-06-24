@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
@@ -71,7 +72,7 @@ func Open(ctx context.Context, cfg Config, opts ...Option) (*sql.DB, error) {
 		opt(o)
 	}
 
-	db, err := sql.Open("sqlite", cfg.Path)
+	db, err := sql.Open("sqlite", buildDSN(&cfg))
 	if err != nil {
 		return nil, errors.Join(ErrOpenFailed, err)
 	}
@@ -79,11 +80,9 @@ func Open(ctx context.Context, cfg Config, opts ...Option) (*sql.DB, error) {
 	db.SetMaxOpenConns(cfg.MaxOpenConns)
 	db.SetMaxIdleConns(cfg.MaxIdleConns)
 
-	if err := applyPragmas(ctx, db, &cfg); err != nil {
-		db.Close()
-		return nil, errors.Join(ErrOpenFailed, err)
-	}
-
+	// PingContext forces the pool to open a connection, which makes the driver
+	// apply the _pragma DSN parameters and surfaces any invalid PRAGMA value
+	// eagerly instead of on first query.
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, errors.Join(ErrOpenFailed, err)
@@ -132,27 +131,37 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
-// applyPragmas executes PRAGMAs in the correct order.
-// journal_mode must be set first, before other PRAGMAs.
-func applyPragmas(ctx context.Context, db *sql.DB, cfg *Config) error {
+// buildDSN constructs the SQLite connection string with all per-connection
+// PRAGMAs encoded as _pragma query parameters.
+//
+// The modernc.org/sqlite driver applies _pragma parameters on every connection
+// it opens (see applyQueryParams in the driver), so the settings hold for the
+// whole pool. Running PRAGMA statements against the *sql.DB pool instead would
+// only configure a single arbitrary connection, leaving any additional
+// connections opened under MaxOpenConns > 1 on driver defaults (foreign_keys
+// off, busy_timeout 0, etc.). journal_mode is included here too: for WAL it is
+// idempotent (and also persists in the file header), and for per-connection
+// journal modes it keeps every pooled connection configured identically.
+func buildDSN(cfg *Config) string {
 	fk := 0
 	if cfg.ForeignKeys {
 		fk = 1
 	}
 
 	pragmas := []string{
-		fmt.Sprintf("PRAGMA journal_mode=%s", cfg.JournalMode),
-		fmt.Sprintf("PRAGMA synchronous=%s", cfg.Synchronous),
-		fmt.Sprintf("PRAGMA cache_size=%d", cfg.CacheSize),
-		fmt.Sprintf("PRAGMA busy_timeout=%d", cfg.BusyTimeoutMS),
-		fmt.Sprintf("PRAGMA foreign_keys=%d", fk),
+		fmt.Sprintf("_pragma=journal_mode(%s)", cfg.JournalMode),
+		fmt.Sprintf("_pragma=busy_timeout(%d)", cfg.BusyTimeoutMS),
+		fmt.Sprintf("_pragma=synchronous(%s)", cfg.Synchronous),
+		fmt.Sprintf("_pragma=cache_size(%d)", cfg.CacheSize),
+		fmt.Sprintf("_pragma=foreign_keys(%d)", fk),
 	}
 
-	for _, p := range pragmas {
-		if _, err := db.ExecContext(ctx, p); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
+	// Append to any query string the caller already supplied (e.g. a file: URI
+	// DSN). The path itself is passed to SQLite verbatim, so ":memory:" and
+	// plain file paths both work without escaping.
+	sep := "?"
+	if strings.ContainsRune(cfg.Path, '?') {
+		sep = "&"
 	}
-
-	return nil
+	return cfg.Path + sep + strings.Join(pragmas, "&")
 }
