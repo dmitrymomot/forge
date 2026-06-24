@@ -3,6 +3,7 @@ package storage_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -213,6 +214,98 @@ func TestS3Integration_Put(t *testing.T) {
 		require.ErrorAs(t, err, &verr)
 		require.Equal(t, storage.ErrCodeInvalidMIME, verr.Code)
 	})
+
+	t.Run("oversized non-seekable body rejected without full buffering", func(t *testing.T) {
+		t.Parallel()
+
+		// A non-seekable reader (plain io.Reader, not io.ReadSeeker) that would
+		// produce far more bytes than the MaxSize limit. If the limit were only
+		// enforced after buffering, all of these bytes would be read into memory.
+		const maxBytes = 1024
+		const total = 8 << 20 // 8MB, far over the limit
+		counted := &countingReader{r: io.LimitReader(zeroReader{}, total)}
+
+		// Wrong size hint on purpose; the stream must still be rejected.
+		_, err := s.Put(ctx, onlyReader{counted}, total,
+			storage.WithContentType("application/octet-stream"),
+			storage.WithValidation(storage.MaxSize(maxBytes)),
+		)
+		require.Error(t, err)
+		var verr *storage.FileValidationError
+		require.ErrorAs(t, err, &verr)
+		require.Equal(t, storage.ErrCodeFileTooLarge, verr.Code)
+		require.True(t, errors.Is(err, storage.ErrFileTooLarge))
+
+		// Only up to maxBytes+1 should have been consumed, proving we did not
+		// buffer the entire 8MB body before rejecting it.
+		require.LessOrEqual(t, counted.n, int64(maxBytes+1))
+	})
+
+	t.Run("non-seekable body size reflects actual bytes not size hint", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("actual buffered content")
+		// Pass a deliberately wrong (too-large) size hint; FileInfo.Size must
+		// reflect the real buffered length once the body is read into memory.
+		info, err := s.Put(ctx, onlyReader{bytes.NewReader(data)}, 9999,
+			storage.WithContentType("text/plain"),
+		)
+		require.NoError(t, err)
+		require.Equal(t, int64(len(data)), info.Size)
+
+		t.Cleanup(func() { _ = s.Delete(ctx, info.Key) })
+	})
+
+	t.Run("multi-segment prefix preserved in key", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte("nested prefix content")
+		info, err := s.Put(ctx, bytes.NewReader(data), int64(len(data)),
+			storage.WithTenant("tenantX"),
+			storage.WithPrefix("users/avatars"),
+		)
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(info.Key, "tenantX/users/avatars/"),
+			"key %q should preserve all prefix segments", info.Key)
+
+		// Round-trip: the object must be retrievable under that exact key.
+		rc, err := s.Get(ctx, info.Key)
+		require.NoError(t, err)
+		got, err := io.ReadAll(rc)
+		require.NoError(t, rc.Close())
+		require.NoError(t, err)
+		require.Equal(t, data, got)
+
+		t.Cleanup(func() { _ = s.Delete(ctx, info.Key) })
+	})
+}
+
+// onlyReader hides any io.ReadSeeker/io.WriterTo methods of the underlying
+// reader, forcing the storage layer down its non-seekable buffering path.
+type onlyReader struct{ r io.Reader }
+
+func (o onlyReader) Read(p []byte) (int, error) { return o.r.Read(p) }
+
+// zeroReader yields an endless stream of zero bytes.
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// countingReader records how many bytes were read from the wrapped reader.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 func TestS3Integration_Get(t *testing.T) {

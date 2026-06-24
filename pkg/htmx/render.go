@@ -2,6 +2,7 @@ package htmx
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -14,7 +15,14 @@ type Renderable interface {
 }
 
 // Config holds HTMX render configuration.
-// Exported so internal/context.go can access OOB components.
+//
+// The fields are intentionally exported. internal/context.go's Render path
+// builds a *Config via NewConfig and then needs to iterate OOBComponents to
+// render out-of-band components after the main component (see
+// internal/context.go Render); the response-header fields are read by
+// ApplyHeaders. The supported way to populate a Config is through NewConfig
+// plus the With* options, which are append-safe (e.g. WithOOB, WithTrigger);
+// direct field mutation is possible but not the intended usage.
 type Config struct {
 	OOBComponents       []Renderable
 	Retarget            string
@@ -65,17 +73,50 @@ func (c *Config) ApplyHeaders(w http.ResponseWriter) {
 		h.Set(HeaderHXReplaceURL, c.ReplaceURL)
 	}
 	if len(c.Triggers) > 0 {
-		h.Set(HeaderHXTrigger, strings.Join(c.Triggers, ", "))
+		h.Set(HeaderHXTrigger, encodeTriggers(c.Triggers))
 	}
 	if len(c.TriggersAfterSwap) > 0 {
-		h.Set(HeaderHXTriggerAfterSwap, strings.Join(c.TriggersAfterSwap, ", "))
+		h.Set(HeaderHXTriggerAfterSwap, encodeTriggers(c.TriggersAfterSwap))
 	}
 	if len(c.TriggersAfterSettle) > 0 {
-		h.Set(HeaderHXTriggerAfterSettle, strings.Join(c.TriggersAfterSettle, ", "))
+		h.Set(HeaderHXTriggerAfterSettle, encodeTriggers(c.TriggersAfterSettle))
 	}
 	if c.Refresh {
 		h.Set(HeaderHXRefresh, "true")
 	}
+}
+
+// encodeTriggers serializes event names into an HX-Trigger header value.
+//
+// HTMX accepts two header forms: a comma-separated list of event names, or a
+// JSON object mapping event names to detail values. The list form is ambiguous
+// when a name itself contains a comma, so in that case the JSON object form is
+// emitted (names map to null details) to preserve each name verbatim. Otherwise
+// the simpler comma-separated form is used.
+func encodeTriggers(events []string) string {
+	hasComma := false
+	for _, e := range events {
+		if strings.Contains(e, ",") {
+			hasComma = true
+			break
+		}
+	}
+
+	if !hasComma {
+		return strings.Join(events, ", ")
+	}
+
+	obj := make(map[string]any, len(events))
+	for _, e := range events {
+		obj[e] = nil
+	}
+	if data, err := json.Marshal(obj); err == nil {
+		return string(data)
+	}
+
+	// json.Marshal of map[string]any with nil values cannot fail; fall back to
+	// the list form only as a defensive last resort.
+	return strings.Join(events, ", ")
 }
 
 // WithOOB appends out-of-band components to render after the main component.

@@ -213,10 +213,40 @@ func TestVerifySignature(t *testing.T) {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
+}
+
+func TestVerifySignature_FutureTimestampRejectedWithoutMaxAge(t *testing.T) {
+	t.Parallel()
+
+	secret := "future_ts_secret"
+	payload := []byte(`{"event":"future"}`)
+
+	valid, err := webhook.SignPayload(secret, payload)
+	require.NoError(t, err)
+
+	// A signature far in the future is always suspicious (clock manipulation /
+	// forged future-dated signature) and must be rejected even when maxAge<=0
+	// disables the "too old" replay window.
+	future := webhook.SignatureHeaders{
+		Signature: valid.Signature,
+		Timestamp: time.Now().Add(2 * time.Hour).Unix(),
+		ID:        valid.ID,
+	}
+
+	for _, maxAge := range []time.Duration{0, -1 * time.Minute, -1 * time.Hour} {
+		err := webhook.VerifySignature(secret, payload, future, maxAge)
+		require.Error(t, err, "future timestamp must be rejected for maxAge=%v", maxAge)
+		require.ErrorIs(t, err, webhook.ErrInvalidConfiguration)
+		require.Contains(t, err.Error(), "signature timestamp is in the future")
+	}
+
+	// A current, correctly-signed payload still verifies with maxAge<=0 (the
+	// future check tolerates clock skew up to one minute).
+	require.NoError(t, webhook.VerifySignature(secret, payload, valid, 0))
 }
 
 func TestExtractSignatureHeaders(t *testing.T) {

@@ -68,21 +68,46 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		opt(o)
 	}
 
+	// When the reader is not seekable we must buffer it to satisfy the AWS SDK
+	// (which needs an io.ReadSeeker). Enforce the smallest MaxSize rule (if any)
+	// while buffering via io.LimitReader so an oversized non-seekable body is
+	// rejected without reading it all into memory.
+	maxBytes := maxBytesFromRules(o.validationRules)
+
 	var contentType string
 	var body io.ReadSeeker
+	// buffered tracks the actual number of bytes when we read the reader into
+	// memory; -1 means the body was passed through without buffering (seekable),
+	// so the caller-supplied size remains authoritative.
+	buffered := int64(-1)
+
 	if o.contentType != "" {
 		contentType = o.contentType
 		if rs, ok := r.(io.ReadSeeker); ok {
 			body = rs
 		} else {
-			data, err := io.ReadAll(r)
+			data, err := readLimited(r, maxBytes)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read input: %w", err)
+				return nil, err
 			}
 			body = bytes.NewReader(data)
+			buffered = int64(len(data))
 		}
+	} else if rs, ok := r.(io.ReadSeeker); ok {
+		contentType, body = detectMIMEWithReader(rs)
 	} else {
-		contentType, body = detectMIMEWithReader(r)
+		// Non-seekable: buffer with the size guard, then sniff the buffered bytes.
+		data, err := readLimited(r, maxBytes)
+		if err != nil {
+			return nil, err
+		}
+		contentType, body = detectMIMEWithReader(bytes.NewReader(data))
+		buffered = int64(len(data))
+	}
+
+	// The actual byte count is authoritative once we have buffered the body.
+	if buffered >= 0 {
+		size = buffered
 	}
 
 	// Run validation if rules present.
@@ -94,7 +119,7 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 
 	key := o.key
 	if key == "" {
-		key = s.buildKey(o.tenant, o.prefix, contentType)
+		key = s.buildKey(o.tenant, o.prefix, contentType, o.filenameExt)
 	}
 
 	var acl types.ObjectCannedACL
@@ -124,6 +149,47 @@ func (s *S3Storage) Put(ctx context.Context, r io.Reader, size int64, opts ...Op
 		ContentType: contentType,
 		ACL:         o.acl,
 	}, nil
+}
+
+// readLimited reads r fully into memory. When maxBytes >= 0 it reads at most
+// maxBytes+1 bytes so an oversize body can be detected and rejected (with a
+// *FileValidationError) without buffering the entire stream.
+func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes < 0 {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read input: %w", err)
+		}
+		return data, nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, &FileValidationError{
+			Field:   "file",
+			Code:    ErrCodeFileTooLarge,
+			Message: fmt.Sprintf("file size exceeds limit of %d bytes", maxBytes),
+			Details: map[string]any{"limit": maxBytes},
+		}
+	}
+	return data, nil
+}
+
+// maxBytesFromRules returns the smallest MaxSize limit across the rules, or -1
+// when no MaxSize rule is present.
+func maxBytesFromRules(rules []ValidationRule) int64 {
+	limit := int64(-1)
+	for _, rule := range rules {
+		if mr, ok := rule.(*maxSizeRule); ok {
+			if limit < 0 || mr.maxBytes < limit {
+				limit = mr.maxBytes
+			}
+		}
+	}
+	return limit
 }
 
 // Get retrieves a file from S3.
@@ -179,17 +245,24 @@ func (s *S3Storage) URL(ctx context.Context, key string, opts ...URLOption) (str
 
 // buildKey constructs a storage key from tenant, prefix, and content type.
 // Format: {tenant}/{prefix}/{ulid}.{ext}
-func (s *S3Storage) buildKey(tenant, prefix, contentType string) string {
+//
+// filenameExt is an optional sanitized extension hint (e.g. ".pdf") derived from
+// a source filename; it is only used when the content type does not map to a
+// known extension, so content-based detection still wins.
+func (s *S3Storage) buildKey(tenant, prefix, contentType, filenameExt string) string {
 	var parts []string
 
 	if tenant != "" {
 		parts = append(parts, sanitizePathSegment(tenant))
 	}
-	if prefix != "" {
-		parts = append(parts, sanitizePathSegment(prefix))
+	if seg := sanitizePathPrefix(prefix); seg != "" {
+		parts = append(parts, seg)
 	}
 
 	ext := ExtFromMIME(contentType)
+	if ext == "" {
+		ext = filenameExt
+	}
 	if ext == "" {
 		ext = ".bin"
 	}
@@ -245,6 +318,29 @@ func (s *S3Storage) signedURL(ctx context.Context, key string, opts *urlOptions)
 
 // pathSegmentRegex matches characters that are not safe for path segments.
 var pathSegmentRegex = regexp.MustCompile(`[^a-zA-Z0-9\-_.]`)
+
+// sanitizePathPrefix sanitizes a (possibly multi-segment) prefix while
+// preserving its '/' separators, so a prefix like "users/avatars" yields
+// "users/avatars" rather than collapsing into a single sanitized segment.
+// Each segment is individually sanitized and empty segments are dropped.
+func sanitizePathPrefix(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+
+	rawSegments := strings.FieldsFunc(prefix, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+
+	clean := make([]string, 0, len(rawSegments))
+	for _, seg := range rawSegments {
+		if s := sanitizePathSegment(seg); s != "" {
+			clean = append(clean, s)
+		}
+	}
+
+	return strings.Join(clean, "/")
+}
 
 // sanitizePathSegment removes potentially dangerous characters from path segments.
 // This prevents path traversal attacks and ensures safe S3 keys.

@@ -3,11 +3,16 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -44,10 +49,20 @@ func PutFile(ctx context.Context, s Storage, fh *multipart.FileHeader, opts ...O
 }
 
 // PutBytes uploads byte data to storage.
-// The filename is used to help with key generation but MIME type is detected from content.
+// The filename is used to seed the generated key's extension and the
+// Content-Disposition-friendly name when no explicit content type or key is
+// provided; the MIME type itself is always detected from content, not the
+// filename. Caller-supplied options take precedence over the filename hint.
 func PutBytes(ctx context.Context, s Storage, data []byte, filename string, opts ...Option) (*FileInfo, error) {
 	if len(data) == 0 {
 		return nil, ErrEmptyFile
+	}
+
+	// Seed the key extension from the filename so the generated key keeps a
+	// sensible suffix even when content sniffing is inconclusive. This is
+	// prepended so explicit caller options still win.
+	if ext := extFromFilename(filename); ext != "" {
+		opts = append([]Option{withFilenameExt(ext)}, opts...)
 	}
 
 	r := bytes.NewReader(data)
@@ -59,6 +74,20 @@ func PutBytes(ctx context.Context, s Storage, data []byte, filename string, opts
 // Returns ErrInvalidURL for malformed URLs.
 // Returns ErrDownloadTooLarge if the file exceeds maxSize.
 // Returns ErrDownloadFailed for network or HTTP errors.
+//
+// # Trust boundary (SSRF)
+//
+// sourceURL is treated as untrusted. By default PutFromURL refuses to connect
+// to private, loopback, link-local, or unspecified addresses, so a caller
+// passing an attacker-controlled URL cannot coerce the server into requesting
+// internal endpoints (cloud metadata, localhost services, RFC1918 hosts). The
+// check is enforced at dial time on the resolved IP, which also defends against
+// DNS-rebinding (a public hostname that resolves to a private IP). Returns
+// ErrDownloadFailed (wrapping ErrBlockedAddress) when a blocked destination is
+// reached.
+//
+// Callers that legitimately need to fetch from internal URLs (e.g. trusted
+// service-to-service transfers) can opt out with WithAllowPrivateURL.
 func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64, opts ...Option) (*FileInfo, error) {
 	parsed, err := url.Parse(sourceURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -69,6 +98,11 @@ func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64,
 		maxSize = DefaultMaxDownloadSize
 	}
 
+	o := &putOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidURL, err)
@@ -77,8 +111,16 @@ func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64,
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
+	if !o.allowPrivateURL {
+		client.Transport = ssrfSafeTransport()
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		// Preserve the blocked-address cause so callers can distinguish an SSRF
+		// rejection from a generic network failure via errors.Is.
+		if errors.Is(err, ErrBlockedAddress) {
+			return nil, fmt.Errorf("%w: %w", ErrDownloadFailed, ErrBlockedAddress)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrDownloadFailed, err)
 	}
 	if resp == nil || resp.Body == nil {
@@ -111,4 +153,65 @@ func PutFromURL(ctx context.Context, s Storage, sourceURL string, maxSize int64,
 	}
 
 	return s.Put(ctx, bytes.NewReader(data), int64(len(data)), opts...)
+}
+
+// ssrfSafeTransport returns an http.Transport whose dialer rejects connections
+// to private, loopback, link-local, or unspecified IP addresses. The check runs
+// on the address actually resolved/dialed, so it also blocks DNS-rebinding
+// where a public hostname resolves to an internal IP.
+func ssrfSafeTransport() *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrBlockedAddress, err)
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || isBlockedIP(ip) {
+				return fmt.Errorf("%w: %s", ErrBlockedAddress, host)
+			}
+			return nil
+		},
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = dialer.DialContext
+	return transport
+}
+
+// isBlockedIP reports whether an IP is in a range that must not be reachable
+// from a user-supplied URL (SSRF protection). It blocks loopback, private
+// (RFC1918 / RFC4193), link-local, and unspecified addresses, plus the IPv4
+// cloud-metadata mapping behind IPv4-in-IPv6.
+func isBlockedIP(ip net.IP) bool {
+	// Normalize IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) to IPv4 so the
+	// range checks below apply uniformly.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified()
+}
+
+// extFromFilename extracts a sanitized lowercase extension (including the dot)
+// from a filename, e.g. "photo.JPG" -> ".jpg". Returns "" when there is no
+// usable extension.
+func extFromFilename(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
+	if ext == "" || ext == "." {
+		return ""
+	}
+	// Only allow simple, safe extensions to avoid smuggling path/control
+	// characters into the generated key.
+	for _, r := range ext[1:] {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') {
+			return ""
+		}
+	}
+	return ext
 }

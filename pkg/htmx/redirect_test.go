@@ -205,15 +205,93 @@ func TestRedirectBack(t *testing.T) {
 		assert.Equal(t, "/first", rec.Header().Get("HX-Redirect"))
 	})
 
-	t.Run("handles absolute URLs in redirect parameter", func(t *testing.T) {
+	t.Run("rejects external absolute URL and falls back", func(t *testing.T) {
 		t.Parallel()
 
+		// An absolute URL with scheme+host is an open-redirect target and must
+		// be replaced with the fallback rather than honored.
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/test?redirect=https://example.com", nil)
+		req := httptest.NewRequest(http.MethodGet, "/test?redirect=https://evil.com/phish", nil)
 		req.Header.Set("HX-Request", "true")
 
 		htmx.RedirectBack(rec, req, "/fallback")
 
-		assert.Equal(t, "https://example.com", rec.Header().Get("HX-Redirect"))
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("rejects protocol-relative URL and falls back", func(t *testing.T) {
+		t.Parallel()
+
+		// "//evil.com" is protocol-relative and navigates cross-origin despite
+		// starting with a slash, so it must fall back to the safe default.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test?redirect=//evil.com/phish", nil)
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("rejects backslash protocol-relative URL and falls back", func(t *testing.T) {
+		t.Parallel()
+
+		// Some browsers normalize "/\evil.com" into "//evil.com".
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/\\evil.com")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("rejects scheme-relative target without leading slash", func(t *testing.T) {
+		t.Parallel()
+
+		// A bare host or scheme-bearing value not rooted at "/" is unsafe.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "evil.com/phish")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("rejects target with control characters and falls back", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/path\r\nSet-Cookie: x=y")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("allows safe relative path with query and fragment", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/dashboard/orders?status=open#top")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/dashboard/orders?status=open#top", rec.Header().Get("HX-Redirect"))
 	})
 }

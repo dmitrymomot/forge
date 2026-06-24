@@ -14,6 +14,8 @@ import (
 )
 
 func TestIPv6SecurityCases(t *testing.T) {
+	t.Parallel()
+
 	t.Run("ipv6_zone_identifiers", func(t *testing.T) {
 		testIPv6ZoneIdentifiers(t)
 	})
@@ -83,7 +85,7 @@ func testIPv6ZoneIdentifiers(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -110,7 +112,7 @@ func testIPv6ZoneIdentifiers(t *testing.T) {
 				req := createTestRequest(headers, "127.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, validIP, ip, "Valid IPv6 should be accepted: %s", validIP)
+				require.Equal(t, validIP, ip, "Valid IPv6 should be accepted: %s", validIP)
 			})
 		}
 	})
@@ -162,7 +164,7 @@ func testIPv6EmbeddingAttacks(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -200,7 +202,7 @@ func testIPv6EmbeddingAttacks(t *testing.T) {
 				req := createTestRequest(headers, "127.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -244,7 +246,7 @@ func testIPv6EmbeddingAttacks(t *testing.T) {
 				req := createTestRequest(headers, "::1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -296,7 +298,7 @@ func testIPv6FormatConfusion(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -346,7 +348,7 @@ func testIPv6FormatConfusion(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -396,7 +398,7 @@ func testIPv6FormatConfusion(t *testing.T) {
 				req := createTestRequest(headers, "[::1]:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -442,7 +444,7 @@ func testIPv6AddressValidation(t *testing.T) {
 				req := createTestRequest(headers, "127.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -465,7 +467,7 @@ func testIPv6AddressValidation(t *testing.T) {
 		ip := clientip.GetIP(req)
 		duration := time.Since(start)
 
-		assert.Equal(t, "2001:db8::", ip, "Should find first valid IPv6") // Go compresses ::0 to ::
+		require.Equal(t, "2001:db8::", ip, "Should find first valid IPv6") // Go compresses ::0 to ::
 		assert.Less(t, duration, 50*time.Millisecond, "IPv6 processing should be efficient")
 
 		t.Logf("Processed %d IPv6 addresses in %v", len(longIPv6Chain), duration)
@@ -473,6 +475,8 @@ func testIPv6AddressValidation(t *testing.T) {
 }
 
 func TestMalformedInputHandling(t *testing.T) {
+	t.Parallel()
+
 	t.Run("malformed_remote_addr", func(t *testing.T) {
 		testMalformedRemoteAddr(t)
 	})
@@ -495,7 +499,7 @@ func testMalformedRemoteAddr(t *testing.T) {
 
 		ip := clientip.GetIP(req)
 
-		assert.Equal(t, "192.168.1.100", ip, "Should parse RemoteAddr directly when SplitHostPort fails")
+		require.Equal(t, "192.168.1.100", ip, "Should parse RemoteAddr directly when SplitHostPort fails")
 	})
 
 	t.Run("ipv6_remote_addr_without_brackets", func(t *testing.T) {
@@ -505,7 +509,7 @@ func testMalformedRemoteAddr(t *testing.T) {
 		req.RemoteAddr = "::1" // IPv6 without brackets or port
 
 		ip := clientip.GetIP(req)
-		assert.Equal(t, "::1", ip, "Should handle IPv6 without brackets in RemoteAddr")
+		require.Equal(t, "::1", ip, "Should handle IPv6 without brackets in RemoteAddr")
 	})
 
 	t.Run("completely_invalid_remote_addr", func(t *testing.T) {
@@ -551,7 +555,7 @@ func testMalformedRemoteAddr(t *testing.T) {
 				req.RemoteAddr = tt.remoteAddr
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -559,22 +563,29 @@ func testMalformedRemoteAddr(t *testing.T) {
 	t.Run("remote_addr_with_invalid_port", func(t *testing.T) {
 		t.Parallel()
 
-		invalidPortAddrs := []string{
-			"192.168.1.1:invalid-port",
-			"192.168.1.1:99999", // Port out of range
-			"192.168.1.1:-1",    // Negative port
-			"[::1]:invalid",     // IPv6 with invalid port
+		// net.SplitHostPort splits on the final colon without validating the
+		// port, so the host portion is still extracted and parsed for all of
+		// these, yielding the validated/normalized client IP.
+		invalidPortAddrs := []struct {
+			addr     string
+			expected string
+		}{
+			{"192.168.1.1:invalid-port", "192.168.1.1"},
+			{"192.168.1.1:99999", "192.168.1.1"}, // Port out of range
+			{"192.168.1.1:-1", "192.168.1.1"},    // Negative port
+			{"[::1]:invalid", "::1"},             // IPv6 with invalid port
 		}
 
-		for i, addr := range invalidPortAddrs {
+		for i, tc := range invalidPortAddrs {
 			t.Run(fmt.Sprintf("invalid_port_%d", i), func(t *testing.T) {
 				t.Parallel()
 
 				req := httptest.NewRequest("GET", "/", nil)
-				req.RemoteAddr = addr
+				req.RemoteAddr = tc.addr
 
 				ip := clientip.GetIP(req)
-				t.Logf("RemoteAddr %s resulted in IP: %s", addr, ip)
+				require.Equal(t, tc.expected, ip,
+					"RemoteAddr %s should resolve to host %s despite the invalid port", tc.addr, tc.expected)
 			})
 		}
 	})
@@ -619,7 +630,7 @@ func testMalformedHeaderValues(t *testing.T) {
 				ip := clientip.GetIP(req)
 				duration := time.Since(start)
 
-				assert.Equal(t, tt.expected, ip, "Should handle long malformed headers")
+				require.Equal(t, tt.expected, ip, "Should handle long malformed headers")
 				assert.Less(t, duration, 10*time.Millisecond, "Should process long headers quickly")
 			})
 		}
@@ -645,7 +656,7 @@ func testMalformedHeaderValues(t *testing.T) {
 				req := createTestRequest(headers, "127.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, "127.0.0.1", ip, "Should handle binary data gracefully")
+				require.Equal(t, "127.0.0.1", ip, "Should handle binary data gracefully")
 			})
 		}
 	})
@@ -695,7 +706,7 @@ func testMalformedHeaderValues(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -730,10 +741,12 @@ func testEdgeCaseInputs(t *testing.T) {
 				desc:     "Octal-looking numbers should be handled carefully",
 			},
 			{
-				name:     "leading_zeros",
-				header:   "192.168.001.001", // Leading zeros
-				expected: "192.168.001.001", // May be accepted depending on parseIP implementation
-				desc:     "Leading zeros handling should be consistent",
+				name:   "leading_zeros",
+				header: "192.168.001.001", // Leading zeros
+				// net.ParseIP rejects IPv4 octets with leading zeros (Go 1.17+),
+				// so this header is treated as invalid and GetIP falls back to RemoteAddr.
+				expected: "10.0.0.1",
+				desc:     "Leading-zero octets are rejected and fall back to RemoteAddr",
 			},
 		}
 
@@ -746,12 +759,12 @@ func testEdgeCaseInputs(t *testing.T) {
 				}
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
-				ip := clientip.GetIP(req)
-				t.Logf("Input: %s, Output: %s", tt.header, ip)
-
 				require.NotPanics(t, func() {
 					clientip.GetIP(req)
 				}, "Should not panic on numeric edge cases")
+
+				ip := clientip.GetIP(req)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -806,7 +819,7 @@ func testEdgeCaseInputs(t *testing.T) {
 				req := createTestRequest(tt.headers, "127.0.0.1:8080")
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -834,10 +847,12 @@ func testEdgeCaseInputs(t *testing.T) {
 				ip := clientip.GetIP(req)
 				duration := time.Since(start)
 
-				assert.True(t,
+				require.True(t,
 					ip == "203.0.113.1" || ip == "2001:db8::1" || ip == "10.0.0.1",
 					"Should find valid IP or fall back")
-				assert.Less(t, duration, 100*time.Millisecond,
+				// Generous upper bound: catches pathological O(n^2) blowups while
+				// tolerating -race instrumentation and loaded CI on a 10k-element chain.
+				assert.Less(t, duration, 2*time.Second,
 					"Should process malformed inputs efficiently")
 
 				t.Logf("Processed malformed input %d in %v, result: %s", i, duration, ip)

@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/clientip"
 )
 
 func TestSecurityAttackVectors(t *testing.T) {
+	t.Parallel()
+
 	t.Run("header_injection_attacks", func(t *testing.T) {
 		testHeaderInjectionAttacks(t)
 	})
@@ -97,12 +100,12 @@ func testHeaderInjectionAttacks(t *testing.T) {
 
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 
-				assert.NotContains(t, ip, "\r", "Result should not contain CR character")
-				assert.NotContains(t, ip, "\n", "Result should not contain LF character")
-				assert.NotContains(t, ip, "\x00", "Result should not contain null bytes")
-				assert.NotContains(t, ip, "\t", "Result should not contain tab characters")
+				require.NotContains(t, ip, "\r", "Result should not contain CR character")
+				require.NotContains(t, ip, "\n", "Result should not contain LF character")
+				require.NotContains(t, ip, "\x00", "Result should not contain null bytes")
+				require.NotContains(t, ip, "\t", "Result should not contain tab characters")
 			})
 		}
 	})
@@ -121,7 +124,7 @@ func testHeaderInjectionAttacks(t *testing.T) {
 		ip := clientip.GetIP(req)
 		duration := time.Since(start)
 
-		assert.Equal(t, "10.0.0.1", ip, "Should fall back to RemoteAddr for extremely long headers")
+		require.Equal(t, "10.0.0.1", ip, "Should fall back to RemoteAddr for extremely long headers")
 		assert.Less(t, duration, 10*time.Millisecond, "Should process long headers quickly")
 	})
 
@@ -164,7 +167,7 @@ func testHeaderInjectionAttacks(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -233,7 +236,7 @@ func testIPSpoofingScenarios(t *testing.T) {
 				req := createTestRequest(tt.headers, "10.0.0.1:8080")
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -277,7 +280,7 @@ func testIPSpoofingScenarios(t *testing.T) {
 				req := createTestRequest(tt.headers, "127.0.0.1:8080")
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -299,7 +302,7 @@ func testDoSAttackVectors(t *testing.T) {
 		ip := clientip.GetIP(req)
 		duration := time.Since(start)
 
-		assert.Equal(t, "203.0.113.1", ip, "Should find valid IP even in very long chain")
+		require.Equal(t, "203.0.113.1", ip, "Should find valid IP even in very long chain")
 		assert.Less(t, duration, 500*time.Millisecond, "Should process long chains within reasonable time")
 
 		t.Logf("Processed chain of %d IPs in %v", chainLength, duration)
@@ -324,7 +327,7 @@ func testDoSAttackVectors(t *testing.T) {
 		ip := clientip.GetIP(req)
 		duration := time.Since(start)
 
-		assert.Equal(t, "203.0.113.1", ip, "Should extract IP despite many large headers")
+		require.Equal(t, "203.0.113.1", ip, "Should extract IP despite many large headers")
 		assert.Less(t, duration, 10*time.Millisecond, "Should not be slowed down by irrelevant large headers")
 	})
 
@@ -350,7 +353,7 @@ func testDoSAttackVectors(t *testing.T) {
 				ip := clientip.GetIP(req)
 				duration := time.Since(start)
 
-				assert.NotEmpty(t, ip, "Should return some IP")
+				require.NotEmpty(t, ip, "Should return some IP")
 				assert.Less(t, duration, 50*time.Millisecond, "Should not spend excessive time on recursive patterns")
 			})
 		}
@@ -372,7 +375,7 @@ func testDoSAttackVectors(t *testing.T) {
 		duration := time.Since(start)
 
 		// Note: Go's header handling may optimize this, but we should still be reasonably fast
-		assert.NotEmpty(t, ip, "Should return some IP despite header bombing")
+		require.NotEmpty(t, ip, "Should return some IP despite header bombing")
 		assert.Less(t, duration, 100*time.Millisecond, "Should handle repeated headers efficiently")
 
 		t.Logf("Processed 10000+ repeated headers in %v, got IP: %s", duration, ip)
@@ -431,7 +434,7 @@ func testTrustBoundaryValidation(t *testing.T) {
 				req := createTestRequest(tt.headers, "127.0.0.1:8080")
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -478,7 +481,7 @@ func testTrustBoundaryValidation(t *testing.T) {
 				req := createTestRequest(tt.headers, "10.0.0.1:8080")
 				ip := clientip.GetIP(req)
 
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
@@ -522,13 +525,15 @@ func testTrustBoundaryValidation(t *testing.T) {
 				req := createTestRequest(headers, "10.0.0.1:8080")
 
 				ip := clientip.GetIP(req)
-				assert.Equal(t, tt.expected, ip, tt.desc)
+				require.Equal(t, tt.expected, ip, tt.desc)
 			})
 		}
 	})
 }
 
 func TestConcurrentSafety(t *testing.T) {
+	t.Parallel()
+
 	t.Run("concurrent_ip_extraction", func(t *testing.T) {
 		t.Parallel()
 
@@ -571,7 +576,7 @@ func TestConcurrentSafety(t *testing.T) {
 			errorCount++
 		}
 
-		assert.Equal(t, 0, errorCount, "Expected no errors in concurrent IP extraction")
+		require.Equal(t, 0, errorCount, "Expected no errors in concurrent IP extraction")
 	})
 
 	t.Run("race_condition_detection", func(t *testing.T) {

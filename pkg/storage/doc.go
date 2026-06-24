@@ -74,17 +74,27 @@
 //
 // # Configuration
 //
-// The Config struct supports environment variables:
+// The Config struct is populated from environment variables via its `env` tags.
+// The names below are the exact tag values; the application typically loads them
+// under a prefix (e.g. STORAGE_), so the effective variable is the prefix plus
+// the tag name (STORAGE_BUCKET, STORAGE_MAX_DOWNLOAD_SIZE, ...).
 //
 //	type Config struct {
-//		Bucket          string // STORAGE_BUCKET
-//		AccessKey       string // STORAGE_ACCESS_KEY
-//		SecretKey       string // STORAGE_SECRET_KEY
-//		Endpoint        string // STORAGE_ENDPOINT (for MinIO/custom S3)
-//		Region          string // STORAGE_REGION (default: us-east-1)
-//		PublicURL       string // STORAGE_PUBLIC_URL (CDN URL)
-//		DefaultACL      string // DEFAULT_ACL (default: private)
-//		PathStyle       bool   // STORAGE_PATH_STYLE (for MinIO)
-//		MaxDownloadSize int64  // STORAGE_MAX_DOWNLOAD (default: 50MB)
+//		Bucket          string `env:"BUCKET,required"`
+//		AccessKey       string `env:"ACCESS_KEY,required"`
+//		SecretKey       string `env:"SECRET_KEY,required"`
+//		Endpoint        string `env:"ENDPOINT"`                          // for MinIO/custom S3
+//		Region          string `env:"REGION" envDefault:"us-east-1"`
+//		PublicURL       string `env:"PUBLIC_URL"`                        // CDN URL
+//		DefaultACL      string `env:"DEFAULT_ACL" envDefault:"private"`
+//		PathStyle       bool   `env:"PATH_STYLE" envDefault:"false"`    // for MinIO
+//		MaxDownloadSize int64  `env:"MAX_DOWNLOAD_SIZE" envDefault:"52428800"` // 50MB
 //	}
+//
+// # Fetching from URLs (SSRF)
+//
+// PutFromURL treats its source URL as untrusted and, by default, refuses to
+// connect to private, loopback, link-local, or unspecified addresses (enforced
+// on the resolved IP at dial time, which also blocks DNS-rebinding). Use
+// WithAllowPrivateURL to opt out for trusted internal source URLs.
 package storage

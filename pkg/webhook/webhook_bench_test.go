@@ -26,7 +26,7 @@ func BenchmarkSender_Send(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		err := sender.Send(context.Background(), server.URL, payload)
+		err := sender.Send(context.Background(), server.URL, payload, webhook.WithAllowPrivateNetworks())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -52,6 +52,7 @@ func BenchmarkSender_SendWithSignature(b *testing.B) {
 			server.URL,
 			payload,
 			webhook.WithSignature("benchmark_secret"),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		if err != nil {
 			b.Fatal(err)
@@ -83,6 +84,7 @@ func BenchmarkSender_HighThroughput_Sequential(b *testing.B) {
 			payload,
 			webhook.WithTimeout(5*time.Second),
 			webhook.WithNoRetry(),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		if err != nil {
 			b.Fatal(err)
@@ -113,6 +115,7 @@ func BenchmarkSender_HighThroughput_Concurrent(b *testing.B) {
 				payload,
 				webhook.WithTimeout(5*time.Second),
 				webhook.WithNoRetry(),
+				webhook.WithAllowPrivateNetworks(),
 			)
 			if err != nil {
 				b.Fatal(err)
@@ -159,6 +162,7 @@ func BenchmarkSender_LargePayload(b *testing.B) {
 					webhook.WithTimeout(10*time.Second),
 					webhook.WithNoRetry(),
 					webhook.WithMaxPayloadSize(0),
+					webhook.WithAllowPrivateNetworks(),
 				)
 				if err != nil {
 					b.Fatal(err)
@@ -191,6 +195,7 @@ func BenchmarkSender_WithRetries(b *testing.B) {
 			payload,
 			webhook.WithMaxRetries(1),
 			webhook.WithBackoff(webhook.FixedBackoff{Interval: time.Millisecond}),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		if err != nil {
 			b.Fatal(err)
@@ -216,6 +221,7 @@ func BenchmarkSender_CircuitBreaker(b *testing.B) {
 			payload,
 			webhook.WithCircuitBreaker(cb),
 			webhook.WithNoRetry(),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		if err != nil {
 			if !errors.Is(err, webhook.ErrCircuitOpen) {

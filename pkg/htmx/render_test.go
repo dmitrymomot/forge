@@ -2,9 +2,12 @@ package htmx_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/htmx"
 )
@@ -20,157 +23,209 @@ func (m mockComponent) Render(_ context.Context, w io.Writer) error {
 }
 
 func TestNewConfig(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig()
-	if cfg == nil {
-		t.Fatal("NewConfig returned nil")
-	}
+	require.NotNil(t, cfg)
 }
 
 func TestWithRetarget(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithRetarget("#content"))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Retarget")
-	if got != "#content" {
-		t.Errorf("HX-Retarget = %q, want %q", got, "#content")
-	}
+	require.Equal(t, "#content", rec.Header().Get("HX-Retarget"))
 }
 
 func TestWithReswap(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithReswap(htmx.SwapOuterHTML))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Reswap")
-	if got != "outerHTML" {
-		t.Errorf("HX-Reswap = %q, want %q", got, "outerHTML")
-	}
+	require.Equal(t, "outerHTML", rec.Header().Get("HX-Reswap"))
 }
 
 func TestWithReselect(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithReselect(".items"))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Reselect")
-	if got != ".items" {
-		t.Errorf("HX-Reselect = %q, want %q", got, ".items")
-	}
+	require.Equal(t, ".items", rec.Header().Get("HX-Reselect"))
 }
 
 func TestWithPushURL(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithPushURL("/contacts/123"))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Push-Url")
-	if got != "/contacts/123" {
-		t.Errorf("HX-Push-Url = %q, want %q", got, "/contacts/123")
-	}
+	require.Equal(t, "/contacts/123", rec.Header().Get("HX-Push-Url"))
 }
 
 func TestWithPushURLFalse(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithPushURL("false"))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Push-Url")
-	if got != "false" {
-		t.Errorf("HX-Push-Url = %q, want %q", got, "false")
-	}
+	require.Equal(t, "false", rec.Header().Get("HX-Push-Url"))
 }
 
 func TestWithReplaceURL(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithReplaceURL("/new-url"))
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Replace-Url")
-	if got != "/new-url" {
-		t.Errorf("HX-Replace-Url = %q, want %q", got, "/new-url")
-	}
+	require.Equal(t, "/new-url", rec.Header().Get("HX-Replace-Url"))
 }
 
 func TestWithTrigger(t *testing.T) {
-	cfg := htmx.NewConfig(htmx.WithTrigger("contacts-updated"))
-	rec := httptest.NewRecorder()
+	t.Parallel()
 
-	cfg.ApplyHeaders(rec)
+	t.Run("single event", func(t *testing.T) {
+		t.Parallel()
 
-	got := rec.Header().Get("HX-Trigger")
-	if got != "contacts-updated" {
-		t.Errorf("HX-Trigger = %q, want %q", got, "contacts-updated")
-	}
-}
+		cfg := htmx.NewConfig(htmx.WithTrigger("contacts-updated"))
+		rec := httptest.NewRecorder()
 
-func TestWithTriggerMultiple(t *testing.T) {
-	cfg := htmx.NewConfig(htmx.WithTrigger("event1", "event2", "event3"))
-	rec := httptest.NewRecorder()
+		cfg.ApplyHeaders(rec)
 
-	cfg.ApplyHeaders(rec)
+		require.Equal(t, "contacts-updated", rec.Header().Get("HX-Trigger"))
+	})
 
-	got := rec.Header().Get("HX-Trigger")
-	want := "event1, event2, event3"
-	if got != want {
-		t.Errorf("HX-Trigger = %q, want %q", got, want)
-	}
+	t.Run("multiple events comma-joined", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := htmx.NewConfig(htmx.WithTrigger("event1", "event2", "event3"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		require.Equal(t, "event1, event2, event3", rec.Header().Get("HX-Trigger"))
+	})
+
+	t.Run("event name with comma emits JSON object form", func(t *testing.T) {
+		t.Parallel()
+
+		// A comma in an event name would corrupt the comma-separated list form,
+		// so ApplyHeaders must emit the JSON object form instead, preserving the
+		// names verbatim.
+		cfg := htmx.NewConfig(htmx.WithTrigger("a,b", "plain"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		raw := rec.Header().Get("HX-Trigger")
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(raw), &got),
+			"comma-containing trigger must be valid JSON object: %q", raw)
+
+		require.Len(t, got, 2)
+		require.Contains(t, got, "a,b")
+		require.Contains(t, got, "plain")
+		require.Nil(t, got["a,b"])
+		require.Nil(t, got["plain"])
+	})
 }
 
 func TestWithTriggerAfterSwap(t *testing.T) {
-	cfg := htmx.NewConfig(htmx.WithTriggerAfterSwap("swapped"))
-	rec := httptest.NewRecorder()
+	t.Parallel()
 
-	cfg.ApplyHeaders(rec)
+	t.Run("single event", func(t *testing.T) {
+		t.Parallel()
 
-	got := rec.Header().Get("HX-Trigger-After-Swap")
-	if got != "swapped" {
-		t.Errorf("HX-Trigger-After-Swap = %q, want %q", got, "swapped")
-	}
+		cfg := htmx.NewConfig(htmx.WithTriggerAfterSwap("swapped"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		require.Equal(t, "swapped", rec.Header().Get("HX-Trigger-After-Swap"))
+	})
+
+	t.Run("event name with comma emits JSON object form", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := htmx.NewConfig(htmx.WithTriggerAfterSwap("x,y"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Swap")), &got))
+		require.Contains(t, got, "x,y")
+	})
 }
 
 func TestWithTriggerAfterSettle(t *testing.T) {
-	cfg := htmx.NewConfig(htmx.WithTriggerAfterSettle("settled"))
-	rec := httptest.NewRecorder()
+	t.Parallel()
 
-	cfg.ApplyHeaders(rec)
+	t.Run("single event", func(t *testing.T) {
+		t.Parallel()
 
-	got := rec.Header().Get("HX-Trigger-After-Settle")
-	if got != "settled" {
-		t.Errorf("HX-Trigger-After-Settle = %q, want %q", got, "settled")
-	}
+		cfg := htmx.NewConfig(htmx.WithTriggerAfterSettle("settled"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		require.Equal(t, "settled", rec.Header().Get("HX-Trigger-After-Settle"))
+	})
+
+	t.Run("event name with comma emits JSON object form", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := htmx.NewConfig(htmx.WithTriggerAfterSettle("p,q"))
+		rec := httptest.NewRecorder()
+
+		cfg.ApplyHeaders(rec)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Settle")), &got))
+		require.Contains(t, got, "p,q")
+	})
 }
 
 func TestWithRefresh(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(htmx.WithRefresh())
 	rec := httptest.NewRecorder()
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Refresh")
-	if got != "true" {
-		t.Errorf("HX-Refresh = %q, want %q", got, "true")
-	}
+	require.Equal(t, "true", rec.Header().Get("HX-Refresh"))
 }
 
 func TestWithOOB(t *testing.T) {
+	t.Parallel()
+
 	comp1 := mockComponent{content: "<div>1</div>"}
 	comp2 := mockComponent{content: "<div>2</div>"}
 
 	cfg := htmx.NewConfig(htmx.WithOOB(comp1, comp2))
 
-	if len(cfg.OOBComponents) != 2 {
-		t.Errorf("OOBComponents len = %d, want 2", len(cfg.OOBComponents))
-	}
+	require.Len(t, cfg.OOBComponents, 2)
 }
 
 func TestWithOOBAppends(t *testing.T) {
+	t.Parallel()
+
 	comp1 := mockComponent{content: "<div>1</div>"}
 	comp2 := mockComponent{content: "<div>2</div>"}
 
@@ -179,12 +234,12 @@ func TestWithOOBAppends(t *testing.T) {
 		htmx.WithOOB(comp2),
 	)
 
-	if len(cfg.OOBComponents) != 2 {
-		t.Errorf("OOBComponents len = %d, want 2", len(cfg.OOBComponents))
-	}
+	require.Len(t, cfg.OOBComponents, 2)
 }
 
 func TestMultipleOptions(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(
 		htmx.WithRetarget("#main"),
 		htmx.WithReswap(htmx.SwapInnerHTML),
@@ -195,25 +250,15 @@ func TestMultipleOptions(t *testing.T) {
 
 	cfg.ApplyHeaders(rec)
 
-	tests := []struct {
-		header string
-		want   string
-	}{
-		{"HX-Retarget", "#main"},
-		{"HX-Reswap", "innerHTML"},
-		{"HX-Trigger", "updated"},
-		{"HX-Push-Url", "/new"},
-	}
-
-	for _, tt := range tests {
-		got := rec.Header().Get(tt.header)
-		if got != tt.want {
-			t.Errorf("%s = %q, want %q", tt.header, got, tt.want)
-		}
-	}
+	require.Equal(t, "#main", rec.Header().Get("HX-Retarget"))
+	require.Equal(t, "innerHTML", rec.Header().Get("HX-Reswap"))
+	require.Equal(t, "updated", rec.Header().Get("HX-Trigger"))
+	require.Equal(t, "/new", rec.Header().Get("HX-Push-Url"))
 }
 
 func TestEmptyOptions(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig()
 	rec := httptest.NewRecorder()
 
@@ -232,21 +277,25 @@ func TestEmptyOptions(t *testing.T) {
 	}
 
 	for _, h := range headers {
-		if got := rec.Header().Get(h); got != "" {
-			t.Errorf("%s = %q, want empty", h, got)
-		}
+		require.Empty(t, rec.Header().Get(h), "header %s must be empty", h)
 	}
 }
 
 func TestNilConfigApplyHeaders(t *testing.T) {
+	t.Parallel()
+
 	var cfg *htmx.Config
 	rec := httptest.NewRecorder()
 
-	// Should not panic
-	cfg.ApplyHeaders(rec)
+	// Must not panic on a nil receiver.
+	require.NotPanics(t, func() {
+		cfg.ApplyHeaders(rec)
+	})
 }
 
 func TestTriggerChaining(t *testing.T) {
+	t.Parallel()
+
 	cfg := htmx.NewConfig(
 		htmx.WithTrigger("event1"),
 		htmx.WithTrigger("event2"),
@@ -255,9 +304,5 @@ func TestTriggerChaining(t *testing.T) {
 
 	cfg.ApplyHeaders(rec)
 
-	got := rec.Header().Get("HX-Trigger")
-	want := "event1, event2"
-	if got != want {
-		t.Errorf("HX-Trigger = %q, want %q", got, want)
-	}
+	require.Equal(t, "event1, event2", rec.Header().Get("HX-Trigger"))
 }

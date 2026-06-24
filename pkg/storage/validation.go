@@ -17,6 +17,24 @@ func (e *FileValidationError) Error() string {
 	return e.Message
 }
 
+// Unwrap maps the validation Code to the matching sentinel error so callers can
+// use errors.Is (e.g. errors.Is(err, ErrFileTooLarge)) in addition to
+// errors.As(err, &*FileValidationError) for the structured details.
+func (e *FileValidationError) Unwrap() error {
+	switch e.Code {
+	case ErrCodeFileTooLarge:
+		return ErrFileTooLarge
+	case ErrCodeFileTooSmall:
+		return ErrFileTooSmall
+	case ErrCodeInvalidMIME:
+		return ErrInvalidMIME
+	case ErrCodeEmptyFile:
+		return ErrEmptyFile
+	default:
+		return nil
+	}
+}
+
 // Error codes for FileValidationError.
 const (
 	ErrCodeFileTooLarge = "file_too_large"

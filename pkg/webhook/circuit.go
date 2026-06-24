@@ -43,7 +43,13 @@ type CircuitBreaker struct {
 	state        CircuitState
 	failures     int
 	successCount int
-	mu           sync.RWMutex
+
+	// halfOpenProbeInFlight tracks whether a probe request is currently being
+	// tested in the half-open state. Only one probe is allowed at a time so a
+	// recovering endpoint is not hammered by concurrent traffic.
+	halfOpenProbeInFlight bool
+
+	mu sync.RWMutex
 }
 
 // NewCircuitBreaker creates a circuit breaker with the given configuration.
@@ -80,11 +86,19 @@ func (cb *CircuitBreaker) Allow() bool {
 		if time.Since(cb.lastFailureTime) > cb.recoveryTimeout {
 			cb.state = CircuitHalfOpen
 			cb.successCount = 0
+			// Begin the single permitted probe for this recovery window.
+			cb.halfOpenProbeInFlight = true
 			return true
 		}
 		return false
 
 	case CircuitHalfOpen:
+		// Only one probe is allowed in flight at a time. Concurrent callers are
+		// rejected until the outstanding probe records a success or failure.
+		if cb.halfOpenProbeInFlight {
+			return false
+		}
+		cb.halfOpenProbeInFlight = true
 		return true
 
 	default:
@@ -102,6 +116,9 @@ func (cb *CircuitBreaker) RecordSuccess() {
 		cb.failures = 0
 
 	case CircuitHalfOpen:
+		// The probe resolved; release the slot so the next probe can run if more
+		// successes are still required to fully close the circuit.
+		cb.halfOpenProbeInFlight = false
 		cb.successCount++
 		if cb.successCount >= cb.successThreshold {
 			cb.state = CircuitClosed
@@ -126,9 +143,12 @@ func (cb *CircuitBreaker) RecordFailure() {
 		}
 
 	case CircuitHalfOpen:
+		// The probe failed; reopen the circuit and release the probe slot for
+		// the next recovery window.
 		cb.state = CircuitOpen
 		cb.failures = cb.failureThreshold
 		cb.successCount = 0
+		cb.halfOpenProbeInFlight = false
 	}
 }
 
@@ -153,6 +173,7 @@ func (cb *CircuitBreaker) Reset() {
 	cb.failures = 0
 	cb.successCount = 0
 	cb.lastFailureTime = time.Time{}
+	cb.halfOpenProbeInFlight = false
 }
 
 // CircuitStats provides visibility into circuit breaker state for monitoring.

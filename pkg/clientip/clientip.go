@@ -6,6 +6,22 @@ import (
 	"strings"
 )
 
+// GetIP extracts the client IP address from an HTTP request.
+//
+// It checks proxy headers in priority order (CF-Connecting-IP, DO-Connecting-IP,
+// X-Forwarded-For, X-Real-IP) before falling back to r.RemoteAddr. The returned
+// value is a validated, normalized IP string; the function never panics and
+// always returns a string.
+//
+// TRUST BOUNDARY: GetIP unconditionally trusts the proxy headers above. Any
+// client that can reach the application directly can set these headers to
+// arbitrary values, so the returned IP is SPOOFABLE unless every request is
+// guaranteed to pass through a trusted reverse proxy / load balancer / CDN that
+// overwrites them. Only use GetIP when the application is deployed strictly
+// behind such trusted infrastructure. If clients can connect directly (or reach
+// the app without traversing the trusted proxy), do NOT use the header-derived
+// IP for any security decision (authentication, authorization, rate limiting,
+// audit logging, IP allow/deny lists); fall back to r.RemoteAddr instead.
 func GetIP(r *http.Request) string {
 	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
 		if parsed := parseIP(ip); parsed != "" {

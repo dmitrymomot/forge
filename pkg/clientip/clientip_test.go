@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dmitrymomot/forge/pkg/clientip"
 )
 
@@ -137,9 +139,7 @@ func TestGetIP(t *testing.T) {
 			req := createTestRequest(tt.headers, tt.remoteAddr)
 			ip := clientip.GetIP(req)
 
-			if ip != tt.expected {
-				t.Errorf("Expected IP %s, got %s", tt.expected, ip)
-			}
+			require.Equal(t, tt.expected, ip)
 		})
 	}
 }
@@ -158,13 +158,8 @@ func TestGetIPConsistency(t *testing.T) {
 	ip1 := clientip.GetIP(req1)
 	ip2 := clientip.GetIP(req2)
 
-	if ip1 != ip2 {
-		t.Errorf("Expected identical IPs for identical requests, got %s and %s", ip1, ip2)
-	}
-
-	if ip1 != "198.51.100.178" {
-		t.Errorf("Expected 198.51.100.178, got %s", ip1)
-	}
+	require.Equal(t, ip1, ip2, "Expected identical IPs for identical requests")
+	require.Equal(t, "198.51.100.178", ip1)
 }
 
 func TestGetIPDifferentHeaders(t *testing.T) {
@@ -180,17 +175,9 @@ func TestGetIPDifferentHeaders(t *testing.T) {
 	ip1 := clientip.GetIP(req1)
 	ip2 := clientip.GetIP(req2)
 
-	if ip1 == ip2 {
-		t.Errorf("Expected different IPs for different headers, both got %s", ip1)
-	}
-
-	if ip1 != "203.0.113.195" {
-		t.Errorf("Expected CF IP 203.0.113.195, got %s", ip1)
-	}
-
-	if ip2 != "198.51.100.178" {
-		t.Errorf("Expected DO IP 198.51.100.178, got %s", ip2)
-	}
+	require.NotEqual(t, ip1, ip2, "Expected different IPs for different headers")
+	require.Equal(t, "203.0.113.195", ip1, "Expected CF IP")
+	require.Equal(t, "198.51.100.178", ip2, "Expected DO IP")
 }
 
 func TestDigitalOceanAppPlatformScenarios(t *testing.T) {
@@ -247,9 +234,7 @@ func TestDigitalOceanAppPlatformScenarios(t *testing.T) {
 			req := createTestRequest(tt.headers, "10.0.0.1:54321")
 			ip := clientip.GetIP(req)
 
-			if ip != tt.expected {
-				t.Errorf("Scenario: %s\nExpected IP %s, got %s", tt.scenario, tt.expected, ip)
-			}
+			require.Equal(t, tt.expected, ip, tt.scenario)
 		})
 	}
 }

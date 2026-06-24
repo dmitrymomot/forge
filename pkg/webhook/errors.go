@@ -17,4 +17,5 @@ var (
 	ErrInvalidPayload        = errors.New("webhook: invalid payload")
 	ErrInvalidURL            = errors.New("webhook: invalid URL")
 	ErrTimeout               = errors.New("webhook: request timeout")
+	ErrBlockedDestination    = errors.New("webhook: destination blocked by SSRF protection")
 )
