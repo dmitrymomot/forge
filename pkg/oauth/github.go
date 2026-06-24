@@ -88,7 +88,11 @@ func (p *GitHubProvider) Exchange(ctx context.Context, code, redirectURI string)
 }
 
 // FetchUserInfo retrieves user information from GitHub.
-// Returns ErrEmailNotVerified if no verified primary email is found.
+//
+// Email resolution prefers the primary verified email and deliberately falls
+// back to any other verified email when no primary verified email exists.
+// Returns ErrNoEmail if GitHub returns no emails at all, or ErrEmailNotVerified
+// if emails exist but none are verified.
 func (p *GitHubProvider) FetchUserInfo(ctx context.Context, token *oauth2.Token) (*UserInfo, error) {
 	ctx = p.contextWithHTTPClient(ctx)
 	client := p.config.Client(ctx, token)
@@ -159,12 +163,27 @@ func (p *GitHubProvider) fetchPrimaryVerifiedEmail(client *http.Client) (string,
 		return "", errors.Join(ErrDecodeFailed, fmt.Errorf("decode emails: %w", err))
 	}
 
+	// GitHub returns an empty list when the user:email scope was not granted
+	// or the account has no email addresses. Distinguish this from the case
+	// where emails exist but none are verified so callers can react
+	// differently (e.g. request the user:email scope vs. ask the user to
+	// verify their address).
+	if len(emails) == 0 {
+		return "", ErrNoEmail
+	}
+
+	// Prefer the primary verified email — this is the address GitHub treats as
+	// the account's canonical email and is the correct identity to bind to.
 	for _, e := range emails {
 		if e.Primary && e.Verified {
 			return e.Email, nil
 		}
 	}
 
+	// Deliberate fallback: if no primary verified email exists (e.g. the user
+	// changed their primary to an as-yet-unverified address), accept any other
+	// verified email rather than failing the login. This trades strictness for
+	// usability and is safe because the address is still provider-verified.
 	for _, e := range emails {
 		if e.Verified {
 			return e.Email, nil

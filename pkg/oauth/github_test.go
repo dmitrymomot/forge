@@ -3,6 +3,7 @@ package oauth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -301,6 +302,62 @@ func TestGitHubProvider_FetchUserInfo(t *testing.T) {
 		require.Nil(t, user)
 	})
 
+	t.Run("no email returned", func(t *testing.T) {
+		t.Parallel()
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":   42,
+				"name": "Octocat",
+			})
+		})
+		mux.HandleFunc("/user/emails", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		})
+
+		transport := &githubRewriteTransport{base: http.DefaultTransport, handler: mux}
+
+		p, err := oauth.NewGitHubProvider(
+			oauth.GitHubConfig{
+				ClientID:     "test-id",
+				ClientSecret: "test-secret",
+			},
+			oauth.WithHTTPClient(&http.Client{Transport: transport}),
+		)
+		require.NoError(t, err)
+
+		token := &oauth2.Token{AccessToken: "test-token"}
+		user, err := p.FetchUserInfo(context.Background(), token)
+		require.ErrorIs(t, err, oauth.ErrNoEmail)
+		require.NotErrorIs(t, err, oauth.ErrEmailNotVerified)
+		require.Nil(t, user)
+	})
+
+	t.Run("transport error returns ErrFetchFailed", func(t *testing.T) {
+		t.Parallel()
+
+		wantErr := errors.New("simulated dial failure")
+		transport := &githubErrorTransport{err: wantErr}
+
+		p, err := oauth.NewGitHubProvider(
+			oauth.GitHubConfig{
+				ClientID:     "test-id",
+				ClientSecret: "test-secret",
+			},
+			oauth.WithHTTPClient(&http.Client{Transport: transport}),
+		)
+		require.NoError(t, err)
+
+		token := &oauth2.Token{AccessToken: "test-token"}
+		user, err := p.FetchUserInfo(context.Background(), token)
+		require.ErrorIs(t, err, oauth.ErrFetchFailed)
+		require.ErrorContains(t, err, "simulated dial failure")
+		require.Nil(t, user)
+	})
+
 	t.Run("user endpoint error", func(t *testing.T) {
 		t.Parallel()
 
@@ -420,6 +477,16 @@ func TestGitHubProvider_FetchUserInfo(t *testing.T) {
 		require.ErrorIs(t, err, oauth.ErrDecodeFailed)
 		require.Nil(t, user)
 	})
+}
+
+// githubErrorTransport always fails the round trip with a fixed error,
+// simulating a transport-level (network) failure.
+type githubErrorTransport struct {
+	err error
+}
+
+func (t *githubErrorTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, t.err
 }
 
 // githubRewriteTransport intercepts requests to GitHub API endpoints and routes them

@@ -3,6 +3,7 @@ package oauth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -224,11 +225,11 @@ func TestGoogleProvider_FetchUserInfo(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":             "12345",
+				"sub":            "12345",
 				"email":          "user@example.com",
 				"name":           "Test User",
 				"picture":        "https://example.com/photo.jpg",
-				"verified_email": true,
+				"email_verified": true,
 			})
 		})
 
@@ -258,9 +259,9 @@ func TestGoogleProvider_FetchUserInfo(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":             "12345",
+				"sub":            "12345",
 				"email":          "user@example.com",
-				"verified_email": false,
+				"email_verified": false,
 			})
 		})
 
@@ -330,6 +331,75 @@ func TestGoogleProvider_FetchUserInfo(t *testing.T) {
 		require.ErrorIs(t, err, oauth.ErrDecodeFailed)
 		require.Nil(t, user)
 	})
+
+	t.Run("transport error returns ErrFetchFailed", func(t *testing.T) {
+		t.Parallel()
+
+		wantErr := errors.New("simulated dial failure")
+		transport := &googleErrorTransport{err: wantErr}
+
+		p, err := oauth.NewGoogleProvider(
+			oauth.GoogleConfig{
+				ClientID:     "test-id",
+				ClientSecret: "test-secret",
+			},
+			oauth.WithHTTPClient(&http.Client{Transport: transport}),
+		)
+		require.NoError(t, err)
+
+		token := &oauth2.Token{AccessToken: "test-token"}
+		user, err := p.FetchUserInfo(context.Background(), token)
+		require.ErrorIs(t, err, oauth.ErrFetchFailed)
+		require.ErrorContains(t, err, "simulated dial failure")
+		require.Nil(t, user)
+	})
+
+	// Not parallel: this subtest temporarily swaps http.DefaultClient.Transport
+	// to exercise the nil-custom-client (default HTTP client) branch of
+	// contextWithHTTPClient end to end. It must not run concurrently with code
+	// that reads or mutates the shared default client.
+	t.Run("default HTTP client path", func(t *testing.T) {
+		// Provider built without WithHTTPClient, so contextWithHTTPClient must
+		// not inject a custom client and the oauth2 library falls back to the
+		// default HTTP client. Route that default client's Google traffic to a
+		// local handler so the real default-client code path is exercised.
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sub":            "default-client-id",
+				"email":          "default@example.com",
+				"name":           "Default Client User",
+				"email_verified": true,
+			})
+		})
+
+		original := http.DefaultClient.Transport
+		http.DefaultClient.Transport = &googleRewriteTransport{base: http.DefaultTransport, handler: handler}
+		t.Cleanup(func() { http.DefaultClient.Transport = original })
+
+		p, err := oauth.NewGoogleProvider(oauth.GoogleConfig{
+			ClientID:     "test-id",
+			ClientSecret: "test-secret",
+		})
+		require.NoError(t, err)
+
+		token := &oauth2.Token{AccessToken: "test-token"}
+		user, err := p.FetchUserInfo(context.Background(), token)
+		require.NoError(t, err)
+		require.Equal(t, "default-client-id", user.ID)
+		require.Equal(t, "default@example.com", user.Email)
+		require.Equal(t, "Default Client User", user.Name)
+	})
+}
+
+// googleErrorTransport always fails the round trip with a fixed error,
+// simulating a transport-level (network) failure.
+type googleErrorTransport struct {
+	err error
+}
+
+func (t *googleErrorTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, t.err
 }
 
 // googleRewriteTransport intercepts requests to Google endpoints and routes them

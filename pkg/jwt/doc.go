@@ -8,17 +8,18 @@
 //
 // - RFC 7519 compliant JWT implementation
 // - HMAC-SHA256 signing (secure and performant)
-// - Standard claims validation (exp, nbf, iat)
+// - Always-on temporal validation (exp, nbf) on Parse, even for custom claims types
 // - Custom claims support with any JSON-serializable type
 // - Constant-time signature verification
-// - Built-in temporal claim validation
+// - Optional clock-skew leeway via Config.Leeway
 //
 // # Usage
 //
 // Basic JWT service setup:
 //
-//	// Create service with signing key (should be cryptographically secure)
-//	service, err := jwt.New(jwt.Config{SigningKey: "your-256-bit-secret"})
+//	// Create service with a signing key of at least 32 bytes (256 bits).
+//	// Shorter keys are rejected with jwt.ErrInvalidSigningKey.
+//	service, err := jwt.New(jwt.Config{SigningKey: "a-32-byte-or-longer-secret-key!!"})
 //	if err != nil {
 //		log.Fatal(err)
 //	}
@@ -83,6 +84,24 @@
 //
 // # HTTP Middleware Example
 //
+// The jwt package only parses and validates tokens; it never reads from or writes
+// to the request context. A middleware is responsible for extracting the token and,
+// if it needs to hand the claims to downstream handlers, doing so through a typed,
+// unexported context key (never a bare string key, which collides across packages
+// and triggers a go vet warning):
+//
+//	// ctxKey is an unexported type so the key cannot collide with keys from other
+//	// packages and cannot be set by callers outside this package.
+//	type ctxKey struct{}
+//
+//	var claimsKey ctxKey
+//
+//	// ClaimsFromContext returns the claims a JWTMiddleware stored, if any.
+//	func ClaimsFromContext(ctx context.Context) (CustomClaims, bool) {
+//		claims, ok := ctx.Value(claimsKey).(CustomClaims)
+//		return claims, ok
+//	}
+//
 //	func JWTMiddleware(service *jwt.Service) func(http.Handler) http.Handler {
 //		return func(next http.Handler) http.Handler {
 //			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,8 +124,8 @@
 //					return
 //				}
 //
-//				// Add claims to request context
-//				ctx := context.WithValue(r.Context(), "claims", claims)
+//				// Store claims under a typed key; handlers read them via ClaimsFromContext.
+//				ctx := context.WithValue(r.Context(), claimsKey, claims)
 //				next.ServeHTTP(w, r.WithContext(ctx))
 //			})
 //		}
@@ -146,14 +165,13 @@
 // # Error Handling
 //
 // The package provides specific error types for different failure modes:
-//   - ErrInvalidToken: Malformed token structure or nbf validation failure
-//   - ErrExpiredToken: Token past expiration time
+//   - ErrInvalidToken: Malformed token structure (wrong number of segments)
+//   - ErrExpiredToken: Token past its expiration time (exp)
+//   - ErrTokenNotYetValid: Token used before its not-before time (nbf)
 //   - ErrInvalidSignature: Signature verification failed
 //   - ErrUnexpectedSigningMethod: Algorithm mismatch (security)
-//   - ErrInvalidSigningMethod: Invalid signing method (legacy)
-//   - ErrMissingSigningKey: Service created without key
-//   - ErrInvalidSigningKey: Invalid signing key (available)
-//   - ErrInvalidClaims: Invalid claims (available)
+//   - ErrMissingSigningKey: New called with an empty signing key
+//   - ErrInvalidSigningKey: Signing key shorter than the 32-byte minimum
 //   - ErrMissingClaims: Generate called with nil claims
 //
 // # Performance Characteristics

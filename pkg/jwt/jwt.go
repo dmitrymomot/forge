@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,29 +24,53 @@ type Header struct {
 	Algorithm string `json:"alg"`
 }
 
+// minSigningKeyBytes is the minimum signing-key length enforced by New.
+// HMAC-SHA256 needs a 256-bit (32-byte) key for adequate security.
+const minSigningKeyBytes = 32
+
 // StandardClaims represents the registered JWT claims defined in RFC 7519 Section 4.1.
 // All fields use Unix timestamps for temporal claims to ensure consistent validation.
+//
+// Note on Audience: RFC 7519 permits the "aud" claim to be either a single string or
+// an array of strings. This package models it as a single string only. Tokens emitted
+// by this package are RFC-valid, but parsing a third-party token whose "aud" is a JSON
+// array will fail to unmarshal. If multi-audience interop is required, use a custom
+// claims type with an "aud" field of your own type (e.g. []string) rather than relying
+// on the embedded StandardClaims.Audience.
 type StandardClaims struct {
 	ID        string `json:"jti,omitempty"` // JWT ID - unique identifier for preventing token reuse
 	Subject   string `json:"sub,omitempty"` // Subject - typically user ID or entity identifier
 	Issuer    string `json:"iss,omitempty"` // Issuer - identifies who issued the token
-	Audience  string `json:"aud,omitempty"` // Audience - intended recipient(s) of the token
+	Audience  string `json:"aud,omitempty"` // Audience - intended recipient (single string only; see type doc)
 	ExpiresAt int64  `json:"exp,omitempty"` // Expiration time - Unix timestamp when token expires
 	NotBefore int64  `json:"nbf,omitempty"` // Not before - Unix timestamp when token becomes valid
 	IssuedAt  int64  `json:"iat,omitempty"` // Issued at - Unix timestamp when token was created
 }
 
-// Valid validates the temporal claims against current time.
+// Valid validates the temporal claims against the current time with no leeway.
 // Zero values are treated as unset (per RFC 7519) and are ignored during validation.
+//
+// Parse always enforces exp/nbf on the embedded StandardClaims regardless of whether
+// the claims type implements this method, so a custom claims type does not need to
+// implement Valid to get temporal validation. Implement Valid only to add extra
+// application-specific checks (e.g. issuer or audience validation).
 func (c StandardClaims) Valid() error {
-	now := time.Now().Unix()
+	return c.validate(0)
+}
 
-	if c.ExpiresAt > 0 && now > c.ExpiresAt {
+// validate checks exp/nbf against the current time, allowing the given clock-skew
+// leeway. A token is expired only once now is past exp+leeway, and not-yet-valid
+// only while now is before nbf-leeway.
+func (c StandardClaims) validate(leeway time.Duration) error {
+	now := time.Now().Unix()
+	skew := int64(leeway.Seconds())
+
+	if c.ExpiresAt > 0 && now > c.ExpiresAt+skew {
 		return ErrExpiredToken
 	}
 
-	if c.NotBefore > 0 && now < c.NotBefore {
-		return ErrInvalidToken
+	if c.NotBefore > 0 && now < c.NotBefore-skew {
+		return ErrTokenNotYetValid
 	}
 
 	return nil
@@ -53,24 +78,36 @@ func (c StandardClaims) Valid() error {
 
 // Config holds JWT service configuration.
 type Config struct {
+	// SigningKey is the HMAC-SHA256 secret. It must be at least 32 bytes.
 	SigningKey string `env:"SIGNING_KEY,required"`
+	// Leeway is the clock-skew tolerance applied to exp/nbf validation during Parse.
+	// Defaults to 0 (strict). A small value (e.g. 30-60s) is recommended when token
+	// issuers and verifiers may have slightly skewed clocks.
+	Leeway time.Duration `env:"LEEWAY"`
 }
 
 // Service handles JWT token generation and validation using HMAC-SHA256.
 // The signing key is kept in memory only and should be cryptographically secure.
 type Service struct {
 	signingKey []byte
+	leeway     time.Duration
 }
 
 // New creates a new JWT service with the provided configuration.
-// The signing key should be at least 32 bytes for adequate security with HMAC-SHA256.
+// The signing key must be at least 32 bytes for adequate security with HMAC-SHA256;
+// a shorter key is rejected with ErrInvalidSigningKey.
 func New(cfg Config) (*Service, error) {
 	if cfg.SigningKey == "" {
 		return nil, ErrMissingSigningKey
 	}
 
+	if len(cfg.SigningKey) < minSigningKeyBytes {
+		return nil, ErrInvalidSigningKey
+	}
+
 	return &Service{
 		signingKey: []byte(cfg.SigningKey),
+		leeway:     cfg.Leeway,
 	}, nil
 }
 
@@ -150,14 +187,36 @@ func (s *Service) Parse(tokenString string, claims any) error {
 		return fmt.Errorf("failed to unmarshal claims: %w", err)
 	}
 
-	// Validate temporal claims if the type implements the Valid interface
+	// Always enforce the registered temporal claims (exp/nbf) by decoding the
+	// standard fields separately. This guarantees expired or not-yet-valid tokens
+	// are rejected even when the caller's claims type does not implement Valid(),
+	// closing the footgun where temporal validation could be silently skipped.
+	var temporal StandardClaims
+	if err := json.Unmarshal(claimsJSON, &temporal); err != nil {
+		return fmt.Errorf("failed to unmarshal temporal claims: %w", err)
+	}
+	if err := temporal.validate(s.leeway); err != nil {
+		return err
+	}
+
+	// Run any additional application-specific validation declared by the claims type.
+	// The registered temporal claims are already validated above with the configured
+	// leeway, so a temporal error surfaced here (e.g. from the promoted, zero-leeway
+	// StandardClaims.Valid on an embedder) is ignored when our leeway-aware check
+	// already accepted the token; non-temporal errors are always propagated.
 	if validator, ok := claims.(interface{ Valid() error }); ok {
-		if err := validator.Valid(); err != nil {
+		if err := validator.Valid(); err != nil && !isTemporalError(err) {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// isTemporalError reports whether err is one of the registered temporal-claim errors
+// (exp/nbf), which Parse validates separately with the configured leeway.
+func isTemporalError(err error) bool {
+	return errors.Is(err, ErrExpiredToken) || errors.Is(err, ErrTokenNotYetValid)
 }
 
 // sign creates an HMAC-SHA256 signature for the given payload.

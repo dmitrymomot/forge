@@ -14,5 +14,7 @@ func main() {
 		log.Fatalf("Failed to generate encoded encryption key: %v", err)
 	}
 
-	fmt.Printf("Generated Encoded Encryption Key (for TOTP_ENCRYPTION_KEY env var): \n———\n%s\n———\n", encodedKey)
+	// The Config struct env tag is ENCRYPTION_KEY; if you mount totp.Config under
+	// a prefix (e.g. "TOTP_") it is read from TOTP_ENCRYPTION_KEY.
+	fmt.Printf("Generated Encoded Encryption Key (for ENCRYPTION_KEY env var, or <PREFIX>_ENCRYPTION_KEY): \n———\n%s\n———\n", encodedKey)
 }

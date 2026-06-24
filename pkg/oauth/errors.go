@@ -13,6 +13,11 @@ var (
 	// that the user's email is not verified.
 	ErrEmailNotVerified = errors.New("oauth: email not verified")
 
+	// ErrNoEmail is returned when the OAuth provider returns no email
+	// addresses at all (an empty list), as distinct from returning emails
+	// that are all unverified (ErrEmailNotVerified).
+	ErrNoEmail = errors.New("oauth: no email returned by provider")
+
 	// ErrNilResponse is returned when the OAuth provider returns a nil response.
 	ErrNilResponse = errors.New("oauth: nil response from provider")
 

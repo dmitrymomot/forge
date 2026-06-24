@@ -15,7 +15,16 @@ import (
 const (
 	// GoogleProviderName is the identifier for Google OAuth provider.
 	GoogleProviderName = "google"
-	googleUserInfoURL  = "https://www.googleapis.com/oauth2/v2/userinfo"
+	// googleUserInfoURL is Google's current OpenID Connect userinfo endpoint.
+	// It supersedes the deprecated oauth2/v2/userinfo endpoint. The response
+	// uses OIDC standard claim names ("sub", "email_verified") rather than the
+	// v2 names ("id", "verified_email"); see googleUserInfo for the mapping.
+	googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
+
+	// maxErrorBodyBytes bounds how much of a non-OK response body is read into
+	// memory for error reporting, preventing an unbounded allocation on a
+	// hostile or misbehaving endpoint.
+	maxErrorBodyBytes = 4 << 10 // 4 KiB
 )
 
 // GoogleDefaultScopes returns the default scopes for Google OAuth.
@@ -106,7 +115,7 @@ func (p *GoogleProvider) FetchUserInfo(ctx context.Context, token *oauth2.Token)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return nil, errors.Join(ErrRequestFailed, fmt.Errorf("userinfo request failed: status=%d body=%s", resp.StatusCode, body))
 	}
 
@@ -134,11 +143,14 @@ func (p *GoogleProvider) contextWithHTTPClient(ctx context.Context) context.Cont
 	return ctx
 }
 
-// googleUserInfo represents the response from Google's userinfo endpoint.
+// googleUserInfo represents the response from Google's OpenID Connect
+// userinfo endpoint. The endpoint returns OIDC standard claims: the stable
+// user identifier is "sub" (not the v2 "id") and verification status is
+// "email_verified" (not the v2 "verified_email").
 type googleUserInfo struct {
-	ID            string `json:"id"`
+	ID            string `json:"sub"`
 	Email         string `json:"email"`
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
-	VerifiedEmail bool   `json:"verified_email"`
+	VerifiedEmail bool   `json:"email_verified"`
 }

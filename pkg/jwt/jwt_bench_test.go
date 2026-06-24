@@ -12,7 +12,7 @@ import (
 
 // BenchmarkGenerate benchmarks JWT token generation
 func BenchmarkGenerate(b *testing.B) {
-	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key"})
+	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key-32-bytes-ok"})
 	require.NoError(b, err)
 	require.NotNil(b, service)
 
@@ -89,7 +89,7 @@ func BenchmarkGenerate(b *testing.B) {
 
 // BenchmarkParse benchmarks JWT token parsing
 func BenchmarkParse(b *testing.B) {
-	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key"})
+	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key-32-bytes-ok"})
 	require.NoError(b, err)
 	require.NotNil(b, service)
 
@@ -176,7 +176,7 @@ func BenchmarkParse(b *testing.B) {
 
 // BenchmarkEnd2End benchmarks the entire JWT lifecycle (generation + parsing)
 func BenchmarkEnd2End(b *testing.B) {
-	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key"})
+	service, err := jwt.New(jwt.Config{SigningKey: "benchmark-secret-key-32-bytes-ok"})
 	require.NoError(b, err)
 	require.NotNil(b, service)
 
