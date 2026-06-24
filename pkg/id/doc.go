@@ -20,7 +20,7 @@
 // creation time.
 //
 //	userID := id.NewULID()    // e.g., "01HZXK5M3N0000ABCDEFGH1234"
-//	orderID := id.NewULID()   // e.g., "01HZXK5M3N0000IJKLMNOP5678"
+//	orderID := id.NewULID()   // e.g., "01HZXK5M3N0000JKMNPQRS5678"
 //
 // Use ULIDs as the default for database primary keys, external identifiers,
 // and any case where global uniqueness matters.
@@ -28,11 +28,16 @@
 // # ShortID
 //
 // NewShortID generates a shorter sortable identifier. ShortIDs are 16 characters
-// long and use a reduced timestamp range (~34 years) with less random entropy.
-// They remain lexicographically sortable by creation time.
+// long: a 30-bit timestamp (whole seconds since 2024-01-01T00:00:00Z) followed by
+// 48 bits of random data. The second-resolution timestamp covers a ~34-year
+// sortable range (until ~2058) and is clamped rather than masked, so IDs remain
+// lexicographically sortable by creation time across the entire range. Sorting is
+// by second, so IDs created within the same second are not ordered relative to one
+// another. ShortIDs carry less random entropy than ULIDs, so uniqueness guarantees
+// are weaker.
 //
 //	ref := id.NewShortID()    // e.g., "0K5M3NABCDEF1234"
-//	code := id.NewShortID()   // e.g., "0K5M3NIJKLMN5678"
+//	code := id.NewShortID()   // e.g., "0K5M3NHJKMNP5678"
 //
 // Use ShortIDs for user-facing codes, short references, or anywhere a compact
 // identifier is preferred and the reduced uniqueness guarantees are acceptable.

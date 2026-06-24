@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // ValidatorFunc is a function that validates a value and returns a Rule
@@ -92,6 +93,24 @@ var (
 	}
 )
 
+// failRule returns a Rule that always fails with the given message. It is used by
+// tag validators when a tag is misconfigured (missing parameters) or applied to a
+// field whose type the rule cannot evaluate, so misconfiguration surfaces as a
+// visible validation error instead of silently passing.
+func failRule(field, message, translationKey string) Rule {
+	return Rule{
+		Check: func() bool { return false },
+		Error: ValidationError{
+			Field:          field,
+			Message:        message,
+			TranslationKey: translationKey,
+			TranslationValues: map[string]any{
+				"field": field,
+			},
+		},
+	}
+}
+
 // RegisterValidator adds a custom validator function to the registry
 func RegisterValidator(name string, fn ValidatorFunc) {
 	registryMu.Lock()
@@ -152,9 +171,13 @@ func validateStructRecursive(rv reflect.Value, prefix string, errors *Validation
 		// Handle pointers
 		if field.Kind() == reflect.Pointer {
 			if field.IsNil() {
-				// If nil and has validation tag, might need to validate required
+				// A nil pointer is an absent value: only the "required" rule is
+				// meaningful. Other rules (min/max/len/format/...) cannot apply to
+				// an absent value, so they are skipped rather than run against the
+				// nil pointer. This keeps optional (nil) fields valid while still
+				// letting "required" reject them.
 				if tag != "" {
-					validateField(fieldPath, field, tag, errors)
+					validateNilPointer(fieldPath, field, tag, errors)
 				}
 			} else {
 				elem := field.Elem()
@@ -179,12 +202,9 @@ func validateStructRecursive(rv reflect.Value, prefix string, errors *Validation
 
 func validateField(fieldPath string, field reflect.Value, tag string, errors *ValidationErrors) {
 	// Parse validation rules separated by semicolon
-	rules := strings.Split(tag, ";")
+	rules := strings.SplitSeq(tag, ";")
 
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-
-	for _, ruleStr := range rules {
+	for ruleStr := range rules {
 		ruleStr = strings.TrimSpace(ruleStr)
 		if ruleStr == "" {
 			continue
@@ -209,9 +229,40 @@ func validateField(fieldPath string, field reflect.Value, tag string, errors *Va
 			}
 		}
 
-		// Get validator function
-		if validatorFn, ok := registry[ruleName]; ok {
+		// Copy the validator out under the read lock, then release it before
+		// invoking the (potentially user-provided) validator and its Check()
+		// closure. Holding the lock across arbitrary callbacks risks deadlocks
+		// and serializes validation unnecessarily.
+		registryMu.RLock()
+		validatorFn, ok := registry[ruleName]
+		registryMu.RUnlock()
+
+		if ok {
 			rule := validatorFn(fieldPath, field, params)
+			if !rule.Check() {
+				errors.Add(rule.Error)
+			}
+		}
+	}
+}
+
+// validateNilPointer evaluates only the "required" rule for a nil pointer field.
+// All other rules are no-ops on an absent value, so they are ignored here. This
+// avoids running type-specific validators against a nil pointer (which would now
+// fail loudly on the unsupported Pointer kind) while still honoring "required".
+func validateNilPointer(fieldPath string, field reflect.Value, tag string, errors *ValidationErrors) {
+	for ruleStr := range strings.SplitSeq(tag, ";") {
+		ruleStr = strings.TrimSpace(ruleStr)
+		if ruleStr != "required" {
+			continue
+		}
+
+		registryMu.RLock()
+		validatorFn, ok := registry["required"]
+		registryMu.RUnlock()
+
+		if ok {
+			rule := validatorFn(fieldPath, field, nil)
 			if !rule.Check() {
 				errors.Add(rule.Error)
 			}
@@ -249,7 +300,7 @@ func requiredValidator(field string, value reflect.Value, params []string) Rule 
 
 func minValidator(field string, value reflect.Value, params []string) Rule {
 	if len(params) < 1 {
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "min validator requires a parameter", "validation.min")
 	}
 
 	switch value.Kind() {
@@ -305,13 +356,13 @@ func minValidator(field string, value reflect.Value, params []string) Rule {
 			},
 		}
 	default:
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "min validator does not support this field type", "validation.min")
 	}
 }
 
 func maxValidator(field string, value reflect.Value, params []string) Rule {
 	if len(params) < 1 {
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "max validator requires a parameter", "validation.max")
 	}
 
 	switch value.Kind() {
@@ -367,13 +418,13 @@ func maxValidator(field string, value reflect.Value, params []string) Rule {
 			},
 		}
 	default:
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "max validator does not support this field type", "validation.max")
 	}
 }
 
 func lenValidator(field string, value reflect.Value, params []string) Rule {
 	if len(params) < 1 {
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "len validator requires a parameter", "validation.exact_length")
 	}
 
 	expectedLen, _ := strconv.Atoi(params[0])
@@ -382,7 +433,8 @@ func lenValidator(field string, value reflect.Value, params []string) Rule {
 	case reflect.String:
 		return Rule{
 			Check: func() bool {
-				return len(value.String()) == expectedLen
+				// Count characters (runes), not bytes, to match "characters" semantics.
+				return utf8.RuneCountInString(value.String()) == expectedLen
 			},
 			Error: ValidationError{
 				Field:          field,
@@ -410,13 +462,13 @@ func lenValidator(field string, value reflect.Value, params []string) Rule {
 			},
 		}
 	default:
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "len validator does not support this field type", "validation.exact_length")
 	}
 }
 
 func betweenValidator(field string, value reflect.Value, params []string) Rule {
 	if len(params) < 2 {
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "between validator requires two parameters", "validation.between")
 	}
 
 	switch value.Kind() {
@@ -425,7 +477,8 @@ func betweenValidator(field string, value reflect.Value, params []string) Rule {
 		max, _ := strconv.Atoi(params[1])
 		return Rule{
 			Check: func() bool {
-				l := len(value.String())
+				// Count characters (runes), not bytes, to match "characters" semantics.
+				l := utf8.RuneCountInString(value.String())
 				return l >= min && l <= max
 			},
 			Error: ValidationError{
@@ -478,7 +531,7 @@ func betweenValidator(field string, value reflect.Value, params []string) Rule {
 			},
 		}
 	default:
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "between validator does not support this field type", "validation.between")
 	}
 }
 
@@ -1017,7 +1070,7 @@ func percentageValidator(field string, value reflect.Value, params []string) Rul
 	case reflect.Float32, reflect.Float64:
 		return ValidPercentage(field, value.Float())
 	default:
-		return Rule{Check: func() bool { return true }}
+		return failRule(field, "percentage validator requires a floating-point field", "validation.percentage")
 	}
 }
 

@@ -22,23 +22,40 @@
 //		}
 //	}
 //
+// # Custom Resolver
+//
+// VerifyDomainOwnershipWith accepts a Resolver, which is satisfied by
+// *net.Resolver and by any test fake. This makes the verification logic
+// unit-testable without performing real DNS lookups:
+//
+//	err := dnsverify.VerifyDomainOwnershipWith(ctx, resolver, "example.com", "my-project-id-123")
+//
 // # Error Handling
 //
-// The package provides several specific error types for different verification failures:
+// The package provides several specific sentinel errors for different
+// verification failures, all matchable via errors.Is:
 //
-//   - ErrInvalidInput: domain or projectID is empty
-//   - ErrTXTRecordNotFound: no TXT records found for the domain
-//   - ErrDNSLookupFailed: DNS lookup encountered a network error
-//   - ErrDomainNotVerified: TXT records exist but do not contain the projectID
+//   - ErrInvalidInput: domain or projectID is empty after trimming whitespace
+//   - ErrDomainNotFound: the domain itself does not exist (NXDOMAIN)
+//   - ErrTXTRecordNotFound: the domain resolved but has no TXT records
+//   - ErrDNSLookupFailed: the DNS lookup failed (e.g. network/timeout); the
+//     underlying error is wrapped and remains available via errors.Is/As
+//   - ErrDomainNotVerified: TXT records exist but none exactly match the projectID
 //
 // # Implementation Details
 //
 // The verification process:
 //
-// 1. Validates that both domain and projectID are provided
-// 2. Normalizes the domain (lowercases, trims whitespace)
-// 3. Performs a DNS TXT record lookup for the domain
-// 4. Checks if any TXT record contains the projectID string
+//  1. Normalizes the domain (lowercases, trims whitespace) and trims the projectID
+//  2. Validates that both domain and projectID are non-empty after normalization
+//  3. Performs a DNS TXT record lookup for the domain
+//  4. Requires an exact, case-sensitive match between a (trimmed) TXT record and
+//     the projectID
+//
+// The domain is lowercased because DNS names are case-insensitive. The projectID
+// is only trimmed, not lowercased, because TXT record values are case-sensitive
+// and project IDs use a case-sensitive alphabet; the same trim-only treatment is
+// applied to each TXT record so matching remains exact.
 //
 // Domain owners should add a TXT record to their DNS configuration containing
 // the project ID. For example:

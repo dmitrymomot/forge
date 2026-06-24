@@ -1,12 +1,10 @@
 package useragent
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // UserAgent contains the parsed information from a user agent string
@@ -70,19 +68,40 @@ var botNameMap = map[string]string{
 	"adsbot":              "AdsBot",
 }
 
-// Fallback patterns for dynamic bot name extraction when fast-path fails
+// Fallback patterns for dynamic bot name extraction when fast-path fails.
+// Patterns operate on lowercased input, so they need no case-insensitivity flag.
 var botNamePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)([a-z0-9\-_]+bot)`),
-	regexp.MustCompile(`(?i)(google-structured-data)`),
-	regexp.MustCompile(`(?i)([a-z0-9\-_]+spider)`),
-	regexp.MustCompile(`(?i)([a-z0-9\-_]+crawler)`),
+	regexp.MustCompile(`([a-z0-9\-_]+bot)`),
+	regexp.MustCompile(`(google-structured-data)`),
+	regexp.MustCompile(`([a-z0-9\-_]+spider)`),
+	regexp.MustCompile(`([a-z0-9\-_]+crawler)`),
+}
+
+// titleCaseASCII title-cases an ASCII bot identifier: the first letter of each
+// word (a run delimited by any non-alphanumeric byte) is uppercased. It is a
+// stateless, allocation-light, and goroutine-safe replacement for the
+// golang.org/x/text title transformer, which is unsafe for concurrent use and
+// would otherwise force a per-call allocation. Bot tokens captured by the
+// fallback regexes are ASCII, so byte-wise casing is correct here.
+func titleCaseASCII(s string) string {
+	b := []byte(s)
+	atWordStart := true
+	for i := range b {
+		c := b[i]
+		isAlphaNum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if atWordStart && c >= 'a' && c <= 'z' {
+			b[i] = c - ('a' - 'A')
+		}
+		atWordStart = !isAlphaNum
+	}
+	return string(b)
 }
 
 // extractBotName extracts bot names using fast-path lookups before falling back to regex.
 // This two-tier approach optimizes for the 90% case where bots are well-known.
-func extractBotName(userAgent string) string {
+// The input is expected to be lowercased, consistent with the rest of Parse.
+func extractBotName(lowerUA string) string {
 	defaultName := "Unknown Bot"
-	lowerUA := strings.ToLower(userAgent)
 
 	// Googlebot represents ~40% of bot traffic, so check it first
 	if strings.Contains(lowerUA, "googlebot") {
@@ -96,15 +115,13 @@ func extractBotName(userAgent string) string {
 
 	// Regex fallback for less common bots and dynamic extraction
 	for _, pattern := range botNamePatterns {
-		matches := pattern.FindStringSubmatch(userAgent)
+		matches := pattern.FindStringSubmatch(lowerUA)
 		if len(matches) > 1 {
 			// Captured group contains the bot identifier
-			title := cases.Title(language.English)
-			return title.String(strings.ToLower(matches[1]))
+			return titleCaseASCII(matches[1])
 		} else if len(matches) == 1 {
 			// No capture group, use full match
-			title := cases.Title(language.English)
-			return title.String(strings.ToLower(matches[0]))
+			return titleCaseASCII(matches[0])
 		}
 	}
 
@@ -140,23 +157,38 @@ func formatBrowserName(browserName string) string {
 	return browserName
 }
 
-// formatBrowserVersion truncates overly long version strings that can appear in some UAs
+// maxVersionComponents bounds how many dot-separated version segments are kept
+// so excessively precise version strings don't overflow display contexts.
+const maxVersionComponents = 4
+
+// formatBrowserVersion trims overly precise version strings that can appear in
+// some UAs. It truncates on dot-separated component boundaries rather than raw
+// characters, so segments are never merged into a misleading number (e.g.
+// "91.0.4472.124" stays "91.0.4472.124", not "91.0.44721"; and a trailing dot
+// in "100.0.12345." is dropped rather than producing a fabricated digit).
 func formatBrowserVersion(version string) string {
 	if version == "" {
 		return "?"
 	}
 
-	// Prevent UI overflow from excessive version precision
-	if strings.Contains(version, ".") && len(version) > 10 {
-		truncated := version[:10]
-		// Avoid trailing periods in truncated versions
-		if truncated[len(truncated)-1] == '.' {
-			return truncated[:len(truncated)-1] + "1"
+	components := strings.Split(version, ".")
+
+	// Drop empty trailing/leading segments produced by stray dots.
+	cleaned := components[:0]
+	for _, c := range components {
+		if c != "" {
+			cleaned = append(cleaned, c)
 		}
-		return truncated
+	}
+	if len(cleaned) == 0 {
+		return version
 	}
 
-	return version
+	if len(cleaned) > maxVersionComponents {
+		cleaned = cleaned[:maxVersionComponents]
+	}
+
+	return strings.Join(cleaned, ".")
 }
 
 func formatDeviceType(deviceType string) string {
@@ -180,7 +212,7 @@ func (ua UserAgent) GetShortIdentifier() string {
 
 // formatBotIdentifier formats bot user agents for display.
 func (ua UserAgent) formatBotIdentifier() string {
-	return fmt.Sprintf("Bot: %s", extractBotName(ua.userAgent))
+	return fmt.Sprintf("Bot: %s", extractBotName(strings.ToLower(ua.userAgent)))
 }
 
 // isAllUnknown checks if all user agent components are unknown.
@@ -191,38 +223,32 @@ func (ua UserAgent) isAllUnknown() bool {
 }
 
 // formatStandardIdentifier formats standard user agents with browser, OS, and device information.
+// The output uses a single, uniform shape regardless of platform:
+//
+//	Browser/Version (OS, device)
+//
+// with the comma-separated platform suffix collapsing to just the OS when the
+// device type is unknown.
 func (ua UserAgent) formatStandardIdentifier() string {
-	// When only browser detection fails, show OS and device
-	if (ua.BrowserName() == "" || ua.BrowserName() == BrowserUnknown) &&
-		(ua.OS() != "" && ua.OS() != OSUnknown) &&
-		(ua.DeviceType() != "" && ua.DeviceType() != DeviceTypeUnknown) {
+	osKnown := ua.OS() != "" && ua.OS() != OSUnknown
+	deviceKnown := ua.DeviceType() != "" && ua.DeviceType() != DeviceTypeUnknown
+
+	// When only browser detection fails, show OS and device.
+	if (ua.BrowserName() == "" || ua.BrowserName() == BrowserUnknown) && osKnown && deviceKnown {
 		return fmt.Sprintf("%s %s", formatOSName(ua.OS()), formatDeviceType(ua.DeviceType()))
 	}
 
 	browserName := formatBrowserName(ua.BrowserName())
 	browserVersion := formatBrowserVersion(ua.BrowserVer())
 	osName := formatOSName(ua.OS())
-	deviceType := formatDeviceType(ua.DeviceType())
 
-	// Avoid redundant 'unknown' information in display
-	if osName == "Unknown OS" && deviceType == "unknown" {
+	// Collapse to just the OS when the device type is unknown to avoid a
+	// redundant "unknown" in the suffix.
+	if !deviceKnown {
 		return fmt.Sprintf("%s/%s (%s)", browserName, browserVersion, osName)
 	}
 
-	// Use comma format for common OS/device combinations for better readability
-	useCommaFormat := (osName == "Windows" && deviceType == "desktop") ||
-		(osName == "iOS" && deviceType == "mobile")
-
-	// Override for specific Firefox test scenarios that expect space format
-	if browserName == "Firefox" && strings.HasPrefix(browserVersion, "100.0.1234") &&
-		osName == "Windows" && deviceType == "desktop" {
-		useCommaFormat = false
-	}
-	if useCommaFormat {
-		return fmt.Sprintf("%s/%s (%s, %s)", browserName, browserVersion, osName, deviceType)
-	}
-
-	return fmt.Sprintf("%s/%s (%s %s)", browserName, browserVersion, osName, deviceType)
+	return fmt.Sprintf("%s/%s (%s, %s)", browserName, browserVersion, osName, formatDeviceType(ua.DeviceType()))
 }
 
 // Parse analyzes a user agent string and extracts device, OS, and browser information.
@@ -230,7 +256,7 @@ func (ua UserAgent) formatStandardIdentifier() string {
 func Parse(ua string) (UserAgent, error) {
 	var zero UserAgent
 	if ua == "" {
-		return zero, ErrEmptyUserAgent
+		return zero, errors.Join(ErrParsingFailed, ErrEmptyUserAgent)
 	}
 
 	// Normalize case for consistent string matching across parsers
@@ -239,7 +265,7 @@ func Parse(ua string) (UserAgent, error) {
 	deviceType := ParseDeviceType(lowerUA)
 	if deviceType == DeviceTypeUnknown && !strings.Contains(lowerUA, "bot") {
 		// Unknown devices are only errors for non-bots since bot patterns can be unusual
-		return zero, ErrUnknownDevice
+		return zero, errors.Join(ErrParsingFailed, ErrUnknownDevice)
 	}
 
 	deviceModel := GetDeviceModel(lowerUA, deviceType)
@@ -250,7 +276,7 @@ func Parse(ua string) (UserAgent, error) {
 
 	// Detect malformed UAs: non-empty but all parsers failed
 	if os == OSUnknown && browser.Name == BrowserUnknown && ua != "" && deviceType == DeviceTypeUnknown {
-		return zero, ErrMalformedUserAgent
+		return zero, errors.Join(ErrParsingFailed, ErrMalformedUserAgent)
 	}
 
 	return New(ua, deviceType, deviceModel, os, browser.Name, browser.Version), nil

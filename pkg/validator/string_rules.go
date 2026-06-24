@@ -3,6 +3,7 @@ package validator
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // RequiredString validates that a string is not empty after trimming whitespace.
@@ -25,7 +26,9 @@ func RequiredString(field, value string) Rule {
 func MinLenString(field, value string, min int) Rule {
 	return Rule{
 		Check: func() bool {
-			return len(value) >= min
+			// Count characters (runes), not bytes, to match the documented
+			// "characters" semantics for multibyte (UTF-8) input.
+			return utf8.RuneCountInString(value) >= min
 		},
 		Error: ValidationError{
 			Field:          field,
@@ -42,7 +45,7 @@ func MinLenString(field, value string, min int) Rule {
 func MaxLenString(field, value string, max int) Rule {
 	return Rule{
 		Check: func() bool {
-			return len(value) <= max
+			return utf8.RuneCountInString(value) <= max
 		},
 		Error: ValidationError{
 			Field:          field,
@@ -59,7 +62,7 @@ func MaxLenString(field, value string, max int) Rule {
 func LenString(field, value string, exact int) Rule {
 	return Rule{
 		Check: func() bool {
-			return len(value) == exact
+			return utf8.RuneCountInString(value) == exact
 		},
 		Error: ValidationError{
 			Field:          field,

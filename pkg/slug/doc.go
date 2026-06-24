@@ -74,5 +74,20 @@
 //	slug.Make("naïve résumé")      // "naive-resume"
 //	slug.Make("Ñoño español")      // "nono-espanol"
 //
+// A few ligatures and special letters are intentionally simplified to a SINGLE
+// ASCII character (favoring compact slugs) rather than the conventional
+// two-character transliteration. This may surprise callers who expect "ss"/"ae":
+//
+//	slug.Make("straße")            // "strase"  (ß -> s, not "ss")
+//	slug.Make("Æsir")              // "asir"  (Æ -> a, not "ae")
+//	slug.Make("œuvre")             // "ouvre"  (œ -> o, not "oe")
+//	slug.Make("søster")            // "soster"  (ø -> o, not "oe")
+//
+// If you need the two-character forms, apply WithCustomReplace before
+// slugification to override the default mapping:
+//
+//	slug.Make("straße", slug.WithCustomReplace(map[string]string{"ß": "ss"}))
+//	// Output: "strasse"
+//
 // Unsupported character sets (Cyrillic, CJK, etc.) are replaced with separators.
 package slug

@@ -4,12 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/slug"
 )
 
 func TestMake(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string
@@ -214,13 +216,16 @@ func TestMake(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := slug.Make(tt.input, tt.opts...)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestNormalizeDiacritic(t *testing.T) {
+	t.Parallel()
+
 	// Test specific diacritic conversions
 	inputs := []struct {
 		char     string
@@ -245,13 +250,16 @@ func TestNormalizeDiacritic(t *testing.T) {
 
 	for _, tt := range inputs {
 		t.Run(tt.char, func(t *testing.T) {
+			t.Parallel()
 			result := slug.Make(tt.char)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestReservedSlugs(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string
@@ -263,11 +271,11 @@ func TestReservedSlugs(t *testing.T) {
 			input: "admin",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin", "api", "login")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "admin", result)
-				assert.True(t, strings.HasPrefix(result, "admin-"))
+				require.NotEqual(t, "admin", result)
+				require.True(t, strings.HasPrefix(result, "admin-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 2)
-				assert.Len(t, parts[1], 6) // default suffix length
+				require.Len(t, parts, 2)
+				require.Len(t, parts[1], 6) // default suffix length
 			},
 		},
 		{
@@ -275,8 +283,8 @@ func TestReservedSlugs(t *testing.T) {
 			input: "ADMIN",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "admin", result)
-				assert.True(t, strings.HasPrefix(result, "admin-"))
+				require.NotEqual(t, "admin", result)
+				require.True(t, strings.HasPrefix(result, "admin-"))
 			},
 		},
 		{
@@ -284,8 +292,8 @@ func TestReservedSlugs(t *testing.T) {
 			input: "AdMiN",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "admin", result)
-				assert.True(t, strings.HasPrefix(result, "admin-"))
+				require.NotEqual(t, "admin", result)
+				require.True(t, strings.HasPrefix(result, "admin-"))
 			},
 		},
 		{
@@ -293,10 +301,10 @@ func TestReservedSlugs(t *testing.T) {
 			input: "ADMIN",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin"), slug.WithLowercase(false)},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "ADMIN", result)
-				assert.True(t, strings.HasPrefix(result, "ADMIN-"))
+				require.NotEqual(t, "ADMIN", result)
+				require.True(t, strings.HasPrefix(result, "ADMIN-"))
 				parts := strings.Split(result, "-")
-				assert.Regexp(t, "^[a-zA-Z0-9]+$", parts[1]) // mixed case suffix when Lowercase(false)
+				require.Regexp(t, "^[a-zA-Z0-9]+$", parts[1]) // mixed case suffix when Lowercase(false)
 			},
 		},
 		{
@@ -304,7 +312,7 @@ func TestReservedSlugs(t *testing.T) {
 			input: "product",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin", "api", "login")},
 			validate: func(t *testing.T, result string) {
-				assert.Equal(t, "product", result)
+				require.Equal(t, "product", result)
 			},
 		},
 		{
@@ -312,10 +320,10 @@ func TestReservedSlugs(t *testing.T) {
 			input: "api",
 			opts:  []slug.Option{slug.WithReservedSlugs("api"), slug.WithSeparator("_")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "api", result)
-				assert.True(t, strings.HasPrefix(result, "api_"))
+				require.NotEqual(t, "api", result)
+				require.True(t, strings.HasPrefix(result, "api_"))
 				parts := strings.Split(result, "_")
-				assert.Len(t, parts, 2)
+				require.Len(t, parts, 2)
 			},
 		},
 		{
@@ -323,11 +331,11 @@ func TestReservedSlugs(t *testing.T) {
 			input: "login",
 			opts:  []slug.Option{slug.WithReservedSlugs("login"), slug.WithSuffix(8)},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "login", result)
-				assert.True(t, strings.HasPrefix(result, "login-"))
+				require.NotEqual(t, "login", result)
+				require.True(t, strings.HasPrefix(result, "login-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 2)
-				assert.Len(t, parts[1], 8) // explicit suffix length
+				require.Len(t, parts, 2)
+				require.Len(t, parts[1], 8) // explicit suffix length
 			},
 		},
 		{
@@ -335,12 +343,12 @@ func TestReservedSlugs(t *testing.T) {
 			input: "admin",
 			opts:  []slug.Option{slug.WithReservedSlugs("admin"), slug.WithMaxLength(10)},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "admin", result)
-				assert.LessOrEqual(t, len(result), 10)
+				require.NotEqual(t, "admin", result)
+				require.LessOrEqual(t, len(result), 10)
 				// With maxLength=10, "admin-" takes 6 chars, leaving 4 for suffix
 				parts := strings.Split(result, "-")
 				if len(parts) == 2 {
-					assert.Len(t, parts[1], 4)
+					require.Len(t, parts[1], 4)
 				}
 			},
 		},
@@ -349,8 +357,8 @@ func TestReservedSlugs(t *testing.T) {
 			input: "administrator",
 			opts:  []slug.Option{slug.WithReservedSlugs("administrator"), slug.WithMaxLength(10)},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "administrator", result)
-				assert.LessOrEqual(t, len(result), 10)
+				require.NotEqual(t, "administrator", result)
+				require.LessOrEqual(t, len(result), 10)
 			},
 		},
 		{
@@ -358,8 +366,8 @@ func TestReservedSlugs(t *testing.T) {
 			input: "api endpoint",
 			opts:  []slug.Option{slug.WithReservedSlugs("api-endpoint", "api", "endpoint")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "api-endpoint", result)
-				assert.True(t, strings.HasPrefix(result, "api-endpoint-"))
+				require.NotEqual(t, "api-endpoint", result)
+				require.True(t, strings.HasPrefix(result, "api-endpoint-"))
 			},
 		},
 		{
@@ -367,8 +375,8 @@ func TestReservedSlugs(t *testing.T) {
 			input: "config",
 			opts:  []slug.Option{slug.WithReservedSlugs([]string{"config", "system", "root"}...)},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "config", result)
-				assert.True(t, strings.HasPrefix(result, "config-"))
+				require.NotEqual(t, "config", result)
+				require.True(t, strings.HasPrefix(result, "config-"))
 			},
 		},
 		{
@@ -376,7 +384,7 @@ func TestReservedSlugs(t *testing.T) {
 			input: "admin",
 			opts:  []slug.Option{slug.WithReservedSlugs()},
 			validate: func(t *testing.T, result string) {
-				assert.Equal(t, "admin", result)
+				require.Equal(t, "admin", result)
 			},
 		},
 		{
@@ -384,14 +392,15 @@ func TestReservedSlugs(t *testing.T) {
 			input: "admin",
 			opts:  []slug.Option{slug.WithReservedSlugs("ADMIN", "Admin", "admin")},
 			validate: func(t *testing.T, result string) {
-				assert.NotEqual(t, "admin", result)
-				assert.True(t, strings.HasPrefix(result, "admin-"))
+				require.NotEqual(t, "admin", result)
+				require.True(t, strings.HasPrefix(result, "admin-"))
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := slug.Make(tt.input, tt.opts...)
 			tt.validate(t, result)
 		})
@@ -461,11 +470,13 @@ func BenchmarkMakeParallel(b *testing.B) {
 	})
 }
 
-func TestGenerateSuffixErrorHandling(t *testing.T) {
-	// This test is designed to improve coverage by testing the error path
-	// In real usage, rand.Read rarely fails, but we need to test the fallback
+func TestGenerateSuffixHappyPath(t *testing.T) {
+	t.Parallel()
 
-	// Test that generateSuffix produces valid output even in edge cases
+	// Verifies that the random-suffix generator produces valid, correctly-sized,
+	// charset-respecting output across a range of lengths. The deterministic
+	// fallback path (rand.Read failure) is covered separately in the internal
+	// test TestGenerateSuffixFallback, which forces randRead to fail.
 	tests := []struct {
 		name      string
 		length    int
@@ -495,18 +506,21 @@ func TestGenerateSuffixErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Since we can't easily mock rand.Read failure, we'll test that
-			// the function always produces valid output
+			t.Parallel()
 			for range 10 {
-				result := slug.Make("test", slug.WithSuffix(tt.length))
+				opts := []slug.Option{slug.WithSuffix(tt.length)}
+				if !tt.lowercase {
+					opts = append(opts, slug.WithLowercase(false))
+				}
+				result := slug.Make("test", opts...)
 				if tt.length > 0 {
 					parts := strings.Split(result, "-")
 					suffix := parts[len(parts)-1]
-					assert.Len(t, suffix, tt.length)
+					require.Len(t, suffix, tt.length)
 					if tt.lowercase {
-						assert.Regexp(t, "^[a-z0-9]*$", suffix)
+						require.Regexp(t, "^[a-z0-9]+$", suffix)
 					} else {
-						assert.Regexp(t, "^[a-zA-Z0-9]*$", suffix)
+						require.Regexp(t, "^[a-zA-Z0-9]+$", suffix)
 					}
 				}
 			}
@@ -515,6 +529,8 @@ func TestGenerateSuffixErrorHandling(t *testing.T) {
 }
 
 func TestMaxLengthEdgeCases(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string
@@ -526,9 +542,9 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			input: "Test",
 			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
-				assert.LessOrEqual(t, len(result), 5)
+				require.LessOrEqual(t, len(result), 5)
 				// Should be just truncated suffix
-				assert.Regexp(t, "^[a-z0-9]{5}$", result)
+				require.Regexp(t, "^[a-z0-9]{5}$", result)
 			},
 		},
 		{
@@ -536,8 +552,8 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			input: "Test",
 			opts:  []slug.Option{slug.WithSuffix(8), slug.WithMaxLength(8)},
 			validate: func(t *testing.T, result string) {
-				assert.Equal(t, 8, len(result))
-				assert.Regexp(t, "^[a-z0-9]{8}$", result)
+				require.Equal(t, 8, len(result))
+				require.Regexp(t, "^[a-z0-9]{8}$", result)
 			},
 		},
 		{
@@ -545,8 +561,8 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			input: "Test Case",
 			opts:  []slug.Option{slug.WithSuffix(4), slug.WithMaxLength(15), slug.WithSeparator("---")},
 			validate: func(t *testing.T, result string) {
-				assert.LessOrEqual(t, len(result), 15)
-				assert.Contains(t, result, "---")
+				require.LessOrEqual(t, len(result), 15)
+				require.Contains(t, result, "---")
 			},
 		},
 		{
@@ -554,11 +570,11 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			input: "Long Title Here",
 			opts:  []slug.Option{slug.WithSuffix(3), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
-				assert.LessOrEqual(t, len(result), 5)
+				require.LessOrEqual(t, len(result), 5)
 				// Should be "l-abc" or similar
 				parts := strings.Split(result, "-")
 				if len(parts) > 1 {
-					assert.Len(t, parts[len(parts)-1], 3)
+					require.Len(t, parts[len(parts)-1], 3)
 				}
 			},
 		},
@@ -568,7 +584,7 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			opts:  []slug.Option{slug.WithMaxLength(6)},
 			validate: func(t *testing.T, result string) {
 				// "Test™Case" becomes "test-case" but truncated to 6 chars = "test-c"
-				assert.Equal(t, "test-c", result)
+				require.Equal(t, "test-c", result)
 			},
 		},
 		{
@@ -576,8 +592,8 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			input: "",
 			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(5)},
 			validate: func(t *testing.T, result string) {
-				assert.Equal(t, 5, len(result))
-				assert.Regexp(t, "^[a-z0-9]{5}$", result)
+				require.Equal(t, 5, len(result))
+				require.Regexp(t, "^[a-z0-9]{5}$", result)
 			},
 		},
 		{
@@ -586,15 +602,30 @@ func TestMaxLengthEdgeCases(t *testing.T) {
 			opts:  []slug.Option{slug.WithSuffix(6), slug.WithMaxLength(8)},
 			validate: func(t *testing.T, result string) {
 				// Should be "v-abc123" (1 char + separator + 6 char suffix = 8)
-				assert.Equal(t, 8, len(result))
+				require.Equal(t, 8, len(result))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[len(parts)-1], 6)
+				require.Len(t, parts[len(parts)-1], 6)
+			},
+		},
+		{
+			// Explicit suffix is a fixed-width token: when the multi-byte
+			// separator plus suffix consume the entire budget, the slug is
+			// dropped and only the suffix (capped at maxLength) is emitted.
+			name:  "explicit suffix no room with multi-byte separator drops slug",
+			input: "Something Long",
+			opts:  []slug.Option{slug.WithSuffix(8), slug.WithMaxLength(8), slug.WithSeparator("---")},
+			validate: func(t *testing.T, result string) {
+				require.Equal(t, 8, len(result))
+				// Slug dropped, no separator, full 8-char suffix.
+				require.Regexp(t, "^[a-z0-9]{8}$", result)
+				require.NotContains(t, result, "---")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := slug.Make(tt.input, tt.opts...)
 			tt.validate(t, result)
 		})
@@ -616,13 +647,13 @@ func TestMinLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(10)},
 			checkFunc: func(t *testing.T, result string) {
 				// "owl" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "owl-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "owl-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 2)
-				assert.Equal(t, "owl", parts[0])
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
-				assert.Regexp(t, "^[a-z0-9]{6}$", parts[1])
+				require.Len(t, parts, 2)
+				require.Equal(t, "owl", parts[0])
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Regexp(t, "^[a-z0-9]{6}$", parts[1])
 			},
 		},
 		{
@@ -630,7 +661,7 @@ func TestMinLength(t *testing.T) {
 			input: "hello",
 			opts:  []slug.Option{slug.WithMinLength(5)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Equal(t, "hello", result)
+				require.Equal(t, "hello", result)
 			},
 		},
 		{
@@ -638,7 +669,7 @@ func TestMinLength(t *testing.T) {
 			input: "hello world",
 			opts:  []slug.Option{slug.WithMinLength(5)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Equal(t, "hello-world", result)
+				require.Equal(t, "hello-world", result)
 			},
 		},
 		{
@@ -646,7 +677,7 @@ func TestMinLength(t *testing.T) {
 			input: "hi",
 			opts:  []slug.Option{slug.WithMinLength(0)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Equal(t, "hi", result)
+				require.Equal(t, "hi", result)
 			},
 		},
 		{
@@ -655,12 +686,12 @@ func TestMinLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(8), slug.WithSeparator("_")},
 			checkFunc: func(t *testing.T, result string) {
 				// "cat" (3 chars) + "_" (1 char) + 6-char suffix = 10 total
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "cat_"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "cat_"))
 				parts := strings.Split(result, "_")
-				assert.Equal(t, "cat", parts[0])
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
-				assert.Regexp(t, "^[a-z0-9]{6}$", parts[1])
+				require.Equal(t, "cat", parts[0])
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Regexp(t, "^[a-z0-9]{6}$", parts[1])
 			},
 		},
 		{
@@ -669,12 +700,12 @@ func TestMinLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(10), slug.WithLowercase(false)},
 			checkFunc: func(t *testing.T, result string) {
 				// "Cat" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "Cat-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "Cat-"))
 				parts := strings.Split(result, "-")
-				assert.Equal(t, "Cat", parts[0])
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
-				assert.Regexp(t, "^[a-zA-Z0-9]{6}$", parts[1])
+				require.Equal(t, "Cat", parts[0])
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Regexp(t, "^[a-zA-Z0-9]{6}$", parts[1])
 			},
 		},
 		{
@@ -682,7 +713,7 @@ func TestMinLength(t *testing.T) {
 			input: "test",
 			opts:  []slug.Option{slug.WithMinLength(4)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Equal(t, "test", result)
+				require.Equal(t, "test", result)
 			},
 		},
 		{
@@ -693,10 +724,10 @@ func TestMinLength(t *testing.T) {
 				// "test" is 4 chars, MinLength is 5
 				// With new behavior: always adds 6-char suffix when below minLength
 				// "test" (4 chars) + "-" (1 char) + 6-char suffix = 11 total
-				assert.Equal(t, 11, len(result))
-				assert.True(t, strings.HasPrefix(result, "test-"))
+				require.Equal(t, 11, len(result))
+				require.True(t, strings.HasPrefix(result, "test-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
 			},
 		},
 		{
@@ -707,10 +738,10 @@ func TestMinLength(t *testing.T) {
 				// "test" is 4 chars, MinLength is 6
 				// With new behavior: always adds 6-char suffix when below minLength
 				// "test" (4 chars) + "-" (1 char) + 6-char suffix = 11 total
-				assert.Equal(t, 11, len(result))
-				assert.True(t, strings.HasPrefix(result, "test-"))
+				require.Equal(t, 11, len(result))
+				require.True(t, strings.HasPrefix(result, "test-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
 			},
 		},
 		{
@@ -719,10 +750,10 @@ func TestMinLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(6), slug.WithSeparator("")},
 			checkFunc: func(t *testing.T, result string) {
 				// "go" (2 chars) + "" (0 chars) + 6-char suffix = 8 total
-				assert.Equal(t, 8, len(result))
-				assert.True(t, strings.HasPrefix(result, "go"))
+				require.Equal(t, 8, len(result))
+				require.True(t, strings.HasPrefix(result, "go"))
 				// No separator, so suffix directly appended
-				assert.Regexp(t, "^go[a-z0-9]{6}$", result)
+				require.Regexp(t, "^go[a-z0-9]{6}$", result)
 			},
 		},
 		{
@@ -731,12 +762,12 @@ func TestMinLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(10), slug.WithSeparator("---")},
 			checkFunc: func(t *testing.T, result string) {
 				// "xy" (2 chars) + "---" (3 chars) + 6-char suffix = 11 total
-				assert.Equal(t, 11, len(result))
-				assert.True(t, strings.HasPrefix(result, "xy---"))
+				require.Equal(t, 11, len(result))
+				require.True(t, strings.HasPrefix(result, "xy---"))
 				parts := strings.Split(result, "---")
-				assert.Equal(t, "xy", parts[0])
-				assert.Len(t, parts[1], 6) // Fixed 6-character suffix
-				assert.Regexp(t, "^[a-z0-9]{6}$", parts[1])
+				require.Equal(t, "xy", parts[0])
+				require.Len(t, parts[1], 6) // Fixed 6-character suffix
+				require.Regexp(t, "^[a-z0-9]{6}$", parts[1])
 			},
 		},
 		{
@@ -746,8 +777,8 @@ func TestMinLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// Empty input gets a 6-char random suffix (no separator since result is empty)
 				// With new behavior: always uses 6-char suffix
-				assert.Equal(t, 6, len(result))
-				assert.Regexp(t, "^[a-z0-9]{6}$", result)
+				require.Equal(t, 6, len(result))
+				require.Regexp(t, "^[a-z0-9]{6}$", result)
 			},
 		},
 		{
@@ -757,17 +788,17 @@ func TestMinLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				result2 := slug.Make("dog", slug.WithMinLength(10))
 				// "dog" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
-				assert.Equal(t, 10, len(result))
-				assert.Equal(t, 10, len(result2))
+				require.Equal(t, 10, len(result))
+				require.Equal(t, 10, len(result2))
 				// Both start with "dog-"
-				assert.True(t, strings.HasPrefix(result, "dog-"))
-				assert.True(t, strings.HasPrefix(result2, "dog-"))
+				require.True(t, strings.HasPrefix(result, "dog-"))
+				require.True(t, strings.HasPrefix(result2, "dog-"))
 				// But suffixes should differ (randomized)
 				parts1 := strings.Split(result, "-")
 				parts2 := strings.Split(result2, "-")
-				assert.Len(t, parts1[1], 6)
-				assert.Len(t, parts2[1], 6)
-				assert.NotEqual(t, parts1[1], parts2[1])
+				require.Len(t, parts1[1], 6)
+				require.Len(t, parts2[1], 6)
+				require.NotEqual(t, parts1[1], parts2[1])
 			},
 		},
 		{
@@ -777,10 +808,10 @@ func TestMinLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "café" becomes "cafe" (4 chars), needs padding with 6-char suffix
 				// "cafe" (4 chars) + "-" (1 char) + 6-char suffix = 11 total
-				assert.Equal(t, 11, len(result))
-				assert.True(t, strings.HasPrefix(result, "cafe-"))
+				require.Equal(t, 11, len(result))
+				require.True(t, strings.HasPrefix(result, "cafe-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
 			},
 		},
 	}
@@ -810,10 +841,10 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "cat" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				// This fits within maxLength of 15
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "cat-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "cat-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
 			},
 		},
 		{
@@ -823,10 +854,10 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "dog" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
 				// Perfectly fits min and max
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "dog-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "dog-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
 			},
 		},
 		{
@@ -837,10 +868,10 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 				// MinLength wants 6-char suffix, but maxLength constrains it
 				// "bird" (4 chars) + "-" (1 char) + suffix fits in maxLength 10
 				// Available space: 10 - 4 - 1 = 5 chars for suffix
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "bird-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "bird-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 5) // Truncated to fit maxLength
+				require.Len(t, parts[1], 5) // Truncated to fit maxLength
 			},
 		},
 		{
@@ -849,7 +880,7 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(20)},
 			checkFunc: func(t *testing.T, result string) {
 				// Input is already long, so maxLength applies
-				assert.LessOrEqual(t, len(result), 20)
+				require.LessOrEqual(t, len(result), 20)
 			},
 		},
 		{
@@ -859,10 +890,10 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// MinLength applies with 6-char suffix
 				// "xyz" (3 chars) + "-" (1 char) + 6-char suffix = 10 total
-				assert.Equal(t, 10, len(result))
-				assert.True(t, strings.HasPrefix(result, "xyz-"))
+				require.Equal(t, 10, len(result))
+				require.True(t, strings.HasPrefix(result, "xyz-"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
 			},
 		},
 		{
@@ -872,10 +903,50 @@ func TestMinLengthWithMaxLength(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "ab" (2 chars) + "_" (1 char) + 6-char suffix = 9 total
 				// Fits within maxLength of 12
-				assert.Equal(t, 9, len(result))
-				assert.True(t, strings.HasPrefix(result, "ab_"))
+				require.Equal(t, 9, len(result))
+				require.True(t, strings.HasPrefix(result, "ab_"))
 				parts := strings.Split(result, "_")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
+			},
+		},
+		{
+			// Regression for the min+max "no room for full suffix" path: the
+			// slug already nearly fills maxLength while being below minLength.
+			// The real slug content must be preserved and the padding suffix
+			// shrunk to fit; maxLength is the hard cap, so minLength (which
+			// exceeds maxLength here) cannot be fully honored.
+			name:  "min length below max but suffix does not fully fit keeps slug",
+			input: "report",
+			opts:  []slug.Option{slug.WithMinLength(10), slug.WithMaxLength(8)},
+			checkFunc: func(t *testing.T, result string) {
+				// "report" (6) + "-" (1) leaves only 1 char for the suffix.
+				require.Equal(t, 8, len(result))
+				require.LessOrEqual(t, len(result), 8) // maxLength respected
+				require.True(t, strings.HasPrefix(result, "report-"))
+				parts := strings.Split(result, "-")
+				require.Len(t, parts, 2)
+				require.Equal(t, "report", parts[0]) // real content NOT discarded
+				require.Len(t, parts[1], 1)
+				require.Regexp(t, "^[a-z0-9]$", parts[1])
+			},
+		},
+		{
+			// Regression for the original bug at slug.go:256-263 where the
+			// "no room" path discarded the slug and produced a bare suffix that
+			// UNDERSHOT minLength (e.g. a single character). With a multi-byte
+			// separator, slug + separator alone consumes the whole budget. The
+			// result must still respect maxLength and not undershoot to a tiny
+			// fragment: it fills maxLength (== minLength) with a suffix.
+			name:  "min length no room at all with multi-byte separator",
+			input: "ab",
+			opts:  []slug.Option{slug.WithMinLength(4), slug.WithMaxLength(4), slug.WithSeparator("---")},
+			checkFunc: func(t *testing.T, result string) {
+				// maxLength(4) == minLength(4); "ab" + "---" already fills the
+				// budget, so the suffix-only result fills exactly maxLength.
+				require.Equal(t, 4, len(result))           // respects maxLength
+				require.GreaterOrEqual(t, len(result), 4)  // does NOT undershoot minLength
+				require.Regexp(t, "^[a-z0-9]{4}$", result) // valid charset, no stray separator
+				require.NotContains(t, result, "---")
 			},
 		},
 	}
@@ -899,33 +970,37 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 		checkFunc func(t *testing.T, result string)
 	}{
 		{
-			name:  "min length with reserved slugs",
+			name:  "min length with reserved slugs uses single cooperating suffix",
 			input: "api",
 			opts:  []slug.Option{slug.WithMinLength(15), slug.WithReservedSlugs("api")},
 			checkFunc: func(t *testing.T, result string) {
-				// Reserved slug adds 6-char suffix: "api-xxxxxx" (10 chars)
-				// Then MinLength check happens, sees 10 < 15, adds another 6-char suffix
-				// "api" (3) + "-" (1) + 6-char + "-" (1) + 6-char = 17 total
-				assert.NotEqual(t, "api", result)
-				assert.True(t, strings.HasPrefix(result, "api-"))
-				assert.Equal(t, 17, len(result))
+				// A reserved-slug collision and the min-length requirement are both
+				// satisfied by ONE 6-char suffix, not two stacked suffixes.
+				// "api" (3) + "-" (1) + 6-char suffix = 10 total.
+				require.NotEqual(t, "api", result)
+				require.True(t, strings.HasPrefix(result, "api-"))
+				require.Equal(t, 10, len(result))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 3) // api, first suffix, second suffix
+				require.Len(t, parts, 2) // api, single suffix (no double suffix)
+				require.Equal(t, "api", parts[0])
+				require.Len(t, parts[1], 6)
+				require.Regexp(t, "^[a-z0-9]{6}$", parts[1])
 			},
 		},
 		{
-			name:  "min length with with suffix option",
+			name:  "min length with suffix option uses single suffix",
 			input: "test",
 			opts:  []slug.Option{slug.WithMinLength(15), slug.WithSuffix(8)},
 			checkFunc: func(t *testing.T, result string) {
-				// WithSuffix adds 8-char suffix: "test-xxxxxxxx" (13 chars)
-				// Then MinLength check sees 13 < 15, adds 6-char suffix
-				// "test" (4) + "-" (1) + 8-char + "-" (1) + 6-char = 20 total
-				assert.Equal(t, 20, len(result))
+				// An explicit WithSuffix already satisfies the "needs a suffix"
+				// requirement; the min-length check must not stack a second one.
+				// "test" (4) + "-" (1) + 8-char suffix = 13 total.
+				require.Equal(t, 13, len(result))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 3) // test, 8-char suffix, 6-char suffix
-				assert.Len(t, parts[1], 8)
-				assert.Len(t, parts[2], 6)
+				require.Len(t, parts, 2) // test, single 8-char suffix
+				require.Equal(t, "test", parts[0])
+				require.Len(t, parts[1], 8)
+				require.Regexp(t, "^[a-z0-9]{8}$", parts[1])
 			},
 		},
 		{
@@ -938,11 +1013,11 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "a&b" with CustomReplace becomes "aandb" (5 chars), below minLength of 10
 				// Adds 6-char suffix: "aandb-xxxxxx" (12 chars)
-				assert.Equal(t, 12, len(result))
-				assert.True(t, strings.Contains(result, "aandb"))
+				require.Equal(t, 12, len(result))
+				require.True(t, strings.Contains(result, "aandb"))
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 2)    // aandb, suffix
-				assert.Len(t, parts[1], 6) // 6-char suffix
+				require.Len(t, parts, 2)    // aandb, suffix
+				require.Len(t, parts[1], 6) // 6-char suffix
 			},
 		},
 		{
@@ -952,12 +1027,12 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// "x[y]" with StripChars becomes "xy" (2 chars), below minLength of 8
 				// Adds 6-char suffix: "xy-xxxxxx" (9 chars)
-				assert.Equal(t, 9, len(result))
-				assert.NotContains(t, result, "[")
-				assert.NotContains(t, result, "]")
+				require.Equal(t, 9, len(result))
+				require.NotContains(t, result, "[")
+				require.NotContains(t, result, "]")
 				parts := strings.Split(result, "-")
-				assert.Len(t, parts, 2)    // xy, suffix
-				assert.Len(t, parts[1], 6) // 6-char suffix
+				require.Len(t, parts, 2)    // xy, suffix
+				require.Len(t, parts[1], 6) // 6-char suffix
 			},
 		},
 		{
@@ -976,10 +1051,10 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 				// checks at line 196 AFTER the first suffix logic runs, but the first suffix
 				// logic only runs if needsSuffix is true (reserved or WithSuffix), which isn't the case here.
 				// So just one 6-char suffix is added: "a_xxxxxx" = 8 chars, which fits in maxLength of 15
-				assert.Equal(t, 8, len(result))
-				assert.True(t, strings.HasPrefix(result, "a_"))
+				require.Equal(t, 8, len(result))
+				require.True(t, strings.HasPrefix(result, "a_"))
 				parts := strings.Split(result, "_")
-				assert.Len(t, parts[1], 6)
+				require.Len(t, parts[1], 6)
 			},
 		},
 	}
@@ -994,6 +1069,8 @@ func TestMinLengthWithOtherOptions(t *testing.T) {
 }
 
 func TestMakeWithSuffix(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		input     string
@@ -1006,11 +1083,11 @@ func TestMakeWithSuffix(t *testing.T) {
 			opts:  []slug.Option{slug.WithSuffix(6)},
 			checkFunc: func(t *testing.T, result string) {
 				parts := strings.Split(result, "-")
-				assert.Equal(t, "hello", parts[0])
-				assert.Equal(t, "world", parts[1])
-				assert.Len(t, parts[2], 6) // suffix should be 6 chars
+				require.Equal(t, "hello", parts[0])
+				require.Equal(t, "world", parts[1])
+				require.Len(t, parts[2], 6) // suffix should be 6 chars
 				// Check suffix is alphanumeric lowercase
-				assert.Regexp(t, "^[a-z0-9]{6}$", parts[2])
+				require.Regexp(t, "^[a-z0-9]{6}$", parts[2])
 			},
 		},
 		{
@@ -1019,10 +1096,10 @@ func TestMakeWithSuffix(t *testing.T) {
 			opts:  []slug.Option{slug.WithSuffix(8), slug.WithLowercase(false)},
 			checkFunc: func(t *testing.T, result string) {
 				parts := strings.Split(result, "-")
-				assert.Equal(t, "Test", parts[0])
-				assert.Len(t, parts[1], 8)
+				require.Equal(t, "Test", parts[0])
+				require.Len(t, parts[1], 8)
 				// Check suffix can contain uppercase
-				assert.Regexp(t, "^[a-zA-Z0-9]{8}$", parts[1])
+				require.Regexp(t, "^[a-zA-Z0-9]{8}$", parts[1])
 			},
 		},
 		{
@@ -1031,8 +1108,8 @@ func TestMakeWithSuffix(t *testing.T) {
 			opts:  []slug.Option{slug.WithSuffix(4), slug.WithSeparator("_")},
 			checkFunc: func(t *testing.T, result string) {
 				parts := strings.Split(result, "_")
-				assert.Equal(t, "product", parts[0])
-				assert.Len(t, parts[1], 4)
+				require.Equal(t, "product", parts[0])
+				require.Len(t, parts[1], 4)
 			},
 		},
 		{
@@ -1040,11 +1117,11 @@ func TestMakeWithSuffix(t *testing.T) {
 			input: "Very Long Title Here",
 			opts:  []slug.Option{slug.WithSuffix(6), slug.WithMaxLength(20)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.LessOrEqual(t, len(result), 20)
-				assert.Contains(t, result, "-") // Should have separator
+				require.LessOrEqual(t, len(result), 20)
+				require.Contains(t, result, "-") // Should have separator
 				parts := strings.Split(result, "-")
 				lastPart := parts[len(parts)-1]
-				assert.Len(t, lastPart, 6) // suffix should still be 6 chars
+				require.Len(t, lastPart, 6) // suffix should still be 6 chars
 			},
 		},
 		{
@@ -1053,8 +1130,8 @@ func TestMakeWithSuffix(t *testing.T) {
 			opts:  []slug.Option{slug.WithSuffix(10), slug.WithMaxLength(8)},
 			checkFunc: func(t *testing.T, result string) {
 				// Should just be the suffix truncated
-				assert.Len(t, result, 8)
-				assert.Regexp(t, "^[a-z0-9]{8}$", result)
+				require.Len(t, result, 8)
+				require.Regexp(t, "^[a-z0-9]{8}$", result)
 			},
 		},
 		{
@@ -1062,8 +1139,8 @@ func TestMakeWithSuffix(t *testing.T) {
 			input: "",
 			opts:  []slug.Option{slug.WithSuffix(5)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Len(t, result, 5)
-				assert.Regexp(t, "^[a-z0-9]{5}$", result)
+				require.Len(t, result, 5)
+				require.Regexp(t, "^[a-z0-9]{5}$", result)
 			},
 		},
 		{
@@ -1071,7 +1148,7 @@ func TestMakeWithSuffix(t *testing.T) {
 			input: "Normal Slug",
 			opts:  []slug.Option{slug.WithSuffix(0)},
 			checkFunc: func(t *testing.T, result string) {
-				assert.Equal(t, "normal-slug", result)
+				require.Equal(t, "normal-slug", result)
 			},
 		},
 		{
@@ -1081,19 +1158,20 @@ func TestMakeWithSuffix(t *testing.T) {
 			checkFunc: func(t *testing.T, result string) {
 				// Generate another one and check they're different
 				result2 := slug.Make("Same Title", slug.WithSuffix(6))
-				assert.NotEqual(t, result, result2)
+				require.NotEqual(t, result, result2)
 				// But the base should be the same
 				parts1 := strings.Split(result, "-")
 				parts2 := strings.Split(result2, "-")
-				assert.Equal(t, parts1[0], parts2[0])
-				assert.Equal(t, parts1[1], parts2[1])
-				assert.NotEqual(t, parts1[2], parts2[2]) // suffixes should differ
+				require.Equal(t, parts1[0], parts2[0])
+				require.Equal(t, parts1[1], parts2[1])
+				require.NotEqual(t, parts1[2], parts2[2]) // suffixes should differ
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := slug.Make(tt.input, tt.opts...)
 			tt.checkFunc(t, result)
 		})

@@ -183,102 +183,122 @@ func Make(s string, opts ...Option) string {
 
 	result := strings.TrimSuffix(b.String(), cfg.separator)
 
-	// Check if slug is reserved (case-insensitive)
-	needsSuffix := cfg.suffixLength > 0
-	if !needsSuffix && len(cfg.reservedSlugs) > 0 {
-		// Check if the generated slug matches any reserved slug
-		if slices.Contains(cfg.reservedSlugs, strings.ToLower(result)) {
-			needsSuffix = true
-		}
+	return applySuffix(result, cfg)
+}
+
+// applySuffix appends at most ONE random suffix to satisfy every constraint that
+// requires one: an explicit WithSuffix, a reserved-slug collision, or padding to
+// reach minLength. A single cooperating suffix is used (never stacked) so that
+// WithReservedSlugs + WithMinLength does not produce a confusing double suffix.
+//
+// Two policies govern how the suffix interacts with maxLength:
+//
+//   - Explicit WithSuffix is a fixed-width uniqueness token: it keeps its full
+//     requested length, and the slug is truncated (and the separator dropped) as
+//     needed to fit within maxLength.
+//   - Reserved-collision and minLength padding treat the slug as the priority:
+//     the real slug content is preserved and the padding suffix is shrunk to fit;
+//     the slug is only truncated as a last resort when even a 1-char suffix would
+//     not otherwise fit.
+//
+// In all cases maxLength is a hard cap on the rune count of the result. minLength
+// is a target, not a guarantee against maxLength: when minLength exceeds maxLength
+// the cap wins and the result may be shorter than minLength.
+func applySuffix(result string, cfg *config) string {
+	resultLen := len([]rune(result))
+
+	// Determine whether a suffix is required and from which source.
+	explicitSuffix := cfg.suffixLength > 0
+	reservedCollision := !explicitSuffix && len(cfg.reservedSlugs) > 0 &&
+		slices.Contains(cfg.reservedSlugs, strings.ToLower(result))
+	belowMinLength := cfg.minLength > 0 && resultLen < cfg.minLength
+
+	if !explicitSuffix && !reservedCollision && !belowMinLength {
+		return result
 	}
 
-	// Check if slug is shorter than minimum length
-	needsMinLengthSuffix := cfg.minLength > 0 && len([]rune(result)) < cfg.minLength
+	sepLen := len([]rune(cfg.separator))
 
-	// Add random suffix for collision avoidance if requested or if slug is reserved
-	if needsSuffix {
-		actualSuffixLen := cfg.suffixLength
-		if actualSuffixLen == 0 {
-			// Default suffix length when avoiding reserved slugs
-			actualSuffixLen = 6
-		}
-
-		// For reserved slugs with max length constraint, adjust suffix to fit
-		if cfg.maxLength > 0 && cfg.suffixLength == 0 {
-			// This is a reserved slug case (no explicit suffix length set)
-			availableSpace := cfg.maxLength - len([]rune(result)) - len([]rune(cfg.separator))
-			if availableSpace < actualSuffixLen && availableSpace > 0 {
-				actualSuffixLen = availableSpace
-			}
-		} else if cfg.maxLength > 0 && actualSuffixLen > cfg.maxLength {
-			// Explicit suffix is longer than max length
-			actualSuffixLen = cfg.maxLength
-		}
-
-		suffix := generateSuffix(actualSuffixLen, cfg.lowercase)
-
-		// Ensure total length doesn't exceed maxLength
-		if cfg.maxLength > 0 {
-			totalLen := len([]rune(result)) + len([]rune(cfg.separator)) + actualSuffixLen
-			if totalLen > cfg.maxLength {
-				// Truncate main slug to make room for suffix
-				mainSlugMaxLen := cfg.maxLength - len([]rune(cfg.separator)) - actualSuffixLen
-				if mainSlugMaxLen > 0 {
-					runes := []rune(result)
-					if len(runes) > mainSlugMaxLen {
-						result = string(runes[:mainSlugMaxLen])
-					}
-				} else {
-					// No room for main slug, use suffix only
-					result = ""
-				}
-			}
-		}
-
-		if result != "" {
-			result = result + cfg.separator + suffix
-		} else {
-			result = suffix
-		}
+	// Base suffix length: honor an explicit WithSuffix, otherwise use the default
+	// of 6 characters for reserved-collision and min-length padding. A single
+	// suffix satisfies all of these at once; a reserved slug that is also below
+	// minLength gets one 6-char suffix, never two stacked suffixes.
+	desiredLen := cfg.suffixLength
+	if desiredLen == 0 {
+		desiredLen = 6
 	}
 
-	// Handle minimum length requirement
-	if needsMinLengthSuffix {
-		currentLen := len([]rune(result))
-		// Use fixed 6-character suffix for better uniqueness
-		requiredLen := 6
-
-		// Adjust suffix length if maxLength is set
-		if cfg.maxLength > 0 {
-			maxAvailableLen := cfg.maxLength - currentLen - len([]rune(cfg.separator))
-			if maxAvailableLen < requiredLen && maxAvailableLen > 0 {
-				requiredLen = maxAvailableLen
-			} else if maxAvailableLen <= 0 {
-				// No room for suffix, truncate result to fit minimum
-				if cfg.minLength <= cfg.maxLength {
-					requiredLen = cfg.minLength - len([]rune(cfg.separator))
-					if requiredLen > 0 {
-						result = ""
-					}
-				}
-			}
-		}
-
-		if requiredLen > 0 {
-			suffix := generateSuffix(requiredLen, cfg.lowercase)
-			if result != "" {
-				result = result + cfg.separator + suffix
-			} else {
-				result = suffix
-			}
-		}
+	if cfg.maxLength <= 0 {
+		// No cap: append the full desired suffix.
+		return joinSuffix(result, cfg.separator, generateSuffix(desiredLen, cfg.lowercase))
 	}
 
-	return result
+	// Room for a suffix while keeping the full slug and separator.
+	available := cfg.maxLength - resultLen - sepLen
+
+	if explicitSuffix {
+		// Uniqueness token wins: keep the suffix at full length, fit it by
+		// truncating the slug (and dropping the separator) as needed.
+		suffixLen := min(desiredLen, cfg.maxLength)
+		keep := cfg.maxLength - sepLen - suffixLen
+		if keep <= 0 {
+			// No room for slug + separator: emit the suffix alone.
+			return generateSuffix(suffixLen, cfg.lowercase)
+		}
+		if resultLen > keep {
+			result = string([]rune(result)[:keep])
+		}
+		return joinSuffix(result, cfg.separator, generateSuffix(suffixLen, cfg.lowercase))
+	}
+
+	// Reserved / minLength padding: the slug is the priority.
+	switch {
+	case available >= desiredLen:
+		// Full slug + full desired suffix fit.
+		return joinSuffix(result, cfg.separator, generateSuffix(desiredLen, cfg.lowercase))
+	case available > 0:
+		// Keep the full slug; shrink the padding suffix to the remaining room.
+		return joinSuffix(result, cfg.separator, generateSuffix(available, cfg.lowercase))
+	default:
+		// Even a separator + 1-char suffix does not fit alongside the full slug.
+		// Truncate the slug as a last resort to keep a usable suffix.
+		suffixLen := min(desiredLen, cfg.maxLength-sepLen)
+		keep := cfg.maxLength - sepLen - suffixLen
+		if keep <= 0 {
+			// No room for any slug content: emit a suffix-only result capped at
+			// maxLength, with no separator.
+			return generateSuffix(min(desiredLen, cfg.maxLength), cfg.lowercase)
+		}
+		if resultLen > keep {
+			result = string([]rune(result)[:keep])
+		}
+		return joinSuffix(result, cfg.separator, generateSuffix(suffixLen, cfg.lowercase))
+	}
+}
+
+// joinSuffix appends a suffix to the slug, inserting the separator only when the
+// slug is non-empty (an empty slug yields the bare suffix with no leading separator).
+func joinSuffix(result, separator, suffix string) string {
+	if result == "" {
+		return suffix
+	}
+	return result + separator + suffix
 }
 
 // diacriticMap maps common Latin diacritics to ASCII equivalents.
 // Covers major European languages but not exhaustive for all Unicode ranges.
+//
+// Note on single-character simplifications: a few ligatures and special letters
+// are intentionally mapped to a SINGLE ASCII character rather than the more
+// conventional two-character transliteration, because slugs favor compactness:
+//   - 'ß' -> "s"  (commonly transliterated "ss";  e.g. "straße" -> "strase")
+//   - 'æ'/'Æ' -> "a"/"A"  (commonly "ae")
+//   - 'œ'/'Œ' -> "o"/"O"  (commonly "oe")
+//   - 'ø'/'Ø' -> "o"/"O"  (commonly "o" or "oe")
+//
+// These choices are stable and documented in doc.go; callers needing the
+// two-character forms can supply WithCustomReplace (e.g. {"ß": "ss"}) before
+// slugification to override them.
 var diacriticMap = map[rune]rune{
 	// lowercase a
 	'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a', 'ă': 'a', 'ą': 'a',
@@ -340,28 +360,75 @@ func normalizeDiacritic(r rune) (rune, bool) {
 	return r, false
 }
 
+// randRead is the source of cryptographic randomness for generateSuffix. It is a
+// package-level variable (rather than a direct crypto/rand.Read call) solely so
+// tests can substitute a failing reader to exercise the deterministic-fallback
+// path. Production code never reassigns it.
+var randRead = rand.Read
+
 // generateSuffix creates a random alphanumeric suffix of the specified length.
+//
+// This is intentionally a bespoke, variable-length random token rather than an
+// identifier from pkg/id: it is collision-reducing padding appended to a slug,
+// not a primary ID, and its length must be sized dynamically to satisfy the
+// minLength/maxLength constraints — pkg/id produces fixed-format IDs that cannot
+// be padded or truncated to arbitrary widths. It is therefore not subject to the
+// "all IDs via pkg/id" rule.
 func generateSuffix(length int, lowercase bool) string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	const charsUpper = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	if length <= 0 {
+		return ""
+	}
 
 	charset := chars
 	if !lowercase {
 		charset = charsUpper
 	}
+	n := byte(len(charset))
 
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to deterministic suffix on rand.Read failure
-		for i := range b {
-			b[i] = charset[i%len(charset)]
+	out := make([]byte, length)
+
+	// Read a primary batch of random bytes.
+	buf := make([]byte, length)
+	if _, err := randRead(buf); err != nil {
+		// Fallback to a deterministic suffix on randomness failure. This keeps
+		// Make total (it never panics) at the cost of predictability, which is
+		// acceptable because the suffix is non-cryptographic collision padding.
+		for i := range out {
+			out[i] = charset[i%len(charset)]
 		}
-		return string(b)
+		return string(out)
 	}
 
-	for i := range b {
-		b[i] = charset[b[i]%byte(len(charset))]
+	// Reject bytes in the biased tail so every character is uniformly likely.
+	// The largest multiple of n that fits in a byte is the rejection threshold;
+	// bytes at or above it would otherwise over-represent the first 256%n chars.
+	limit := byte(256 - (256 % int(n)))
+	for i := 0; i < length; {
+		for _, v := range buf {
+			if v >= limit {
+				continue // biased tail: draw again
+			}
+			out[i] = charset[v%n]
+			i++
+			if i == length {
+				break
+			}
+		}
+		if i == length {
+			break
+		}
+		// Not enough unbiased bytes yet: refill and continue. On a refill failure
+		// fall back to deterministic padding for the remaining positions.
+		if _, err := randRead(buf); err != nil {
+			for ; i < length; i++ {
+				out[i] = charset[i%len(charset)]
+			}
+			break
+		}
 	}
 
-	return string(b)
+	return string(out)
 }

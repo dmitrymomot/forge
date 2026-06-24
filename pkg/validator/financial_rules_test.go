@@ -154,12 +154,22 @@ func TestDecimalPrecision(t *testing.T) {
 			{10.55, 2},   // 2 decimals
 			{100.0, 0},   // no decimals allowed
 			{123.456, 3}, // 3 decimals
+			// Float-unfriendly monetary values: these are not exactly
+			// representable in binary float64 and the old multiplier-based
+			// check rejected them. They must be accepted at 2 decimals.
+			{19.99, 2},
+			{0.07, 2},
+			{0.01, 2},
+			{2.99, 2},
+			{1234.56, 2},
+			{0.1, 2}, // 0.1 has no exact binary representation
+			{0.3, 2}, // classic 0.1+0.2 territory
 		}
 
 		for _, tc := range testCases {
 			rule := validator.DecimalPrecision("amount", tc.value, tc.maxDecimals)
 			err := validator.Apply(rule)
-			assert.NoError(t, err, "Value %f should have valid precision for %d decimals", tc.value, tc.maxDecimals)
+			require.NoErrorf(t, err, "Value %v should have valid precision for %d decimals", tc.value, tc.maxDecimals)
 		}
 	})
 
@@ -171,16 +181,18 @@ func TestDecimalPrecision(t *testing.T) {
 			{10.555, 2},   // too many decimals
 			{10.1, 0},     // decimals not allowed
 			{123.4567, 3}, // too many decimals
+			{19.999, 2},   // three decimals when two allowed
+			{0.001, 2},    // three decimals when two allowed
 		}
 
 		for _, tc := range testCases {
 			rule := validator.DecimalPrecision("amount", tc.value, tc.maxDecimals)
 			err := validator.Apply(rule)
-			assert.Error(t, err, "Value %f should be rejected for %d decimals", tc.value, tc.maxDecimals)
+			require.Errorf(t, err, "Value %v should be rejected for %d decimals", tc.value, tc.maxDecimals)
 
 			validationErr := validator.ExtractValidationErrors(err)
 			require.NotNil(t, validationErr)
-			assert.Equal(t, "validation.decimal_precision", validationErr[0].TranslationKey)
+			require.Equal(t, "validation.decimal_precision", validationErr[0].TranslationKey)
 		}
 	})
 }

@@ -14,6 +14,10 @@ var (
 	hexStringRegex = regexp.MustCompile(`^[0-9A-Fa-f]+$`)
 	base64Regex    = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 	subdomainRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*$`)
+	apiKeyRegex    = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	ticketRegex    = regexp.MustCompile(`^[A-Z0-9]+$`)
+	// Semantic versioning: MAJOR.MINOR.PATCH with optional pre-release and build metadata.
+	semverRegex = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
 )
 
 // ValidSlug validates URL-safe slugs, preventing edge cases like leading/trailing hyphens.
@@ -344,7 +348,7 @@ func ValidAPIKey(field, value string, minLength int, maxLength int) Rule {
 				return false
 			}
 			// API keys are typically alphanumeric with some special characters
-			return regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(value)
+			return apiKeyRegex.MatchString(value)
 		},
 		Error: ValidationError{
 			Field:          field,
@@ -374,7 +378,7 @@ func ValidTicketNumber(field, value string, prefix string) Rule {
 			if prefix != "" {
 				remaining = strings.TrimPrefix(value, prefix)
 			}
-			return regexp.MustCompile(`^[A-Z0-9]+$`).MatchString(remaining)
+			return ticketRegex.MatchString(remaining)
 		},
 		Error: ValidationError{
 			Field:          field,
@@ -390,15 +394,12 @@ func ValidTicketNumber(field, value string, prefix string) Rule {
 
 // ValidVersion validates that a string is a valid semantic version.
 func ValidVersion(field, value string) Rule {
-	// Semantic versioning pattern: MAJOR.MINOR.PATCH with optional pre-release and build metadata
-	versionRegex := regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
-
 	return Rule{
 		Check: func() bool {
 			if strings.TrimSpace(value) == "" {
 				return false
 			}
-			return versionRegex.MatchString(value)
+			return semverRegex.MatchString(value)
 		},
 		Error: ValidationError{
 			Field:          field,

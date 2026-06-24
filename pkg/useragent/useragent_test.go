@@ -1,13 +1,11 @@
 package useragent_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/pkg/useragent"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +52,7 @@ func TestParseOS(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := useragent.ParseOS(strings.ToLower(tc.ua))
-			assert.Equal(t, tc.expected, result)
+			require.Equal(t, tc.expected, result)
 		})
 	}
 }
@@ -112,7 +110,7 @@ func TestParseBrowser(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := useragent.ParseBrowser(strings.ToLower(tc.ua))
-			assert.Equal(t, tc.expected, result)
+			require.Equal(t, tc.expected, result)
 		})
 	}
 }
@@ -178,22 +176,24 @@ func TestParseUserAgent(t *testing.T) {
 			result, err := useragent.Parse(tc.ua)
 
 			if tc.expectedErr != nil {
-				assert.Equal(t, tc.expectedErr, err)
+				require.ErrorIs(t, err, tc.expectedErr)
+				// Every parse failure is also matchable via the parent sentinel.
+				require.ErrorIs(t, err, useragent.ErrParsingFailed)
 			} else {
 				require.NoError(t, err)
 			}
 
 			// Use getter methods to compare values
-			assert.Equal(t, tc.expected.UserAgent(), result.UserAgent())
-			assert.Equal(t, tc.expected.DeviceType(), result.DeviceType())
-			assert.Equal(t, tc.expected.OS(), result.OS())
-			assert.Equal(t, tc.expected.BrowserName(), result.BrowserName())
-			assert.Equal(t, tc.expected.BrowserVer(), result.BrowserVer())
-			assert.Equal(t, tc.expected.IsBot(), result.IsBot())
-			assert.Equal(t, tc.expected.IsMobile(), result.IsMobile())
-			assert.Equal(t, tc.expected.IsDesktop(), result.IsDesktop())
-			assert.Equal(t, tc.expected.IsTablet(), result.IsTablet())
-			assert.Equal(t, tc.expected.IsUnknown(), result.IsUnknown())
+			require.Equal(t, tc.expected.UserAgent(), result.UserAgent())
+			require.Equal(t, tc.expected.DeviceType(), result.DeviceType())
+			require.Equal(t, tc.expected.OS(), result.OS())
+			require.Equal(t, tc.expected.BrowserName(), result.BrowserName())
+			require.Equal(t, tc.expected.BrowserVer(), result.BrowserVer())
+			require.Equal(t, tc.expected.IsBot(), result.IsBot())
+			require.Equal(t, tc.expected.IsMobile(), result.IsMobile())
+			require.Equal(t, tc.expected.IsDesktop(), result.IsDesktop())
+			require.Equal(t, tc.expected.IsTablet(), result.IsTablet())
+			require.Equal(t, tc.expected.IsUnknown(), result.IsUnknown())
 		})
 	}
 }
@@ -210,19 +210,19 @@ func TestNewUserAgent(t *testing.T) {
 		"15.0",
 	)
 
-	assert.Equal(t, "test-ua", ua.UserAgent())
-	assert.Equal(t, useragent.DeviceTypeMobile, ua.DeviceType())
-	assert.Equal(t, useragent.MobileDeviceIPhone, ua.DeviceModel())
-	assert.Equal(t, useragent.OSiOS, ua.OS())
-	assert.Equal(t, useragent.BrowserSafari, ua.BrowserName())
-	assert.Equal(t, "15.0", ua.BrowserVer())
-	assert.True(t, ua.IsMobile())
-	assert.False(t, ua.IsDesktop())
-	assert.False(t, ua.IsTablet())
-	assert.False(t, ua.IsBot())
-	assert.False(t, ua.IsUnknown())
-	assert.False(t, ua.IsTV())
-	assert.False(t, ua.IsConsole())
+	require.Equal(t, "test-ua", ua.UserAgent())
+	require.Equal(t, useragent.DeviceTypeMobile, ua.DeviceType())
+	require.Equal(t, useragent.MobileDeviceIPhone, ua.DeviceModel())
+	require.Equal(t, useragent.OSiOS, ua.OS())
+	require.Equal(t, useragent.BrowserSafari, ua.BrowserName())
+	require.Equal(t, "15.0", ua.BrowserVer())
+	require.True(t, ua.IsMobile())
+	require.False(t, ua.IsDesktop())
+	require.False(t, ua.IsTablet())
+	require.False(t, ua.IsBot())
+	require.False(t, ua.IsUnknown())
+	require.False(t, ua.IsTV())
+	require.False(t, ua.IsConsole())
 }
 
 // TestGetShortIdentifier tests the GetShortIdentifier method
@@ -243,7 +243,9 @@ func TestGetShortIdentifier(t *testing.T) {
 				useragent.BrowserChrome,
 				"91.0.4472.124",
 			),
-			expected: "Chrome/91.0.44721 (Windows, desktop)",
+			// Version is kept intact (4 dot-separated components), not garbled by
+			// raw character truncation; the platform suffix is uniform.
+			expected: "Chrome/91.0.4472.124 (Windows, desktop)",
 		},
 		{
 			name: "Safari on iOS",
@@ -256,6 +258,20 @@ func TestGetShortIdentifier(t *testing.T) {
 				"14.0",
 			),
 			expected: "Safari/14.0 (iOS, mobile)",
+		},
+		{
+			name: "Chrome on Linux desktop",
+			ua: useragent.New(
+				"linux desktop chrome",
+				useragent.DeviceTypeDesktop,
+				"",
+				useragent.OSLinux,
+				useragent.BrowserChrome,
+				"120.0",
+			),
+			// Same uniform format applies to every OS/device combination, not
+			// just the two that were previously special-cased.
+			expected: "Chrome/120.0 (Linux, desktop)",
 		},
 		{
 			name: "Bot",
@@ -327,7 +343,9 @@ func TestGetShortIdentifier(t *testing.T) {
 				useragent.BrowserFirefox,
 				"100.0.12345.67890.beta",
 			),
-			expected: "Firefox/100.0.1234 (Windows desktop)",
+			// Truncation keeps the first 4 dot-separated components intact rather
+			// than slicing mid-number.
+			expected: "Firefox/100.0.12345.67890 (Windows, desktop)",
 		},
 		{
 			name: "Browser with version ending with dot",
@@ -339,7 +357,23 @@ func TestGetShortIdentifier(t *testing.T) {
 				useragent.BrowserFirefox,
 				"100.0.12345.",
 			),
-			expected: "Firefox/100.0.1234 (Windows desktop)",
+			// The empty trailing segment from the stray dot is dropped, not turned
+			// into a fabricated "1".
+			expected: "Firefox/100.0.12345 (Windows, desktop)",
+		},
+		{
+			name: "Browser with garbled-prone version",
+			ua: useragent.New(
+				"Browser with single huge version segment",
+				useragent.DeviceTypeDesktop,
+				"", // deviceModel
+				useragent.OSWindows,
+				useragent.BrowserChrome,
+				"123456789.0",
+			),
+			// Regression for the old defect where "123456789.0" became the
+			// misleading "1234567891"; component-wise truncation keeps it correct.
+			expected: "Chrome/123456789.0 (Windows, desktop)",
 		},
 	}
 
@@ -347,7 +381,7 @@ func TestGetShortIdentifier(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := tc.ua.GetShortIdentifier()
-			assert.Equal(t, tc.expected, result)
+			require.Equal(t, tc.expected, result)
 		})
 	}
 }
@@ -361,8 +395,8 @@ func TestParseComplexBots(t *testing.T) {
 		ua := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 		result, err := useragent.Parse(ua)
 		require.NoError(t, err)
-		assert.True(t, result.IsBot())
-		assert.Equal(t, "Bot: Googlebot", result.GetShortIdentifier())
+		require.True(t, result.IsBot())
+		require.Equal(t, "Bot: Googlebot", result.GetShortIdentifier())
 	})
 
 	t.Run("Bot with unusual casing and special characters", func(t *testing.T) {
@@ -370,8 +404,12 @@ func TestParseComplexBots(t *testing.T) {
 		ua := "MyCompany-WebCrawler_v2.1.3-bot (+https://example.com/crawler)"
 		result, err := useragent.Parse(ua)
 		require.NoError(t, err)
-		assert.True(t, result.IsBot())
-		assert.Contains(t, result.GetShortIdentifier(), "Bot:")
+		require.True(t, result.IsBot())
+		// Bot-name extraction is case-consistent: the mixed-case UA is lowercased
+		// before pattern matching, then title-cased, so the dynamic identifier is
+		// stable regardless of the original casing. The regex stops at the '.'
+		// separator, so the captured token is the trailing "3-bot".
+		require.Equal(t, "Bot: 3-Bot", result.GetShortIdentifier())
 	})
 
 	t.Run("Bot pattern at end of UA string", func(t *testing.T) {
@@ -379,7 +417,8 @@ func TestParseComplexBots(t *testing.T) {
 		ua := "CustomUserAgent/1.0 (compatible; Linux x86_64) SearchBot"
 		result, err := useragent.Parse(ua)
 		require.NoError(t, err)
-		assert.True(t, result.IsBot())
+		require.True(t, result.IsBot())
+		require.Equal(t, "Bot: Searchbot", result.GetShortIdentifier())
 	})
 }
 
@@ -391,8 +430,9 @@ func TestParseMalformedUserAgents(t *testing.T) {
 		t.Parallel()
 		result, err := useragent.Parse("")
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, useragent.ErrEmptyUserAgent))
-		assert.Equal(t, "Unknown device", result.GetShortIdentifier())
+		require.ErrorIs(t, err, useragent.ErrEmptyUserAgent)
+		require.ErrorIs(t, err, useragent.ErrParsingFailed)
+		require.Equal(t, "Unknown device", result.GetShortIdentifier())
 	})
 
 	t.Run("Random gibberish without any recognizable patterns", func(t *testing.T) {
@@ -401,7 +441,8 @@ func TestParseMalformedUserAgents(t *testing.T) {
 		_, err := useragent.Parse(ua)
 		require.Error(t, err)
 		// The gibberish is detected as an unknown device, not malformed
-		assert.True(t, errors.Is(err, useragent.ErrUnknownDevice))
+		require.ErrorIs(t, err, useragent.ErrUnknownDevice)
+		require.ErrorIs(t, err, useragent.ErrParsingFailed)
 	})
 
 	t.Run("Very long user agent exceeding reasonable limits", func(t *testing.T) {
@@ -409,11 +450,10 @@ func TestParseMalformedUserAgents(t *testing.T) {
 		// Create a very long string that might trigger length checks
 		longUA := strings.Repeat("Mozilla/5.0 ", 100)
 		result, err := useragent.Parse(longUA)
-		// Should handle gracefully without panicking
-		assert.NotNil(t, result)
-		if err != nil {
-			assert.True(t, errors.Is(err, useragent.ErrMalformedUserAgent) || errors.Is(err, useragent.ErrUnknownDevice))
-		}
+		// "Mozilla/5.0" alone has no device/OS/browser signal, so Parse reports an
+		// unknown device rather than panicking on the oversized input.
+		require.ErrorIs(t, err, useragent.ErrUnknownDevice)
+		require.Equal(t, "Unknown device", result.GetShortIdentifier())
 	})
 }
 
@@ -428,29 +468,25 @@ func TestParseMultiStepVerification(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify each component was parsed correctly
-		assert.Equal(t, useragent.DeviceTypeMobile, result.DeviceType())
-		assert.Equal(t, "iphone", result.DeviceModel())
-		assert.Equal(t, useragent.OSiOS, result.OS())
-		assert.Equal(t, useragent.BrowserSafari, result.BrowserName())
-		assert.NotEmpty(t, result.BrowserVer())
+		require.Equal(t, useragent.DeviceTypeMobile, result.DeviceType())
+		require.Equal(t, useragent.MobileDeviceIPhone, result.DeviceModel())
+		require.Equal(t, useragent.OSiOS, result.OS())
+		require.Equal(t, useragent.BrowserSafari, result.BrowserName())
+		require.Equal(t, "14.0", result.BrowserVer())
 
-		// Verify the short identifier format
-		identifier := result.GetShortIdentifier()
-		assert.Contains(t, identifier, "Safari")
-		assert.Contains(t, identifier, "iOS")
-		assert.Contains(t, identifier, "mobile")
+		// Verify the full short identifier, not just substrings.
+		require.Equal(t, "Safari/14.0 (iOS, mobile)", result.GetShortIdentifier())
 	})
 
 	t.Run("Desktop with partial information", func(t *testing.T) {
 		t.Parallel()
-		// UA with browser but missing OS details
+		// UA with a browser-like token but no device/OS signal is treated as an
+		// unknown device.
 		ua := "CustomBrowser/1.0"
 		result, err := useragent.Parse(ua)
-		// Should not error for partial information
-		if err != nil {
-			assert.True(t, errors.Is(err, useragent.ErrUnknownDevice))
-		}
-		assert.NotNil(t, result)
+		require.ErrorIs(t, err, useragent.ErrUnknownDevice)
+		// On error Parse returns the zero value, which renders as "Unknown device".
+		require.Equal(t, "Unknown device", result.GetShortIdentifier())
 	})
 
 	t.Run("Tablet device detection and formatting", func(t *testing.T) {
@@ -459,8 +495,9 @@ func TestParseMultiStepVerification(t *testing.T) {
 		result, err := useragent.Parse(ua)
 		require.NoError(t, err)
 
-		assert.Equal(t, useragent.DeviceTypeTablet, result.DeviceType())
-		assert.Equal(t, "ipad", result.DeviceModel())
-		assert.Equal(t, useragent.OSiOS, result.OS())
+		require.Equal(t, useragent.DeviceTypeTablet, result.DeviceType())
+		require.Equal(t, useragent.TabletDeviceIPad, result.DeviceModel())
+		require.Equal(t, useragent.OSiOS, result.OS())
+		require.Equal(t, "Safari/13.1.1 (iOS, tablet)", result.GetShortIdentifier())
 	})
 }

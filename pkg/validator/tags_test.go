@@ -4,10 +4,13 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
 
 func TestValidateStruct_BasicFields(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Email    string `validate:"required;email"`
 		Username string `validate:"required;min:3;max:20;alphanum"`
@@ -106,6 +109,7 @@ func TestValidateStruct_BasicFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -139,6 +143,7 @@ func TestValidateStruct_BasicFields(t *testing.T) {
 }
 
 func TestValidateStruct_NestedStructs(t *testing.T) {
+	t.Parallel()
 	type Address struct {
 		Street  string `validate:"required;min:5"`
 		City    string `validate:"required"`
@@ -187,6 +192,7 @@ func TestValidateStruct_NestedStructs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -211,6 +217,7 @@ func TestValidateStruct_NestedStructs(t *testing.T) {
 }
 
 func TestValidateStruct_Delimiters(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Price    float64  `validate:"required;between:0.01,999.99"`
 		Status   string   `validate:"required;in:active,pending,disabled"`
@@ -271,6 +278,7 @@ func TestValidateStruct_Delimiters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -295,6 +303,7 @@ func TestValidateStruct_Delimiters(t *testing.T) {
 }
 
 func TestValidateStruct_NumericValidation(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Positive int     `validate:"positive"`
 		Negative int     `validate:"negative"`
@@ -384,6 +393,7 @@ func TestValidateStruct_NumericValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -408,6 +418,7 @@ func TestValidateStruct_NumericValidation(t *testing.T) {
 }
 
 func TestValidateStruct_StringValidation(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		URL      string `validate:"url"`
 		Phone    string `validate:"phone"`
@@ -517,6 +528,7 @@ func TestValidateStruct_StringValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -541,6 +553,7 @@ func TestValidateStruct_StringValidation(t *testing.T) {
 }
 
 func TestValidateStruct_Pointers(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Required *string `validate:"required"`
 		Optional *string `validate:"email"`
@@ -590,6 +603,7 @@ func TestValidateStruct_Pointers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -614,6 +628,7 @@ func TestValidateStruct_Pointers(t *testing.T) {
 }
 
 func TestValidateStruct_CustomValidator(t *testing.T) {
+	t.Parallel()
 	// Register a custom validator
 	validator.RegisterValidator("even", func(field string, value reflect.Value, params []string) validator.Rule {
 		return validator.Rule{
@@ -653,6 +668,7 @@ func TestValidateStruct_CustomValidator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateStruct(&tt.input)
 
 			if tt.wantError {
@@ -669,6 +685,7 @@ func TestValidateStruct_CustomValidator(t *testing.T) {
 }
 
 func TestValidateStruct_EmptyTag(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Field1 string `validate:""`
 		Field2 string `validate:";;;"`
@@ -697,6 +714,7 @@ func TestValidateStruct_EmptyTag(t *testing.T) {
 }
 
 func TestValidateStruct_Errors(t *testing.T) {
+	t.Parallel()
 	// Test non-pointer
 	var s struct{ Name string }
 	err := validator.ValidateStruct(s)
@@ -713,6 +731,7 @@ func TestValidateStruct_Errors(t *testing.T) {
 }
 
 func TestValidateStruct_MultipleErrors(t *testing.T) {
+	t.Parallel()
 	type TestStruct struct {
 		Email    string `validate:"required;email"`
 		Username string `validate:"required;min:3;max:20;alphanum"`
@@ -753,6 +772,125 @@ func TestValidateStruct_MultipleErrors(t *testing.T) {
 	if len(usernameErrors) < 2 {
 		t.Errorf("expected multiple errors for Username, got %d", len(usernameErrors))
 	}
+}
+
+// TestValidateStruct_RuneCounting verifies that tag-based min/max/len/between on
+// strings count characters (runes), not bytes, for multibyte UTF-8 input.
+func TestValidateStruct_RuneCounting(t *testing.T) {
+	t.Parallel()
+
+	t.Run("min counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "héllo" = 5 runes, 6 bytes. min:5 must pass.
+		type S struct {
+			Name string `validate:"min:5"`
+		}
+		require.NoError(t, validator.ValidateStruct(&S{Name: "héllo"}))
+	})
+
+	t.Run("max counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "café" = 4 runes, 5 bytes. max:4 must pass.
+		type S struct {
+			Name string `validate:"max:4"`
+		}
+		require.NoError(t, validator.ValidateStruct(&S{Name: "café"}))
+	})
+
+	t.Run("len counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "naïve" = 5 runes, 6 bytes. len:5 must pass.
+		type S struct {
+			Word string `validate:"len:5"`
+		}
+		require.NoError(t, validator.ValidateStruct(&S{Word: "naïve"}))
+	})
+
+	t.Run("between counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "naïve" = 5 runes, 6 bytes. between:3,5 must pass on rune count.
+		type S struct {
+			Word string `validate:"between:3,5"`
+		}
+		require.NoError(t, validator.ValidateStruct(&S{Word: "naïve"}))
+	})
+}
+
+// TestValidateStruct_MisconfiguredTagsFail verifies that tag validators surface
+// misconfiguration (missing params or unsupported field types) as a visible
+// validation error instead of silently passing.
+func TestValidateStruct_MisconfiguredTagsFail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("min on bool field fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Flag bool `validate:"min:1"`
+		}
+		err := validator.ValidateStruct(&S{Flag: true})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Flag"))
+	})
+
+	t.Run("max on bool field fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Flag bool `validate:"max:1"`
+		}
+		err := validator.ValidateStruct(&S{Flag: true})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Flag"))
+	})
+
+	t.Run("len on int field fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Num int `validate:"len:3"`
+		}
+		err := validator.ValidateStruct(&S{Num: 42})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Num"))
+	})
+
+	t.Run("between on bool field fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Flag bool `validate:"between:1,5"`
+		}
+		err := validator.ValidateStruct(&S{Flag: true})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Flag"))
+	})
+
+	t.Run("percentage on non-float field fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Rate int `validate:"percentage"`
+		}
+		err := validator.ValidateStruct(&S{Rate: 50})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Rate"))
+	})
+
+	t.Run("nil optional pointer skips non-required rules", func(t *testing.T) {
+		t.Parallel()
+		// A nil optional pointer must remain valid: min must be skipped, not
+		// fail, for an absent value.
+		type S struct {
+			Optional *string `validate:"min:5"`
+		}
+		require.NoError(t, validator.ValidateStruct(&S{Optional: nil}))
+	})
+
+	t.Run("nil required pointer still fails", func(t *testing.T) {
+		t.Parallel()
+		type S struct {
+			Required *string `validate:"required;min:5"`
+		}
+		err := validator.ValidateStruct(&S{Required: nil})
+		require.Error(t, err)
+		require.True(t, validator.ExtractValidationErrors(err).Has("Required"))
+	})
 }
 
 // Benchmark to ensure performance is reasonable

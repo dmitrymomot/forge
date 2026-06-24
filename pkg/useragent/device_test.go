@@ -6,6 +6,7 @@ import (
 	"github.com/dmitrymomot/forge/pkg/useragent"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGetDeviceModel tests the GetDeviceModel function with various devices
@@ -122,6 +123,38 @@ func TestGetDeviceModel(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+// TestGetDeviceModelXiaomiFalsePositives verifies that Xiaomi model detection no
+// longer fires on an incidental "mi " substring, while still recognizing real
+// Xiaomi "Mi"/"Redmi" model tokens. The old bare "mi " keyword misclassified
+// unrelated Android devices as Xiaomi.
+func TestGetDeviceModelXiaomiFalsePositives(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Incidental 'mi ' substring is not Xiaomi", func(t *testing.T) {
+		t.Parallel()
+		// "calorimi 7" contains the sequence "mi 7" mid-token but is not a Xiaomi
+		// device; with the old "mi " keyword this matched Xiaomi.
+		ua := "mozilla/5.0 (linux; android 11; calorimi 7) applewebkit/537.36 (khtml, like gecko) chrome/91.0.4472.120 mobile safari/537.36"
+		result := useragent.GetDeviceModel(ua, useragent.DeviceTypeMobile)
+		require.Equal(t, useragent.MobileDeviceAndroid, result)
+		require.NotEqual(t, useragent.MobileDeviceXiaomi, result)
+	})
+
+	t.Run("Genuine Xiaomi Mi model is detected", func(t *testing.T) {
+		t.Parallel()
+		ua := "mozilla/5.0 (linux; android 11; mi 11) applewebkit/537.36 (khtml, like gecko) chrome/91.0.4472.120 mobile safari/537.36"
+		result := useragent.GetDeviceModel(ua, useragent.DeviceTypeMobile)
+		require.Equal(t, useragent.MobileDeviceXiaomi, result)
+	})
+
+	t.Run("Genuine Redmi model is detected", func(t *testing.T) {
+		t.Parallel()
+		ua := "mozilla/5.0 (linux; android 11; redmi note 10) applewebkit/537.36 (khtml, like gecko) chrome/91.0.4472.120 mobile safari/537.36"
+		result := useragent.GetDeviceModel(ua, useragent.DeviceTypeMobile)
+		require.Equal(t, useragent.MobileDeviceXiaomi, result)
+	})
 }
 
 // TestParseDeviceType tests the device type parsing

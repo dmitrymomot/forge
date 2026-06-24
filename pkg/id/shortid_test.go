@@ -19,7 +19,7 @@ func TestNewShortID(t *testing.T) {
 		t.Parallel()
 
 		shortID := id.NewShortID()
-		assert.Len(t, shortID, 16, "ShortID should be exactly 16 characters")
+		require.Len(t, shortID, 16, "ShortID should be exactly 16 characters")
 	})
 
 	t.Run("uses only Crockford Base32 alphabet", func(t *testing.T) {
@@ -44,25 +44,28 @@ func TestNewShortID(t *testing.T) {
 		}
 	})
 
-	t.Run("generates lexicographically sortable IDs", func(t *testing.T) {
+	t.Run("generates lexicographically sortable IDs across seconds", func(t *testing.T) {
 		t.Parallel()
 
-		const iterations = 100
+		// ShortID timestamps have second resolution, so IDs are only ordered when
+		// generated in different seconds. Sleeping just over a second between
+		// samples guarantees the timestamp prefix advances, proving real-clock
+		// sortability without relying on the (unordered) random suffix.
+		const iterations = 3
 		shortIDs := make([]string, iterations)
 
-		// Generate ShortIDs with small time gaps
 		for i := range iterations {
 			shortIDs[i] = id.NewShortID()
-			// Small sleep to ensure timestamp progression
 			if i < iterations-1 {
-				time.Sleep(2 * time.Millisecond)
+				time.Sleep(1100 * time.Millisecond)
 			}
 		}
 
-		// Verify sortability: each ShortID should be >= previous
+		// Each ShortID generated in a later second must sort strictly after the
+		// previous one (the timestamp prefix dominates the comparison).
 		for i := 1; i < len(shortIDs); i++ {
-			assert.GreaterOrEqual(t, shortIDs[i], shortIDs[i-1],
-				"ShortID at index %d (%s) should be >= previous (%s)", i, shortIDs[i], shortIDs[i-1])
+			require.Greater(t, shortIDs[i], shortIDs[i-1],
+				"ShortID at index %d (%s) should sort after previous (%s)", i, shortIDs[i], shortIDs[i-1])
 		}
 	})
 
@@ -95,15 +98,16 @@ func TestNewShortID(t *testing.T) {
 			seen[shortID] = true
 		}
 
-		assert.Len(t, seen, goroutines*perGoroutine, "should generate expected number of unique IDs")
+		require.Len(t, seen, goroutines*perGoroutine, "should generate expected number of unique IDs")
 	})
 
 	t.Run("timestamp portion reflects generation time", func(t *testing.T) {
 		t.Parallel()
 
-		// Generate ShortID, wait, generate another
+		// ShortID timestamps have second resolution, so cross a full second
+		// boundary to guarantee the encoded timestamp advances.
 		shortID1 := id.NewShortID()
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(1100 * time.Millisecond)
 		shortID2 := id.NewShortID()
 
 		// Extract timestamp portions (first 6 chars)
@@ -111,7 +115,7 @@ func TestNewShortID(t *testing.T) {
 		ts2 := shortID2[:6]
 
 		// Second timestamp should be lexicographically greater
-		assert.Greater(t, ts2, ts1, "later ShortID should have greater timestamp portion")
+		require.Greater(t, ts2, ts1, "later ShortID should have greater timestamp portion")
 	})
 
 	t.Run("random portion differs between consecutive IDs", func(t *testing.T) {
@@ -125,7 +129,7 @@ func TestNewShortID(t *testing.T) {
 		random1 := shortID1[6:]
 		random2 := shortID2[6:]
 
-		assert.NotEqual(t, random1, random2, "random portions should differ")
+		require.NotEqual(t, random1, random2, "random portions should differ")
 	})
 
 	t.Run("performance benchmark", func(t *testing.T) {
@@ -152,6 +156,6 @@ func TestNewShortID(t *testing.T) {
 		shortID := id.NewShortID()
 		ulid := id.NewULID()
 
-		assert.Less(t, len(shortID), len(ulid), "ShortID should be shorter than ULID")
+		require.Less(t, len(shortID), len(ulid), "ShortID should be shorter than ULID")
 	})
 }

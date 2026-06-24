@@ -1,8 +1,15 @@
 package useragent
 
 import (
+	"regexp"
 	"strings"
 )
+
+// xiaomiModelRegex matches Xiaomi "Mi"/"POCO" model tokens with a word boundary
+// (e.g. "mi 11", "mi-9", "mi note", "poco f3"). A bare "mi " substring is too
+// common in unrelated UAs (e.g. it appears mid-token), so model detection
+// requires the "mi" to start a token and be followed by a model identifier.
+var xiaomiModelRegex = regexp.MustCompile(`\bmi[ -](?:\d|note|max|play|pad|mix|cc)|\bpoco\b`)
 
 // keywordSet optimizes keyword lookups using map structure for O(1) access
 type keywordSet map[string]struct{}
@@ -37,7 +44,7 @@ var (
 	// Mobile device brand detection based on common UA patterns
 	samsungMobileWords = newKeywordSet("samsung", "sm-g", "sm-a", "sm-n", "samsungbrowser")
 	huaweiMobileWords  = newKeywordSet("huawei", "hwa-", "honor", "h60-", "h30-")
-	xiaomiMobileWords  = newKeywordSet("xiaomi", "mi ", "redmi", "miui")
+	xiaomiMobileWords  = newKeywordSet("xiaomi", "redmi", "miui")
 	oppoMobileWords    = newKeywordSet("oppo", "cph1", "cph2", "f1f")
 	vivoMobileWords    = newKeywordSet("vivo", "viv-", "v1730", "v1731")
 
@@ -126,7 +133,7 @@ func GetDeviceModel(lowerUA, deviceType string) string {
 			return MobileDeviceHuawei
 		}
 
-		if xiaomiMobileWords.contains(lowerUA) {
+		if xiaomiMobileWords.contains(lowerUA) || xiaomiModelRegex.MatchString(lowerUA) {
 			return MobileDeviceXiaomi
 		}
 

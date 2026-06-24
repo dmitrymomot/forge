@@ -2,8 +2,8 @@ package validator
 
 import (
 	"fmt"
-	"math"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +20,11 @@ var (
 
 	// Currency code regex (3 uppercase letters)
 	currencyCodeRegex = regexp.MustCompile(`^[A-Z]{3}$`)
+
+	// Compiled once at package load to avoid recompiling on every validator call.
+	// (Case-insensitive alphanumeric reuses alphanumericRegex from format_rules.go.)
+	digitsOnlyRegex = regexp.MustCompile(`^\d+$`)
+	nineDigitsRegex = regexp.MustCompile(`^\d{9}$`)
 )
 
 func PositiveAmount[T Numeric](field string, value T) Rule {
@@ -73,11 +78,21 @@ func AmountRange[T Numeric](field string, value T, min T, max T) Rule {
 }
 
 // DecimalPrecision prevents floating-point precision issues in financial calculations.
+//
+// The precision check operates on the decimal string representation rather than
+// fragile float arithmetic, so common monetary values like 19.99 or 0.07 are
+// accepted correctly. strconv.FormatFloat with precision -1 yields the shortest
+// representation that round-trips to the same float64, which reflects the value's
+// intended decimal places.
 func DecimalPrecision(field string, value float64, maxDecimals int) Rule {
 	return Rule{
 		Check: func() bool {
-			multiplier := math.Pow(10, float64(maxDecimals))
-			return math.Floor(value*multiplier) == value*multiplier
+			s := strconv.FormatFloat(value, 'f', -1, 64)
+			dot := strings.IndexByte(s, '.')
+			if dot < 0 {
+				return true // no fractional part at all
+			}
+			return len(s)-dot-1 <= maxDecimals
 		},
 		Error: ValidationError{
 			Field:          field,
@@ -218,7 +233,7 @@ func ValidCreditCardChecksum(field, value string) Rule {
 			cleaned := strings.ReplaceAll(strings.ReplaceAll(value, " ", ""), "-", "")
 
 			// Must be all digits
-			if !regexp.MustCompile(`^\d+$`).MatchString(cleaned) {
+			if !digitsOnlyRegex.MatchString(cleaned) {
 				return false
 			}
 
@@ -268,7 +283,7 @@ func ValidAccountNumber(field, value string) Rule {
 			cleaned := strings.ReplaceAll(strings.ReplaceAll(value, " ", ""), "-", "")
 
 			// Must be alphanumeric and reasonable length
-			if !regexp.MustCompile(`^[A-Za-z0-9]+$`).MatchString(cleaned) {
+			if !alphanumericRegex.MatchString(cleaned) {
 				return false
 			}
 
@@ -293,7 +308,7 @@ func ValidRoutingNumber(field, value string) Rule {
 			cleaned := strings.ReplaceAll(strings.ReplaceAll(value, " ", ""), "-", "")
 
 			// Must be exactly 9 digits
-			if !regexp.MustCompile(`^\d{9}$`).MatchString(cleaned) {
+			if !nineDigitsRegex.MatchString(cleaned) {
 				return false
 			}
 
