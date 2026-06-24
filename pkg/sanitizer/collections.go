@@ -85,7 +85,9 @@ func SortStringsIgnoreCase(slice []string) []string {
 	return result
 }
 
-// FilterSliceByPattern uses case-insensitive substring matching for user-friendly filtering.
+// FilterSliceByPattern returns the elements that do NOT contain pattern, using
+// case-insensitive substring matching. This is exclusion (deny-list) filtering:
+// any element whose lowercased value contains the lowercased pattern is removed.
 func FilterSliceByPattern(slice []string, pattern string) []string {
 	result := make([]string, 0)
 	for _, item := range slice {
@@ -141,7 +143,9 @@ func SanitizeMapValues[K comparable](m map[K]string, sanitizer func(string) stri
 	return result
 }
 
-// FilterMapByKeys uses case-insensitive substring matching for consistent behavior.
+// FilterMapByKeys returns the entries whose key does NOT contain pattern, using
+// case-insensitive substring matching. This is exclusion (deny-list) filtering:
+// any entry whose lowercased key contains the lowercased pattern is removed.
 func FilterMapByKeys[V any](m map[string]V, pattern string) map[string]V {
 	result := make(map[string]V)
 	lowerPattern := strings.ToLower(pattern)
@@ -155,6 +159,10 @@ func FilterMapByKeys[V any](m map[string]V, pattern string) map[string]V {
 	return result
 }
 
+// FilterMapByValues returns the entries whose value does NOT contain pattern,
+// using case-insensitive substring matching. This is exclusion (deny-list)
+// filtering: any entry whose lowercased value contains the lowercased pattern
+// is removed.
 func FilterMapByValues[K comparable](m map[K]string, pattern string) map[K]string {
 	result := make(map[K]string)
 	lowerPattern := strings.ToLower(pattern)

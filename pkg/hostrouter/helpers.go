@@ -28,7 +28,7 @@ func GetDomain(r *http.Request) string {
 //	GetSubdomain(req, "example.com") // req.Host = "other.com" -> ""
 func GetSubdomain(r *http.Request, baseDomain string) string {
 	host := normalizeHost(r.Host)
-	base := strings.ToLower(baseDomain)
+	base := strings.ToLower(strings.TrimSpace(baseDomain))
 
 	// Exact match means no subdomain
 	if host == base {

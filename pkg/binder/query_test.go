@@ -245,20 +245,41 @@ func TestQuery(t *testing.T) {
 		assert.Equal(t, []float64{1.5, 2.0, 3.5}, result.Scores)
 	})
 
-	t.Run("slice parameters mixed format", func(t *testing.T) {
+	t.Run("multi-value entries preserve commas in string elements", func(t *testing.T) {
 		t.Parallel()
 		type sliceStruct struct {
 			Tags []string `query:"tags"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/test?tags=go,web&tags=api&tags=backend,frontend", nil)
+		// When the same parameter is repeated, each occurrence is already a discrete
+		// element. Commas inside a repeated value are legitimate content and must be
+		// preserved verbatim rather than split into extra elements.
+		req := httptest.NewRequest(http.MethodGet, "/test?tags=go&tags=a,b&tags=c", nil)
 
 		var result sliceStruct
 		bindFunc := binder.Query()
 		err := bindFunc(req, &result)
 
 		require.NoError(t, err)
-		assert.Equal(t, []string{"go", "web", "api", "backend", "frontend"}, result.Tags)
+		assert.Equal(t, []string{"go", "a,b", "c"}, result.Tags)
+	})
+
+	t.Run("single value with embedded comma is preserved as literal element", func(t *testing.T) {
+		t.Parallel()
+		type sliceStruct struct {
+			Tags []string `query:"tags"`
+		}
+
+		// A single combined value is still comma-split into a list; this documents
+		// the boundary between the two conventions.
+		req := httptest.NewRequest(http.MethodGet, "/test?tags=go,web,api", nil)
+
+		var result sliceStruct
+		bindFunc := binder.Query()
+		err := bindFunc(req, &result)
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"go", "web", "api"}, result.Tags)
 	})
 
 	t.Run("boolean slice parameters", func(t *testing.T) {

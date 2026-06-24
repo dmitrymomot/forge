@@ -20,7 +20,13 @@ type Router struct {
 
 // New creates a host router from the given routes.
 // The fallback handler is used for requests that don't match any host pattern.
+// If fallback is nil, unmatched requests are served a 404 Not Found response
+// instead of panicking.
 func New(routes Routes, fallback http.Handler) *Router {
+	if fallback == nil {
+		fallback = http.HandlerFunc(http.NotFound)
+	}
+
 	r := &Router{
 		exact:    make(map[string]http.Handler),
 		wildcard: make(map[string]http.Handler),

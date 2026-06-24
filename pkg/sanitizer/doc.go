@@ -70,8 +70,8 @@
 //	escaped := sanitizer.EscapeHTML("<script>alert('xss')</script>")
 //	// Result: "&lt;script&gt;alert('xss')&lt;/script&gt;"
 //
-//	// Comprehensive XSS prevention
-//	safe := sanitizer.PreventXSS(`<p onclick="evil()">Content</p>`)
+//	// Comprehensive XSS prevention (bluemonday-backed; strips all HTML)
+//	safe := sanitizer.PreventXSS(`<p onclick="evil()">Content</p>`)  // "Content"
 //
 //	// Remove specific dangerous elements
 //	cleaned := sanitizer.StripScriptTags(`<p>Safe</p><script>alert('xss')</script>`)
@@ -181,13 +181,16 @@
 //
 // Automatically sanitize struct fields using reflection and tags:
 //
+// Tags are separated by ';' and parameters use ':' (e.g. "max:20"), matching
+// the project-wide convention shared with pkg/validator.
+//
 //	type User struct {
-//		Name     string `sanitize:"trim,title"`
+//		Name     string `sanitize:"trim;title"`
 //		Email    string `sanitize:"email"`
-//		Username string `sanitize:"trim,lower,alphanum,max:20"`
-//		Bio      string `sanitize:"trim,safe_html"`
+//		Username string `sanitize:"trim;lower;alphanum;max:20"`
+//		Bio      string `sanitize:"trim;safe_html"`
 //		Website  string `sanitize:"url"`
-//		Tags     []string `sanitize:"trim,lower"`
+//		Tags     []string `sanitize:"trim;lower"`
 //		// Use "-" to skip sanitization
 //		Password string `sanitize:"-"`
 //	}
@@ -232,7 +235,7 @@
 //	"name" (title + no_spaces + trim)
 //	"text" (no_spaces + trim)
 //	"safe_text" (escape_html + no_spaces + trim)
-//	"safe_html" (xss + trim)
+//	"safe_html" (bluemonday SanitizeHTML + trim; keeps safe formatting tags)
 //
 // # Custom Sanitizer Registration
 //
@@ -246,7 +249,7 @@
 //
 //	// Use in struct tags
 //	type Post struct {
-//		Title string `sanitize:"trim,remove_emoji"`
+//		Title string `sanitize:"trim;remove_emoji"`
 //	}
 //
 // # Functional Composition

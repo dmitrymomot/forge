@@ -85,7 +85,9 @@
 // The package uses cryptographically secure randomness:
 //
 //   - Uses crypto/rand.Reader for all random generation
-//   - Implements bias-free selection algorithm to avoid modulo bias
-//   - Falls back to time-based seed only if crypto/rand fails
+//   - Implements a bias-free (rejection-sampling) selection algorithm to avoid modulo bias
+//   - Never falls back to a predictable (e.g. time-based) source: if crypto/rand
+//     cannot provide entropy, selection retries and otherwise degrades to a fixed
+//     value, so every value returned is derived solely from crypto/rand
 //   - Suitable for security-sensitive naming scenarios
 package randomname

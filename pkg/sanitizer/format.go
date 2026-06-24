@@ -299,9 +299,10 @@ func SanitizeFilename(filename string) string {
 	// Remove problematic leading/trailing characters
 	safe = strings.Trim(safe, " .")
 
-	// Enforce filesystem length limits
-	if len(safe) > 255 {
-		safe = safe[:255]
+	// Enforce filesystem length limits on runes, not bytes, so a multibyte
+	// UTF-8 rune is never split mid-sequence (which would corrupt the name).
+	if runes := []rune(safe); len(runes) > 255 {
+		safe = string(runes[:255])
 	}
 
 	// Prevent empty filenames

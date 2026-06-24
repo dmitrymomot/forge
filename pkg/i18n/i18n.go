@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +27,13 @@ type I18n struct {
 
 	// Default/fallback language.
 	defaultLang string
+
+	// Languages explicitly registered via WithLanguages.
+	explicitLangs []string
+
+	// Set of languages seen while loading translations
+	// (WithTranslations/WithJSONDir/WithYAMLDir).
+	loadedLangs map[string]struct{}
 
 	// Pre-computed list of available languages.
 	languages []string
@@ -51,6 +59,7 @@ func New(cfg Config, opts ...Option) (*I18n, error) {
 		translations: make(map[string]string),
 		pluralRules:  make(map[string]PluralRule),
 		defaultLang:  cfg.DefaultLanguage,
+		loadedLangs:  make(map[string]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -70,34 +79,16 @@ func New(cfg Config, opts ...Option) (*I18n, error) {
 
 // WithLanguages sets the supported languages for the I18n instance.
 // The default language will always be included and placed first in the list.
-// Other languages will be sorted alphabetically.
+// Other languages will be sorted alphabetically. Languages discovered while
+// loading translations (WithTranslations/WithJSONDir/WithYAMLDir) are also
+// included automatically.
 func WithLanguages(langs ...string) Option {
 	return func(i *I18n) error {
-		if len(langs) == 0 {
-			return nil
-		}
-
-		langSet := make(map[string]bool)
 		for _, lang := range langs {
 			if lang != "" {
-				langSet[lang] = true
+				i.explicitLangs = append(i.explicitLangs, lang)
 			}
 		}
-
-		i.languages = make([]string, 0, len(langSet)+1)
-		i.languages = append(i.languages, i.defaultLang)
-
-		delete(langSet, i.defaultLang)
-
-		if len(langSet) > 0 {
-			otherLangs := make([]string, 0, len(langSet))
-			for lang := range langSet {
-				otherLangs = append(otherLangs, lang)
-			}
-			slices.Sort(otherLangs)
-			i.languages = append(i.languages, otherLangs...)
-		}
-
 		return nil
 	}
 }
@@ -117,12 +108,17 @@ func WithTranslations(lang, namespace string, translations map[string]any) Optio
 			return nil
 		}
 
-		flattened := flattenTranslations(translations, "")
+		flattened, err := flattenTranslations(translations, "")
+		if err != nil {
+			return fmt.Errorf("%w: %s/%s: %w", ErrInvalidFile, lang, namespace, err)
+		}
 
 		for key, value := range flattened {
 			compositeKey := buildKey(lang, namespace, key)
 			i.translations[compositeKey] = value
 		}
+
+		i.loadedLangs[lang] = struct{}{}
 
 		if _, exists := i.pluralRules[lang]; !exists {
 			i.pluralRules[lang] = GetPluralRuleForLanguage(lang)
@@ -254,9 +250,10 @@ func (i *I18n) findPluralTranslation(lang, namespace, pluralKey, key, form strin
 	return false, ""
 }
 
-// Languages returns the list of available languages.
+// Languages returns the list of available languages. The returned slice is a
+// copy; mutating it does not affect the instance's internal state.
 func (i *I18n) Languages() []string {
-	return i.languages
+	return slices.Clone(i.languages)
 }
 
 // DefaultLanguage returns the default/fallback language.
@@ -264,19 +261,58 @@ func (i *I18n) DefaultLanguage() string {
 	return i.defaultLang
 }
 
+// buildLanguagesList computes the available-languages list from the default
+// language, languages registered via WithLanguages, and languages discovered
+// while loading translations. The default language is always first; the rest
+// are unique and sorted alphabetically.
 func (i *I18n) buildLanguagesList() []string {
-	if len(i.languages) > 0 {
-		return i.languages
+	others := make(map[string]struct{})
+
+	for _, lang := range i.explicitLangs {
+		if lang != i.defaultLang {
+			others[lang] = struct{}{}
+		}
 	}
-	return []string{i.defaultLang}
+	for lang := range i.loadedLangs {
+		if lang != i.defaultLang {
+			others[lang] = struct{}{}
+		}
+	}
+
+	langs := make([]string, 0, len(others)+1)
+	langs = append(langs, i.defaultLang)
+
+	if len(others) > 0 {
+		otherLangs := make([]string, 0, len(others))
+		for lang := range others {
+			otherLangs = append(otherLangs, lang)
+		}
+		slices.Sort(otherLangs)
+		langs = append(langs, otherLangs...)
+	}
+
+	return langs
 }
 
 func buildKey(lang, namespace, key string) string {
 	return lang + ":" + namespace + ":" + key
 }
 
-func flattenTranslations(data map[string]any, prefix string) map[string]string {
+// flattenTranslations flattens a nested translation map into dot-separated keys.
+// String, boolean, and numeric scalars are supported. Nested maps recurse.
+// Any other type (slices, nil, functions, etc.) is rejected with an error rather
+// than being silently stringified. Duplicate keys are also rejected so that a
+// scalar and a nested branch cannot silently overwrite one another.
+func flattenTranslations(data map[string]any, prefix string) (map[string]string, error) {
 	result := make(map[string]string)
+
+	set := func(key, value string) error {
+		if _, exists := result[key]; exists {
+			return fmt.Errorf("duplicate translation key %q", key)
+		}
+		result[key] = value
+		return nil
+	}
 
 	for key, value := range data {
 		fullKey := key
@@ -286,20 +322,47 @@ func flattenTranslations(data map[string]any, prefix string) map[string]string {
 
 		switch v := value.(type) {
 		case string:
-			result[fullKey] = v
+			if err := set(fullKey, v); err != nil {
+				return nil, err
+			}
+		case bool:
+			if err := set(fullKey, strconv.FormatBool(v)); err != nil {
+				return nil, err
+			}
+		case int:
+			if err := set(fullKey, strconv.Itoa(v)); err != nil {
+				return nil, err
+			}
+		case int64:
+			if err := set(fullKey, strconv.FormatInt(v, 10)); err != nil {
+				return nil, err
+			}
+		case float64:
+			if err := set(fullKey, strconv.FormatFloat(v, 'g', -1, 64)); err != nil {
+				return nil, err
+			}
 		case map[string]any:
-			nested := flattenTranslations(v, fullKey)
-			maps.Copy(result, nested)
+			nested, err := flattenTranslations(v, fullKey)
+			if err != nil {
+				return nil, err
+			}
+			for k, val := range nested {
+				if err := set(k, val); err != nil {
+					return nil, err
+				}
+			}
 		case map[string]string:
 			for subKey, subVal := range v {
-				result[fullKey+"."+subKey] = subVal
+				if err := set(fullKey+"."+subKey, subVal); err != nil {
+					return nil, err
+				}
 			}
 		default:
-			result[fullKey] = fmt.Sprintf("%v", v)
+			return nil, fmt.Errorf("unsupported translation value type %T for key %q", value, fullKey)
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func replacePlaceholdersWithMerge(template string, placeholders ...M) string {

@@ -16,19 +16,25 @@ import (
 )
 
 func TestErrorBoundaries(t *testing.T) {
+	t.Parallel()
+
 	t.Run("malformed_content_type_headers", func(t *testing.T) {
+		t.Parallel()
 		testMalformedContentTypeHeaders(t)
 	})
 
 	t.Run("parser_limits", func(t *testing.T) {
+		t.Parallel()
 		testParserLimits(t)
 	})
 
 	t.Run("charset_confusion_attacks", func(t *testing.T) {
+		t.Parallel()
 		testCharsetConfusionAttacks(t)
 	})
 
 	t.Run("boundary_injection", func(t *testing.T) {
+		t.Parallel()
 		testBoundaryInjection(t)
 	})
 }
@@ -47,12 +53,12 @@ func testMalformedContentTypeHeaders(t *testing.T) {
 			Field string `json:"field"`
 		}
 
-		// Should handle malformed Content-Type header gracefully
+		// A Content-Type whose media type is not exactly application/json must be
+		// rejected as unsupported, never silently bypassed.
 		err := binder.JSON()(req, &target)
-		if err != nil {
-			// Should get a controlled error, not a panic or security bypass
-			assert.Error(t, err)
-		}
+		require.Error(t, err)
+		require.ErrorIs(t, err, binder.ErrUnsupportedMediaType)
+		assert.Empty(t, target.Field, "no field should be bound on a rejected request")
 	})
 
 	t.Run("missing_content_type", func(t *testing.T) {
@@ -66,13 +72,13 @@ func testMalformedContentTypeHeaders(t *testing.T) {
 			Field string `json:"field"`
 		}
 
-		// Should handle missing Content-Type gracefully
+		// A missing Content-Type must produce a controlled, identifiable error.
 		err := binder.JSON()(req, &target)
-		if err != nil {
-			assert.Error(t, err)
-			assert.Contains(t, strings.ToLower(err.Error()), "content-type",
-				"Error should mention content-type issue")
-		}
+		require.Error(t, err)
+		require.ErrorIs(t, err, binder.ErrMissingContentType)
+		assert.Contains(t, strings.ToLower(err.Error()), "content-type",
+			"Error should mention content-type issue")
+		assert.Empty(t, target.Field, "no field should be bound when content-type is missing")
 	})
 
 	t.Run("empty_content_type", func(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -44,7 +44,7 @@ func TestEscapeHTML(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.EscapeHTML(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -84,7 +84,7 @@ func TestUnescapeHTML(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.UnescapeHTML(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -129,7 +129,7 @@ func TestStripScriptTags(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.StripScriptTags(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -174,7 +174,7 @@ func TestRemoveJavaScriptEvents(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveJavaScriptEvents(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -182,6 +182,8 @@ func TestRemoveJavaScriptEvents(t *testing.T) {
 func TestPreventXSS(t *testing.T) {
 	t.Parallel()
 
+	// PreventXSS now delegates to the bluemonday-backed StripHTML, so all HTML
+	// tags are removed and only their text content remains.
 	tests := []struct {
 		name     string
 		input    string
@@ -195,12 +197,12 @@ func TestPreventXSS(t *testing.T) {
 		{
 			name:     "prevents event handler injection",
 			input:    `<div onclick="alert('xss')">content</div>`,
-			expected: "&lt;div&gt;content&lt;/div&gt;",
+			expected: "content",
 		},
 		{
 			name:     "comprehensive XSS prevention",
 			input:    `<script>alert('xss')</script><div onclick="bad()">content</div>`,
-			expected: "&lt;div&gt;content&lt;/div&gt;",
+			expected: "content",
 		},
 		{
 			name:     "handles normal content",
@@ -214,9 +216,78 @@ func TestPreventXSS(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.PreventXSS(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestPreventXSSClosesRegexBypasses proves that PreventXSS, now backed by
+// bluemonday, neutralizes XSS vectors that the previous home-grown regex
+// scrubbers were known to miss (unquoted attributes, malformed/uppercase tags,
+// newline-separated handlers, protocol obfuscation).
+func TestPreventXSSClosesRegexBypasses(t *testing.T) {
+	t.Parallel()
+
+	vectors := []struct {
+		name  string
+		input string
+	}{
+		{name: "unquoted onerror attribute", input: `<img src=x onerror=alert('XSS')>`},
+		{name: "uppercase script tag", input: `<SCRIPT>alert('XSS')</SCRIPT>`},
+		{name: "newline split handler", input: "<img src=x\nonerror=alert('XSS')>"},
+		{name: "svg onload", input: `<svg/onload=alert('XSS')>`},
+		{name: "javascript protocol mixed case", input: `<a href="JaVaScRiPt:alert('XSS')">link</a>`},
+		{name: "malformed script no close", input: `<script>alert('XSS')`},
+		{name: "body onload", input: `<body onload=alert('XSS')>`},
+		{name: "iframe srcdoc", input: `<iframe srcdoc="<script>alert('XSS')</script>"></iframe>`},
+	}
+
+	for _, v := range vectors {
+		t.Run(v.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := sanitizer.PreventXSS(v.input)
+			require.NotContains(t, result, "<script")
+			require.NotContains(t, result, "javascript:")
+			require.NotContains(t, result, "onerror")
+			require.NotContains(t, result, "onload")
+			require.NotContains(t, result, "<img")
+			require.NotContains(t, result, "<svg")
+			require.NotContains(t, result, "<iframe")
+		})
+	}
+}
+
+// TestSafeHTMLTagClosesRegexBypasses proves that the "safe_html" struct tag,
+// now backed by bluemonday's SanitizeHTML, keeps safe formatting while removing
+// XSS vectors that the previous regex-based PreventXSS could not.
+func TestSafeHTMLTagClosesRegexBypasses(t *testing.T) {
+	t.Parallel()
+
+	type Post struct {
+		Body string `sanitize:"safe_html"`
+	}
+
+	t.Run("strips dangerous tags and attributes", func(t *testing.T) {
+		t.Parallel()
+
+		p := Post{Body: `<p>Hello <img src=x onerror=alert('XSS')> <script>alert('XSS')</script></p>`}
+		require.NoError(t, sanitizer.SanitizeStruct(&p))
+		require.NotContains(t, p.Body, "<script")
+		require.NotContains(t, p.Body, "onerror")
+		require.NotContains(t, p.Body, "<img")
+		// Safe formatting is preserved.
+		require.Contains(t, p.Body, "<p>")
+		require.Contains(t, p.Body, "Hello")
+	})
+
+	t.Run("preserves safe formatting tags", func(t *testing.T) {
+		t.Parallel()
+
+		p := Post{Body: `<p><strong>Bold</strong> and <em>italic</em></p>`}
+		require.NoError(t, sanitizer.SanitizeStruct(&p))
+		require.Equal(t, `<p><strong>Bold</strong> and <em>italic</em></p>`, p.Body)
+	})
 }
 
 func TestEscapeSQLString(t *testing.T) {
@@ -254,7 +325,7 @@ func TestEscapeSQLString(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.EscapeSQLString(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -299,7 +370,7 @@ func TestRemoveSQLKeywords(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveSQLKeywords(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -344,7 +415,7 @@ func TestSanitizeSQLIdentifier(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeSQLIdentifier(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -389,7 +460,7 @@ func TestPreventPathTraversal(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.PreventPathTraversal(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -438,7 +509,7 @@ func TestSanitizePath(t *testing.T) {
 			if result == "." && tt.expected == "" {
 				result = ""
 			}
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -483,7 +554,7 @@ func TestSanitizeShellArgument(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeShellArgument(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -523,7 +594,7 @@ func TestRemoveNullBytes(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveNullBytes(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -563,7 +634,7 @@ func TestRemoveControlSequences(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveControlSequences(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -614,7 +685,7 @@ func TestLimitLength(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.LimitLength(tt.input, tt.maxLength)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -654,7 +725,7 @@ func TestSanitizeUserInput(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeUserInput(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -694,7 +765,7 @@ func TestPreventLDAPInjection(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.PreventLDAPInjection(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -734,7 +805,7 @@ func TestSanitizeEmail(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeEmail(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -774,7 +845,7 @@ func TestSanitizeURL(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeURL(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -814,7 +885,7 @@ func TestPreventHeaderInjection(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.PreventHeaderInjection(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -859,7 +930,7 @@ func TestSanitizeSecureFilename(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeSecureFilename(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -877,7 +948,7 @@ func TestSecurityApplyPattern(t *testing.T) {
 			sanitizer.StripScriptTags,
 			sanitizer.EscapeHTML,
 		)
-		assert.Equal(t, "userinput", result)
+		require.Equal(t, "userinput", result)
 	})
 
 	t.Run("compose security transformations", func(t *testing.T) {
@@ -893,7 +964,7 @@ func TestSecurityApplyPattern(t *testing.T) {
 
 		maliciousInput := "<script>alert('xss')</script>\x00\x01dangerous input"
 		result := inputSanitizer(maliciousInput)
-		assert.Equal(t, "dangerous input", result)
+		require.Equal(t, "dangerous input", result)
 	})
 }
 
@@ -914,7 +985,7 @@ func TestRealWorldSecurityUsage(t *testing.T) {
 
 		dangerousComment := `<script>steal_data()</script>Nice post! <div onclick="evil()">Click me</div>`
 		cleanComment := commentSanitizer(dangerousComment)
-		assert.Equal(t, `Nice post! <div>Click me</div>`, cleanComment)
+		require.Equal(t, `Nice post! <div>Click me</div>`, cleanComment)
 	})
 
 	t.Run("file upload sanitization", func(t *testing.T) {
@@ -937,8 +1008,8 @@ func TestRealWorldSecurityUsage(t *testing.T) {
 		cleanPath := pathSanitizer(dangerousPath)
 		cleanFilename := filenameSanitizer(dangerousFilename)
 
-		assert.Equal(t, "etc/passwd", cleanPath)
-		assert.Equal(t, "filename_script_.txt", cleanFilename)
+		require.Equal(t, "etc/passwd", cleanPath)
+		require.Equal(t, "filename_script_.txt", cleanFilename)
 	})
 
 	t.Run("database input sanitization", func(t *testing.T) {
@@ -955,8 +1026,8 @@ func TestRealWorldSecurityUsage(t *testing.T) {
 		cleanInput := sqlSanitizer(maliciousInput)
 
 		// Should remove SQL keywords and escape quotes
-		assert.NotContains(t, cleanInput, "DROP")
-		assert.NotContains(t, cleanInput, "TABLE")
-		assert.Contains(t, cleanInput, "''") // Should escape the quotes
+		require.NotContains(t, cleanInput, "DROP")
+		require.NotContains(t, cleanInput, "TABLE")
+		require.Contains(t, cleanInput, "''") // Should escape the quotes
 	})
 }

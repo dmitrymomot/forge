@@ -66,11 +66,25 @@
 //
 //	info, err := lim.Peek(ctx, "user:123")
 //
+// # Allow vs AllowN semantics
+//
+// [Limiter.Allow] is shorthand for AllowN(ctx, key, 1). [Limiter.AllowN] uses
+// an increment-first strategy: it increments the counter by n and THEN checks
+// the limit. A throttled request is reported via the returned [Info]
+// (IsAllowed()==false, non-zero RetryAfter), not as an error. n must be
+// positive — AllowN returns [ErrInvalidN] otherwise. A batch larger than the
+// configured limit can never fit a window, so AllowN rejects it up front with
+// [ErrRateLimited] without incrementing the counter. See [Limiter.AllowN] for
+// the full contract.
+//
 // # Error Handling
 //
 // The package defines sentinel errors:
 //
-//   - [ErrRateLimited] — request exceeds the rate limit
+//   - [ErrRateLimited] — AllowN was called with n greater than the limit
+//     (a structurally impossible batch); ordinary throttling is reported via
+//     [Info], not this error
+//   - [ErrInvalidN] — AllowN was called with n <= 0
 //   - [ErrInvalidLimit] — limit is zero or negative
 //   - [ErrInvalidWindow] — window duration is zero or negative
 //   - [ErrNilCounter] — nil counter provided to New

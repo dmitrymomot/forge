@@ -144,14 +144,22 @@ func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string)
 func setSliceValue(field reflect.Value, fieldType reflect.Type, values []string) error {
 	elemType := fieldType.Elem()
 
-	// Handle both multiple form fields and comma-separated values in single field
+	// Determine the list elements.
+	//
+	// Two distinct conventions are supported:
+	//   1. Repeated parameters (?tags=go&tags=web) arrive as multiple values, where
+	//      each value is already a discrete element.
+	//   2. A single combined value (?tags=go,web) represents a comma-separated list.
+	//
+	// Comma-splitting is only applied to convention (2): a single value. When the
+	// caller supplied multiple values, each is treated as a literal element so that
+	// legitimate commas inside a value (e.g. ?tags=go&tags=a,b as the literal "a,b")
+	// are preserved rather than silently torn apart.
 	var allValues []string
-	for _, v := range values {
-		if strings.Contains(v, ",") {
-			allValues = append(allValues, strings.Split(v, ",")...)
-		} else {
-			allValues = append(allValues, v)
-		}
+	if len(values) == 1 {
+		allValues = strings.Split(values[0], ",")
+	} else {
+		allValues = values
 	}
 
 	slice := reflect.MakeSlice(fieldType, len(allValues), len(allValues))
@@ -178,15 +186,20 @@ func sanitizeStringValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.ReplaceAll(value, "\n", "")
 
-	// Filter out control characters while preserving printable content
+	// Filter out control characters while preserving printable content.
+	//
+	// Tabs are explicitly allowed. Everything else must be both a valid rune and
+	// non-control: this strips C0 controls (below 0x20), DEL (0x7F), and the C1
+	// control block (0x80-0x9F), which unicode.IsControl reports for all of them.
 	var builder strings.Builder
 	builder.Grow(len(value))
 
 	for _, r := range value {
-		if r == '\t' || r >= ' ' || unicode.IsGraphic(r) {
-			if utf8.ValidRune(r) {
-				builder.WriteRune(r)
-			}
+		if !utf8.ValidRune(r) {
+			continue
+		}
+		if r == '\t' || !unicode.IsControl(r) {
+			builder.WriteRune(r)
 		}
 	}
 

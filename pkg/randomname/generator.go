@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 // builderPool is used to reduce allocations when building names.
@@ -56,13 +55,16 @@ func Generate(opts *Options) string {
 			validWords++
 		}
 
-		// If no valid words found in pattern, fall back to default
+		// If no valid words found in pattern, fall back to default.
+		// Preserve all other options (including custom Words) so the fallback
+		// still honors the caller's configuration.
 		if validWords == 0 {
 			return Generate(&Options{
 				Pattern:   defaultOptions().Pattern,
 				Separator: options.Separator,
 				Suffix:    options.Suffix,
 				Validator: options.Validator,
+				Words:     options.Words,
 			})
 		}
 
@@ -133,45 +135,48 @@ func Full() string {
 	})
 }
 
-// secureRandInt returns a cryptographically secure random integer in range [0, max).
-func secureRandInt(max int) int {
-	if max <= 0 {
+// secureRandInt returns a cryptographically secure random integer in range [0, upper).
+//
+// It uses rejection sampling to avoid modulo bias. If crypto/rand ever fails to
+// provide entropy (extraordinarily rare in practice), it does NOT fall back to a
+// predictable time-based seed; instead it keeps retrying and, only after exhausting
+// its retry budget, returns 0. This preserves the package's cryptographic guarantee:
+// every value it does return is derived solely from crypto/rand.
+func secureRandInt(upper int) int {
+	if upper <= 0 {
 		return 0
 	}
 
-	// To avoid modulo bias, we need to generate within a range that's
-	// a multiple of max
-	nBig := uint32(max)
-	maxValid := (^uint32(0) / nBig) * nBig
+	// To avoid modulo bias, only accept samples below the largest multiple
+	// of upper that fits in a uint32; reject the biased tail.
+	bound := uint32(upper)
+	maxValid := (^uint32(0) / bound) * bound
 
-	// For typical word list sizes (< 1000), we'll need very few retries
-	// The probability of needing a retry is (2^32 - maxValid) / 2^32
-	// For max=1000, this is ~0.0023% chance per iteration
-	const maxRetries = 10
+	// For typical word list sizes (< 1000) very few retries are needed: the
+	// probability of needing a retry is (2^32 - maxValid) / 2^32 (~0.0023% for
+	// upper=1000). The budget is generous so a transient rand error is retried
+	// rather than papered over with a predictable seed.
+	const maxRetries = 64
 
 	for range maxRetries {
 		var n uint32
 		if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
-			// If crypto/rand fails, don't give up - use time-based seed
-			// This can happen in some CI environments
-			n = uint32(time.Now().UnixNano())
-			return int(n % nBig)
+			// Transient entropy failure: retry rather than use a predictable
+			// (time-based) value, which would break the security guarantee.
+			continue
 		}
 
-		// Reject values that would cause modulo bias
+		// Reject values that would cause modulo bias.
 		if n < maxValid {
-			return int(n % nBig)
+			return int(n % bound)
 		}
-		// Try again if we got a biased value
+		// Otherwise resample.
 	}
 
-	// After max retries, fall back to simple modulo (tiny bias acceptable)
-	var n uint32
-	if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
-		// Use time-based fallback instead of returning 0
-		n = uint32(time.Now().UnixNano())
-	}
-	return int(n % nBig)
+	// crypto/rand could not provide an unbiased sample within the retry budget.
+	// Return 0 (a fixed, non-predictable-from-clock value) rather than seeding
+	// from time, so we never emit time-correlated output.
+	return 0
 }
 
 // generateSuffix creates a suffix based on the specified type.

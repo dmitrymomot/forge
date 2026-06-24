@@ -224,6 +224,47 @@ func TestRouter_EmptyRoutes(t *testing.T) {
 	require.Equal(t, "fallback", rec.Body.String(), "unexpected response body")
 }
 
+func TestRouter_NilFallback(t *testing.T) {
+	t.Parallel()
+
+	routes := hostrouter.Routes{
+		"api.example.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("api"))
+		}),
+	}
+
+	// nil fallback must not panic on an unmatched request; it should serve 404.
+	router := hostrouter.New(routes, nil)
+
+	t.Run("unmatched request returns 404 instead of panicking", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "unknown.com"
+		rec := httptest.NewRecorder()
+
+		require.NotPanics(t, func() {
+			router.ServeHTTP(rec, req)
+		}, "unmatched request with nil fallback should not panic")
+
+		require.Equal(t, http.StatusNotFound, rec.Code, "should return 404 Not Found")
+		require.Equal(t, "404 page not found\n", rec.Body.String())
+	})
+
+	t.Run("matched request still routes to its handler", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "api.example.com"
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "api", rec.Body.String())
+	})
+}
+
 func TestRouter_PatternNormalization(t *testing.T) {
 	t.Parallel()
 

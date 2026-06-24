@@ -3,7 +3,7 @@ package sanitizer_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -43,7 +43,7 @@ func TestFilterEmpty(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FilterEmpty(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -88,7 +88,7 @@ func TestDeduplicate(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Deduplicate(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -128,7 +128,7 @@ func TestDeduplicateStringsIgnoreCase(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.DeduplicateStringsIgnoreCase(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -179,7 +179,7 @@ func TestLimitSliceLength(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.LimitSliceLength(tt.input, tt.maxLength)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -224,7 +224,7 @@ func TestSortStrings(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SortStrings(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -259,7 +259,7 @@ func TestSortStringsIgnoreCase(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SortStringsIgnoreCase(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -304,7 +304,7 @@ func TestFilterSliceByPattern(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FilterSliceByPattern(tt.input, tt.pattern)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -344,7 +344,7 @@ func TestTrimStringSlice(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.TrimStringSlice(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -384,7 +384,7 @@ func TestToLowerStringSlice(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToLowerStringSlice(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -419,7 +419,7 @@ func TestCleanStringSlice(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.CleanStringSlice(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -469,7 +469,7 @@ func TestSanitizeMapKeys(t *testing.T) {
 			result := sanitizer.SanitizeMapKeys(tt.input, func(s string) string {
 				return sanitizer.Apply(s, sanitizer.Trim, sanitizer.ToLower)
 			})
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -507,7 +507,7 @@ func TestSanitizeMapValues(t *testing.T) {
 			result := sanitizer.SanitizeMapValues(tt.input, func(s string) string {
 				return sanitizer.Apply(s, sanitizer.Trim, sanitizer.ToLower)
 			})
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -551,7 +551,7 @@ func TestFilterMapByKeys(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FilterMapByKeys(tt.input, tt.pattern)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -589,7 +589,7 @@ func TestFilterEmptyMapValues(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FilterEmptyMapValues(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -622,7 +622,7 @@ func TestCleanStringMap(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.CleanStringMap(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -665,7 +665,7 @@ func TestLimitMapSize(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.LimitMapSize(tt.input, tt.maxSize)
-			assert.Equal(t, tt.expected, len(result))
+			require.Equal(t, tt.expected, len(result))
 		})
 	}
 }
@@ -697,11 +697,11 @@ func TestExtractMapKeys(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ExtractMapKeys(tt.input)
-			assert.Equal(t, tt.expected, len(result))
+			require.Equal(t, tt.expected, len(result))
 
 			// Verify all keys are present
 			for key := range tt.input {
-				assert.Contains(t, result, key)
+				require.Contains(t, result, key)
 			}
 		})
 	}
@@ -747,7 +747,7 @@ func TestMergeStringMaps(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MergeStringMaps(tt.maps...)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -779,7 +779,7 @@ func TestSliceToMap(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SliceToMap(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -795,7 +795,7 @@ func TestFilterSlice(t *testing.T) {
 			return n%2 == 0 // even numbers only
 		})
 		expected := []int{2, 4, 6}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 
 	t.Run("filters strings by length", func(t *testing.T) {
@@ -806,7 +806,7 @@ func TestFilterSlice(t *testing.T) {
 			return len(s) > 2
 		})
 		expected := []string{"hello", "world"}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 }
 
@@ -828,7 +828,7 @@ func TestTransformSlice(t *testing.T) {
 			}
 		})
 		expected := []string{"one", "two", "three"}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 
 	t.Run("transforms strings to uppercase", func(t *testing.T) {
@@ -837,7 +837,7 @@ func TestTransformSlice(t *testing.T) {
 		input := []string{"hello", "world"}
 		result := sanitizer.TransformSlice(input, sanitizer.ToUpper)
 		expected := []string{"HELLO", "WORLD"}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 }
 
@@ -871,7 +871,7 @@ func TestReverseSlice(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ReverseSlice(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -892,7 +892,7 @@ func TestCollectionsApplyPattern(t *testing.T) {
 			sanitizer.SortStrings,
 		)
 		expected := []string{"hello", "test", "world"}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 
 	t.Run("compose collection transformations", func(t *testing.T) {
@@ -911,7 +911,7 @@ func TestCollectionsApplyPattern(t *testing.T) {
 		input := []string{"  a  ", "b", "", "a", "c", "d", "e", "f", "g"}
 		result := sliceCleaner(input)
 		expected := []string{"a", "b", "c", "d", "e"}
-		assert.Equal(t, expected, result)
+		require.Equal(t, expected, result)
 	})
 }
 
@@ -937,8 +937,8 @@ func TestRealWorldCollectionUsage(t *testing.T) {
 		cleanTags := tagProcessor(userTags)
 
 		expected := []string{"angular", "docker", "golang", "javascript", "kubernetes", "node.js", "python", "react", "vue"}
-		assert.Equal(t, expected, cleanTags)
-		assert.True(t, len(cleanTags) <= 10)
+		require.Equal(t, expected, cleanTags)
+		require.True(t, len(cleanTags) <= 10)
 	})
 
 	t.Run("form data sanitization", func(t *testing.T) {
@@ -966,7 +966,7 @@ func TestRealWorldCollectionUsage(t *testing.T) {
 			"email":   "john@example.com",
 			"company": "Acme Corp",
 		}
-		assert.Equal(t, expected, cleanData)
+		require.Equal(t, expected, cleanData)
 	})
 
 	t.Run("search results deduplication", func(t *testing.T) {
@@ -997,7 +997,7 @@ func TestRealWorldCollectionUsage(t *testing.T) {
 
 		cleanResults := resultsProcessor(searchResults)
 		expected := []string{"Go Programming", "Golang Tutorial", "Python Programming", "Java Tutorial"}
-		assert.Equal(t, expected, cleanResults)
+		require.Equal(t, expected, cleanResults)
 	})
 
 	t.Run("configuration merging", func(t *testing.T) {
@@ -1022,10 +1022,10 @@ func TestRealWorldCollectionUsage(t *testing.T) {
 
 		finalConfig := sanitizer.MergeStringMaps(defaultConfig, userConfig, envConfig)
 
-		assert.Equal(t, "60s", finalConfig["timeout"])    // user override
-		assert.Equal(t, "true", finalConfig["debug"])     // env override
-		assert.Equal(t, "3", finalConfig["retries"])      // default preserved
-		assert.Equal(t, "localhost", finalConfig["host"]) // user addition
-		assert.Equal(t, "8080", finalConfig["port"])      // env addition
+		require.Equal(t, "60s", finalConfig["timeout"])    // user override
+		require.Equal(t, "true", finalConfig["debug"])     // env override
+		require.Equal(t, "3", finalConfig["retries"])      // default preserved
+		require.Equal(t, "localhost", finalConfig["host"]) // user addition
+		require.Equal(t, "8080", finalConfig["port"])      // env addition
 	})
 }

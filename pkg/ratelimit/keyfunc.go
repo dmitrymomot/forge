@@ -8,6 +8,15 @@ import (
 	"github.com/dmitrymomot/forge/pkg/fingerprint"
 )
 
+// The extractors in this file are HTTP-oriented and live in the same package as
+// the storage/algorithm core (Limiter, Counter) deliberately: they are the
+// ergonomic glue that lets HTTP middleware derive a stable rate-limit key, and
+// keeping them here avoids forcing every caller to import a second package for
+// the common case. The core Limiter/Counter types take a plain string key and
+// have no HTTP dependency, so the algorithm remains usable without these
+// helpers; consumers that need custom keying can pass their own KeyFunc or any
+// string. Splitting these into a separate package is intentionally out of scope.
+
 // KeyFunc extracts a rate-limit key from an HTTP request.
 type KeyFunc func(r *http.Request) string
 

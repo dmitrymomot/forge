@@ -43,7 +43,29 @@ func TestMaxMindProvider_Lookup(t *testing.T) {
 		require.NotNil(t, loc)
 		require.Equal(t, "GB", loc.Country)
 		require.Equal(t, "London", loc.City)
+		require.Equal(t, "England", loc.Region)
 		require.Equal(t, "Europe/London", loc.Timezone)
+	})
+
+	t.Run("populates region from subdivisions", func(t *testing.T) {
+		t.Parallel()
+		loc, err := p.Lookup(context.Background(), "2.125.160.216")
+		require.NoError(t, err)
+		require.NotNil(t, loc)
+		require.Equal(t, "GB", loc.Country)
+		require.Equal(t, "Boxford", loc.City)
+		// The primary subdivision is the first entry, even when the
+		// record carries multiple subdivision levels.
+		require.Equal(t, "England", loc.Region)
+	})
+
+	t.Run("returns nil for public IP absent from database", func(t *testing.T) {
+		t.Parallel()
+		// 8.8.8.8 is a routable public address with no record in the
+		// test database, exercising the record.HasData() == false branch.
+		loc, err := p.Lookup(context.Background(), "8.8.8.8")
+		require.NoError(t, err)
+		require.Nil(t, loc)
 	})
 
 	t.Run("returns nil for loopback IPv4", func(t *testing.T) {

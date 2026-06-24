@@ -1,9 +1,11 @@
 package sanitizer_test
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -53,7 +55,7 @@ func TestNormalizeEmail(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeEmail(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -93,7 +95,7 @@ func TestExtractEmailDomain(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ExtractEmailDomain(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -138,7 +140,7 @@ func TestMaskEmail(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaskEmail(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -183,7 +185,7 @@ func TestNormalizePhone(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizePhone(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -228,7 +230,7 @@ func TestFormatPhoneUS(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FormatPhoneUS(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -268,7 +270,7 @@ func TestMaskPhone(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaskPhone(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -318,7 +320,7 @@ func TestNormalizeURL(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeURL(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -363,7 +365,7 @@ func TestExtractDomain(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ExtractDomain(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -403,7 +405,7 @@ func TestRemoveQueryParams(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveQueryParams(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -443,7 +445,7 @@ func TestRemoveFragment(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveFragment(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -483,7 +485,7 @@ func TestNormalizeCreditCard(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeCreditCard(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -523,7 +525,7 @@ func TestMaskCreditCard(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaskCreditCard(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -568,7 +570,7 @@ func TestFormatCreditCard(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FormatCreditCard(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -608,7 +610,7 @@ func TestNormalizeSSN(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeSSN(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -648,7 +650,7 @@ func TestMaskSSN(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaskSSN(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -688,7 +690,7 @@ func TestFormatSSN(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FormatSSN(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -728,7 +730,7 @@ func TestNormalizePostalCode(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizePostalCode(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -773,7 +775,7 @@ func TestFormatPostalCodeUS(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FormatPostalCodeUS(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -813,7 +815,7 @@ func TestFormatPostalCodeCA(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.FormatPostalCodeCA(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -864,7 +866,7 @@ func TestMaskString(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaskString(tt.input, tt.visibleChars)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -904,7 +906,7 @@ func TestRemoveNonAlphanumeric(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveNonAlphanumeric(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -949,7 +951,7 @@ func TestNormalizeWhitespace(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeWhitespace(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -994,7 +996,7 @@ func TestExtractNumbers(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ExtractNumbers(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -1039,9 +1041,41 @@ func TestSanitizeFilename(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeFilename(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestSanitizeFilename_MultibyteTruncation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncates on runes without splitting a multibyte rune", func(t *testing.T) {
+		t.Parallel()
+
+		// Each 'é' is 2 bytes in UTF-8. A 300-rune name is 600 bytes; a
+		// byte-based truncation at 255 would land mid-rune and produce
+		// invalid UTF-8, corrupting the trailing character.
+		input := strings.Repeat("é", 300)
+		result := sanitizer.SanitizeFilename(input)
+
+		require.True(t, utf8.ValidString(result), "result must remain valid UTF-8")
+		require.Equal(t, 255, utf8.RuneCountInString(result), "must keep 255 runes")
+		require.Equal(t, strings.Repeat("é", 255), result)
+		// The byte length exceeds 255 precisely because runes are multibyte;
+		// this confirms truncation is rune-based, not byte-based.
+		require.Equal(t, 510, len(result))
+	})
+
+	t.Run("emoji name is not corrupted at the boundary", func(t *testing.T) {
+		t.Parallel()
+
+		// '😀' is 4 bytes. 256 of them = 1024 bytes; rune truncation keeps 255.
+		input := strings.Repeat("😀", 256)
+		result := sanitizer.SanitizeFilename(input)
+
+		require.True(t, utf8.ValidString(result))
+		require.Equal(t, 255, utf8.RuneCountInString(result))
+	})
 }
 
 func TestFormatApplyPattern(t *testing.T) {
@@ -1055,7 +1089,7 @@ func TestFormatApplyPattern(t *testing.T) {
 		cleanEmail := sanitizer.Apply(dirtyEmail,
 			sanitizer.NormalizeEmail,
 		)
-		assert.Equal(t, "user.name@example.com", cleanEmail)
+		require.Equal(t, "user.name@example.com", cleanEmail)
 	})
 
 	t.Run("compose format transformations", func(t *testing.T) {
@@ -1068,7 +1102,7 @@ func TestFormatApplyPattern(t *testing.T) {
 		)
 
 		result := phoneSanitizer("123 456 7890")
-		assert.Equal(t, "(123) 456-7890", result)
+		require.Equal(t, "(123) 456-7890", result)
 	})
 
 	t.Run("compose URL cleaning pipeline", func(t *testing.T) {
@@ -1082,7 +1116,7 @@ func TestFormatApplyPattern(t *testing.T) {
 		)
 
 		result := urlCleaner("  EXAMPLE.COM/path?param=value#section  ")
-		assert.Equal(t, "https://example.com/path", result)
+		require.Equal(t, "https://example.com/path", result)
 	})
 }
 
@@ -1109,8 +1143,8 @@ func TestRealWorldFormatUsage(t *testing.T) {
 		cleanEmail := emailSanitizer(rawEmail)
 		cleanPhone := phoneSanitizer(rawPhone)
 
-		assert.Equal(t, "user.email@domain.com", cleanEmail)
-		assert.Equal(t, "(123) 456-7890", cleanPhone)
+		require.Equal(t, "user.email@domain.com", cleanEmail)
+		require.Equal(t, "(123) 456-7890", cleanPhone)
 	})
 
 	t.Run("payment form sanitization", func(t *testing.T) {
@@ -1124,7 +1158,7 @@ func TestRealWorldFormatUsage(t *testing.T) {
 		rawCard := "1234 5678 9012 3456"
 		cleanCard := cardSanitizer(rawCard)
 
-		assert.Equal(t, "1234567890123456", cleanCard)
+		require.Equal(t, "1234567890123456", cleanCard)
 	})
 
 	t.Run("address form sanitization", func(t *testing.T) {
@@ -1138,6 +1172,6 @@ func TestRealWorldFormatUsage(t *testing.T) {
 		rawZip := "123456789"
 		cleanZip := zipSanitizer(rawZip)
 
-		assert.Equal(t, "12345-6789", cleanZip)
+		require.Equal(t, "12345-6789", cleanZip)
 	})
 }

@@ -3,7 +3,7 @@ package sanitizer_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -76,7 +76,7 @@ func TestApply(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Apply(tt.input, tt.transforms...)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -130,7 +130,7 @@ func TestCompose(t *testing.T) {
 
 			composedRule := sanitizer.Compose(tt.transforms...)
 			result := composedRule(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -163,7 +163,7 @@ func TestComposeReusability(t *testing.T) {
 
 		for i, input := range inputs {
 			result := emailCleanRule(input)
-			assert.Equal(t, expected[i], result, "Failed for input: %s", input)
+			require.Equal(t, expected[i], result, "Failed for input: %s", input)
 		}
 	})
 }
@@ -183,7 +183,7 @@ func TestApplyWithCompose(t *testing.T) {
 
 		// Use it in Apply
 		result := sanitizer.Apply("  john    doe  ", nameCleanRule)
-		assert.Equal(t, "JOHN DOE", result)
+		require.Equal(t, "JOHN DOE", result)
 	})
 
 	t.Run("mix composed rules with direct functions", func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestApplyWithCompose(t *testing.T) {
 			sanitizer.ToLower,
 			func(s string) string { return sanitizer.MaxLength(s, 8) },
 		)
-		assert.Equal(t, "hello wo", result)
+		require.Equal(t, "hello wo", result)
 	})
 }
 
@@ -238,9 +238,9 @@ func TestRealWorldUsagePatternsUsage(t *testing.T) {
 		cleanEmail := emailCleanRule(rawEmail)
 		cleanUsername := usernameCleanRule(rawUsername)
 
-		assert.Equal(t, "JOHN DOE", cleanName)
-		assert.Equal(t, "john.doe@example.com", cleanEmail)
-		assert.Equal(t, "johndoe123", cleanUsername)
+		require.Equal(t, "JOHN DOE", cleanName)
+		require.Equal(t, "john.doe@example.com", cleanEmail)
+		require.Equal(t, "johndoe123", cleanUsername)
 	})
 
 	t.Run("content sanitization pipeline", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestRealWorldUsagePatternsUsage(t *testing.T) {
 
 		// bluemonday correctly strips script tags AND their content (XSS protection)
 		expected := "Hello world This is a test."
-		assert.Equal(t, expected, cleanContent)
+		require.Equal(t, expected, cleanContent)
 	})
 }
 
@@ -271,7 +271,7 @@ func TestEdgeCases(t *testing.T) {
 
 		input := "test value"
 		result := sanitizer.Apply(input)
-		assert.Equal(t, input, result)
+		require.Equal(t, input, result)
 	})
 
 	t.Run("compose with no transforms creates identity function", func(t *testing.T) {
@@ -280,7 +280,7 @@ func TestEdgeCases(t *testing.T) {
 		identityRule := sanitizer.Compose[string]()
 		input := "test value"
 		result := identityRule(input)
-		assert.Equal(t, input, result)
+		require.Equal(t, input, result)
 	})
 
 	t.Run("chained compositions work correctly", func(t *testing.T) {
@@ -291,6 +291,6 @@ func TestEdgeCases(t *testing.T) {
 		combinedRule := sanitizer.Compose(rule1, rule2)
 
 		result := combinedRule("  HELLO  ")
-		assert.Equal(t, "hello", result)
+		require.Equal(t, "hello", result)
 	})
 }

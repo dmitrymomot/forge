@@ -16,7 +16,7 @@ var defaultWords = map[WordType][]string{
 		"harmonious", "heroic", "humble", "illustrious", "immense", "incredible", "inspired",
 		"intelligent", "intrepid", "legendary", "luminous", "majestic", "marvelous", "mindful",
 		"modern", "mystical", "noble", "peaceful", "persistent", "playful", "polished",
-		"powerful", "precious", "pristine", "quick", "quirky", "radiant", "refreshing",
+		"powerful", "precious", "pristine", "quick", "quirky", "refreshing",
 		"remarkable", "royal", "sage", "savvy", "serene", "shining", "skillful",
 		"sleek", "smooth", "sophisticated", "sparkling", "spectacular", "splendid", "stellar",
 		"strong", "stunning", "sublime", "subtle", "sunny", "super", "supreme",

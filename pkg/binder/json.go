@@ -1,6 +1,7 @@
 package binder
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func JSON() Binder {
 			return fmt.Errorf("%w: request body too large (max %d bytes)", ErrFailedToParseJSON, DefaultMaxJSONSize)
 		}
 
-		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields() // Strict mode prevents typos and unexpected fields
 
 		if err := decoder.Decode(v); err != nil {
@@ -135,13 +136,22 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Map:
+		// Map values obtained via MapIndex are never addressable/settable, so they
+		// cannot be mutated in place. Sanitize into an addressable copy and write the
+		// result back with SetMapIndex; otherwise sanitization would be a silent no-op.
+		if rv.IsNil() {
+			return nil
+		}
 		for _, key := range rv.MapKeys() {
 			value := rv.MapIndex(key)
-			if value.CanSet() {
-				if err := sanitizeReflectValue(value); err != nil {
-					return err
-				}
+
+			// Copy into an addressable temporary so nested fields can be set.
+			tmp := reflect.New(value.Type()).Elem()
+			tmp.Set(value)
+			if err := sanitizeReflectValue(tmp); err != nil {
+				return err
 			}
+			rv.SetMapIndex(key, tmp)
 		}
 
 	case reflect.Pointer:
@@ -152,9 +162,18 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Interface:
+		// The concrete value held by an interface is not addressable, so sanitize a
+		// copy and, when the interface itself is settable (e.g. a map[string]any value
+		// copied into an addressable temporary), write the sanitized value back.
 		if !rv.IsNil() {
-			if err := sanitizeReflectValue(rv.Elem()); err != nil {
+			concrete := rv.Elem()
+			tmp := reflect.New(concrete.Type()).Elem()
+			tmp.Set(concrete)
+			if err := sanitizeReflectValue(tmp); err != nil {
 				return err
+			}
+			if rv.CanSet() {
+				rv.Set(tmp)
 			}
 		}
 	}

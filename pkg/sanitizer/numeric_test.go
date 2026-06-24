@@ -3,7 +3,7 @@ package sanitizer_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -60,7 +60,7 @@ func TestClamp(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Clamp(tt.value, tt.min, tt.max)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -69,13 +69,13 @@ func TestClampWithFloats(t *testing.T) {
 	t.Parallel()
 
 	result := sanitizer.Clamp(3.7, 1.5, 10.2)
-	assert.Equal(t, 3.7, result)
+	require.Equal(t, 3.7, result)
 
 	result = sanitizer.Clamp(0.5, 1.5, 10.2)
-	assert.Equal(t, 1.5, result)
+	require.Equal(t, 1.5, result)
 
 	result = sanitizer.Clamp(15.8, 1.5, 10.2)
-	assert.Equal(t, 10.2, result)
+	require.Equal(t, 10.2, result)
 }
 
 func TestClampMin(t *testing.T) {
@@ -112,7 +112,7 @@ func TestClampMin(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ClampMin(tt.value, tt.min)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -151,7 +151,7 @@ func TestClampMax(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ClampMax(tt.value, tt.max)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -186,7 +186,7 @@ func TestAbs(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Abs(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -195,10 +195,10 @@ func TestAbsWithFloats(t *testing.T) {
 	t.Parallel()
 
 	result := sanitizer.Abs(-3.14)
-	assert.Equal(t, 3.14, result)
+	require.Equal(t, 3.14, result)
 
 	result = sanitizer.Abs(2.71)
-	assert.Equal(t, 2.71, result)
+	require.Equal(t, 2.71, result)
 }
 
 func TestZeroIfNegative(t *testing.T) {
@@ -231,7 +231,7 @@ func TestZeroIfNegative(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ZeroIfNegative(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -266,7 +266,7 @@ func TestZeroIfPositive(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ZeroIfPositive(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -301,7 +301,7 @@ func TestNonZero(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NonZero(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -352,7 +352,7 @@ func TestRoundToDecimalPlaces(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RoundToDecimalPlaces(tt.value, tt.places)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -392,7 +392,7 @@ func TestRoundUp(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RoundUp(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -432,7 +432,7 @@ func TestRoundDown(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RoundDown(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -472,7 +472,7 @@ func TestRound(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Round(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -512,7 +512,7 @@ func TestTruncateToInt(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.TruncateToInt(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -559,7 +559,7 @@ func TestClampPrecision(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ClampPrecision(tt.value, tt.min, tt.max, tt.decimalPlaces)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -602,7 +602,7 @@ func TestSafeDivide(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SafeDivide(tt.numerator, tt.denominator, tt.fallback)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -611,10 +611,10 @@ func TestSafeDivideWithFloats(t *testing.T) {
 	t.Parallel()
 
 	result := sanitizer.SafeDivide(10.0, 3.0, -1.0)
-	assert.InDelta(t, 3.333333333333333, result, 0.000001)
+	require.InDelta(t, 3.333333333333333, result, 0.000001)
 
 	result = sanitizer.SafeDivide(10.0, 0.0, -1.0)
-	assert.Equal(t, -1.0, result)
+	require.Equal(t, -1.0, result)
 }
 
 func TestPercentage(t *testing.T) {
@@ -669,7 +669,7 @@ func TestPercentage(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Percentage(tt.part, tt.whole)
-			assert.InDelta(t, tt.expected, result, 0.000001)
+			require.InDelta(t, tt.expected, result, 0.000001)
 		})
 	}
 }
@@ -738,7 +738,7 @@ func TestNormalizeToRange(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.NormalizeToRange(tt.value, tt.fromMin, tt.fromMax, tt.toMin, tt.toMax)
-			assert.InDelta(t, tt.expected, result, 0.000001)
+			require.InDelta(t, tt.expected, result, 0.000001)
 		})
 	}
 }
@@ -773,7 +773,7 @@ func TestClampToPositive(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ClampToPositive(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -782,13 +782,13 @@ func TestClampToPositiveWithFloats(t *testing.T) {
 	t.Parallel()
 
 	result := sanitizer.ClampToPositive(3.14)
-	assert.Equal(t, 3.14, result)
+	require.Equal(t, 3.14, result)
 
 	result = sanitizer.ClampToPositive(0.0)
-	assert.Equal(t, 1.0, result)
+	require.Equal(t, 1.0, result)
 
 	result = sanitizer.ClampToPositive(-2.7)
-	assert.Equal(t, 1.0, result)
+	require.Equal(t, 1.0, result)
 }
 
 func TestClampToNonNegative(t *testing.T) {
@@ -821,7 +821,7 @@ func TestClampToNonNegative(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ClampToNonNegative(tt.value)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -830,13 +830,13 @@ func TestClampToNonNegativeWithFloats(t *testing.T) {
 	t.Parallel()
 
 	result := sanitizer.ClampToNonNegative(3.14)
-	assert.Equal(t, 3.14, result)
+	require.Equal(t, 3.14, result)
 
 	result = sanitizer.ClampToNonNegative(0.0)
-	assert.Equal(t, 0.0, result)
+	require.Equal(t, 0.0, result)
 
 	result = sanitizer.ClampToNonNegative(-2.7)
-	assert.Equal(t, 0.0, result)
+	require.Equal(t, 0.0, result)
 }
 
 func TestNumericApplyPattern(t *testing.T) {
@@ -852,7 +852,7 @@ func TestNumericApplyPattern(t *testing.T) {
 			func(v float64) float64 { return sanitizer.ClampMax(v, 10.0) },
 			func(v float64) float64 { return sanitizer.RoundToDecimalPlaces(v, 1) },
 		)
-		assert.Equal(t, 10.0, result)
+		require.Equal(t, 10.0, result)
 	})
 
 	t.Run("compose numeric transformations", func(t *testing.T) {
@@ -871,7 +871,7 @@ func TestNumericApplyPattern(t *testing.T) {
 
 		for i, input := range inputs {
 			result := priceSanitizer(input)
-			assert.Equal(t, expected[i], result, "Failed for input: %f", input)
+			require.Equal(t, expected[i], result, "Failed for input: %f", input)
 		}
 	})
 }
@@ -893,7 +893,7 @@ func TestRealWorldNumericUsage(t *testing.T) {
 
 		for i, age := range ages {
 			result := ageSanitizer(age)
-			assert.Equal(t, expectedAges[i], result)
+			require.Equal(t, expectedAges[i], result)
 		}
 	})
 
@@ -911,7 +911,7 @@ func TestRealWorldNumericUsage(t *testing.T) {
 
 		for i, score := range scores {
 			result := percentageSanitizer(score)
-			assert.Equal(t, expectedScores[i], result)
+			require.Equal(t, expectedScores[i], result)
 		}
 	})
 
@@ -929,7 +929,7 @@ func TestRealWorldNumericUsage(t *testing.T) {
 
 		for i, quantity := range quantities {
 			result := quantitySanitizer(quantity)
-			assert.Equal(t, expectedQuantities[i], result)
+			require.Equal(t, expectedQuantities[i], result)
 		}
 	})
 }

@@ -19,11 +19,15 @@ import (
 )
 
 func TestSecurityVulnerabilities(t *testing.T) {
+	t.Parallel()
+
 	t.Run("malicious_input_prevention", func(t *testing.T) {
+		t.Parallel()
 		testMaliciousInputPrevention(t)
 	})
 
 	t.Run("file_upload_security", func(t *testing.T) {
+		t.Parallel()
 		testFileUploadSecurity(t)
 	})
 }
@@ -32,8 +36,10 @@ func testMaliciousInputPrevention(t *testing.T) {
 	t.Run("json_control_characters", func(t *testing.T) {
 		t.Parallel()
 
-		// Test JSON with control characters
-		maliciousJSON := `{"field": "value\x00with\x1fnull\x0cbytes"}`
+		// Valid JSON carrying control characters via \u escapes: NUL (0x00),
+		// US (0x1f), and form-feed (0x0c). Sanitization must strip all of them while
+		// preserving the surrounding text.
+		maliciousJSON := `{"field": "value\u0000with\u001fnull\u000cbytes"}`
 
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(maliciousJSON))
 		req.Header.Set("Content-Type", "application/json")
@@ -43,11 +49,11 @@ func testMaliciousInputPrevention(t *testing.T) {
 		}
 
 		err := binder.JSON()(req, &target)
-		if err == nil {
-			// If parsing succeeds, ensure control characters are handled safely
-			assert.NotContains(t, target.Field, "\x00", "NUL bytes should be filtered")
-			assert.NotContains(t, target.Field, "\x1f", "Control characters should be filtered")
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "valuewithnullbytes", target.Field, "control characters should be stripped")
+		assert.NotContains(t, target.Field, "\x00", "NUL bytes should be filtered")
+		assert.NotContains(t, target.Field, "\x1f", "Control characters should be filtered")
+		assert.NotContains(t, target.Field, "\x0c", "Form-feed should be filtered")
 	})
 
 	t.Run("unicode_normalization_attacks", func(t *testing.T) {
@@ -97,10 +103,9 @@ func testMaliciousInputPrevention(t *testing.T) {
 		}
 
 		err := binder.JSON()(req, &target)
-		if err == nil {
-			// NUL bytes should be handled safely
-			assert.NotContains(t, target.Filename, "\x00", "NUL bytes should not be present in result")
-		}
+		require.NoError(t, err)
+		assert.NotContains(t, target.Filename, "\x00", "NUL bytes should not be present in result")
+		assert.Equal(t, "test.exe.txt", target.Filename, "NUL byte should be stripped, surrounding text preserved")
 	})
 
 	t.Run("form_field_path_traversal", func(t *testing.T) {
@@ -185,10 +190,11 @@ func testMaliciousInputPrevention(t *testing.T) {
 		}
 
 		err := binder.Form()(req, &target)
-		if err == nil {
-			// CRLF should be handled safely
-			assert.NotContains(t, target.Field, "\r\n", "CRLF should be filtered")
-		}
+		require.NoError(t, err)
+		assert.NotContains(t, target.Field, "\r\n", "CRLF should be filtered")
+		assert.NotContains(t, target.Field, "\r", "CR should be filtered")
+		assert.NotContains(t, target.Field, "\n", "LF should be filtered")
+		assert.Equal(t, "valueInjected-Header: malicious", target.Field, "CRLF stripped, text preserved")
 	})
 }
 
