@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS forge_jobs (
     task_name    TEXT    NOT NULL,
     payload      TEXT,
     unique_key   TEXT    NOT NULL DEFAULT '',
+    dedup_key    TEXT    NOT NULL DEFAULT '',
     tags         TEXT    NOT NULL DEFAULT '[]',
     priority     INTEGER NOT NULL DEFAULT 1,
     max_attempts INTEGER NOT NULL DEFAULT 25,
@@ -75,9 +76,14 @@ CREATE INDEX IF NOT EXISTS idx_forge_jobs_poll
     ON forge_jobs (queue, status, scheduled_at, priority, id)
     WHERE status = 'pending';
 
-CREATE INDEX IF NOT EXISTS idx_forge_jobs_unique
-    ON forge_jobs (task_name, unique_key)
-    WHERE unique_key != '' AND status NOT IN ('completed', 'discarded', 'failed');
+-- Atomic deduplication: a partial UNIQUE index over dedup_key guarantees that at
+-- most one *active* (non-terminal) job can exist per dedup key. dedup_key is only
+-- populated for jobs that opt into dedup (UniqueFor > 0), so plain unique_key
+-- usage without UniqueFor is unconstrained. Concurrent inserts that both target
+-- the same active dedup key cannot both succeed — the second hits ON CONFLICT.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_jobs_dedup
+    ON forge_jobs (dedup_key)
+    WHERE dedup_key != '' AND status NOT IN ('completed', 'discarded', 'failed');
 `
 	if _, err := d.db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("sqlitedriver: migrate: %w", err)
@@ -124,24 +130,13 @@ func insertJob(ctx context.Context, qe queryExecer, j *job.JobInsert) error {
 
 	uniqueKey := j.UniqueKey
 
-	// Dedup check: if UniqueKey is set and UniqueFor > 0,
-	// skip if an active job with the same task_name+unique_key exists within the window.
+	// dedupKey is non-empty only when the job opts into deduplication
+	// (UniqueKey set AND UniqueFor > 0). It scopes the partial UNIQUE index so
+	// that at most one *active* job can exist for this (task, key) pair. The NUL
+	// separator prevents ("ab","c") and ("a","bc") from colliding.
+	dedupKey := ""
 	if uniqueKey != "" && j.UniqueFor > 0 {
-		cutoff := time.Now().UTC().Add(-j.UniqueFor).Format(time.RFC3339Nano)
-		var count int
-		err := qe.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM forge_jobs
-			 WHERE task_name = ? AND unique_key = ?
-			   AND status NOT IN ('completed', 'discarded', 'failed')
-			   AND created_at >= ?`,
-			j.TaskName, uniqueKey, cutoff,
-		).Scan(&count)
-		if err != nil {
-			return fmt.Errorf("sqlitedriver: dedup check: %w", err)
-		}
-		if count > 0 {
-			return nil // skip duplicate
-		}
+		dedupKey = j.TaskName + "\x00" + uniqueKey
 	}
 
 	// Marshal tags.
@@ -166,13 +161,33 @@ func insertJob(ctx context.Context, qe queryExecer, j *job.JobInsert) error {
 		scheduledAt = j.ScheduledAt.UTC().Format(time.RFC3339Nano)
 	}
 
-	_, err := qe.ExecContext(ctx,
-		`INSERT INTO forge_jobs (queue, task_name, payload, unique_key, tags, priority, max_attempts, scheduled_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		queue, j.TaskName, payload, uniqueKey, tagsJSON, priority, maxAttempts, scheduledAt,
+	// For dedup-opted jobs, rely on the partial UNIQUE index over dedup_key:
+	// ON CONFLICT ... DO NOTHING makes the check-and-insert atomic, so two
+	// concurrent inserts for the same active dedup key cannot both succeed.
+	// A 0-row result means an active duplicate already exists → silently skip.
+	const insertSQL = `INSERT INTO forge_jobs
+		(queue, task_name, payload, unique_key, dedup_key, tags, priority, max_attempts, scheduled_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	const onConflict = `
+		ON CONFLICT (dedup_key)
+		WHERE dedup_key != '' AND status NOT IN ('completed', 'discarded', 'failed')
+		DO NOTHING`
+
+	stmt := insertSQL
+	if dedupKey != "" {
+		stmt += onConflict
+	}
+
+	res, err := qe.ExecContext(ctx, stmt,
+		queue, j.TaskName, payload, uniqueKey, dedupKey, tagsJSON, priority, maxAttempts, scheduledAt,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlitedriver: insert: %w", err)
+	}
+	if dedupKey != "" {
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil // active duplicate exists → skipped
+		}
 	}
 	return nil
 }

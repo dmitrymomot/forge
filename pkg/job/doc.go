@@ -91,15 +91,21 @@
 //
 // # App Integration
 //
-// Jobs integrate with Forge through the WithJobs option:
+// Jobs integrate with Forge through the WithJobs option. WithJobs takes a
+// [Driver] (the queue backend), a [Config], and any number of [Option] values.
+// Pick a driver implementation based on your datastore — riverdriver for
+// PostgreSQL or sqlitedriver for SQLite:
 //
 //	import (
 //	    "github.com/dmitrymomot/forge"
 //	    "github.com/dmitrymomot/forge/pkg/job"
+//	    "github.com/dmitrymomot/forge/pkg/job/riverdriver"
 //	)
 //
-//	app := forge.New(
-//	    forge.WithJobs(pool, forge.JobConfig{},
+//	driver := riverdriver.New(pool) // *pgxpool.Pool
+//
+//	app := forge.New(cfg,
+//	    forge.WithJobs(driver, job.Config{MaxWorkers: 50},
 //	        job.WithTask(tasks.NewSendWelcome(mailer, repo)),
 //	        job.WithTask(tasks.NewProcessPayment(stripe, repo)),
 //	        job.WithScheduledTask(tasks.NewCleanupSessions(repo)),
@@ -179,13 +185,16 @@
 //
 // # Database Migrations
 //
-// River schema migrations run automatically when using WithJobs, WithJobEnqueuer,
-// or WithJobWorker. Already-applied migrations are skipped, so this is safe to call
-// on every startup. No manual SQL or migration tooling is needed.
+// Schema migrations are owned by the [Driver]. Forge runs them automatically
+// when wiring jobs through WithJobs or WithJobEnqueuer — each calls the driver's
+// Migrate method during app construction. Migrations are idempotent
+// (already-applied steps are skipped), so this is safe on every startup and no
+// manual SQL or migration tooling is needed.
 //
-// For standalone or testing use, call [Migrate] directly:
+// For standalone or testing use, call the driver's Migrate method directly:
 //
-//	if err := job.Migrate(pool); err != nil {
+//	driver := riverdriver.New(pool)
+//	if err := driver.Migrate(ctx); err != nil {
 //	    log.Fatal(err)
 //	}
 package job

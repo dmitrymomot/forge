@@ -13,7 +13,7 @@ import (
 type MemoryConfig struct {
 	DefaultTTL      time.Duration `env:"DEFAULT_TTL"      envDefault:"5m"`
 	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" envDefault:"1m"`
-	MaxEntries      int           `env:"MAX_ENTRIES"       envDefault:"0"`
+	MaxEntries      int           `env:"MAX_ENTRIES"      envDefault:"0"`
 }
 
 // entry holds a cached value with its expiration time and key.
@@ -94,10 +94,16 @@ func (m *Memory[V]) SetEvictCallback(fn func(key string, value V)) {
 // Accessing a key marks it as recently used for LRU purposes.
 func (m *Memory[V]) Get(_ context.Context, key string) (V, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+
+	if m.closed {
+		m.mu.Unlock()
+		var zero V
+		return zero, ErrClosed
+	}
 
 	elem, ok := m.items[key]
 	if !ok {
+		m.mu.Unlock()
 		var zero V
 		return zero, ErrNotFound
 	}
@@ -105,15 +111,19 @@ func (m *Memory[V]) Get(_ context.Context, key string) (V, error) {
 	e := elem.Value.(*entry[V])
 
 	if e.isExpired() {
-		m.removeElement(elem)
+		evicted := m.removeElement(elem)
+		m.mu.Unlock()
+		m.fireEvict(evicted)
 		var zero V
 		return zero, ErrNotFound
 	}
 
 	// Move to front: mark as recently used.
 	m.eviction.MoveToFront(elem)
+	value := e.value
 
-	return e.value, nil
+	m.mu.Unlock()
+	return value, nil
 }
 
 // Set stores a value with the given TTL.
@@ -121,9 +131,9 @@ func (m *Memory[V]) Get(_ context.Context, key string) (V, error) {
 // negative = never expires.
 func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duration) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.closed {
+		m.mu.Unlock()
 		return ErrClosed
 	}
 
@@ -144,12 +154,14 @@ func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duratio
 		e.value = value
 		e.expiresAt = expiresAt
 		m.eviction.MoveToFront(elem)
+		m.mu.Unlock()
 		return nil
 	}
 
 	// Evict LRU entry if at capacity.
+	var evicted *entry[V]
 	if m.cfg.MaxEntries > 0 && len(m.items) >= m.cfg.MaxEntries {
-		m.evictOldest()
+		evicted = m.evictOldest()
 	}
 
 	// Insert new entry at front.
@@ -157,63 +169,83 @@ func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duratio
 	elem := m.eviction.PushFront(e)
 	m.items[key] = elem
 
+	m.mu.Unlock()
+	m.fireEvict(evicted)
 	return nil
 }
 
 // Delete removes a key from the cache.
 func (m *Memory[V]) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.closed {
+		m.mu.Unlock()
 		return ErrClosed
 	}
 
+	var evicted *entry[V]
 	if elem, ok := m.items[key]; ok {
-		m.removeElement(elem)
+		evicted = m.removeElement(elem)
 	}
 
+	m.mu.Unlock()
+	m.fireEvict(evicted)
 	return nil
 }
 
 // Has checks whether a key exists and has not expired.
 func (m *Memory[V]) Has(_ context.Context, key string) (bool, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+
+	if m.closed {
+		m.mu.Unlock()
+		return false, ErrClosed
+	}
 
 	elem, ok := m.items[key]
 	if !ok {
+		m.mu.Unlock()
 		return false, nil
 	}
 
 	e := elem.Value.(*entry[V])
 	if e.isExpired() {
-		m.removeElement(elem)
+		evicted := m.removeElement(elem)
+		m.mu.Unlock()
+		m.fireEvict(evicted)
 		return false, nil
 	}
 
+	m.mu.Unlock()
 	return true, nil
 }
 
 // Clear removes all entries from the cache.
 func (m *Memory[V]) Clear(_ context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.closed {
+		m.mu.Unlock()
 		return ErrClosed
 	}
 
+	// Collect evicted entries under the lock; fire callbacks after releasing it.
+	var evicted []*entry[V]
 	if m.onEvict != nil {
+		evicted = make([]*entry[V], 0, len(m.items))
 		for _, elem := range m.items {
-			e := elem.Value.(*entry[V])
-			m.onEvict(e.key, e.value)
+			evicted = append(evicted, elem.Value.(*entry[V]))
 		}
 	}
 
 	m.items = make(map[string]*list.Element)
 	m.eviction.Init()
 
+	m.mu.Unlock()
+
+	for _, e := range evicted {
+		m.fireEvict(e)
+	}
 	return nil
 }
 
@@ -251,37 +283,61 @@ func (m *Memory[V]) janitor() {
 // deleteExpired removes all expired entries from back to front.
 func (m *Memory[V]) deleteExpired() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
+	var evicted []*entry[V]
 	now := time.Now()
 	for elem := m.eviction.Back(); elem != nil; {
 		e := elem.Value.(*entry[V])
 		prev := elem.Prev()
 		if !e.expiresAt.IsZero() && now.After(e.expiresAt) {
-			m.removeElement(elem)
+			if removed := m.removeElement(elem); removed != nil {
+				evicted = append(evicted, removed)
+			}
 		}
 		elem = prev
 	}
-}
 
-// evictOldest removes the least recently used entry.
-// Caller must hold the mutex.
-func (m *Memory[V]) evictOldest() {
-	elem := m.eviction.Back()
-	if elem != nil {
-		m.removeElement(elem)
+	m.mu.Unlock()
+
+	for _, e := range evicted {
+		m.fireEvict(e)
 	}
 }
 
-// removeElement removes a specific element and triggers the eviction callback.
-// Caller must hold the mutex.
-func (m *Memory[V]) removeElement(elem *list.Element) {
+// evictOldest removes the least recently used entry and returns it (or nil
+// if the cache is empty) so the caller can fire the eviction callback after
+// releasing the mutex. Caller must hold the mutex.
+func (m *Memory[V]) evictOldest() *entry[V] {
+	elem := m.eviction.Back()
+	if elem != nil {
+		return m.removeElement(elem)
+	}
+	return nil
+}
+
+// removeElement removes a specific element from the map and eviction list and
+// returns its entry so the caller can fire the eviction callback after
+// releasing the mutex. The callback is intentionally NOT invoked here to avoid
+// running user code while holding the cache mutex. Caller must hold the mutex.
+func (m *Memory[V]) removeElement(elem *list.Element) *entry[V] {
 	m.eviction.Remove(elem)
 	e := elem.Value.(*entry[V])
 	delete(m.items, e.key)
+	return e
+}
 
-	if m.onEvict != nil {
-		m.onEvict(e.key, e.value)
+// fireEvict invokes the eviction callback for a removed entry. It must be
+// called WITHOUT holding the mutex so user callbacks cannot deadlock or block
+// other cache operations. A nil entry is a no-op.
+func (m *Memory[V]) fireEvict(e *entry[V]) {
+	if e == nil {
+		return
+	}
+	m.mu.Lock()
+	fn := m.onEvict
+	m.mu.Unlock()
+	if fn != nil {
+		fn(e.key, e.value)
 	}
 }
 

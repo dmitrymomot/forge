@@ -3,8 +3,10 @@ package smtp
 import (
 	"bytes"
 	"mime/multipart"
+	"net/mail"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -590,6 +592,28 @@ func TestWriteAttachment(t *testing.T) {
 		require.Contains(t, result, "Content-Id: <logo-cid-123>\r\n")
 	})
 
+	t.Run("ContentID with pre-existing angle brackets is sanitized", func(t *testing.T) {
+		t.Parallel()
+
+		att := &mailer.Attachment{
+			Filename:    "logo.png",
+			ContentType: "image/png",
+			ContentID:   "<logo-cid-123>",
+			Content:     []byte("png data"),
+		}
+
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		err := writeAttachment(w, att)
+		require.NoError(t, err)
+
+		w.Close()
+		result := buf.String()
+		// Angle brackets supplied by the caller must not be doubled up.
+		require.Contains(t, result, "Content-Id: <logo-cid-123>\r\n")
+		require.NotContains(t, result, "<<logo-cid-123>>")
+	})
+
 	t.Run("defaults to octet-stream when ContentType empty", func(t *testing.T) {
 		t.Parallel()
 
@@ -661,4 +685,107 @@ func TestWriteHeader(t *testing.T) {
 		require.Contains(t, result, "To: recipient@example.com\r\n")
 		require.Contains(t, result, "Subject: Test\r\n")
 	})
+}
+
+func TestBuildMessage_DateAndMessageIDHeaders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("includes a parseable Date header", func(t *testing.T) {
+		t.Parallel()
+
+		email := &mailer.Email{
+			Subject: "Test",
+			Text:    "body",
+			To:      []string{"recipient@example.com"},
+		}
+
+		msg, err := buildMessage("sender@example.com", email)
+		require.NoError(t, err)
+
+		hdr := parseHeaders(t, msg)
+		dateVal := hdr.Get("Date")
+		require.NotEmpty(t, dateVal, "Date header must be present")
+
+		// Must parse as an RFC 1123Z timestamp.
+		parsed, err := time.Parse(time.RFC1123Z, dateVal)
+		require.NoError(t, err, "Date header %q must be RFC 1123Z", dateVal)
+		require.WithinDuration(t, time.Now(), parsed, time.Minute)
+	})
+
+	t.Run("includes a well-formed Message-ID header", func(t *testing.T) {
+		t.Parallel()
+
+		email := &mailer.Email{
+			Subject: "Test",
+			Text:    "body",
+			To:      []string{"recipient@example.com"},
+		}
+
+		msg, err := buildMessage("Sender Name <sender@example.com>", email)
+		require.NoError(t, err)
+
+		hdr := parseHeaders(t, msg)
+		mid := hdr.Get("Message-ID")
+		require.NotEmpty(t, mid, "Message-ID header must be present")
+		require.True(t, strings.HasPrefix(mid, "<"), "Message-ID must start with <")
+		require.True(t, strings.HasSuffix(mid, ">"), "Message-ID must end with >")
+		// Domain is derived from the sender address.
+		require.True(t, strings.HasSuffix(mid, "@example.com>"),
+			"Message-ID %q should use the sender domain", mid)
+		require.NotContains(t, strings.TrimSuffix(strings.TrimPrefix(mid, "<"), ">"), " ",
+			"Message-ID local/domain parts must not contain spaces")
+	})
+
+	t.Run("Message-IDs are unique across messages", func(t *testing.T) {
+		t.Parallel()
+
+		email := &mailer.Email{
+			Subject: "Test",
+			Text:    "body",
+			To:      []string{"recipient@example.com"},
+		}
+
+		msg1, err := buildMessage("sender@example.com", email)
+		require.NoError(t, err)
+		msg2, err := buildMessage("sender@example.com", email)
+		require.NoError(t, err)
+
+		id1 := parseHeaders(t, msg1).Get("Message-ID")
+		id2 := parseHeaders(t, msg2).Get("Message-ID")
+		require.NotEmpty(t, id1)
+		require.NotEqual(t, id1, id2, "each message must get a unique Message-ID")
+	})
+}
+
+func TestMessageID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("derives domain from a plain address", func(t *testing.T) {
+		t.Parallel()
+
+		mid := messageID("user@example.org")
+		require.True(t, strings.HasSuffix(mid, "@example.org>"))
+	})
+
+	t.Run("derives domain from a display-name address", func(t *testing.T) {
+		t.Parallel()
+
+		mid := messageID(`"Doe, John" <john@example.com>`)
+		require.True(t, strings.HasSuffix(mid, "@example.com>"))
+	})
+
+	t.Run("falls back to localhost on unparseable address", func(t *testing.T) {
+		t.Parallel()
+
+		mid := messageID("not-an-address")
+		require.True(t, strings.HasSuffix(mid, "@localhost>"))
+	})
+}
+
+// parseHeaders extracts the RFC 5322 headers from a built message for assertion.
+func parseHeaders(t *testing.T, msg []byte) mail.Header {
+	t.Helper()
+	m, err := mail.ReadMessage(bytes.NewReader(msg))
+	require.NoError(t, err)
+	return m.Header
 }

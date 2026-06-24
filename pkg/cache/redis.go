@@ -33,7 +33,7 @@ type Redis[V any] struct {
 //
 // Example:
 //
-//	client := redis.MustOpen(ctx, os.Getenv("REDIS_URL"))
+//	client := redis.MustOpen(ctx, redis.Config{URL: os.Getenv("REDIS_URL")})
 //	c := cache.NewRedis[User](client, nil, cache.RedisConfig{
 //	    Prefix:     "users",
 //	    DefaultTTL: 30 * time.Minute,
@@ -111,14 +111,26 @@ func (r *Redis[V]) Has(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// Clear removes all cache entries.
-// If a prefix is configured, only keys matching the prefix are removed using SCAN.
-// If no prefix is configured, FLUSHDB is used.
+// Clear removes all cache entries that match the configured prefix using SCAN
+// (non-blocking, safe for production).
+//
+// If no prefix is configured, Clear returns ErrNoPrefix instead of wiping the
+// whole Redis database: an unprefixed cache shares the database with every
+// other key, so an accidental FLUSHDB here would destroy unrelated data. To
+// deliberately wipe the entire database, call FlushDB explicitly.
 func (r *Redis[V]) Clear(ctx context.Context) error {
 	if r.prefix == "" {
-		return r.client.FlushDB(ctx).Err()
+		return ErrNoPrefix
 	}
 	return r.clearByPrefix(ctx)
+}
+
+// FlushDB removes every key in the underlying Redis database, not just keys
+// belonging to this cache's prefix. This is a destructive, explicit-opt-in
+// operation that bypasses the prefix isolation Clear enforces; use it only when
+// you intend to wipe the entire database (e.g., in tests).
+func (r *Redis[V]) FlushDB(ctx context.Context) error {
+	return r.client.FlushDB(ctx).Err()
 }
 
 // Close is a no-op for Redis. The Redis client lifecycle is managed

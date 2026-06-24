@@ -8,9 +8,12 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net/mail"
 	"net/textproto"
 	"strings"
+	"time"
 
+	"github.com/dmitrymomot/forge/pkg/id"
 	"github.com/dmitrymomot/forge/pkg/mailer"
 )
 
@@ -28,6 +31,8 @@ func buildMessage(from string, email *mailer.Email) ([]byte, error) {
 		writeHeader(&buf, "Reply-To", email.ReplyTo)
 	}
 	writeHeader(&buf, "Subject", mime.QEncoding.Encode("utf-8", email.Subject))
+	writeHeader(&buf, "Date", time.Now().Format(time.RFC1123Z))
+	writeHeader(&buf, "Message-ID", messageID(from))
 	writeHeader(&buf, "MIME-Version", "1.0")
 
 	for k, v := range email.Headers {
@@ -180,8 +185,11 @@ func writeAttachment(w *multipart.Writer, att *mailer.Attachment) error {
 	h.Set("Content-Transfer-Encoding", "base64")
 
 	if att.ContentID != "" {
+		// Strip any pre-existing angle brackets so we don't produce a
+		// malformed "<<cid>>" Content-ID header.
+		cid := strings.Trim(att.ContentID, "<>")
 		h.Set("Content-Disposition", "inline; filename=\""+att.Filename+"\"")
-		h.Set("Content-ID", "<"+att.ContentID+">")
+		h.Set("Content-ID", "<"+cid+">")
 	} else {
 		h.Set("Content-Disposition", "attachment; filename=\""+att.Filename+"\"")
 	}
@@ -196,6 +204,20 @@ func writeAttachment(w *multipart.Writer, att *mailer.Attachment) error {
 		return fmt.Errorf("smtp: encode attachment: %w", err)
 	}
 	return encoder.Close()
+}
+
+// messageID builds an RFC 5322 Message-ID of the form "<unique@domain>".
+// The unique part comes from pkg/id (the project's mandated ID generator) and
+// the domain is derived from the sender's address, falling back to "localhost"
+// when it cannot be parsed.
+func messageID(from string) string {
+	domain := "localhost"
+	if addr, err := mail.ParseAddress(from); err == nil {
+		if at := strings.LastIndex(addr.Address, "@"); at >= 0 && at < len(addr.Address)-1 {
+			domain = addr.Address[at+1:]
+		}
+	}
+	return "<" + id.NewULID() + "@" + domain + ">"
 }
 
 // writeHeader writes a single MIME header line to the buffer.

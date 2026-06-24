@@ -82,24 +82,25 @@ func GetOrSet[V any](ctx context.Context, c Cache[V], key string, fn func(ctx co
 		return v, nil
 	}
 
+	// compute runs fn and best-effort caches the result. Wrapped in
+	// singleflight below so the computation AND the Set run exactly once per
+	// key per stampede, not once per waiting caller.
+	compute := func() (any, error) {
+		val, ttl, fnErr := fn(ctx)
+		if fnErr != nil {
+			return nil, fnErr
+		}
+		_ = c.Set(ctx, key, val, ttl)
+		return getOrSetResult[V]{val: val, ttl: ttl}, nil
+	}
+
 	// Slow path: deduplicate concurrent misses via per-instance singleflight.
 	var v any
 	var err error
 	if d, ok := c.(deduper); ok {
-		v, err = d.sfDo(key, func() (any, error) {
-			val, ttl, fnErr := fn(ctx)
-			if fnErr != nil {
-				return nil, fnErr
-			}
-			return getOrSetResult[V]{val: val, ttl: ttl}, nil
-		})
+		v, err = d.sfDo(key, compute)
 	} else {
-		val, ttl, fnErr := fn(ctx)
-		if fnErr != nil {
-			var zero V
-			return zero, fnErr
-		}
-		v = getOrSetResult[V]{val: val, ttl: ttl}
+		v, err = compute()
 	}
 	if err != nil {
 		var zero V
@@ -107,9 +108,5 @@ func GetOrSet[V any](ctx context.Context, c Cache[V], key string, fn func(ctx co
 	}
 
 	r := v.(getOrSetResult[V])
-
-	// Best-effort cache the result.
-	_ = c.Set(ctx, key, r.val, r.ttl)
-
 	return r.val, nil
 }

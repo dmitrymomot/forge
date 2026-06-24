@@ -1,6 +1,7 @@
 package mailer
 
 import (
+	"net/mail"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,7 +47,14 @@ func TestRecipient_WithName(t *testing.T) {
 
 	result := Recipient("John Doe", "john@example.com")
 
-	require.Equal(t, "John Doe <john@example.com>", result)
+	// mail.Address.String quotes display names containing spaces, which is
+	// valid RFC 5322 and re-parses back to the original name.
+	require.Equal(t, `"John Doe" <john@example.com>`, result)
+
+	addr, err := mail.ParseAddress(result)
+	require.NoError(t, err)
+	require.Equal(t, "John Doe", addr.Name)
+	require.Equal(t, "john@example.com", addr.Address)
 }
 
 func TestRecipient_WithoutName(t *testing.T) {
@@ -57,13 +65,47 @@ func TestRecipient_WithoutName(t *testing.T) {
 	require.Equal(t, "john@example.com", result)
 }
 
+func TestRecipient_NameWithComma(t *testing.T) {
+	t.Parallel()
+
+	// A comma in the display name must be quoted; otherwise the address parses
+	// as two separate recipients and SMTP sending silently fails.
+	result := Recipient("Doe, John", "john@example.com")
+
+	require.Equal(t, `"Doe, John" <john@example.com>`, result)
+
+	addr, err := mail.ParseAddress(result)
+	require.NoError(t, err)
+	require.Equal(t, "Doe, John", addr.Name)
+	require.Equal(t, "john@example.com", addr.Address)
+
+	// And it must parse as exactly one address, not two.
+	list, err := mail.ParseAddressList(result)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+}
+
+func TestRecipient_NameWithSpecialChars(t *testing.T) {
+	t.Parallel()
+
+	// Quotes and non-ASCII in the display name must be encoded such that the
+	// result still round-trips through the RFC 5322 parser.
+	result := Recipient(`Jürgen "JJ" Müller`, "jj@example.com")
+
+	addr, err := mail.ParseAddress(result)
+	require.NoError(t, err)
+	require.Equal(t, `Jürgen "JJ" Müller`, addr.Name)
+	require.Equal(t, "jj@example.com", addr.Address)
+}
+
 func TestRecipient_EmptyName(t *testing.T) {
 	t.Parallel()
 
 	result := Recipient("   ", "john@example.com")
 
-	// Function doesn't trim, returns format as-is with spaces
-	require.Equal(t, "    <john@example.com>", result)
+	// Whitespace-only names are quoted (still valid) rather than producing a
+	// malformed bare-space header.
+	require.Equal(t, `"   " <john@example.com>`, result)
 }
 
 func TestTags_CanHoldKeyValuePairs(t *testing.T) {

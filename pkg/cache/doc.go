@@ -86,6 +86,12 @@
 //   - [ErrClosed] — operation on a closed cache
 //   - [ErrMarshal] — value serialization failed
 //   - [ErrUnmarshal] — value deserialization failed
+//   - [ErrNoPrefix] — Redis Clear called without a configured prefix
+//
+// The Redis backend's Clear only removes keys under the configured prefix (via
+// non-blocking SCAN). If no prefix is set it returns [ErrNoPrefix] rather than
+// flushing the whole database; call [Redis.FlushDB] to wipe the database
+// explicitly.
 //
 // Use [errors.Is] to check:
 //

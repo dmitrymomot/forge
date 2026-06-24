@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	texttemplate "text/template"
 )
 
@@ -11,15 +12,22 @@ import (
 type Mailer struct {
 	sender   Sender
 	renderer *Renderer
-	config   Config
+
+	// subjectCache caches compiled subject templates keyed by the raw subject
+	// string, mirroring the renderer's parse-once caching approach. Guarded by
+	// subjectMu for concurrent Send calls.
+	subjectCache map[string]*texttemplate.Template
+	config       Config
+	subjectMu    sync.RWMutex
 }
 
 // New creates a new Mailer with the given sender and renderer.
 func New(sender Sender, renderer *Renderer, cfg Config) *Mailer {
 	return &Mailer{
-		sender:   sender,
-		renderer: renderer,
-		config:   cfg,
+		sender:       sender,
+		renderer:     renderer,
+		config:       cfg,
+		subjectCache: make(map[string]*texttemplate.Template),
 	}
 }
 
@@ -110,7 +118,7 @@ func (m *Mailer) SendRaw(ctx context.Context, email *Email) error {
 }
 
 func (m *Mailer) processSubject(subject string, data any) (string, error) {
-	tmpl, err := texttemplate.New("subject").Parse(subject)
+	tmpl, err := m.subjectTemplate(subject)
 	if err != nil {
 		return "", err
 	}
@@ -121,4 +129,32 @@ func (m *Mailer) processSubject(subject string, data any) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// subjectTemplate returns a compiled subject template, parsing and caching it
+// on first use. Uses double-checked locking so concurrent Send calls share a
+// single compiled template per subject string.
+func (m *Mailer) subjectTemplate(subject string) (*texttemplate.Template, error) {
+	m.subjectMu.RLock()
+	tmpl, ok := m.subjectCache[subject]
+	m.subjectMu.RUnlock()
+	if ok {
+		return tmpl, nil
+	}
+
+	m.subjectMu.Lock()
+	defer m.subjectMu.Unlock()
+
+	// Double-check after acquiring the write lock.
+	if tmpl, ok := m.subjectCache[subject]; ok {
+		return tmpl, nil
+	}
+
+	tmpl, err := texttemplate.New("subject").Parse(subject)
+	if err != nil {
+		return nil, err
+	}
+
+	m.subjectCache[subject] = tmpl
+	return tmpl, nil
 }

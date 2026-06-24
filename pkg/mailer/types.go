@@ -1,6 +1,6 @@
 package mailer
 
-import "fmt"
+import "net/mail"
 
 // Tags represents email tags/categories that can be either presence-only
 // (using struct{}{}) or key-value pairs (using string values).
@@ -20,12 +20,16 @@ func SimpleTags(names ...string) Tags {
 }
 
 // Recipient formats a name and email into RFC 5322 address format.
-// Returns "Name <email>" if name is provided, otherwise just email.
+// Returns just the email if no name is provided. Display names containing
+// special characters (commas, quotes, etc.) are properly quoted/encoded per
+// RFC 5322 via mail.Address.String, so names like "Doe, John" do not break
+// downstream address parsing.
 func Recipient(name, email string) string {
 	if name == "" {
 		return email
 	}
-	return fmt.Sprintf("%s <%s>", name, email)
+	addr := mail.Address{Name: name, Address: email}
+	return addr.String()
 }
 
 // Email represents a fully-prepared email message ready for sending.

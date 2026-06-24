@@ -16,6 +16,13 @@ import (
 // Config holds SQLite connection configuration.
 // Fields are tagged for environment variable parsing via caarlos0/env.
 type Config struct {
+
+	// ForeignKeys controls SQLite foreign key enforcement (off in SQLite by
+	// default). It is a pointer so a nil value (the zero value for a
+	// Go-constructed Config) can default to enabled — matching the documented
+	// "foreign_keys on by default" behavior — while still allowing callers to
+	// explicitly disable enforcement with a pointer to false.
+	ForeignKeys   *bool  `env:"FOREIGN_KEYS" envDefault:"true"`
 	Path          string `env:"PATH,required"`
 	JournalMode   string `env:"JOURNAL_MODE"    envDefault:"wal"`
 	Synchronous   string `env:"SYNCHRONOUS"     envDefault:"normal"`
@@ -23,7 +30,6 @@ type Config struct {
 	MaxIdleConns  int    `env:"MAX_IDLE_CONNS"  envDefault:"1"`
 	BusyTimeoutMS int    `env:"BUSY_TIMEOUT_MS" envDefault:"5000"`
 	CacheSize     int    `env:"CACHE_SIZE"      envDefault:"-20000"`
-	ForeignKeys   bool   `env:"FOREIGN_KEYS"    envDefault:"true"`
 }
 
 // Option configures the SQLite database connection.
@@ -103,7 +109,17 @@ func Open(ctx context.Context, cfg Config, opts ...Option) (*sql.DB, error) {
 func MustOpen(ctx context.Context, cfg Config, opts ...Option) *sql.DB {
 	db, err := Open(ctx, cfg, opts...)
 	if err != nil {
-		slog.Error("failed to open sqlite database", "error", err)
+		// Use the configured logger if one was provided via WithLogger,
+		// falling back to the default logger otherwise.
+		o := &options{}
+		for _, opt := range opts {
+			opt(o)
+		}
+		log := o.logger
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Error("failed to open sqlite database", "error", err)
 		os.Exit(1)
 	}
 	return db
@@ -129,6 +145,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.CacheSize == 0 {
 		cfg.CacheSize = -20000
 	}
+	if cfg.ForeignKeys == nil {
+		// Default to enabled so a Go-constructed Config matches the documented
+		// "foreign_keys on by default" behavior, mirroring the env default.
+		on := true
+		cfg.ForeignKeys = &on
+	}
 }
 
 // buildDSN constructs the SQLite connection string with all per-connection
@@ -144,7 +166,7 @@ func applyDefaults(cfg *Config) {
 // journal modes it keeps every pooled connection configured identically.
 func buildDSN(cfg *Config) string {
 	fk := 0
-	if cfg.ForeignKeys {
+	if cfg.ForeignKeys != nil && *cfg.ForeignKeys {
 		fk = 1
 	}
 

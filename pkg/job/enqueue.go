@@ -58,7 +58,8 @@ func WithScheduledIn(d time.Duration) EnqueueOption {
 
 // WithMaxAttempts sets the maximum number of retry attempts for the job.
 // If the job fails, it will be retried up to this many times.
-// Defaults to River's default (25 attempts).
+// When unset (or <= 0), the driver's default is used; both the River and
+// SQLite drivers default to 25 attempts.
 //
 // Example:
 //
@@ -88,8 +89,11 @@ func WithUniqueFor(d time.Duration) EnqueueOption {
 }
 
 // WithUniqueKey sets a custom unique key for deduplication.
-// Combined with WithUniqueFor, this prevents duplicate jobs with the same key.
-// If not set, River generates a key based on the job arguments.
+// Deduplication only takes effect together with WithUniqueFor, which defines
+// the window during which the key must be unique. The key is always forwarded
+// to the driver even when WithUniqueFor is absent, so it is never silently
+// dropped; without WithUniqueFor it simply has no dedup effect.
+// If no key is set (River only), River derives one from the job arguments.
 //
 // Example:
 //
@@ -104,7 +108,8 @@ func WithUniqueKey(key string) EnqueueOption {
 
 // WithPriority sets the job priority (lower numbers = higher priority).
 // Jobs with lower priority values are processed first.
-// Defaults to 1 if not set.
+// When unset (or <= 0), the driver's default is used; both the River and
+// SQLite drivers default to priority 1.
 //
 // Example:
 //

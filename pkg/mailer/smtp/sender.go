@@ -27,11 +27,7 @@ func New(cfg Config) *Sender {
 func (s *Sender) Send(ctx context.Context, email *mailer.Email) error {
 	from := email.From
 	if from == "" {
-		if s.config.SenderName != "" {
-			from = fmt.Sprintf("%s <%s>", s.config.SenderName, s.config.SenderEmail)
-		} else {
-			from = s.config.SenderEmail
-		}
+		from = mailer.Recipient(s.config.SenderName, s.config.SenderEmail)
 	}
 
 	msg, err := buildMessage(from, email)

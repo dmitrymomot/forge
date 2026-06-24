@@ -200,6 +200,69 @@ func TestPollQueue_PanicRecovery(t *testing.T) {
 	require.Equal(t, "discarded", status)
 }
 
+// TestExecuteJob_PersistsResultDuringStop verifies that a job which finishes
+// while Stop is cancelling the poller context still persists its terminal
+// status (rather than being left in 'running' because the write used the
+// cancelled context).
+func TestExecuteJob_PersistsResultDuringStop(t *testing.T) {
+	t.Parallel()
+	db := testDB(t)
+	d := New(db, WithPollInterval(20*time.Millisecond))
+	ctx := context.Background()
+
+	ji := &job.JobInsert{TaskName: "slow_task"}
+	require.NoError(t, d.Insert(ctx, ji))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var observedCtxErr atomic.Bool
+
+	cfg := job.WorkerConfig{
+		Executor: func(execCtx context.Context, _ string, _ json.RawMessage) error {
+			close(started)
+			<-release
+			// By now Stop has cancelled the poller ctx; record that so the test
+			// confirms it actually raced with shutdown.
+			if execCtx.Err() != nil {
+				observedCtxErr.Store(true)
+			}
+			return nil
+		},
+		Queues: map[string]int{"default": 1},
+	}
+
+	require.NoError(t, d.Start(ctx, cfg))
+
+	// Wait until the job is mid-flight.
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job never started")
+	}
+
+	// Begin Stop in the background (it blocks waiting for the in-flight job).
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- d.Stop(context.Background()) }()
+
+	// Give Stop a moment to cancel the poller context, then let the job finish.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+
+	select {
+	case err := <-stopDone:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop did not return")
+	}
+
+	require.True(t, observedCtxErr.Load(), "executor should have seen the cancelled poller context")
+
+	// The completed status must have been persisted despite the cancellation.
+	var status string
+	require.NoError(t, db.QueryRow(`SELECT status FROM forge_jobs`).Scan(&status))
+	require.Equal(t, "completed", status)
+}
+
 func TestPollQueue_CompletedOnSuccess(t *testing.T) {
 	t.Parallel()
 	db := testDB(t)

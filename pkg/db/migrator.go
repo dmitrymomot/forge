@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -19,24 +20,37 @@ const (
 	defaultMigrationsTable = "schema_migrations"
 )
 
+// gooseMu serializes Migrate calls. goose v3 configures the migration run via
+// process-global mutable state (SetBaseFS, SetTableName, SetDialect, SetLogger),
+// which is not safe to mutate from multiple goroutines concurrently. Holding
+// this mutex for the duration of a migration run makes Migrate safe to call
+// concurrently at the cost of serializing concurrent migrations.
+var gooseMu sync.Mutex
+
 // Migrate runs database migrations using the embedded SQL files.
-// Uses hardcoded defaults: FS root (".") directory and "schema_migrations" table.
-// Pass nil for log to disable migration logging.
+// Migrations are applied from the FS root (".") and tracked in the
+// "schema_migrations" table. Pass nil for log to disable migration logging.
+//
+// Migrate is safe to call concurrently: calls are serialized internally because
+// goose configures the run via process-global state.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, log *slog.Logger) error {
-	// Bridge pgx connection pool to database/sql interface required by goose.
-	// This creates a wrapper that shares the underlying connections but provides
-	// the standard library interface that goose migration tool expects.
-	// Note: We don't close db here because stdlib.OpenDBFromPool shares the underlying
-	// pool connections, and closing would disrupt the shared pool.
+	// Bridge the pgx connection pool to the database/sql interface required by
+	// goose. stdlib.OpenDBFromPool returns a *sql.DB that draws connections
+	// from the shared pool; closing this *sql.DB releases that wrapper without
+	// closing the underlying pgxpool, so the caller's pool stays usable.
 	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
 
-	goose.SetBaseFS(migrations)
-	goose.SetTableName(defaultMigrationsTable)
-
-	// Use discard logger if nil
+	// Use a discard logger when none is provided.
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+
+	gooseMu.Lock()
+	defer gooseMu.Unlock()
+
+	goose.SetBaseFS(migrations)
+	goose.SetTableName(defaultMigrationsTable)
 	goose.SetLogger(&gooseLoggerAdapter{log})
 
 	if err := goose.SetDialect("postgres"); err != nil {
