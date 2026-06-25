@@ -3,6 +3,7 @@ package supervisor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -183,4 +184,57 @@ func TestRun_ZeroTimeout_DrainsCooperativeService(t *testing.T) {
 
 	err := Run(ctx, WithService(svc), WithShutdownTimeout(0), WithLogger(discardLogger()))
 	require.NoError(t, err)
+}
+
+func TestRunService_RecoverEnabled_ReturnsSingleLineErrPanic(t *testing.T) {
+	svc := fakeService{name: "boom", run: func(ctx context.Context) error { panic("kaboom") }}
+
+	err := runService(context.Background(), svc, discardLogger(), true)
+
+	require.ErrorIs(t, err, ErrPanic)
+	assert.Contains(t, err.Error(), "kaboom")
+	assert.NotContains(t, err.Error(), "\n", "error string must be single-line; no stack embedded")
+}
+
+func TestRunService_RecoverEnabled_LogsStackAsAttribute(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	svc := fakeService{name: "boom", run: func(ctx context.Context) error { panic("kaboom") }}
+
+	_ = runService(context.Background(), svc, logger, true)
+
+	var rec map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec))
+	assert.Equal(t, "service panicked", rec["msg"])
+	assert.Equal(t, "boom", rec["service"])
+	stack, ok := rec["stack"].(string)
+	require.True(t, ok, "stack must be a structured string attribute")
+	assert.Contains(t, stack, "goroutine")
+}
+
+func TestRunService_RecoverDisabled_Propagates(t *testing.T) {
+	svc := fakeService{name: "boom", run: func(ctx context.Context) error { panic("kaboom") }}
+	require.Panics(t, func() {
+		_ = runService(context.Background(), svc, discardLogger(), false)
+	})
+}
+
+func TestRun_PanicTriggersGracefulShutdown(t *testing.T) {
+	siblingDrained := make(chan struct{})
+	sibling := fakeService{name: "sibling", run: func(ctx context.Context) error {
+		<-ctx.Done()
+		close(siblingDrained)
+		return ctx.Err()
+	}}
+	panicky := fakeService{name: "panicky", run: func(ctx context.Context) error { panic("boom") }}
+
+	err := Run(context.Background(),
+		WithService(sibling), WithService(panicky), WithLogger(discardLogger()))
+
+	require.ErrorIs(t, err, ErrPanic)
+	select {
+	case <-siblingDrained:
+	default:
+		t.Fatal("sibling did not drain when the other service panicked")
+	}
 }

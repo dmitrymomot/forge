@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"time"
 )
@@ -53,7 +54,7 @@ func Run(ctx context.Context, opts ...Option) error {
 		remaining[i] = svc.Name()
 		go func() {
 			log.Info("service started", slog.String("service", svc.Name()))
-			err := runService(runCtx, svc)
+			err := runService(runCtx, svc, log, cfg.recover)
 			results <- result{idx: i, name: svc.Name(), err: err}
 		}()
 	}
@@ -102,8 +103,24 @@ func Run(ctx context.Context, opts ...Option) error {
 	return errors.Join(errs...)
 }
 
-// runService runs a single service. Panic recovery is added in a later task.
-func runService(ctx context.Context, svc Service) error {
+// runService runs a single service. When recoverPanics is true, a panic
+// escaping svc.Run is logged with structured attributes (service, panic,
+// stack) and converted to an ErrPanic-wrapped, single-line error. The stack is
+// never embedded in the returned error string.
+func runService(ctx context.Context, svc Service, log *slog.Logger, recoverPanics bool) (err error) {
+	if !recoverPanics {
+		return svc.Run(ctx)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("service panicked",
+				slog.String("service", svc.Name()),
+				slog.Any("panic", p),
+				slog.String("stack", string(debug.Stack())),
+			)
+			err = fmt.Errorf("%w: %v", ErrPanic, p)
+		}
+	}()
 	return svc.Run(ctx)
 }
 
