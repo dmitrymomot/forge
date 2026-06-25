@@ -1,11 +1,13 @@
 # Design: `logger` — slog factory, context extraction, file output + Sentry adapter
 
 - **Date:** 2026-06-25
-- **Status:** Draft for review
+- **Status:** Draft for review (rev. 2 — Sentry is a sibling factory `sentry.New(opts…)`,
+  not a `Wrap`; core gains a generic `WithHandler` destination hook; the context
+  decorator is internal)
 - **Scope:** A new `logger` package — an `slog.Logger` factory with context-attribute
   extraction, an optional local-dev file destination, and a discard logger — plus a
-  separate `logger/sentry` adapter package that wraps a finished logger to fan logs
-  out to Sentry **in parallel, at its own level**, with the one unavoidable external
+  separate `logger/sentry` package whose `New(opts…)` builds a logger that *also*
+  reports to Sentry **in parallel, at its own level**, with the one unavoidable external
   dependency (the Sentry SDK) isolated to that subpackage.
 
 ## Overview
@@ -14,29 +16,32 @@
 four things and nothing more:
 
 1. Builds a configured `*slog.Logger` from functional options (`New`).
-2. Injects request-scoped attributes from `context.Context` on every log call via an
-   exported handler decorator (`ContextHandler` + `ContextExtractor`).
+2. Injects request-scoped attributes from `context.Context` on every log call (the
+   `ContextExtractor` seam; the handler that applies them is internal).
 3. Writes to a **single** primary destination — stdout by default, **or** a local file
    (not both): when a file path is configured, all records go to that file *instead of*
    stdout (no rotation — a plain append file for local development), creating the file
    and any missing parent directories.
 4. Provides a no-op discard logger (`NewNope`) for defaults and tests.
 
-A separate `logger/sentry` package adds Sentry as a **parallel** destination. The
-dependency direction is **inverted** relative to a plugin model: core `logger` knows
-nothing about Sentry; `sentry.Wrap(base, cfg)` takes the finished `*slog.Logger`,
-fans it out to both its existing primary destination and a Sentry handler via
-`slog.NewMultiHandler`, and returns the combined logger plus a `Flush` closer. This
-keeps the core package 100% standard library and makes Sentry a strictly additive,
-opt-in import. (Sentry is the *only* parallel destination — stdout and file remain
-mutually exclusive in core.)
+It also exposes one general extension point — **`WithHandler(h slog.Handler)`** — that
+adds an extra *parallel* destination alongside the primary one, beneath context
+extraction. This is the seam adapters plug into.
+
+The **`logger/sentry`** package is one such adapter, shaped like every other forge
+package: it owns an env-loadable `Config`, options, and a constructor
+`New(opts …Option) (*slog.Logger, Flush, error)`. Internally it builds a Sentry
+`slog.Handler` and calls `logger.New(append(loggerOpts, logger.WithHandler(sentryH))…)`.
+The dependency direction is clean: `sentry` imports `logger` and passes a built handler
+*into* it; core `logger` never imports Sentry and stays 100% standard library. Sentry
+is the only *parallel* destination — stdout and file remain mutually exclusive in core.
 
 This spec follows the framework conventions established by `supervisor` and
 `httpserver`: serializable settings live in an env-loadable `Config` (data only) with
 `DefaultConfig()`/`Validate()`/`WithConfig(...)`; non-serializable settings (writers,
-extractors) are functional options; option values are validated zero-trust and errors
-accumulate; sentinel errors live in `errors.go`; diagnostics are slog attributes and
-errors are single-line.
+extractors, handlers) are functional options; option values are validated zero-trust
+and errors accumulate; sentinel errors live in `errors.go`; diagnostics are slog
+attributes and errors are single-line.
 
 ## Goals
 
@@ -44,17 +49,19 @@ errors are single-line.
   reasonable logger: text format, info level, stdout.
 - **Context extraction** of request-scoped attributes (request id, user id, tenant
   id, …) injected fresh on every log call, landing at the record's **top level** even
-  when the caller has opened groups.
+  when the caller has opened groups — and reaching **every** destination, including any
+  added via `WithHandler`, because the decorator wraps the whole fan-out.
 - **File as an alternative primary destination** for local development: when a path is
   configured, all records go to that file *instead of* stdout (the two are mutually
   exclusive — never both at once), creating the file and parent directories if absent.
   No rotation, retention, or compression.
 - **Sentry runs parallel to the primary destination at its own, separate level** —
   e.g. primary at `info`, Sentry at `warn` — with zero external dependency in core.
-- **Graceful Sentry fallback:** an empty DSN returns the base logger immediately
-  (no-op flush, nil error); a Sentry init failure still returns a usable logger.
-- **Config = data, Option = code.** Serializable settings in one env-loadable
-  `Config`; writers and extractor funcs as options.
+- **Graceful Sentry fallback:** an empty DSN makes `sentry.New` return a plain logger
+  immediately (no-op flush, nil error); a Sentry init failure still returns a usable
+  logger (plus `ErrSentryInit`).
+- **Config = data, Option = code.** Serializable settings in env-loadable `Config`
+  structs; writers, extractor funcs, and handlers as options.
 - **No third-party dependency in `logger`.** The Sentry SDK is confined to
   `logger/sentry`; tests use only the already-permitted `testify`.
 
@@ -69,14 +76,12 @@ errors are single-line.
 - Built-in extractors. `ContextExtractor` is the seam; callers supply the funcs
   (request-id middleware owns the key, not this package).
 - **Logging to stdout and a file simultaneously.** The primary destination is exactly
-  one writer (stdout XOR file). Teeing to multiple local sinks at once is out of scope;
-  Sentry is the only *parallel* destination, added via the adapter.
-- Additional sinks beyond stdout/file/Sentry (Kafka, syslog, OTLP, …). New
-  destinations are future adapter packages following the same `Wrap` shape.
-- Importing or wrapping any config loader. `Config` is plain data with inert `env`
-  struct tags.
+  one writer (stdout XOR file). Teeing to multiple *local* sinks at once is out of
+  scope; `WithHandler`/Sentry add *parallel* destinations, which is different.
+- A config loader. `Config` is plain data with inert `env` struct tags.
 - Per-destination level/format knobs in core. The single primary destination uses the
-  global level and format; only Sentry has an independent level (separate package).
+  global level and format; only handlers added via `WithHandler` (e.g. Sentry) carry
+  their own independent level, baked in by whoever builds them.
 
 ## Package & module
 
@@ -91,23 +96,24 @@ errors are single-line.
 
   ```
   logger/
-    logger.go        # New, NewNope, internal config, handler assembly
-    decorator.go     # ContextExtractor, ContextHandler (Inner/WithInner/Handle/…)
+    logger.go        # New, NewNope, internal config, handler assembly (primary + WithHandler fan-out)
+    decorator.go     # ContextExtractor (exported); contextHandler (internal: Handle + group logic)
     file.go          # openFile: mkdir -p + create + append
-    config.go        # Config (env-tagged), DefaultConfig, Validate, level/format parse
-    options.go       # Option, WithConfig/WithLevel/WithFormat/WithFile/WithOutput/WithContextExtractors
+    config.go        # Config (env-tagged), DefaultConfig, Validate, parseLevel/parseFormat
+    options.go       # Option, WithConfig/WithLevel/WithFormat/WithFile/WithOutput/WithHandler/WithContextExtractors
     errors.go        # ErrInvalidConfig, ErrOpenFile
-    doc.go           # package documentation
+    doc.go
     logger_test.go
     decorator_test.go
     config_test.go
     options_test.go
     sentry/
-      sentry.go               # Config, DefaultConfig, Validate, Wrap, Flush
+      sentry.go               # Config (embeds logger.Config), DefaultConfig, Validate, New, Flush
       errors.go               # ErrInvalidConfig, ErrSentryInit, ErrSentryFlushTimeout
       doc.go
-      sentry_test.go          # external: empty-DSN passthrough, Validate
-      sentry_internal_test.go # internal: composition/extraction via injected fake handler
+      sentry_test.go          # package sentry_test (external): empty-DSN passthrough, Validate, flush-timeout
+      sentry_internal_test.go # package sentry (same pkg, not a subpackage): exercises the unexported
+                              #   newWith seam with a fake handler builder → fan-out + extraction, no network
   ```
 
 ## Public API — core `logger`
@@ -162,8 +168,10 @@ they assume a member of the validated set.
 // New builds an *slog.Logger from the options. With no options it returns a
 // text-format, info-level logger writing to os.Stdout. If Config.File is set (via
 // WithConfig or WithFile), the primary destination becomes that file INSTEAD of stdout
-// (the file and any missing parent directories are created). Returns ErrInvalidConfig
-// for bad option/Config values and ErrOpenFile if the file cannot be opened.
+// (the file and any missing parent directories are created). Any handlers added via
+// WithHandler run as parallel destinations beneath context extraction. Returns
+// ErrInvalidConfig for bad option/Config values and ErrOpenFile if the file cannot be
+// opened.
 func New(opts ...Option) (*slog.Logger, error)
 
 // NewNope returns a logger that discards all records. Use as a safe default when
@@ -179,6 +187,8 @@ kernel immediately. An append log file opened once for the process lifetime lose
 data when the fd is reclaimed at exit. This keeps the return signature clean and
 matches the "local development" scope of the file feature. `New` is safe to call
 concurrently (each call opens its own fd; `O_APPEND` writes are atomic per record).
+(A `WithHandler` destination that *does* need flushing — e.g. Sentry — is owned by the
+adapter that built it; that is why `sentry.New` returns its own `Flush`.)
 
 ### Options
 
@@ -219,6 +229,13 @@ func WithFile(path string) Option
 // NOT opened and w is used. A nil writer is rejected (ErrInvalidConfig).
 func WithOutput(w io.Writer) Option
 
+// WithHandler adds an extra parallel destination that runs ALONGSIDE the primary
+// (stdout/file) destination, beneath context extraction. Multiple may be added; each
+// filters at its own level via slog.Handler.Enabled. This is the generic seam adapters
+// (e.g. logger/sentry) plug into — core stays unaware of them. A nil handler is
+// rejected (ErrInvalidConfig).
+func WithHandler(h slog.Handler) Option
+
 // WithContextExtractors registers ContextExtractor funcs applied on every log call.
 // Nil extractors are filtered. Order is preserved.
 func WithContextExtractors(ex ...ContextExtractor) Option
@@ -238,77 +255,34 @@ func WithContextExtractors(ex ...ContextExtractor) Option
 
 **Primary-writer resolution (single destination, stdout XOR file):** the one output
 writer is resolved as `WithOutput`'s writer if set, else `openFile(Config.File)` if
-`File != ""`, else `os.Stdout`. There is never more than one local writer; `MultiHandler`
-does not appear in core (it is introduced only by `logger/sentry`).
+`File != ""`, else `os.Stdout`. There is never more than one *primary* writer.
+`WithHandler` destinations are *parallel*, not alternatives to the primary.
 
-`Format` is a tiny string enum so `WithFormat` is type-safe while `Config.Format`
-stays an env-friendly string.
-
-### Context extraction (exported decorator)
+### Context extraction (decorator is internal)
 
 ```go
 // ContextExtractor extracts a slog attribute from context. Return ok=false to skip.
+// This is the ONLY exported extraction type: callers supply funcs; the package owns the
+// handler that applies them.
 type ContextExtractor func(ctx context.Context) (slog.Attr, bool)
-
-// ContextHandler wraps a slog.Handler and injects context-extracted attributes at the
-// record's top level on every Handle call — ahead of any group opened with WithGroup.
-//
-// All methods are pure: WithAttrs/WithGroup/WithInner return a NEW *ContextHandler and
-// never mutate the receiver (slices are copied), so a ContextHandler is safe for
-// concurrent use by multiple goroutines like any slog.Handler.
-type ContextHandler struct {
-    // root is the underlying handler BEFORE any recorded WithAttrs/WithGroup ops.
-    // Extracted attributes are attached here so they land at the top level, ahead of
-    // any group. This is exactly what Inner() returns.
-    root       slog.Handler
-    // next is root with all recorded ops applied; it handles records on the fast path
-    // (no group active) without rebuilding the chain per call.
-    next       slog.Handler
-    // ops records WithAttrs/WithGroup calls in order so the chain can be replayed onto
-    // a fresh root (used by both Handle's slow path and WithInner).
-    ops        []handlerOp
-    extractors []ContextExtractor
-}
-
-// NewContextHandler wraps next with the given extractors. Nil extractors are filtered.
-// With zero extractors it is a pass-through (callers may skip it entirely). Initializes
-// root == next and ops == nil.
-func NewContextHandler(next slog.Handler, ex ...ContextExtractor) *ContextHandler
-
-// Inner returns the ORIGINAL unwrapped handler (h.root) — the base destination handler
-// BEFORE any recorded WithAttrs/WithGroup ops. Adapters compose a new destination onto
-// this clean base; returning root (not next) is required so that WithInner can replay
-// the ops without double-applying them.
-func (h *ContextHandler) Inner() slog.Handler
-
-// WithInner returns a copy of the decorator whose root is `next`, rebuilding the cached
-// `next` by replaying h.ops onto `next` (same logic as Handle's slow path), and copying
-// the ops and extractors slices. This preserves any static attrs/groups added via
-// log.With(...) BEFORE the swap, so an adapter that does
-// d.WithInner(MultiHandler(d.Inner(), extra)) keeps extraction AND prior With-attrs for
-// every destination, old and new.
-func (h *ContextHandler) WithInner(next slog.Handler) *ContextHandler
-
-// Standard slog.Handler methods: Enabled, Handle, WithAttrs, WithGroup.
 ```
 
-`Inner`/`WithInner` are the intentional **adapter seam** that makes the inverse Sentry
-wrap (and any future destination adapter) work without re-passing extractors — and the
-reason `ContextHandler` is exported. There is no import cycle: `logger/sentry` imports
-`logger`, never the reverse.
-
-The decorator's `Handle`/group internals are ported from the v1 implementation:
+Internally, an unexported `contextHandler` wraps the assembled handler and, on every
+`Handle`, runs the extractors and injects their results at the record's **top level**
+(ahead of any group opened with `WithGroup`). It is ported from the v1 implementation:
 extracted attributes are attached to the root handler so they land at the top level
-regardless of active groups, with a fast path when no group is open (add directly to
-the record) and a rebuild path when a group is active (re-apply recorded ops on top of
-the root + extracted attrs).
+regardless of active groups, with a fast path when no group is open (add directly to the
+record) and a rebuild path when a group is active (re-apply recorded ops on top of the
+root + extracted attrs). All of its methods are pure — `WithAttrs`/`WithGroup` return a
+new handler and never mutate the receiver (slices copied) — so it is safe for concurrent
+use, like any `slog.Handler`.
 
-> **Net-new vs v1 — implementer beware:** `Inner`/`WithInner` do not exist in the v1
-> decorator. The correctness hinge is that `Inner()` returns `root` and `WithInner`
-> replays `ops` onto the new inner. If `WithInner` skipped the replay (or `Inner`
-> returned `next`), static attributes added via `log.With(...)` before `sentry.Wrap`
-> would silently vanish or be double-applied. This must be covered by a test (see
-> Testing → `decorator_test.go`).
+> **Why no exported `Inner`/`WithInner` seam (changed from rev. 1):** composition now
+> happens *before* decoration, inside `New`. `New` assembles
+> `[primary, …WithHandler handlers]` into a `slog.NewMultiHandler` and then wraps the
+> whole fan-out in `contextHandler`. So a Sentry handler added via `WithHandler` sits
+> *beneath* the single decorator automatically and receives extracted attributes — no
+> handler-peeling, no ops-replay. The decorator stays a private implementation detail.
 
 ## Option validation (zero-trust)
 
@@ -319,6 +293,7 @@ Options accumulate invalid values into `config.errs`; `New` joins them and retur
 |---|---|---|
 | `WithFile(path)` | `path == ""` | `ErrInvalidConfig` |
 | `WithOutput(w)` | `w == nil` | `ErrInvalidConfig` |
+| `WithHandler(h)` | `h == nil` | `ErrInvalidConfig` |
 | `Config.Level` | not a known level name | `ErrInvalidConfig` (from `Validate`) |
 | `Config.Format` | not `"text"`/`"json"` | `ErrInvalidConfig` (from `Validate`) |
 | `WithContextExtractors` | nil entries | filtered (not an error) |
@@ -330,9 +305,10 @@ defensively even if the caller already called it after env loading.
 
 ```
 1. c := defaultConfig()                     // {Config: DefaultConfig(), outputOverride: nil,
-                                             //  extractors: nil, level/format override: nil}
+                                             //  extractors: nil, extraHandlers: nil, overrides: nil}
 2. apply opts in order; each invalid value appends fmt.Errorf("%w: ...", ErrInvalidConfig)
-   to c.errs. WithConfig replaces the embedded Config block.
+   to c.errs. WithConfig replaces the embedded Config block; WithHandler appends to
+   c.extraHandlers; WithContextExtractors appends non-nil funcs to c.extractors.
 3. if len(c.errs) > 0: return nil, errors.Join(c.errs...)   // each err already wraps
                                                             // ErrInvalidConfig; no I/O
 4. if err := c.Validate(); err != nil: return nil, err      // wraps ErrInvalidConfig
@@ -351,114 +327,155 @@ defensively even if the caller already called it after env loading.
    default:
        w = os.Stdout
    }
-7. var base slog.Handler = newHandler(format, w, level, c.AddSource)   // exactly one handler
-8. // c.extractors holds only non-nil funcs (WithContextExtractors filtered them on apply),
-   // so an all-nil extractor list correctly skips the decorator:
-   if len(c.extractors) > 0 { base = NewContextHandler(base, c.extractors...) }
+7. // primary destination + any parallel WithHandler destinations:
+   handlers := append([]slog.Handler{newHandler(format, w, level, c.AddSource)}, c.extraHandlers...)
+   var base slog.Handler = handlers[0]
+   if len(handlers) > 1 { base = slog.NewMultiHandler(handlers...) }
+8. // c.extractors holds only non-nil funcs (filtered on apply), so an all-nil list skips:
+   if len(c.extractors) > 0 { base = newContextHandler(base, c.extractors...) }
 9. return slog.New(base), nil
 ```
 
 The internal `config` embeds `Config` (serializable strings) and adds the
 non-serializable fields: `outputOverride io.Writer` (nil unless `WithOutput`),
-`extractors []ContextExtractor`, the code overrides `levelOverride *slog.Level` and
-`formatOverride *Format`, and `errs []error` — mirroring how `httpserver`'s internal
-`config` embeds its `Config`.
+`extractors []ContextExtractor`, `extraHandlers []slog.Handler`, the code overrides
+`levelOverride *slog.Level` and `formatOverride *Format`, and `errs []error` — mirroring
+how `httpserver`'s internal `config` embeds its `Config`.
 
 `newHandler` maps `FormatText → slog.NewTextHandler`, `FormatJSON → slog.NewJSONHandler`,
 each with `&slog.HandlerOptions{Level: level, AddSource: addSource}`. The core builds
-**exactly one** handler over the single resolved writer — `slog.NewMultiHandler` never
-appears here; it is introduced only by `logger/sentry` to run Sentry in parallel. (That
-is where per-handler `Enabled(level)` filtering gives Sentry its independent level.)
+exactly one **primary** handler; `slog.NewMultiHandler` appears only when one or more
+`WithHandler` destinations are present. Per-handler `Enabled(level)` filtering is what
+gives each parallel destination (e.g. Sentry) its independent level: `MultiHandler.Handle`
+calls a sub-handler's `Handle` only when its `Enabled` returns true for the record level.
 
 `openFile` (in `file.go`): `dir := filepath.Dir(path)`; if `dir != "" && dir != "."`,
 `os.MkdirAll(dir, 0o755)`; then `os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-0o644)`. Both errors are wrapped with `ErrOpenFile`.
+0o644)`. Both failures are wrapped as `fmt.Errorf("%w: %v", ErrOpenFile, originalErr)` —
+single `%w` so `ErrOpenFile` is the `errors.Is` sentinel, with the underlying
+path/permission error preserved as message context.
 
-## Public API — `logger/sentry` adapter
+## Public API — `logger/sentry`
+
+Shaped like every other forge package (own `Config`/`DefaultConfig`/`Validate`/`Option`/
+`WithConfig`/`New`). It configures the underlying primary logger *and* Sentry from one
+place, and returns the combined logger plus a `Flush`.
 
 ### Config
 
 ```go
+// Config carries both the primary-logger settings (embedded logger.Config) and the
+// Sentry-specific settings, so the whole thing env-loads in one shot.
 type Config struct {
+    logger.Config          // embedded: Level, Format, File, AddSource (env LEVEL/FORMAT/FILE/ADD_SOURCE)
+
     DSN         string `env:"DSN"`
-    Environment string `env:"ENVIRONMENT"` // default "production"
+    Environment string `env:"ENVIRONMENT"`  // default "production"
     // MinLevel is Sentry's OWN minimum level — the lowest level forwarded to Sentry,
-    // independent of the base logger's primary-destination level. Case-insensitive, one
-    // of "debug", "info", "warn"/"warning", "error".
-    MinLevel    string `env:"MIN_LEVEL"`    // default "warn"
+    // independent of the primary destination's level. Case-insensitive, one of
+    // "debug", "info", "warn"/"warning", "error".
+    MinLevel    string `env:"MIN_LEVEL"`     // default "warn"
     // EnableLogs forwards non-error log entries to Sentry as Logs (in addition to
     // errors, which always create Issues). Default false (opt-in).
     EnableLogs  bool   `env:"ENABLE_LOGS"`
 }
 
-func DefaultConfig() Config // {DSN:"", Environment:"production", MinLevel:"warn", EnableLogs:false}
+func DefaultConfig() Config // {Config: logger.DefaultConfig(), Environment:"production", MinLevel:"warn"}
 func (c Config) Validate() error
 ```
 
-**`Validate` semantics:** rejects an unknown `MinLevel` with `ErrInvalidConfig` (same
-case-insensitive `{debug, info, warn, warning, error}` set as `logger.Config.Level`,
-**no silent fallback**). `DSN`/`Environment`/`EnableLogs` are not constrained — an
-empty `DSN` is valid and triggers the no-op path in `Wrap`. The internal `parseLevel`
-(in the `sentry` package, mirroring v1's `parseMinLevel`) is called by `Wrap` only
-after `Validate` passes, so it assumes a validated value.
+**`Validate` semantics:** validates the embedded `logger.Config` (Level/Format) **and**
+rejects an unknown `MinLevel`, both case-insensitive over `{debug, info, warn, warning,
+error}` with **no silent fallback**. It wraps with **double-`%w`** so the result matches
+*both* `sentry.ErrInvalidConfig` and (for a bad Level/Format) `logger.ErrInvalidConfig`:
+`fmt.Errorf("%w: %w", ErrInvalidConfig, c.Config.Validate())`. An empty `DSN` is valid
+(triggers the no-op path in `New`). `parseLevel` (internal to `sentry`, mirroring v1's
+`parseMinLevel`) is called only after `Validate` passes.
 
-### Wrap, Flush
+### Options, New, Flush
 
 ```go
+type Option func(*config)
+
+// WithConfig sets the whole serializable data block (primary-logger + Sentry settings).
+func WithConfig(cfg Config) Option
+
+// WithContextExtractors registers ContextExtractor funcs for the primary logger AND the
+// Sentry destination (they sit beneath one decorator). Nil entries are filtered.
+func WithContextExtractors(ex ...logger.ContextExtractor) Option
+
+// WithOutput overrides the primary destination's writer (tests). A nil writer is
+// rejected (ErrInvalidConfig).
+func WithOutput(w io.Writer) Option
+
 // Flush flushes buffered Sentry events; call it before the program exits. The timeout
 // is derived from ctx.Deadline() (fallback defaultFlushTimeout = 2s). Returns
 // ErrSentryFlushTimeout if not all events were delivered in time. A no-op when Sentry
-// is not active.
+// is not active (empty DSN or init failure).
 type Flush func(ctx context.Context) error
 
-// Wrap fans the base logger out to Sentry in parallel at cfg.MinLevel, returning the
-// combined logger and a Flush closer.
+// New builds a logger that writes to the primary destination (stdout/file from the
+// embedded logger.Config) and, when DSN is non-empty, ALSO to Sentry in parallel at
+// MinLevel. Returns the logger, a Flush closer, and an error.
 //
-//   - cfg.DSN == "": returns base unchanged, a no-op Flush, and nil error
-//     (graceful local-dev/CI path — Sentry is never initialized).
-//   - sentry.Init fails: returns base (still usable) plus an ErrSentryInit-wrapped
-//     error; the application keeps logging to its existing destinations.
-//   - otherwise: returns slog.New(combined), flush, nil.
-func Wrap(base *slog.Logger, cfg Config) (*slog.Logger, Flush, error)
+//   - cfg.DSN == "": returns a plain logger (primary only), a no-op Flush, nil error.
+//   - sentry.Init fails: returns a usable plain logger plus an ErrSentryInit-wrapped
+//     error (the application keeps logging to its primary destination).
+//   - otherwise: returns the combined logger, a real Flush, nil.
+func New(opts ...Option) (*slog.Logger, Flush, error)
 ```
 
-### Wrap algorithm
+`sentry.New` deliberately mirrors `logger.New`'s ergonomics: it returns the standard
+`*slog.Logger` (so it drops straight into `httpserver.WithLogger` etc.), plus the one
+extra thing Sentry needs that a file does not — a `Flush`.
+
+### sentry.New algorithm
 
 ```
-1. if err := cfg.Validate(); err != nil: return base, noopFlush, err
-2. if cfg.DSN == "": return base, noopFlush, nil          // immediate base return
-3. if err := sentry.Init(ClientOptions{DSN, Environment, EnableLogs}); err != nil:
-       return base, noopFlush, fmt.Errorf("%w: <err>", ErrSentryInit)
-4. min := parseLevel(cfg.MinLevel)
-   sh := sentryslog.Option{
-            EventLevel: []slog.Level{slog.LevelError},   // errors → Issues  (see API note)
-            LogLevel:   levelsFrom(min),                 // min..error → Logs
-        }.NewSentryHandler(context.Background())
-5. combined := composeBeneathExtraction(base.Handler(), sh)
-6. return slog.New(combined), flush, nil
+1. c := defaultConfig()                       // sentry defaults incl. embedded logger defaults
+2. apply opts; accumulate c.errs (WithConfig replaces block; WithContextExtractors filters nils)
+3. if len(c.errs) > 0: return nil, nil, errors.Join(c.errs...)
+4. if err := c.Validate(); err != nil: return nil, nil, err
+5. // forward primary-logger settings to logger.New:
+   loggerOpts := []logger.Option{ logger.WithConfig(c.Config) }              // embedded logger.Config
+   if len(c.extractors) > 0 { loggerOpts = append(loggerOpts, logger.WithContextExtractors(c.extractors...)) }
+   if c.output != nil       { loggerOpts = append(loggerOpts, logger.WithOutput(c.output)) }
+6. if c.DSN == "":                            // Sentry disabled — plain logger, no-op flush
+       l, err := logger.New(loggerOpts...)
+       return l, noopFlush, err
+7. sh, err := buildHandler(c)                 // sentry.Init(...) + build sentryslog handler
+   if err != nil:                             // graceful: keep logging, surface the error
+       l, lerr := logger.New(loggerOpts...)
+       if lerr != nil { return nil, nil, lerr }
+       return l, noopFlush, fmt.Errorf("%w: %v", ErrSentryInit, err) // single %w: ErrSentryInit
+                                                                     // stays the only errors.Is sentinel
+8. l, err := logger.New(append(loggerOpts, logger.WithHandler(sh))...)
+   if err != nil { return nil, nil, err }
+   return l, flush, nil
 ```
 
-> **SDK / API note (re-confirm at implementation time).** The `sentryslog.Option`
-> shape above is the v1 reference. The `getsentry/sentry-go/slog` API has churned —
-> `EventLevel` is deprecated in newer releases. Before coding `logger/sentry`, pin an
-> exact version in `go.mod` and re-confirm the current handler-construction API against
-> that version's docs; drop/replace `EventLevel` if required. Targeted versions and the
-> outcome of this check are recorded in the **Dependencies** section below.
-
-`composeBeneathExtraction` is the inverse-wrap core and the reason core exports
-`ContextHandler.Inner/WithInner`:
-
+**Test seam (no mutable global):** the public `New` delegates to an unexported
+`newWith(buildHandler func(Config) (slog.Handler, error), opts ...Option)` that runs the
+algorithm above; `New` passes the real builder, the internal test passes a fake one:
 ```go
-func composeBeneathExtraction(bh, sh slog.Handler) slog.Handler {
-    if d, ok := bh.(*logger.ContextHandler); ok {
-        // Slot Sentry beneath the SAME extraction decorator so request-scoped attrs
-        // reach Sentry too — extractors configured once in logger.New.
-        return d.WithInner(slog.NewMultiHandler(d.Inner(), sh))
-    }
-    // base had no extractors: plain parallel fan-out.
-    return slog.NewMultiHandler(bh, sh)
-}
+func New(opts ...Option) (*slog.Logger, Flush, error) { return newWith(realSentryHandler, opts...) }
 ```
+`realSentryHandler(cfg)` calls `sentry.Init(ClientOptions{DSN, Environment, EnableLogs})`
+then builds the handler:
+```go
+min := parseLevel(cfg.MinLevel)
+sh  := sentryslog.Option{
+           EventLevel: []slog.Level{slog.LevelError},   // errors → Issues  (see SDK note)
+           LogLevel:   levelsFrom(min),                 // min..error → Logs
+       }.NewSentryHandler(context.Background())
+```
+
+> **SDK / API note (re-confirm at implementation time).** The `sentryslog.Option` shape
+> above is the v1 reference. The `getsentry/sentry-go/slog` API has churned —
+> `EventLevel` is deprecated in newer releases. Before coding `logger/sentry`, pin exact
+> versions in `go.mod` and re-confirm the current handler-construction API against them;
+> drop/replace `EventLevel` if required. Versions and the outcome are recorded in the
+> **Dependencies** section.
 
 `flush(ctx)`:
 ```go
@@ -502,13 +519,15 @@ var (
 ```
 
 All errors are single-line and matchable with `errors.Is`. No stacks or blobs are
-embedded; failure context is conveyed as wrapped messages.
+embedded; failure context is conveyed as wrapped messages. `sentry.Config.Validate`
+wraps with double-`%w` so a bad primary-logger Level/Format matches both
+`sentry.ErrInvalidConfig` and `logger.ErrInvalidConfig`.
 
 ## Logging conventions
 
 Records are emitted by callers via slog; this package adds attributes, never strings.
-Diagnostics produced by the package itself (none expected on the hot path) would use
-slog attributes. The package never logs from `New` on success.
+The package never logs from `New` on success. On Sentry init failure it does not log on
+your behalf — it returns `ErrSentryInit` for the caller to handle.
 
 ## Usage
 
@@ -529,20 +548,17 @@ log, err := logger.New(
 )
 if err != nil { /* handle ErrInvalidConfig / ErrOpenFile */ }
 
-// Production: JSON to stdout, plus Sentry at warn+ (parallel, separate level).
-base, err := logger.New(
-    logger.WithConfig(logger.DefaultConfig()), // info, text, stdout — or env-parsed
-    logger.WithFormat(logger.FormatJSON),
-    logger.WithContextExtractors(reqID),
+// Production: JSON to stdout, plus Sentry at warn+ (parallel, separate level) — one call.
+log, flush, err := sentry.New(
+    sentry.WithConfig(sentry.Config{
+        Config:   logger.Config{Level: "info", Format: "json"}, // primary destination
+        DSN:      os.Getenv("SENTRY_DSN"),                       // empty in dev → plain logger
+        MinLevel: "warn",
+    }),
+    sentry.WithContextExtractors(reqID),
 )
-if err != nil { /* ... */ }
-
-log, flush, err := sentry.Wrap(base, sentry.Config{
-    DSN:      os.Getenv("SENTRY_DSN"),  // empty in dev → base returned as-is
-    MinLevel: "warn",
-})
 if err != nil {
-    base.Warn("sentry disabled", slog.Any("err", err)) // base still usable
+    log.Warn("sentry disabled", slog.Any("err", err)) // log is still usable
 }
 defer flush(ctx) // ctx carries the shutdown deadline; no-op if Sentry inactive
 
@@ -554,70 +570,64 @@ log.ErrorContext(ctx, "payment failed", slog.String("user_id", "u-456"))
 
 - **No options:** text, info, stdout — a complete logger.
 - **Empty `Config.File`:** primary destination is stdout; no file opened.
-- **`Config.File` set:** primary destination is the file; **stdout receives nothing**
-  (mutually exclusive).
+- **`Config.File` set:** primary destination is the file; **stdout receives nothing**.
 - **File path with missing dirs:** `mkdir -p` creates them; failure → `ErrOpenFile`.
 - **Bad level/format string:** `Validate` fails → `ErrInvalidConfig`, no I/O.
 - **`WithOutput(buf)` + `WithFile`:** `WithOutput` wins (code override) — the file is
   **not opened** and records go to `buf` only.
-- **No extractors:** `New` skips the decorator entirely; `base.Handler()` is the single
-  primary handler, and `sentry.Wrap` takes the plain `MultiHandler(base, sentry)` path.
-- **`sentry.Wrap` with empty DSN:** returns `base` immediately; `defer flush(ctx)` is
-  a no-op.
-- **`sentry.Wrap` init failure:** returns usable `base` + `ErrSentryInit`; the app
-  decides whether to treat it as fatal.
-- **`flush` past deadline:** `ErrSentryFlushTimeout`. `flush` with a **no-deadline**
-  ctx uses the 2s default.
-- **Groups + extraction:** extracted attrs stay at the record's top level, not nested
-  in a `WithGroup`.
-- **`sentry.Wrap(NewNope(), cfg)`:** `NewNope`'s handler is a discard handler, not a
-  `*ContextHandler`, so `Wrap` fans out as `MultiHandler(discard, sentryHandler)`. The
-  discard branch drops records; the **Sentry branch still delivers** (each MultiHandler
-  sub-handler gets its own clone). Net effect: **Sentry-only** logging with no stdout —
-  a legitimate, if niche, pattern. (Note: there are no extractors to carry, since
-  `NewNope` has none.)
-- **Double-wrap `sentry.Wrap(sentry.Wrap(base))`:** **not supported — call `Wrap`
-  once.** It nests MultiHandlers (functionally still routes, but redundantly) *and*
-  calls `sentry.Init` a second time, reconfiguring the process-global Sentry hub. The
-  doc comment on `Wrap` must state it is intended to be called exactly once per process.
+- **`WithHandler` + extractors:** the extra handler sits beneath the decorator, so it
+  receives extracted attributes; it still filters at its own level.
+- **No extractors:** `New` skips the decorator entirely; the logger's handler is the
+  primary handler (or a `MultiHandler` if `WithHandler` was used).
+- **`sentry.New` with empty DSN:** returns a plain logger + no-op flush + nil error;
+  `defer flush(ctx)` is a no-op.
+- **`sentry.New` init failure:** returns a usable plain logger + `ErrSentryInit`; the
+  app decides whether to treat it as fatal.
+- **`flush` past deadline:** `ErrSentryFlushTimeout`. `flush` with a **no-deadline** ctx
+  uses the 2s default.
+- **Groups + extraction:** extracted attrs stay at the record's top level, not nested in
+  a `WithGroup`, on every destination.
+- **Calling `sentry.New` twice:** initializes the process-global Sentry hub twice —
+  **call it once per process.** The doc comment on `New` states this.
 
 ## Testing
 
 `logger`:
 - `config_test.go` — `DefaultConfig` values; `Validate` table (good/bad level, format);
-  level/format parsing case-insensitivity; an env-tag presence test (mirrors the
-  supervisor `reflect.TypeFor` test).
+  level/format parsing case-insensitivity (incl. `"warning"`); an env-tag presence test
+  (mirrors the supervisor `reflect.TypeFor` test).
 - `options_test.go` — each option mutates `config` as expected; nil/empty rejections
-  accumulate `ErrInvalidConfig`; option order/precedence (`WithConfig` then `WithLevel`).
+  (`WithFile("")`, `WithOutput(nil)`, `WithHandler(nil)`) accumulate `ErrInvalidConfig`;
+  `WithConfig`-then-`WithFile` order; `WithLevel`/`WithFormat`/`WithOutput` override-wins
+  regardless of order.
 - `logger_test.go` — `New()` default writes JSON/text to a captured `WithOutput` buffer
   at the right level; `WithFile` creates the file under `t.TempDir()` (incl. a missing
   nested dir) and **all records go to the file**; `WithOutput` + `WithFile` together →
-  file is **not** created and records land in the buffer only (XOR precedence);
-  `ErrOpenFile` on an un-creatable path; `NewNope` discards (buffer stays empty).
+  file is **not** created (XOR precedence); `WithHandler(fake)` → both the primary buffer
+  and the fake handler receive a record, and the fake filters at its own level;
+  `ErrOpenFile` on an un-creatable path; `NewNope` discards.
 - `decorator_test.go` — extractor injects an attr; returns false → skipped; attr lands
-  at top level even after `WithGroup`; nil extractors filtered; **immutability** (
-  `WithAttrs`/`WithGroup`/`WithInner` return new handlers, receiver unchanged; safe
-  under `-race`). The **blocker hinge**: build `d := NewContextHandler(h, ex)`, call
-  `d2 := d.WithAttrs([]slog.Attr{slog.String("k","v")})`, then
-  `d3 := d2.WithInner(slog.NewMultiHandler(d2.Inner(), fake))`; assert a record routed
-  through `d3` still carries `k=v` on **both** the original `h` and `fake` branches (ops
-  replayed onto the swapped inner; `Inner()` returned the clean root so `k=v` is not
-  doubled).
+  at top level even after `WithGroup`; nil extractors filtered; **immutability**
+  (`WithAttrs`/`WithGroup` return new handlers, receiver unchanged; safe under `-race`);
+  with `WithHandler`, the extracted attr reaches **both** the primary and the extra
+  handler.
 
 `logger/sentry`:
-- `sentry_test.go` (external) — `Wrap` with empty DSN returns the **same** `*slog.Logger`
-  pointer and a no-op flush; `Validate` table for `MinLevel` (incl. `"warning"` alias and
-  rejection of unknown); `Flush` timeout derivation from a deadlined ctx, and the
-  no-deadline → 2s-default path (no network).
-- `sentry_internal_test.go` (internal) — `composeBeneathExtraction` with a fake
-  in-package handler asserts (a) a decorated base places the fake beneath the same
-  extractor so extracted attrs reach it (and With-attrs added before the wrap survive),
-  and (b) an undecorated base (e.g. `NewNope`'s handler) produces a plain `MultiHandler`
-  whose Sentry branch still receives records. Network/`sentry.Init` is never invoked.
+- `sentry_test.go` (external) — `Validate` table for `MinLevel` (incl. `"warning"` alias,
+  rejection of unknown, and a bad embedded `Level` matching both sentinels via
+  `errors.Is`); `New` with empty DSN returns a working primary logger (captured via
+  `WithOutput`) and a no-op flush; `Flush` timeout derivation from a deadlined ctx and
+  the no-deadline → 2s-default path. No network.
+- `sentry_internal_test.go` (internal) — call the unexported `newWith` with a fake
+  `buildHandler` returning an in-test handler, a non-empty DSN, and extractors; assert
+  (a) a record reaches both the primary writer (captured via `WithOutput`) and the fake
+  (parallel fan-out), (b) the fake carries the extracted attrs (extraction beneath the
+  decorator), and (c) the returned `Flush` is the real one. `sentry.Init` / network is
+  never invoked.
 
 All tests use only `testify`. `just check` (fmt + vet + golangci-lint + nilaway +
-betteralign + test with `-race`) must pass; field order satisfies `betteralign`,
-slog usage satisfies `sloglint`.
+betteralign + test with `-race`) must pass; field order satisfies `betteralign`, slog
+usage satisfies `sloglint`.
 
 ## Dependencies
 
@@ -626,28 +636,27 @@ that rule intact:
 
 - **`logger` (core): zero third-party dependencies.** Every file imports only the
   stdlib (`log/slog`, `context`, `io`, `os`, `path/filepath`, `strings`, `errors`,
-  `fmt`). This is enforceable: a test (or a `depguard` rule) can assert the core
-  package's import graph contains nothing under `github.com/getsentry`.
+  `fmt`). Enforceable: a test (or a `depguard` rule) can assert the core package's import
+  graph contains nothing under `github.com/getsentry`.
 - **`logger/sentry`: the one justified, isolated dependency.** It imports
   `github.com/getsentry/sentry-go` and `github.com/getsentry/sentry-go/slog`. Strong
   reason: reimplementing Sentry's ingestion protocol is infeasible and out of scope.
   Because it is a **separate package**, only apps that import `logger/sentry` pull the
   SDK; the core logger and its consumers (`httpserver`, `supervisor`) never do.
 - **Version pinning (action item for implementation):** pin exact versions of
-  `sentry-go` and `sentry-go/slog` in `go.mod`, and re-confirm the
-  `sentryslog`-handler construction API (`Option`/`EventLevel`/`LogLevel` vs. the
-  current shape) against those versions before writing `Wrap` — see the SDK note in the
-  Wrap algorithm. Record the chosen versions here once selected.
+  `sentry-go` and `sentry-go/slog` in `go.mod`, and re-confirm the `sentryslog`-handler
+  construction API (`Option`/`EventLevel`/`LogLevel` vs. the current shape) against those
+  versions before writing `newSentryHandler` — see the SDK note above. Record the chosen
+  versions here once selected.
 - **Tests:** `testify` only (already permitted framework-wide).
 
 ## Future fit
 
-- Additional destinations (OTLP, syslog, Loki) follow the same inverse `Wrap(base,
-  cfg)` shape in their own adapter packages, each composing beneath the extraction
-  decorator via `ContextHandler.Inner/WithInner`.
-- If a destination ever needs buffered I/O (and thus a real `Close`), it returns its
-  own closer from its `Wrap`, exactly as `sentry.Wrap` returns `Flush` — core stays a
-  clean `(*slog.Logger, error)`.
+- Additional parallel destinations (OTLP, syslog, Loki) follow the same shape: a sibling
+  adapter package with its own `Config`/`New` that builds a `slog.Handler` and calls
+  `logger.New(append(loggerOpts, logger.WithHandler(h))...)`. Core never changes.
+- If such a destination needs flushing/closing, its `New` returns its own closer, exactly
+  as `sentry.New` returns `Flush` — core stays a clean `(*slog.Logger, error)`.
 - Built-in extractor helpers could ship in a sibling package if a request-context
   convention is standardized framework-wide.
 
@@ -655,5 +664,7 @@ that rule intact:
 
 - Log rotation / retention / compression (explicitly out of scope — platform's job).
 - Simultaneous stdout **and** file output (deliberately excluded — the primary
-  destination is stdout XOR file; add a teeing option only if a real need appears).
+  destination is stdout XOR file; `WithHandler` covers *parallel* sinks if ever needed).
+- Convenience options on `sentry` (`WithDSN`, `WithMinLevel`, …) — `WithConfig` covers
+  configuration today; add sugar only if call sites get noisy.
 - Sampling, rate limiting, async/buffered handlers.
