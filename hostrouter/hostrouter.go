@@ -1,6 +1,49 @@
 package hostrouter
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
+
+// Router dispatches by Host header. It is immutable after New and safe for
+// concurrent use. It implements http.Handler.
+type Router struct {
+	exact    map[string]http.Handler
+	wildcard map[string]http.Handler
+	fallback http.Handler
+}
+
+// New builds a Router from options applied in order. With no WithHost options every
+// request is served by the fallback (HTTP 404 unless WithFallback overrides it).
+// New panics on any invalid registration. It does no I/O.
+func New(opts ...Option) *Router {
+	r := &Router{
+		exact:    make(map[string]http.Handler),
+		wildcard: make(map[string]http.Handler),
+		fallback: http.NotFoundHandler(),
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// ServeHTTP routes by Host: exact match first, then a single-label wildcard, then
+// the fallback.
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	host := normalizeHost(req.Host)
+	if h, ok := r.exact[host]; ok {
+		h.ServeHTTP(w, req)
+		return
+	}
+	if _, parent, ok := splitFirstLabel(host); ok {
+		if h, found := r.wildcard[parent]; found {
+			h.ServeHTTP(w, req)
+			return
+		}
+	}
+	r.fallback.ServeHTTP(w, req)
+}
 
 // normalizeHost lowercases the host, strips any port, removes IPv6 brackets, and
 // trims a trailing FQDN dot. It allocates only on strings.ToLower's slow path

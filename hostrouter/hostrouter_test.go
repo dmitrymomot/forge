@@ -1,6 +1,8 @@
 package hostrouter
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,6 +26,58 @@ func TestNormalizeHost(t *testing.T) {
 			assert.Equal(t, tt.want, normalizeHost(tt.in))
 		})
 	}
+}
+
+// handlerWriting returns a handler that writes id to the response body.
+func handlerWriting(id string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(id))
+	})
+}
+
+func TestRouter_Routing(t *testing.T) {
+	r := New(
+		WithHost("api.example.com", handlerWriting("api")),
+		WithHost("example.com", handlerWriting("apex")),
+		WithHost("*.example.com", handlerWriting("wild")),
+		WithFallback(handlerWriting("fallback")),
+	)
+	tests := []struct{ name, host, want string }{
+		{"exact wins over wildcard", "api.example.com", "api"},
+		{"apex exact", "example.com", "apex"},
+		{"wildcard single label", "foo.example.com", "wild"},
+		{"wildcard case and port", "FOO.example.com:8443", "wild"},
+		{"multi level no match", "a.b.example.com", "fallback"},
+		{"unknown host", "other.com", "fallback"},
+		{"empty host", "", "fallback"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			assert.Equal(t, tt.want, rec.Body.String())
+		})
+	}
+}
+
+func TestRouter_DefaultFallbackIs404(t *testing.T) {
+	r := New(WithHost("api.example.com", handlerWriting("api")))
+	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	req.Host = "unknown.com"
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestRouter_NoRoutesAllFallback(t *testing.T) {
+	r := New()
+	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	req.Host = "anything.com"
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestSplitFirstLabel(t *testing.T) {
