@@ -107,7 +107,17 @@ func (s *Server) Run(ctx context.Context) error {
 	log.Info("http server listening", slog.String("addr", ln.Addr().String()))
 
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.Serve(ln) }()
+	go func() {
+		switch {
+		case s.cfg.tlsConfig != nil:
+			// In-memory config wins; pass empty paths so ServeTLS keeps its certs.
+			serveErr <- srv.ServeTLS(ln, "", "")
+		case s.cfg.TLSCertFile != "" && s.cfg.TLSKeyFile != "":
+			serveErr <- srv.ServeTLS(ln, s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		default:
+			serveErr <- srv.Serve(ln)
+		}
+	}()
 
 	select {
 	case err := <-serveErr:
