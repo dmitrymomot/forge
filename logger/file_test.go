@@ -30,3 +30,20 @@ func TestOpenFileErrorWhenDirUncreatable(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrOpenFile)
 }
+
+func TestOpenFileBareFilenameSkipsMkdir(t *testing.T) {
+	// A bare filename has filepath.Dir == "." — openFile must skip MkdirAll and create the
+	// file in the working directory. t.Chdir keeps the file inside a temp dir, exercising
+	// the guard branch without an mkdir.
+	t.Chdir(t.TempDir())
+	f, err := openFile("bare.log")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	_, err = f.WriteString("x\n")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile("bare.log")
+	require.NoError(t, err)
+	assert.Equal(t, "x\n", string(data))
+}
