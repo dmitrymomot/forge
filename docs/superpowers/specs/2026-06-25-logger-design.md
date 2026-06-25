@@ -641,12 +641,22 @@ that rule intact:
 - **`logger/sentry`: the one justified, isolated dependency.** It imports
   `github.com/getsentry/sentry-go` and `github.com/getsentry/sentry-go/slog`. Strong
   reason: reimplementing Sentry's ingestion protocol is infeasible and out of scope.
-  Because it is a **separate package**, only apps that import `logger/sentry` pull the
-  SDK; the core logger and its consumers (`httpserver`, `supervisor`) never do.
+- **Why a subpackage (not merged into `logger`, not a separate module).** Go links per
+  **package**, not per module, and Go 1.17+ prunes the module graph. So although forge's
+  own `go.mod` lists `sentry-go` regardless (a single module can't make a dependency
+  conditional), an app — or sibling package — that imports only `logger` and **not**
+  `logger/sentry` never compiles, links, or downloads the SDK source; it stays out of
+  that binary. This matters because `logger` is **foundational**: `supervisor`,
+  `httpserver`, and essentially every app import it. Merging Sentry into `logger` would
+  force `sentry-go` into **every** forge binary; the subpackage makes it strictly opt-in.
+  A separate *module* would remove it from forge's `go.mod` too, but a multi-module repo
+  (separate tagging/versioning, workspace wiring) is heavier than the one-line `go.mod`
+  entry is worth, and cuts against the flat composable-monolith direction. Decision:
+  **subpackage**.
 - **Version pinning (action item for implementation):** pin exact versions of
   `sentry-go` and `sentry-go/slog` in `go.mod`, and re-confirm the `sentryslog`-handler
   construction API (`Option`/`EventLevel`/`LogLevel` vs. the current shape) against those
-  versions before writing `newSentryHandler` — see the SDK note above. Record the chosen
+  versions before writing `realSentryHandler` — see the SDK note above. Record the chosen
   versions here once selected.
 - **Tests:** `testify` only (already permitted framework-wide).
 
