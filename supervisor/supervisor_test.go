@@ -230,6 +230,17 @@ func TestRunService_RecoverDisabled_Propagates(t *testing.T) {
 	})
 }
 
+func TestRun_InvalidConfigReturnsError(t *testing.T) {
+	ok := fakeService{name: "ok", run: func(ctx context.Context) error { return nil }}
+	err := Run(context.Background(),
+		WithService(ok),
+		WithService(nil),
+		WithShutdownTimeout(-1),
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
 func TestRun_PanicTriggersGracefulShutdown(t *testing.T) {
 	siblingDrained := make(chan struct{})
 	sibling := fakeService{name: "sibling", run: func(ctx context.Context) error {

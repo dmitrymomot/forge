@@ -78,3 +78,19 @@ func TestWithConfig_SetsWholeBlock(t *testing.T) {
 	assert.Equal(t, 7*time.Second, cfg.ShutdownTimeout)
 	assert.False(t, cfg.Recover)
 }
+
+func TestWithService_NilAppendsError(t *testing.T) {
+	cfg := defaultConfig()
+	WithService(nil)(&cfg)
+	require.Len(t, cfg.errs, 1)
+	assert.ErrorIs(t, cfg.errs[0], ErrInvalidConfig)
+	assert.Empty(t, cfg.services)
+}
+
+func TestWithServiceFunc_NilFuncAppendsError(t *testing.T) {
+	cfg := defaultConfig()
+	WithServiceFunc("w", nil)(&cfg)
+	require.Len(t, cfg.errs, 1)
+	assert.ErrorIs(t, cfg.errs[0], ErrInvalidConfig)
+	assert.Empty(t, cfg.services)
+}

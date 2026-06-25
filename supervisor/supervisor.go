@@ -24,6 +24,14 @@ func Run(ctx context.Context, opts ...Option) error {
 	}
 	log := resolveLogger(cfg.logger)
 
+	allErrs := cfg.errs
+	if e := cfg.Validate(); e != nil {
+		allErrs = append(allErrs, e)
+	}
+	if len(allErrs) > 0 {
+		return errors.Join(allErrs...)
+	}
+
 	if len(cfg.services) == 0 {
 		return ErrNoServices
 	}

@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -10,6 +11,7 @@ import (
 type config struct {
 	logger   *slog.Logger
 	services []Service
+	errs     []error
 	Config
 }
 
@@ -23,14 +25,26 @@ func defaultConfig() config {
 // Option configures a Run call: it registers services and tunes behavior.
 type Option func(*config)
 
-// WithService registers a Service to be supervised.
+// WithService registers a Service to be supervised. A nil Service is rejected and
+// surfaced by Run as ErrInvalidConfig.
 func WithService(svc Service) Option {
-	return func(c *config) { c.services = append(c.services, svc) }
+	return func(c *config) {
+		if svc == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithService received a nil Service", ErrInvalidConfig))
+			return
+		}
+		c.services = append(c.services, svc)
+	}
 }
 
-// WithServiceFunc registers a named function as a service. name must be non-empty.
+// WithServiceFunc registers a named function as a service. name must be non-empty;
+// a nil func is rejected and surfaced by Run as ErrInvalidConfig.
 func WithServiceFunc(name string, fn func(ctx context.Context) error) Option {
 	return func(c *config) {
+		if fn == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithServiceFunc(%q) received a nil func", ErrInvalidConfig, name))
+			return
+		}
 		c.services = append(c.services, serviceFunc{name: name, fn: fn})
 	}
 }
