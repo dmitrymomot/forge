@@ -12,7 +12,7 @@ import (
 // config holds resolved settings for a single Server. The embedded Config carries
 // serializable data; the remaining fields are non-serializable code values.
 type config struct {
-	handler     http.Handler //nolint:unused // set by New in Task 6
+	handler     http.Handler
 	listener    net.Listener
 	logger      *slog.Logger
 	tlsConfig   *tls.Config
