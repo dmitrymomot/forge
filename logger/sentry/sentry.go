@@ -2,7 +2,9 @@ package sentry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -127,4 +129,98 @@ func levelByName(s string) (slog.Level, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// Option configures New. Invalid values accumulate and are returned by New.
+type Option func(*config)
+
+// config holds resolved settings for a single New call.
+type config struct {
+	output     io.Writer
+	extractors []logger.ContextExtractor
+	errs       []error
+	Config
+}
+
+func defaultConfig() config {
+	return config{Config: DefaultConfig()}
+}
+
+// WithConfig sets the whole serializable data block (primary-logger + Sentry settings).
+// Build the argument from DefaultConfig().
+func WithConfig(cfg Config) Option {
+	return func(c *config) { c.Config = cfg }
+}
+
+// WithContextExtractors registers ContextExtractor funcs for the primary logger AND the
+// Sentry destination (they sit beneath one decorator). Nil entries are filtered.
+func WithContextExtractors(ex ...logger.ContextExtractor) Option {
+	return func(c *config) {
+		for _, e := range ex {
+			if e != nil {
+				c.extractors = append(c.extractors, e)
+			}
+		}
+	}
+}
+
+// WithOutput overrides the primary destination's writer (tests). A nil writer is rejected.
+func WithOutput(w io.Writer) Option {
+	return func(c *config) {
+		if w == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithOutput received a nil io.Writer", ErrInvalidConfig))
+			return
+		}
+		c.output = w
+	}
+}
+
+// New builds a logger that writes to the primary destination and, when DSN is non-empty,
+// also to Sentry in parallel at MinLevel. Empty DSN returns a plain logger and a no-op
+// Flush; an init failure returns a usable plain logger plus an ErrSentryInit-wrapped
+// error. Call New once per process (it initializes the global Sentry hub).
+func New(opts ...Option) (*slog.Logger, Flush, error) {
+	return newWith(realSentryHandler, opts...)
+}
+
+// newWith is the test seam: New passes realSentryHandler; tests pass a fake builder.
+func newWith(buildHandler func(Config) (slog.Handler, error), opts ...Option) (*slog.Logger, Flush, error) {
+	c := defaultConfig()
+	for _, opt := range opts {
+		opt(&c)
+	}
+	if len(c.errs) > 0 {
+		return nil, nil, errors.Join(c.errs...)
+	}
+	if err := c.Validate(); err != nil {
+		return nil, nil, err
+	}
+
+	loggerOpts := []logger.Option{logger.WithConfig(c.Config.Config)} // embedded logger.Config
+	if len(c.extractors) > 0 {
+		loggerOpts = append(loggerOpts, logger.WithContextExtractors(c.extractors...))
+	}
+	if c.output != nil {
+		loggerOpts = append(loggerOpts, logger.WithOutput(c.output))
+	}
+
+	if c.DSN == "" { // Sentry disabled — plain logger, no-op flush
+		l, err := logger.New(loggerOpts...)
+		return l, noopFlush, err
+	}
+
+	sh, err := buildHandler(c.Config)
+	if err != nil { // graceful: keep logging, surface the error
+		l, lerr := logger.New(loggerOpts...)
+		if lerr != nil {
+			return nil, nil, lerr
+		}
+		return l, noopFlush, fmt.Errorf("%w: %v", ErrSentryInit, err)
+	}
+
+	l, err := logger.New(append(loggerOpts, logger.WithHandler(sh))...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return l, flush, nil
 }

@@ -1,6 +1,8 @@
 package sentry_test
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,4 +43,23 @@ func TestValidateBadPrimaryLevelMatchesBothSentinels(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, sentry.ErrInvalidConfig)
 	assert.ErrorIs(t, err, logger.ErrInvalidConfig)
+}
+
+func TestNewEmptyDSNReturnsPlainLogger(t *testing.T) {
+	var buf bytes.Buffer
+	log, flush, err := sentry.New(sentry.WithOutput(&buf)) // DefaultConfig has empty DSN
+	require.NoError(t, err)
+	require.NotNil(t, log)
+
+	log.Info("hello")
+	assert.Contains(t, buf.String(), "hello")
+	require.NoError(t, flush(context.Background())) // no-op flush
+}
+
+func TestNewInvalidConfigSurfacesError(t *testing.T) {
+	bad := sentry.DefaultConfig()
+	bad.MinLevel = "loud"
+	_, _, err := sentry.New(sentry.WithConfig(bad))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentry.ErrInvalidConfig)
 }
