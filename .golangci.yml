@@ -1,24 +1,32 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
   default: standard
   enable:
-    - goimports
     - misspell
     - unconvert
+  settings:
+    misspell:
+      ignore-rules:
+        - elementy
+  exclusions:
+    paths:
+      - examples
+    rules:
+      - path: _test\.go
+        linters:
+          - misspell
 
-linters-settings:
-  goimports:
-    local-prefixes: github.com/dmitrymomot/forge
-  misspell:
-    ignore-words:
-      - elementy
-
-issues:
-  exclude-dirs:
-    - examples
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - misspell
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/dmitrymomot/forge
+  exclusions:
+    paths:
+      - examples
