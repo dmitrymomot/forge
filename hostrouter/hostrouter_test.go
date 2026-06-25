@@ -19,6 +19,7 @@ func TestNormalizeHost(t *testing.T) {
 		{"ipv6 with port", "[::1]:8080", "::1"},
 		{"ipv6 no port", "[::1]", "::1"},
 		{"ipv6 bracketless", "::1", "::1"},
+		{"ipv6 missing bracket", "[::1", ""},
 		{"subdomain", "foo.example.com", "foo.example.com"},
 	}
 	for _, tt := range tests {
@@ -85,9 +86,9 @@ func TestSplitFirstLabel(t *testing.T) {
 		name, in, label, parent string
 		ok                      bool
 	}{
-		{"single label", "localhost", "", "", false},
-		{"two labels", "foo.example.com", "foo", "example.com", true},
-		{"three labels", "a.b.example.com", "a", "b.example.com", true},
+		{"no dot", "localhost", "", "", false},
+		{"strips first label", "foo.example.com", "foo", "example.com", true},
+		{"strips only first of many", "a.b.example.com", "a", "b.example.com", true},
 		{"leading dot", ".example.com", "", "", false},
 		{"trailing dot", "example.", "", "", false},
 		{"empty", "", "", "", false},

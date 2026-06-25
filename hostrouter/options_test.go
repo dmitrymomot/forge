@@ -1,6 +1,7 @@
 package hostrouter
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -13,10 +14,16 @@ func nopHandler() http.Handler {
 }
 
 // recoverErr runs fn and returns the error it panicked with (nil if no panic).
+// A non-error panic is wrapped so it still fails an errors.Is assertion loudly
+// rather than being silently reported as "no panic".
 func recoverErr(fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err, _ = r.(error)
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("non-error panic: %v", r)
+			}
 		}
 	}()
 	fn()

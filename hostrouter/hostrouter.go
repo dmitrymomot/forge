@@ -75,9 +75,11 @@ func normalizeHost(host string) string {
 		return ""
 	}
 	if host[0] == '[' { // IPv6 literal: "[::1]" or "[::1]:8080"
-		if i := strings.IndexByte(host, ']'); i >= 0 {
-			host = host[1:i] // inside brackets; drops "]" and any ":port" after it
+		i := strings.IndexByte(host, ']')
+		if i < 0 {
+			return "" // malformed: opening '[' with no closing ']'
 		}
+		host = host[1:i] // inside brackets; drops "]" and any ":port" after it
 	} else if i := strings.LastIndexByte(host, ':'); i >= 0 &&
 		strings.IndexByte(host, ':') == i {
 		host = host[:i] // exactly one colon => host:port (not bracketless IPv6)

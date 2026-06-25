@@ -45,7 +45,7 @@ func WithHost(pattern string, h http.Handler) Option {
 func WithFallback(h http.Handler) Option {
 	return func(r *Router) {
 		if h == nil {
-			panic(fmt.Errorf("%w: WithFallback handler", ErrNilHandler))
+			panic(fmt.Errorf("%w: fallback handler", ErrNilHandler))
 		}
 		r.fallback = h
 	}
