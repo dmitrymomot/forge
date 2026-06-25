@@ -103,8 +103,20 @@ func levelsFrom(min slog.Level) []slog.Level {
 	return out
 }
 
+// sentryOption builds the sentryslog handler options from cfg. It is factored out of
+// realSentryHandler so the level/AddSource mapping is unit-testable without initializing
+// the global Sentry hub (which sentry.Init mutates process-wide).
+func sentryOption(cfg Config) sentryslog.Option {
+	return sentryslog.Option{
+		EventLevel: []slog.Level{slog.LevelError},        // errors → Issues (DEPRECATED, removed in v0.48.0)
+		LogLevel:   levelsFrom(parseLevel(cfg.MinLevel)), // MinLevel..error → Logs
+		AddSource:  cfg.AddSource,                        // mirror the primary's AddSource into Sentry events
+	}
+}
+
 // realSentryHandler initializes the Sentry SDK and builds the slog handler. Confirmed
-// against sentry-go v0.47.0.
+// against sentry-go v0.47.0. The level/AddSource mapping lives in sentryOption (tested);
+// this wrapper is the thin, global-state-mutating glue around it.
 func realSentryHandler(cfg Config) (slog.Handler, error) {
 	// v0.47.0: ClientOptions has no EnableLogs; logs are on by default, gated by
 	// DisableLogs — so our opt-in EnableLogs inverts.
@@ -115,12 +127,7 @@ func realSentryHandler(cfg Config) (slog.Handler, error) {
 	}); err != nil {
 		return nil, err
 	}
-	min := parseLevel(cfg.MinLevel)
-	return sentryslog.Option{
-		EventLevel: []slog.Level{slog.LevelError}, // errors → Issues (DEPRECATED, removed in v0.48.0)
-		LogLevel:   levelsFrom(min),               // min..error → Logs
-		AddSource:  cfg.AddSource,                 // mirror the primary's AddSource into Sentry events
-	}.NewSentryHandler(context.Background()), nil
+	return sentryOption(cfg).NewSentryHandler(context.Background()), nil
 }
 
 // levelByName maps a level name to a slog.Level, reporting whether it is known.
