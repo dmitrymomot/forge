@@ -76,9 +76,11 @@
 //   - SameSite: Set the SameSite attribute as string (default: "lax").
 //     "none" forces Secure on, since browsers reject SameSite=None without it.
 //   - Secure: Set the Secure flag (HTTPS only)
-//   - HTTPOnly: Set the HttpOnly flag. Defaults to true; the Manager always
-//     emits HttpOnly cookies regardless of this value, since every cookie it
-//     manages is server-side and never needs client-side JS access.
+//   - HTTPOnly: Set the HttpOnly flag, honored as given. Configs loaded from the
+//     environment default it to true (a secure default, since server-managed
+//     cookies never need client-side JS access), but a directly-constructed
+//     Config{} leaves HTTPOnly at its zero value (false); set it explicitly to
+//     true for server cookies.
 //
 // # Errors
 //
@@ -87,6 +89,7 @@
 //   - [ErrNoSecret]: Secret required for signed/encrypted operations
 //   - [ErrBadSecret]: Secret must be at least 32 bytes
 //   - [ErrBadSig]: Signature verification failed (tampering detected)
+//   - [ErrBadVersion]: Payload carries an unsupported on-the-wire version
 //   - [ErrDecrypt]: Decryption failed (tampering or corruption detected)
 //   - [ErrExpired]: Embedded expiry has passed
 package cookie

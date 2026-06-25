@@ -36,8 +36,12 @@
 // verification failures, all matchable via errors.Is:
 //
 //   - ErrInvalidInput: domain or projectID is empty after trimming whitespace
-//   - ErrDomainNotFound: the domain itself does not exist (NXDOMAIN)
-//   - ErrTXTRecordNotFound: the domain resolved but has no TXT records
+//   - ErrDomainNotFound: the domain itself does not exist (NXDOMAIN). For
+//     backward compatibility this case also matches ErrTXTRecordNotFound, so
+//     errors.Is(err, ErrTXTRecordNotFound) is true for both NXDOMAIN and a
+//     domain that resolved with no TXT records.
+//   - ErrTXTRecordNotFound: the domain resolved but has no TXT records (also
+//     matched on NXDOMAIN, see above)
 //   - ErrDNSLookupFailed: the DNS lookup failed (e.g. network/timeout); the
 //     underlying error is wrapped and remains available via errors.Is/As
 //   - ErrDomainNotVerified: TXT records exist but none exactly match the projectID

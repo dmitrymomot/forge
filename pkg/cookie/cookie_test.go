@@ -545,7 +545,8 @@ func TestDefaultAttributes(t *testing.T) {
 
 	c := w.Result().Cookies()[0]
 	require.Equal(t, "/", c.Path)
-	// HttpOnly is a secure default: the Manager always emits HttpOnly cookies.
-	require.True(t, c.HttpOnly, "HttpOnly should default to true")
+	// HTTPOnly is honored from the config; a directly-constructed Config{} leaves
+	// it at the zero value (false). Env-loaded configs default it to true.
+	require.False(t, c.HttpOnly, "HttpOnly should be the zero value for Config{}")
 	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
 }

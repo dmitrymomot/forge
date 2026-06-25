@@ -146,15 +146,18 @@ func setSliceValue(field reflect.Value, fieldType reflect.Type, values []string)
 
 	// Determine the list elements.
 	//
-	// Two distinct conventions are supported:
-	//   1. Repeated parameters (?tags=go&tags=web) arrive as multiple values, where
-	//      each value is already a discrete element.
-	//   2. A single combined value (?tags=go,web) represents a comma-separated list.
+	// Two distinct conventions are supported, and they are intentionally NOT
+	// mixed:
+	//   1. A single combined value is comma-split:
+	//        ?tags=a,b        -> ["a", "b"]
+	//   2. Repeated parameters are treated as literal elements (no further
+	//      comma-splitting), so embedded commas are preserved verbatim:
+	//        ?tags=a,b&tags=c -> ["a,b", "c"]
 	//
-	// Comma-splitting is only applied to convention (2): a single value. When the
-	// caller supplied multiple values, each is treated as a literal element so that
-	// legitimate commas inside a value (e.g. ?tags=go&tags=a,b as the literal "a,b")
-	// are preserved rather than silently torn apart.
+	// Comma-splitting is therefore applied ONLY when exactly one value was
+	// supplied. As soon as the same parameter repeats, each value is taken as a
+	// discrete literal element, so a deliberate "a,b" sent as one of several
+	// repeated values is not silently torn apart.
 	var allValues []string
 	if len(values) == 1 {
 		allValues = strings.Split(values[0], ",")

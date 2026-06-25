@@ -165,6 +165,11 @@ func insertJob(ctx context.Context, qe queryExecer, j *job.JobInsert) error {
 	// ON CONFLICT ... DO NOTHING makes the check-and-insert atomic, so two
 	// concurrent inserts for the same active dedup key cannot both succeed.
 	// A 0-row result means an active duplicate already exists → silently skip.
+	//
+	// Targeting a partial index in the conflict clause (ON CONFLICT (col) WHERE
+	// ...) requires SQLite >= 3.35.0 (2021-03-12). The bundled
+	// modernc.org/sqlite driver ships a newer SQLite version, so this requirement
+	// is satisfied.
 	const insertSQL = `INSERT INTO forge_jobs
 		(queue, task_name, payload, unique_key, dedup_key, tags, priority, max_attempts, scheduled_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`

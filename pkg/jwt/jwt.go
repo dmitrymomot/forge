@@ -215,6 +215,16 @@ func (s *Service) Parse(tokenString string, claims any) error {
 
 // isTemporalError reports whether err is one of the registered temporal-claim errors
 // (exp/nbf), which Parse validates separately with the configured leeway.
+//
+// It deliberately matches ONLY the temporal sentinels (ErrExpiredToken,
+// ErrTokenNotYetValid) and NOT the broader ErrInvalidToken. When a claims type
+// embeds StandardClaims, the promoted StandardClaims.Valid() runs with zero
+// leeway and may re-reject a token that Parse already accepted under the
+// configured leeway, returning a temporal error. We swallow those (the
+// leeway-aware check above is authoritative) but must still propagate genuine
+// validation failures: ErrInvalidToken signals a malformed/structurally invalid
+// token, never a leeway-boundary timing case, so it must not be treated as
+// temporal and suppressed.
 func isTemporalError(err error) bool {
 	return errors.Is(err, ErrExpiredToken) || errors.Is(err, ErrTokenNotYetValid)
 }

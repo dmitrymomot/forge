@@ -176,7 +176,15 @@ func ssrfSafeTransport() *http.Transport {
 		},
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Clone the standard transport when available so we inherit its sensible
+	// defaults; if DefaultTransport was replaced with a non-*http.Transport,
+	// fall back to a fresh transport rather than panicking on the type assertion.
+	var transport *http.Transport
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = dt.Clone()
+	} else {
+		transport = &http.Transport{}
+	}
 	transport.DialContext = dialer.DialContext
 	return transport
 }

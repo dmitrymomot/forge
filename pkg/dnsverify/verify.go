@@ -66,9 +66,12 @@ func VerifyDomainOwnershipWith(ctx context.Context, resolver Resolver, domain, p
 	if err != nil {
 		// Distinguish "the domain itself does not exist" (NXDOMAIN) from a
 		// transient/network lookup failure. A missing domain can never be
-		// verified, so it gets its own sentinel.
+		// verified, so it gets its own sentinel. ErrTXTRecordNotFound is joined
+		// for backward compatibility: callers that historically matched the
+		// NXDOMAIN case via errors.Is(err, ErrTXTRecordNotFound) keep working,
+		// while the finer ErrDomainNotFound is now also available.
 		if dnsErr, ok := errors.AsType[*net.DNSError](err); ok && dnsErr.IsNotFound {
-			return ErrDomainNotFound
+			return errors.Join(ErrDomainNotFound, ErrTXTRecordNotFound)
 		}
 		return fmt.Errorf("%w: %w", ErrDNSLookupFailed, err)
 	}

@@ -24,6 +24,9 @@ var (
 	ErrBadSig    = errors.New("cookie: invalid signature")
 	ErrDecrypt   = errors.New("cookie: decryption failed")
 	ErrExpired   = errors.New("cookie: value expired")
+	// ErrBadVersion is returned when a framed payload carries an unsupported
+	// version byte (i.e. it was produced by a different on-the-wire format).
+	ErrBadVersion = errors.New("cookie: unsupported payload version")
 )
 
 // payloadVersion is the first byte of every signed/encrypted payload. It allows
@@ -58,9 +61,11 @@ type Manager struct {
 // New creates a cookie Manager with the given config.
 // Returns ErrBadSecret if Secret is non-empty but shorter than 32 bytes.
 //
-// HttpOnly defaults to true (a secure default); set it explicitly to keep that
-// behavior. When SameSite is "none", Secure is forced on because browsers reject
-// SameSite=None cookies without the Secure attribute.
+// HttpOnly is honored from cfg.HTTPOnly. Configs loaded from the environment
+// default HTTPOnly to true (a secure default), but a directly-constructed
+// Config{} leaves it at the zero value (false), so set it explicitly for
+// server-managed cookies. When SameSite is "none", Secure is forced on because
+// browsers reject SameSite=None cookies without the Secure attribute.
 func New(cfg Config) (*Manager, error) {
 	if cfg.Path == "" {
 		cfg.Path = "/"
@@ -80,10 +85,11 @@ func New(cfg Config) (*Manager, error) {
 		path:     cfg.Path,
 		sameSite: sameSite,
 		secure:   secure,
-		// HttpOnly defaults to true as a secure default. Every cookie this
-		// Manager emits is server-managed, so client-side JS access is never
-		// required and is disabled to reduce XSS exposure.
-		httpOnly: true,
+		// HttpOnly is honored from the config. Env-loaded configs default it to
+		// true (a secure default that blocks client-side JS access to reduce XSS
+		// exposure); a directly-constructed Config{} leaves it false, so callers
+		// that need server-managed cookies should set HTTPOnly explicitly.
+		httpOnly: cfg.HTTPOnly,
 	}
 
 	if cfg.Secret != "" {
@@ -334,8 +340,14 @@ func framePayload(value []byte, maxAge int) []byte {
 // unframePayload validates the header and returns the embedded value, returning
 // ErrExpired when the recorded expiry has passed.
 func unframePayload(payload []byte) ([]byte, error) {
-	if len(payload) < payloadHeaderSize || payload[0] != payloadVersion {
+	if len(payload) < payloadHeaderSize {
 		return nil, ErrBadSig
+	}
+	// A mismatched version byte means the payload was produced by a different
+	// on-the-wire format rather than tampered with, so surface a distinct
+	// sentinel instead of the misleading ErrBadSig.
+	if payload[0] != payloadVersion {
+		return nil, ErrBadVersion
 	}
 
 	expiry := int64(binary.BigEndian.Uint64(payload[1:payloadHeaderSize]))

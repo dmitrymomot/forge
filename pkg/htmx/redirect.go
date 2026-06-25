@@ -2,6 +2,7 @@ package htmx
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -45,7 +46,29 @@ func RedirectBack(w http.ResponseWriter, r *http.Request, fallback string) {
 //   - it does not begin with "/" (not rooted; relative or scheme-bearing like "http://...")
 //   - it begins with "//" or "/\" (protocol-relative, e.g. "//evil.com")
 //   - it contains a control character (CR/LF and friends) used for header injection
+//
+// The same checks are applied to the URL-decoded form of the target so that
+// percent-encoded separators ("/%2f/evil.com", "/%5c/evil.com") cannot smuggle a
+// protocol-relative destination past the literal checks once a browser decodes
+// the path.
 func isSafeRelativePath(target string) bool {
+	if !isSafeRelativePathLiteral(target) {
+		return false
+	}
+
+	// A malformed escape sequence is rejected outright rather than passed
+	// through unchecked.
+	dec, err := url.PathUnescape(target)
+	if err != nil {
+		return false
+	}
+
+	return isSafeRelativePathLiteral(dec)
+}
+
+// isSafeRelativePathLiteral runs the same-origin safety checks against a single
+// (already-decoded or raw) form of the target.
+func isSafeRelativePathLiteral(target string) bool {
 	// Must be rooted at the application's own path space.
 	if !strings.HasPrefix(target, "/") {
 		return false

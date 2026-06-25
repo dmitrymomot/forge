@@ -74,7 +74,10 @@ type staticRoute struct {
 // New creates a new application with the given config and options.
 // The App is immutable after creation.
 func New(cfg AppConfig, opts ...Option) *App {
-	cm, _ := cookie.New(cookie.Config{})
+	// HTTPOnly is set explicitly because cookie.New honors the config value and a
+	// zero-value Config would otherwise emit non-HttpOnly cookies; the framework's
+	// default cookie manager must stay HttpOnly as a secure default.
+	cm, _ := cookie.New(cookie.Config{HTTPOnly: true})
 	a := &App{
 		router:         chi.NewRouter(),
 		logger:         logger.New(),

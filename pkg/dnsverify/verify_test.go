@@ -68,9 +68,11 @@ func TestVerifyDomainOwnership_DomainNotFound(t *testing.T) {
 	err := dnsverify.VerifyDomainOwnershipWith(context.Background(), res, "example.com", "proj-123")
 
 	require.ErrorIs(t, err, dnsverify.ErrDomainNotFound)
-	// NXDOMAIN must not be reported as a generic lookup failure or missing TXT.
+	// NXDOMAIN must not be reported as a generic lookup failure.
 	require.NotErrorIs(t, err, dnsverify.ErrDNSLookupFailed)
-	require.NotErrorIs(t, err, dnsverify.ErrTXTRecordNotFound)
+	// For backward compatibility the NXDOMAIN case is joined with
+	// ErrTXTRecordNotFound, so callers matching either sentinel keep working.
+	require.ErrorIs(t, err, dnsverify.ErrTXTRecordNotFound)
 }
 
 func TestVerifyDomainOwnership_LookupError(t *testing.T) {

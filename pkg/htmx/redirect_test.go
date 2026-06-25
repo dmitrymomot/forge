@@ -294,4 +294,55 @@ func TestRedirectBack(t *testing.T) {
 
 		assert.Equal(t, "/dashboard/orders?status=open#top", rec.Header().Get("HX-Redirect"))
 	})
+
+	t.Run("rejects percent-encoded slash protocol-relative URL and falls back", func(t *testing.T) {
+		t.Parallel()
+
+		// "/%2f/evil.com" decodes to "///evil.com", which a browser treats as
+		// protocol-relative. The literal value passes the raw "//" check, so the
+		// decoded form must also be validated.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/%2f/evil.com")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("rejects percent-encoded backslash protocol-relative URL and falls back", func(t *testing.T) {
+		t.Parallel()
+
+		// "/%5c/evil.com" decodes to "/\/evil.com", the backslash browser quirk.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/%5c/evil.com")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/fallback", rec.Header().Get("HX-Redirect"))
+	})
+
+	t.Run("allows encoded-but-safe relative path", func(t *testing.T) {
+		t.Parallel()
+
+		// "/search?q=%20hello" decodes to "/search?q= hello": still rooted, not
+		// protocol-relative, no control chars, so it must remain allowed.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		q := req.URL.Query()
+		q.Set("redirect", "/search?q=%20hello")
+		req.URL.RawQuery = q.Encode()
+		req.Header.Set("HX-Request", "true")
+
+		htmx.RedirectBack(rec, req, "/fallback")
+
+		assert.Equal(t, "/search?q=%20hello", rec.Header().Get("HX-Redirect"))
+	})
 }

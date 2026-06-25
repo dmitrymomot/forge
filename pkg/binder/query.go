@@ -16,6 +16,10 @@ import (
 //   - Slices of basic types for multi-value parameters
 //   - Pointers for optional fields
 //
+// Slice semantics: a single combined value is comma-split
+// (?tags=a,b -> ["a", "b"]), while repeated parameters are treated as literal
+// elements (?tags=a,b&tags=c -> ["a,b", "c"]), preserving any embedded commas.
+//
 // Example:
 //
 //	type SearchRequest struct {

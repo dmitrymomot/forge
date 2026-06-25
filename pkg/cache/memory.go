@@ -112,8 +112,9 @@ func (m *Memory[V]) Get(_ context.Context, key string) (V, error) {
 
 	if e.isExpired() {
 		evicted := m.removeElement(elem)
+		fn := m.onEvict
 		m.mu.Unlock()
-		m.fireEvict(evicted)
+		m.fireEvict(fn, evicted)
 		var zero V
 		return zero, ErrNotFound
 	}
@@ -169,8 +170,9 @@ func (m *Memory[V]) Set(_ context.Context, key string, value V, ttl time.Duratio
 	elem := m.eviction.PushFront(e)
 	m.items[key] = elem
 
+	fn := m.onEvict
 	m.mu.Unlock()
-	m.fireEvict(evicted)
+	m.fireEvict(fn, evicted)
 	return nil
 }
 
@@ -188,8 +190,9 @@ func (m *Memory[V]) Delete(_ context.Context, key string) error {
 		evicted = m.removeElement(elem)
 	}
 
+	fn := m.onEvict
 	m.mu.Unlock()
-	m.fireEvict(evicted)
+	m.fireEvict(fn, evicted)
 	return nil
 }
 
@@ -211,8 +214,9 @@ func (m *Memory[V]) Has(_ context.Context, key string) (bool, error) {
 	e := elem.Value.(*entry[V])
 	if e.isExpired() {
 		evicted := m.removeElement(elem)
+		fn := m.onEvict
 		m.mu.Unlock()
-		m.fireEvict(evicted)
+		m.fireEvict(fn, evicted)
 		return false, nil
 	}
 
@@ -229,9 +233,11 @@ func (m *Memory[V]) Clear(_ context.Context) error {
 		return ErrClosed
 	}
 
-	// Collect evicted entries under the lock; fire callbacks after releasing it.
+	// Collect evicted entries and snapshot the callback under the lock; fire
+	// callbacks after releasing it.
+	fn := m.onEvict
 	var evicted []*entry[V]
-	if m.onEvict != nil {
+	if fn != nil {
 		evicted = make([]*entry[V], 0, len(m.items))
 		for _, elem := range m.items {
 			evicted = append(evicted, elem.Value.(*entry[V]))
@@ -244,7 +250,7 @@ func (m *Memory[V]) Clear(_ context.Context) error {
 	m.mu.Unlock()
 
 	for _, e := range evicted {
-		m.fireEvict(e)
+		m.fireEvict(fn, e)
 	}
 	return nil
 }
@@ -297,10 +303,11 @@ func (m *Memory[V]) deleteExpired() {
 		elem = prev
 	}
 
+	fn := m.onEvict
 	m.mu.Unlock()
 
 	for _, e := range evicted {
-		m.fireEvict(e)
+		m.fireEvict(fn, e)
 	}
 }
 
@@ -326,19 +333,16 @@ func (m *Memory[V]) removeElement(elem *list.Element) *entry[V] {
 	return e
 }
 
-// fireEvict invokes the eviction callback for a removed entry. It must be
-// called WITHOUT holding the mutex so user callbacks cannot deadlock or block
-// other cache operations. A nil entry is a no-op.
-func (m *Memory[V]) fireEvict(e *entry[V]) {
-	if e == nil {
+// fireEvict invokes the supplied eviction callback for a removed entry. It must
+// be called WITHOUT holding the mutex so user callbacks cannot deadlock or block
+// other cache operations. The callback fn is snapshotted by the caller while it
+// already holds m.mu (so no second lock cycle is needed here). A nil entry or
+// nil callback is a no-op.
+func (m *Memory[V]) fireEvict(fn func(key string, value V), e *entry[V]) {
+	if e == nil || fn == nil {
 		return
 	}
-	m.mu.Lock()
-	fn := m.onEvict
-	m.mu.Unlock()
-	if fn != nil {
-		fn(e.key, e.value)
-	}
+	fn(e.key, e.value)
 }
 
 func (m *Memory[V]) sfDo(key string, fn func() (any, error)) (any, error) {
