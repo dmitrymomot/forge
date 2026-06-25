@@ -460,22 +460,33 @@ algorithm above; `New` passes the real builder, the internal test passes a fake 
 ```go
 func New(opts ...Option) (*slog.Logger, Flush, error) { return newWith(realSentryHandler, opts...) }
 ```
-`realSentryHandler(cfg)` calls `sentry.Init(ClientOptions{DSN, Environment, EnableLogs})`
-then builds the handler:
+`realSentryHandler(cfg)` initializes the SDK and builds the handler. **Confirmed against
+sentry-go / sentry-go/slog `v0.47.0`** (the pinned version):
 ```go
+// NOTE v0.47.0: ClientOptions has NO EnableLogs field — logs are on by default and
+// gated by DisableLogs. Our Config.EnableLogs (opt-in) therefore inverts to DisableLogs.
+if err := sentry.Init(sentry.ClientOptions{
+    Dsn:         cfg.DSN,
+    Environment: cfg.Environment,
+    DisableLogs: !cfg.EnableLogs,
+}); err != nil {
+    return nil, err
+}
 min := parseLevel(cfg.MinLevel)
-sh  := sentryslog.Option{
-           EventLevel: []slog.Level{slog.LevelError},   // errors → Issues  (see SDK note)
-           LogLevel:   levelsFrom(min),                 // min..error → Logs
-       }.NewSentryHandler(context.Background())
+sh := sentryslog.Option{
+    EventLevel: []slog.Level{slog.LevelError}, // errors → Issues (DEPRECATED, removed in v0.48.0)
+    LogLevel:   levelsFrom(min),               // min..error → Logs (supported field)
+}.NewSentryHandler(context.Background())
+return sh, nil
 ```
 
-> **SDK / API note (re-confirm at implementation time).** The `sentryslog.Option` shape
-> above is the v1 reference. The `getsentry/sentry-go/slog` API has churned —
-> `EventLevel` is deprecated in newer releases. Before coding `logger/sentry`, pin exact
-> versions in `go.mod` and re-confirm the current handler-construction API against them;
-> drop/replace `EventLevel` if required. Versions and the outcome are recorded in the
-> **Dependencies** section.
+> **SDK / API note (confirmed v0.47.0; revisit on upgrade).** In `getsentry/sentry-go/slog`
+> `v0.47.0`, `EventLevel` (errors → Sentry Issues/events) still exists but is **deprecated
+> and removed in `v0.48.0`**; `LogLevel` (levels forwarded as Sentry Logs) is the supported
+> field. This design pins `v0.47.0` and keeps `EventLevel` to preserve "errors create
+> Issues." A future bump to `v0.48.0+` MUST revisit `realSentryHandler` (drop `EventLevel`
+> and rely on Sentry's log-based alerting, or whatever replaces it). Versions are recorded
+> in the **Dependencies** section.
 
 `flush(ctx)`:
 ```go
@@ -653,11 +664,13 @@ that rule intact:
   (separate tagging/versioning, workspace wiring) is heavier than the one-line `go.mod`
   entry is worth, and cuts against the flat composable-monolith direction. Decision:
   **subpackage**.
-- **Version pinning (action item for implementation):** pin exact versions of
-  `sentry-go` and `sentry-go/slog` in `go.mod`, and re-confirm the `sentryslog`-handler
-  construction API (`Option`/`EventLevel`/`LogLevel` vs. the current shape) against those
-  versions before writing `realSentryHandler` — see the SDK note above. Record the chosen
-  versions here once selected.
+- **Pinned versions (confirmed):** `github.com/getsentry/sentry-go v0.47.0` and its
+  `/slog` subpackage `v0.47.0` (single module; `go get github.com/getsentry/sentry-go@v0.47.0`
+  brings both). Confirmed API: `sentry.Init(ClientOptions{Dsn, Environment, DisableLogs})`
+  (no `EnableLogs` — logs default on, gated by `DisableLogs`); `sentry.Flush(timeout
+  time.Duration) bool`; `sentryslog.Option{EventLevel, LogLevel, …}.NewSentryHandler(ctx)
+  slog.Handler` where `EventLevel` is deprecated and removed in `v0.48.0`. See the SDK note
+  in the Wrap/handler algorithm. A future bump to `v0.48.0+` must revisit `realSentryHandler`.
 - **Tests:** `testify` only (already permitted framework-wide).
 
 ## Future fit
