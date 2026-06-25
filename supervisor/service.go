@@ -16,8 +16,8 @@ type Service interface {
 
 // serviceFunc adapts a named function to Service. Created by WithServiceFunc.
 type serviceFunc struct {
-	name string
 	fn   func(ctx context.Context) error
+	name string
 }
 
 func (s serviceFunc) Name() string                  { return s.name }

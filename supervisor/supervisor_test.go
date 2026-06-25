@@ -36,7 +36,7 @@ func TestRun_SingleService_ReturnsWrappedError(t *testing.T) {
 	err := Run(context.Background(), WithService(svc), WithLogger(discardLogger()))
 
 	require.ErrorIs(t, err, sentinel)
-	assert.Contains(t, err.Error(), `service "svc"`)
+	assert.Contains(t, err.Error(), `service "svc"`) //nolint:nilaway // err is guaranteed non-nil by require.ErrorIs above; nilaway does not track require's fatal-on-nil behavior
 }
 
 func TestRun_FirstExitStopsAll(t *testing.T) {

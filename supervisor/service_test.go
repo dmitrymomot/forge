@@ -24,7 +24,7 @@ func TestServiceFunc_DelegatesNameAndRun(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxKey{}, "v")
 	require.NoError(t, s.Run(ctx))
 	assert.True(t, called, "fn must be invoked by Run")
-	assert.Equal(t, "v", gotCtx.Value(ctxKey{}), "Run must pass ctx straight through")
+	assert.Equal(t, "v", gotCtx.Value(ctxKey{}), "Run must pass ctx straight through") //nolint:nilaway // gotCtx is assigned inside the closure called synchronously by s.Run above; nilaway cannot track cross-closure assignment
 }
 
 func TestServiceFunc_PropagatesError(t *testing.T) {

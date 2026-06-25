@@ -43,9 +43,9 @@ func Run(ctx context.Context, opts ...Option) error {
 	defer cancel()
 
 	type result struct {
-		idx  int
-		name string
 		err  error
+		name string
+		idx  int
 	}
 	results := make(chan result, len(cfg.services))
 	remaining := make(map[int]string, len(cfg.services))

@@ -10,9 +10,9 @@ const defaultShutdownTimeout = 30 * time.Second
 
 // config holds resolved settings for a single Run call.
 type config struct {
+	logger          *slog.Logger
 	services        []Service
 	shutdownTimeout time.Duration
-	logger          *slog.Logger
 	recover         bool
 }
 
