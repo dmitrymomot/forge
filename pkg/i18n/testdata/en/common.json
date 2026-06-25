@@ -1,8 +1,0 @@
-{
-  "hello": "Hello",
-  "welcome": "Welcome, {{name}}!",
-  "buttons": {
-    "save": "Save",
-    "cancel": "Cancel"
-  }
-}

@@ -29,15 +29,3 @@ fmt path='./...':
 
 # Run fmt, lint, and test
 check: fmt lint test
-
-# Run integration tests with docker infrastructure
-test-integration:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker compose up -d --wait postgres mailpit rustfs redis
-    docker compose up rustfs-bucket-init
-    trap 'docker compose down -v --remove-orphans' EXIT
-    go test -tags=integration -count=1 -race -cover $(grep -rl '//go:build integration' . --include='*_test.go' | xargs -I{} dirname {} | sort -u)
-
-# Short alias for test-integration
-alias ti := test-integration

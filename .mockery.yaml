@@ -5,9 +5,9 @@ mockname: "{{.InterfaceName}}"
 outpkg: "mocks"
 
 packages:
-  github.com/dmitrymomot/forge/internal:
-    interfaces:
-      Store:
-        config:
-          filename: "session_store.go"
-          mockname: "SessionStore"
+  # github.com/dmitrymomot/forge/internal:
+  #   interfaces:
+  #     Store:
+  #       config:
+  #         filename: "session_store.go"
+  #         mockname: "SessionStore"
