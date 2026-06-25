@@ -12,4 +12,6 @@ var (
 	ErrShutdownTimeout = errors.New("supervisor: graceful shutdown timed out")
 	// ErrPanic wraps a value recovered from a panicking service's Run.
 	ErrPanic = errors.New("supervisor: service panicked")
+	// ErrInvalidConfig is returned (joined) by Run when an option or Config field has an invalid value.
+	ErrInvalidConfig = errors.New("supervisor: invalid config")
 )
