@@ -13,7 +13,9 @@
 //
 // Serializable settings live in an env-loadable Config (Level, Format, File, AddSource)
 // with a DefaultConfig and Validate; writers, handlers, and extractor funcs are
-// functional options. Invalid values are reported by New as a joined ErrInvalidConfig
-// and ErrOpenFile; no closer is returned because file writes are unbuffered syscalls.
+// functional options. New returns ErrInvalidConfig for bad option or Config values
+// (multiple invalid options are joined together); it returns ErrOpenFile if the log
+// file cannot be opened — these two errors are on separate paths and are never joined
+// to each other. No closer is returned because file writes are unbuffered syscalls.
 // NewNope returns a discard logger. The package imports only the standard library.
 package logger
