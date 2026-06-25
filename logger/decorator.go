@@ -21,10 +21,11 @@ type handlerOp struct {
 // All methods are pure (they return new handlers and copy slices), so it is safe for
 // concurrent use like any slog.Handler.
 type contextHandler struct {
-	root       slog.Handler // handler before any recorded WithAttrs/WithGroup ops
-	next       slog.Handler // root with all ops applied (fast path)
-	ops        []handlerOp
-	extractors []ContextExtractor
+	root        slog.Handler // handler before any recorded WithAttrs/WithGroup ops
+	next        slog.Handler // root with all ops applied (fast path)
+	ops         []handlerOp
+	extractors  []ContextExtractor
+	groupActive bool // true once a non-empty WithGroup is recorded in the op chain
 }
 
 // newContextHandler wraps next with the given extractors, filtering nil entries.
@@ -46,7 +47,8 @@ func (h *contextHandler) Handle(ctx context.Context, rec slog.Record) error {
 	if len(h.extractors) == 0 {
 		return h.next.Handle(ctx, rec)
 	}
-	extracted := make([]slog.Attr, 0, len(h.extractors))
+	// Lazily allocate: a context that misses every extractor stays alloc-free.
+	var extracted []slog.Attr
 	for _, ex := range h.extractors {
 		if attr, ok := ex(ctx); ok {
 			extracted = append(extracted, attr)
@@ -56,8 +58,9 @@ func (h *contextHandler) Handle(ctx context.Context, rec slog.Record) error {
 		return h.next.Handle(ctx, rec)
 	}
 	// Fast path: no group active, so adding to the record keeps extracted attrs at the
-	// top level without rebuilding the chain.
-	if !h.hasGroup() {
+	// top level without rebuilding the chain. groupActive is precomputed, so this is a
+	// field read rather than a per-call scan of ops.
+	if !h.groupActive {
 		rec.AddAttrs(extracted...)
 		return h.next.Handle(ctx, rec)
 	}
@@ -74,21 +77,13 @@ func (h *contextHandler) Handle(ctx context.Context, rec slog.Record) error {
 	return target.Handle(ctx, rec)
 }
 
-func (h *contextHandler) hasGroup() bool {
-	for _, op := range h.ops {
-		if op.group != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &contextHandler{
-		root:       h.root,
-		next:       h.next.WithAttrs(attrs),
-		ops:        h.appendOp(handlerOp{attrs: attrs}),
-		extractors: h.extractors,
+		root:        h.root,
+		next:        h.next.WithAttrs(attrs),
+		ops:         h.appendOp(handlerOp{attrs: attrs}),
+		extractors:  h.extractors,
+		groupActive: h.groupActive,
 	}
 }
 
@@ -97,10 +92,11 @@ func (h *contextHandler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	return &contextHandler{
-		root:       h.root,
-		next:       h.next.WithGroup(name),
-		ops:        h.appendOp(handlerOp{group: name}),
-		extractors: h.extractors,
+		root:        h.root,
+		next:        h.next.WithGroup(name),
+		ops:         h.appendOp(handlerOp{group: name}),
+		extractors:  h.extractors,
+		groupActive: true,
 	}
 }
 
