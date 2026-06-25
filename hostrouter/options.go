@@ -26,7 +26,7 @@ func WithHost(pattern string, h http.Handler) Option {
 			if _, dup := r.wildcard[parent]; dup {
 				panic(fmt.Errorf("%w: %q", ErrDuplicateHost, pattern))
 			}
-			r.wildcard[parent] = h
+			r.wildcard[parent] = wildcardEntry{handler: h, pattern: "*." + parent}
 			return
 		}
 		host := normalizeHost(pattern)
@@ -49,4 +49,11 @@ func WithFallback(h http.Handler) Option {
 		}
 		r.fallback = h
 	}
+}
+
+// WithoutMatchContext disables match-context injection for the Router, making the
+// matched path zero-allocation (no http.Request copy). FromContext and the
+// Subdomain/Pattern/Host accessors then return zero values.
+func WithoutMatchContext() Option {
+	return func(r *Router) { r.injectCtx = false }
 }

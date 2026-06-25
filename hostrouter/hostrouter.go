@@ -5,12 +5,20 @@ import (
 	"strings"
 )
 
+// wildcardEntry stores a wildcard handler together with its pre-built "*."+parent
+// pattern, so ServeHTTP never concatenates on the hot path.
+type wildcardEntry struct {
+	handler http.Handler
+	pattern string
+}
+
 // Router dispatches by Host header. It is immutable after New and safe for
 // concurrent use. It implements http.Handler.
 type Router struct {
-	exact    map[string]http.Handler
-	wildcard map[string]http.Handler
-	fallback http.Handler
+	exact     map[string]http.Handler
+	wildcard  map[string]wildcardEntry
+	fallback  http.Handler
+	injectCtx bool
 }
 
 // New builds a Router from options applied in order. With no WithHost options every
@@ -18,9 +26,10 @@ type Router struct {
 // New panics on any invalid registration. It does no I/O.
 func New(opts ...Option) *Router {
 	r := &Router{
-		exact:    make(map[string]http.Handler),
-		wildcard: make(map[string]http.Handler),
-		fallback: http.NotFoundHandler(),
+		exact:     make(map[string]http.Handler),
+		wildcard:  make(map[string]wildcardEntry),
+		fallback:  http.NotFoundHandler(),
+		injectCtx: true,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -29,20 +38,30 @@ func New(opts ...Option) *Router {
 }
 
 // ServeHTTP routes by Host: exact match first, then a single-label wildcard, then
-// the fallback.
+// the fallback. Matched routes carry a Match in the request context unless the
+// Router was built with WithoutMatchContext.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := normalizeHost(req.Host)
 	if h, ok := r.exact[host]; ok {
-		h.ServeHTTP(w, req)
+		r.serve(w, req, h, Match{Host: host, Pattern: host})
 		return
 	}
-	if _, parent, ok := splitFirstLabel(host); ok {
-		if h, found := r.wildcard[parent]; found {
-			h.ServeHTTP(w, req)
+	if label, parent, ok := splitFirstLabel(host); ok {
+		if e, found := r.wildcard[parent]; found {
+			r.serve(w, req, e.handler, Match{Host: host, Pattern: e.pattern, Subdomain: label})
 			return
 		}
 	}
-	r.fallback.ServeHTTP(w, req)
+	r.fallback.ServeHTTP(w, req) // no match: no context injected, original request
+}
+
+// serve dispatches to h, injecting m into the request context unless the Router was
+// built with WithoutMatchContext.
+func (r *Router) serve(w http.ResponseWriter, req *http.Request, h http.Handler, m Match) {
+	if r.injectCtx {
+		req = req.WithContext(&matchCtx{Context: req.Context(), m: m})
+	}
+	h.ServeHTTP(w, req)
 }
 
 // normalizeHost lowercases the host, strips any port, removes IPv6 brackets, and
