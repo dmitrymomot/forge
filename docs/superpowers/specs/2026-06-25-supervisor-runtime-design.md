@@ -122,25 +122,33 @@ Equivalent to `signal.NotifyContext(context.Background(), os.Interrupt, syscall.
 6. Select loop over three cases: a **result** arriving, `runCtx.Done()`, and a **grace timer** (nil until shutdown begins, and never armed when `shutdownTimeout == 0`). "Begin shutdown" is an idempotent step — the first time it runs it logs the reason, `cancel()`s the shared context (all siblings observe it and drain), stops the loop from selecting on `Done()` again, and arms `time.After(shutdownTimeout)` if the timeout is > 0; subsequent calls are no-ops.
    - **A result arrives** — remove the name from `remaining`; if `err != nil` and not `context.Canceled`, append `service %q: %w` to the error list (`context.DeadlineExceeded` is **not** filtered — that's a real failure); then **begin shutdown** (no-op if already shutting down). The loop continues until `remaining` is empty.
    - **`Done()` fires** (OS signal / parent cancel) — **begin shutdown**.
-   - **Grace timer fires** — append `ErrShutdownTimeout` annotated with the still-`remaining` names, log them at `ERROR`, and return immediately. Stuck goroutines are abandoned; the process exits.
+   - **Grace timer fires** — append a single-line `fmt.Errorf("%w: %d service(s) did not stop within %s", ErrShutdownTimeout, len(remaining), shutdownTimeout)` to the error list, log the still-`remaining` names at `ERROR` as a structured `stuck` attribute (e.g. `slog.Any("stuck", names)`), and return immediately. Stuck goroutines are abandoned; the process exits.
 7. When all services have returned, log "shutdown complete" and return `errors.Join(errs...)` (nil if none).
 
 Panic handling wrapper:
 
 ```go
-func runService(ctx context.Context, svc Service, recoverPanics bool) (err error) {
-    if recoverPanics {
-        defer func() {
-            if p := recover(); p != nil {
-                err = fmt.Errorf("%w: %v\n%s", ErrPanic, p, debug.Stack())
-            }
-        }()
+func runService(ctx context.Context, svc Service, log *slog.Logger, recoverPanics bool) (err error) {
+    if !recoverPanics {
+        return svc.Run(ctx)
     }
+    defer func() {
+        if p := recover(); p != nil {
+            // The panic value and stack are emitted as structured slog
+            // attributes — never embedded in the error string.
+            log.Error("service panicked",
+                slog.String("service", svc.Name()),
+                slog.Any("panic", p),
+                slog.String("stack", string(debug.Stack())),
+            )
+            err = fmt.Errorf("%w: %v", ErrPanic, p) // single-line, no stack, no newline
+        }
+    }()
     return svc.Run(ctx)
 }
 ```
 
-A recovered panic becomes a normal service error, which is itself a "first exit" trigger — so a single panicking worker brings the process down *gracefully* (siblings drain) rather than aborting the whole process immediately. Default: enabled.
+A recovered panic becomes a normal service error, which is itself a "first exit" trigger — so a single panicking worker brings the process down *gracefully* (siblings drain) rather than aborting the whole process immediately. The returned `ErrPanic` error is single-line (`supervisor: service panicked: <value>`); the full stack is only ever emitted as the structured `stack` attribute on the ERROR log. Default: enabled.
 
 **Scope caveat (to be stated in the godoc):** recovery only catches panics that propagate out of a service's own top-level `Run` goroutine. It does **not** catch panics in goroutines a service spawns internally — e.g. an HTTP handler panic runs in `net/http`'s per-connection goroutine and must be recovered by HTTP middleware, not here. `WithRecover` is a backstop for the service's main loop, not a process-wide panic shield.
 
@@ -169,11 +177,11 @@ var (
 
 ## Logging
 
-Via the configured `*slog.Logger`. Events:
+All diagnostics go through the configured `*slog.Logger` as **structured attributes** — never as preformatted plain text. Error values are always single-line; multi-line/plain-text blobs (stack traces, name lists) are emitted as slog attributes, never embedded in an error string. Events:
 
 - `INFO` — service started (`service`), shutdown started (`reason`), service stopped (`service`, `err`), shutdown complete.
-- `WARN` — duplicate service names detected.
-- `ERROR` — graceful shutdown timed out (`stuck` = list of remaining service names).
+- `WARN` — duplicate service names detected (`service`).
+- `ERROR` — service panicked (`service`, `panic`, `stack`); graceful shutdown timed out (`stuck` = remaining service names).
 
 No values are smuggled through `context`; the logger is passed explicitly and used only by the supervisor.
 
