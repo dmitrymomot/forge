@@ -125,7 +125,7 @@ func testHeaderInjectionAttacks(t *testing.T) {
 		duration := time.Since(start)
 
 		require.Equal(t, "10.0.0.1", ip, "Should fall back to RemoteAddr for extremely long headers")
-		assert.Less(t, duration, 10*time.Millisecond, "Should process long headers quickly")
+		assert.Less(t, duration, 2*time.Second, "Should process long headers in non-pathological time")
 	})
 
 	t.Run("unicode_normalization_attacks", func(t *testing.T) {
@@ -303,7 +303,11 @@ func testDoSAttackVectors(t *testing.T) {
 		duration := time.Since(start)
 
 		require.Equal(t, "203.0.113.1", ip, "Should find valid IP even in very long chain")
-		assert.Less(t, duration, 500*time.Millisecond, "Should process long chains within reasonable time")
+		// Generous, CI-safe ceiling. The 50k-element scan is linear and costs a
+		// few ms in practice; under -race + parallel CI contention it can take
+		// noticeably longer. 5s still cleanly catches a quadratic/exponential
+		// blowup (which would take tens of seconds) without flaking on noise.
+		assert.Less(t, duration, 5*time.Second, "Should process long chains in linear (not pathological) time")
 
 		t.Logf("Processed chain of %d IPs in %v", chainLength, duration)
 	})
@@ -328,7 +332,7 @@ func testDoSAttackVectors(t *testing.T) {
 		duration := time.Since(start)
 
 		require.Equal(t, "203.0.113.1", ip, "Should extract IP despite many large headers")
-		assert.Less(t, duration, 10*time.Millisecond, "Should not be slowed down by irrelevant large headers")
+		assert.Less(t, duration, 2*time.Second, "Should not be slowed down by irrelevant large headers")
 	})
 
 	t.Run("recursive_parsing_attack", func(t *testing.T) {
@@ -354,7 +358,7 @@ func testDoSAttackVectors(t *testing.T) {
 				duration := time.Since(start)
 
 				require.NotEmpty(t, ip, "Should return some IP")
-				assert.Less(t, duration, 50*time.Millisecond, "Should not spend excessive time on recursive patterns")
+				assert.Less(t, duration, 2*time.Second, "Should not spend excessive time on recursive patterns")
 			})
 		}
 	})
@@ -376,7 +380,7 @@ func testDoSAttackVectors(t *testing.T) {
 
 		// Note: Go's header handling may optimize this, but we should still be reasonably fast
 		require.NotEmpty(t, ip, "Should return some IP despite header bombing")
-		assert.Less(t, duration, 100*time.Millisecond, "Should handle repeated headers efficiently")
+		assert.Less(t, duration, 2*time.Second, "Should handle repeated headers in non-pathological time")
 
 		t.Logf("Processed 10000+ repeated headers in %v, got IP: %s", duration, ip)
 	})

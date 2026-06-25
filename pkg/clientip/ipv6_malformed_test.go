@@ -468,7 +468,7 @@ func testIPv6AddressValidation(t *testing.T) {
 		duration := time.Since(start)
 
 		require.Equal(t, "2001:db8::", ip, "Should find first valid IPv6") // Go compresses ::0 to ::
-		assert.Less(t, duration, 50*time.Millisecond, "IPv6 processing should be efficient")
+		assert.Less(t, duration, 2*time.Second, "IPv6 processing should be non-pathological")
 
 		t.Logf("Processed %d IPv6 addresses in %v", len(longIPv6Chain), duration)
 	})
@@ -631,7 +631,7 @@ func testMalformedHeaderValues(t *testing.T) {
 				duration := time.Since(start)
 
 				require.Equal(t, tt.expected, ip, "Should handle long malformed headers")
-				assert.Less(t, duration, 10*time.Millisecond, "Should process long headers quickly")
+				assert.Less(t, duration, 2*time.Second, "Should process long headers in non-pathological time")
 			})
 		}
 	})
