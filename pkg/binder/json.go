@@ -135,13 +135,20 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Map:
+		if rv.IsNil() {
+			return nil
+		}
+		// Map values are not addressable, so reflect.Value.CanSet always reports
+		// false for them and the value cannot be mutated in place. Sanitize an
+		// addressable copy of each value and write it back with SetMapIndex.
 		for _, key := range rv.MapKeys() {
 			value := rv.MapIndex(key)
-			if value.CanSet() {
-				if err := sanitizeReflectValue(value); err != nil {
-					return err
-				}
+			copyVal := reflect.New(value.Type()).Elem()
+			copyVal.Set(value)
+			if err := sanitizeReflectValue(copyVal); err != nil {
+				return err
 			}
+			rv.SetMapIndex(key, copyVal)
 		}
 
 	case reflect.Pointer:
@@ -152,10 +159,20 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Interface:
-		if !rv.IsNil() {
-			if err := sanitizeReflectValue(rv.Elem()); err != nil {
-				return err
-			}
+		if rv.IsNil() {
+			return nil
+		}
+		// An interface's dynamic value is not addressable either (e.g. the string
+		// behind a map[string]any entry), so sanitize an addressable copy and
+		// write it back into the interface when possible.
+		elem := rv.Elem()
+		copyVal := reflect.New(elem.Type()).Elem()
+		copyVal.Set(elem)
+		if err := sanitizeReflectValue(copyVal); err != nil {
+			return err
+		}
+		if rv.CanSet() {
+			rv.Set(copyVal)
 		}
 	}
 

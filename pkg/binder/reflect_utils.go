@@ -178,15 +178,20 @@ func sanitizeStringValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.ReplaceAll(value, "\n", "")
 
-	// Filter out control characters while preserving printable content
+	// Filter out control characters while preserving printable content. Tab is
+	// kept as legitimate text; everything else in the C0 (0x00-0x1f), DEL (0x7f),
+	// and C1 (0x80-0x9f) ranges is dropped. unicode.IsControl covers all three,
+	// so DEL and C1 bytes — which are >= ' ' and would otherwise slip through —
+	// are stripped too.
 	var builder strings.Builder
 	builder.Grow(len(value))
 
 	for _, r := range value {
-		if r == '\t' || r >= ' ' || unicode.IsGraphic(r) {
-			if utf8.ValidRune(r) {
-				builder.WriteRune(r)
-			}
+		if r != '\t' && unicode.IsControl(r) {
+			continue
+		}
+		if utf8.ValidRune(r) {
+			builder.WriteRune(r)
 		}
 	}
 
