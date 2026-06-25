@@ -10,9 +10,10 @@
 //		}),
 //		sentry.WithContextExtractors(reqIDExtractor),
 //	)
-//	defer flush(ctx) // flushes buffered events; no-op when Sentry is inactive
+//	defer flush(context.Background()) // flushes buffered events; no-op when Sentry is inactive
 //
 // Config embeds logger.Config so primary-logger and Sentry settings env-load together.
 // An empty DSN returns a plain logger and a no-op Flush; a Sentry init failure returns a
-// usable logger plus an ErrSentryInit-wrapped error. Call New once per process.
+// usable logger plus an ErrSentryInit-wrapped error. Flush is always non-nil, so deferring
+// it is safe regardless of the error. Call New once per process.
 package sentry

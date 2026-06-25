@@ -50,29 +50,36 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Flush flushes buffered Sentry events; call it before the program exits. The timeout is
-// derived from ctx.Deadline() (fallback defaultFlushTimeout). Returns ErrSentryFlushTimeout
-// if not all events were delivered in time. A no-op when Sentry is not active.
+// Flush flushes buffered Sentry events; call it before the program exits. The wait honors
+// ctx's cancellation and deadline (fallback defaultFlushTimeout). Returns the context's
+// error if ctx is done, or ErrSentryFlushTimeout if events remain unsent. A no-op when
+// Sentry is not active. New always returns a non-nil Flush, so `defer flush(ctx)` is safe
+// even when New returns an error.
 type Flush func(ctx context.Context) error
 
 const defaultFlushTimeout = 2 * time.Second
 
-// noopFlush is returned whenever Sentry is inactive (empty DSN or init failure).
+// noopFlush is returned whenever Sentry is inactive (empty DSN, init failure, or a New that
+// errored before activating Sentry). Keeping it non-nil makes deferring Flush always safe.
 func noopFlush(context.Context) error { return nil }
 
-// flush flushes the global Sentry client within the ctx deadline (or the 2s default).
+// flush flushes the global Sentry client, honoring ctx's cancellation and deadline. When
+// ctx carries no deadline the wait is bounded to defaultFlushTimeout so a stuck transport
+// cannot block forever. Returns the context's error if ctx is (or becomes) done, or
+// ErrSentryFlushTimeout if events remain unsent within the window.
 func flush(ctx context.Context) error {
-	timeout := defaultFlushTimeout
-	if dl, ok := ctx.Deadline(); ok {
-		timeout = time.Until(dl)
+	if err := ctx.Err(); err != nil { // already canceled or past deadline
+		return err
 	}
-	if timeout <= 0 { // deadline already passed (ctx may not be Done yet)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultFlushTimeout)
+		defer cancel()
+	}
+	if !sentry.FlushWithContext(ctx) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return ErrSentryFlushTimeout
-	}
-	if !sentry.Flush(timeout) {
 		return ErrSentryFlushTimeout
 	}
 	return nil
@@ -112,6 +119,7 @@ func realSentryHandler(cfg Config) (slog.Handler, error) {
 	return sentryslog.Option{
 		EventLevel: []slog.Level{slog.LevelError}, // errors → Issues (DEPRECATED, removed in v0.48.0)
 		LogLevel:   levelsFrom(min),               // min..error → Logs
+		AddSource:  cfg.AddSource,                 // mirror the primary's AddSource into Sentry events
 	}.NewSentryHandler(context.Background()), nil
 }
 
@@ -178,7 +186,10 @@ func WithOutput(w io.Writer) Option {
 // New builds a logger that writes to the primary destination and, when DSN is non-empty,
 // also to Sentry in parallel at MinLevel. Empty DSN returns a plain logger and a no-op
 // Flush; an init failure returns a usable plain logger plus an ErrSentryInit-wrapped
-// error. Call New once per process (it initializes the global Sentry hub).
+// error. The returned Flush is always non-nil (a no-op when Sentry is inactive), so it is
+// safe to defer regardless of the error; on a fatal config error the logger is nil and the
+// error is set — check it before logging. Call New once per process (it initializes the
+// global Sentry hub).
 func New(opts ...Option) (*slog.Logger, Flush, error) {
 	return newWith(realSentryHandler, opts...)
 }
@@ -190,10 +201,10 @@ func newWith(buildHandler func(Config) (slog.Handler, error), opts ...Option) (*
 		opt(&c)
 	}
 	if len(c.errs) > 0 {
-		return nil, nil, errors.Join(c.errs...)
+		return nil, noopFlush, errors.Join(c.errs...)
 	}
 	if err := c.Validate(); err != nil {
-		return nil, nil, err
+		return nil, noopFlush, err
 	}
 
 	loggerOpts := []logger.Option{logger.WithConfig(c.Config.Config)} // embedded logger.Config
@@ -213,14 +224,14 @@ func newWith(buildHandler func(Config) (slog.Handler, error), opts ...Option) (*
 	if err != nil { // graceful: keep logging, surface the error
 		l, lerr := logger.New(loggerOpts...)
 		if lerr != nil {
-			return nil, nil, lerr
+			return nil, noopFlush, lerr
 		}
 		return l, noopFlush, fmt.Errorf("%w: %v", ErrSentryInit, err)
 	}
 
 	l, err := logger.New(append(loggerOpts, logger.WithHandler(sh))...)
 	if err != nil {
-		return nil, nil, err
+		return nil, noopFlush, err
 	}
 	return l, flush, nil
 }

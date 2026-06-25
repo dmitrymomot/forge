@@ -59,7 +59,10 @@ func TestNewEmptyDSNReturnsPlainLogger(t *testing.T) {
 func TestNewInvalidConfigSurfacesError(t *testing.T) {
 	bad := sentry.DefaultConfig()
 	bad.MinLevel = "loud"
-	_, _, err := sentry.New(sentry.WithConfig(bad))
+	_, flush, err := sentry.New(sentry.WithConfig(bad))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, sentry.ErrInvalidConfig)
+	// Flush is always non-nil, so `defer flush(ctx)` is safe even on a fatal config error.
+	require.NotNil(t, flush)
+	require.NoError(t, flush(context.Background()))
 }

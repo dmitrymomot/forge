@@ -39,6 +39,16 @@ func TestFlushPastDeadlineReturnsCtxErr(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func TestFlushCanceledContextReturnsCtxErr(t *testing.T) {
+	// A canceled context WITHOUT a deadline must be honored immediately, not wait out the
+	// 2s default. flush returns the context's cancellation error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := flush(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 type ctxKey struct{}
 
 func TestNewBuildHandlerErrorReturnsUsableLogger(t *testing.T) {
@@ -61,6 +71,8 @@ func TestNewBuildHandlerErrorReturnsUsableLogger(t *testing.T) {
 
 func TestNewWithFanOutAndExtraction(t *testing.T) {
 	var primary, fake bytes.Buffer
+	// Fake Sentry handler with nil opts → default Info level; the test logs at Info so the
+	// record is captured. A debug-level log would be dropped by this handler.
 	fakeHandler := slog.NewJSONHandler(&fake, nil)
 	build := func(Config) (slog.Handler, error) { return fakeHandler, nil }
 
@@ -87,6 +99,7 @@ func TestNewWithFanOutAndExtraction(t *testing.T) {
 	log.InfoContext(ctx, "hello")
 
 	assert.Contains(t, primary.String(), "hello") // primary destination
+	require.NotEmpty(t, fake.Bytes(), "fake Sentry handler received no record")
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(bytes.TrimSpace(fake.Bytes()), &m))
 	assert.Equal(t, "hello", m["msg"])
