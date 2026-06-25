@@ -27,6 +27,8 @@ func defaultConfig() config {
 
 // WithConfig sets the whole serializable data block at once. Options apply in order — a
 // later WithConfig replaces the block, so place it before any WithFile you want to keep.
+// WithLevel and WithFormat are separate code-level overrides, not part of this block:
+// they always win over Config.Level/Config.Format regardless of WithConfig ordering.
 func WithConfig(cfg Config) Option {
 	return func(c *config) { c.Config = cfg }
 }

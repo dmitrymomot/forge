@@ -16,6 +16,8 @@
 // functional options. New returns ErrInvalidConfig for bad option or Config values
 // (multiple invalid options are joined together); it returns ErrOpenFile if the log
 // file cannot be opened — these two errors are on separate paths and are never joined
-// to each other. No closer is returned because file writes are unbuffered syscalls.
-// NewNope returns a discard logger. The package imports only the standard library.
+// to each other. A file opened via Config.File is held open for the lifetime of the
+// process and never closed (like os.Stdout); no closer is returned, so call New once at
+// startup rather than per request. NewNope returns a discard logger. The package imports
+// only the standard library.
 package logger

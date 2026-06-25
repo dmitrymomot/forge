@@ -9,9 +9,11 @@ import (
 
 // New builds an *slog.Logger from the options. With no options it returns a text-format,
 // info-level logger writing to os.Stdout. If Config.File is set the primary destination
-// becomes that file instead of stdout. Handlers added via WithHandler run as parallel
-// destinations beneath context extraction. Returns ErrInvalidConfig for bad values and
-// ErrOpenFile if the file cannot be opened.
+// becomes that file instead of stdout; the file is opened once and held for the lifetime
+// of the process (never closed, like os.Stdout), so call New once at startup rather than
+// per request. Handlers added via WithHandler run as parallel destinations beneath
+// context extraction. Returns ErrInvalidConfig for bad values and ErrOpenFile if the file
+// cannot be opened.
 func New(opts ...Option) (*slog.Logger, error) {
 	c := defaultConfig()
 	for _, opt := range opts {
@@ -80,5 +82,5 @@ func newHandler(format Format, w io.Writer, level slog.Level, addSource bool) sl
 // NewNope returns a logger that discards all records. Use as a safe default when logging
 // is not configured, and in tests.
 func NewNope() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
