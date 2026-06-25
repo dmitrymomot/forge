@@ -16,18 +16,20 @@ four things and nothing more:
 1. Builds a configured `*slog.Logger` from functional options (`New`).
 2. Injects request-scoped attributes from `context.Context` on every log call via an
    exported handler decorator (`ContextHandler` + `ContextExtractor`).
-3. Optionally tees every record into a local file as a second destination (no
-   rotation — a plain append file for local development), creating the file and any
-   missing parent directories.
+3. Writes to a **single** primary destination — stdout by default, **or** a local file
+   (not both): when a file path is configured, all records go to that file *instead of*
+   stdout (no rotation — a plain append file for local development), creating the file
+   and any missing parent directories.
 4. Provides a no-op discard logger (`NewNope`) for defaults and tests.
 
-A separate `logger/sentry` package adds Sentry as an additional destination. The
+A separate `logger/sentry` package adds Sentry as a **parallel** destination. The
 dependency direction is **inverted** relative to a plugin model: core `logger` knows
 nothing about Sentry; `sentry.Wrap(base, cfg)` takes the finished `*slog.Logger`,
-fans it out to both its existing destinations and a Sentry handler via
+fans it out to both its existing primary destination and a Sentry handler via
 `slog.NewMultiHandler`, and returns the combined logger plus a `Flush` closer. This
 keeps the core package 100% standard library and makes Sentry a strictly additive,
-opt-in import.
+opt-in import. (Sentry is the *only* parallel destination — stdout and file remain
+mutually exclusive in core.)
 
 This spec follows the framework conventions established by `supervisor` and
 `httpserver`: serializable settings live in an env-loadable `Config` (data only) with
@@ -43,11 +45,12 @@ errors are single-line.
 - **Context extraction** of request-scoped attributes (request id, user id, tenant
   id, …) injected fresh on every log call, landing at the record's **top level** even
   when the caller has opened groups.
-- **File as a second destination** for local development: write all records to a
-  caller-provided path, creating the file and parent directories if absent. No
-  rotation, retention, or compression.
-- **Sentry runs parallel to stdout at its own, separate level** — e.g. stdout at
-  `info`, Sentry at `warn` — with zero external dependency in the core package.
+- **File as an alternative primary destination** for local development: when a path is
+  configured, all records go to that file *instead of* stdout (the two are mutually
+  exclusive — never both at once), creating the file and parent directories if absent.
+  No rotation, retention, or compression.
+- **Sentry runs parallel to the primary destination at its own, separate level** —
+  e.g. primary at `info`, Sentry at `warn` — with zero external dependency in core.
 - **Graceful Sentry fallback:** an empty DSN returns the base logger immediately
   (no-op flush, nil error); a Sentry init failure still returns a usable logger.
 - **Config = data, Option = code.** Serializable settings in one env-loadable
@@ -65,12 +68,15 @@ errors are single-line.
   everywhere (`httpserver.WithLogger`, `supervisor`'s logger), so we never wrap it.
 - Built-in extractors. `ContextExtractor` is the seam; callers supply the funcs
   (request-id middleware owns the key, not this package).
+- **Logging to stdout and a file simultaneously.** The primary destination is exactly
+  one writer (stdout XOR file). Teeing to multiple local sinks at once is out of scope;
+  Sentry is the only *parallel* destination, added via the adapter.
 - Additional sinks beyond stdout/file/Sentry (Kafka, syslog, OTLP, …). New
   destinations are future adapter packages following the same `Wrap` shape.
 - Importing or wrapping any config loader. `Config` is plain data with inert `env`
   struct tags.
-- Per-destination level/format knobs in core. stdout and file share the global level
-  and format; only Sentry has an independent level (it is a separate package).
+- Per-destination level/format knobs in core. The single primary destination uses the
+  global level and format; only Sentry has an independent level (separate package).
 
 ## Package & module
 
@@ -112,13 +118,14 @@ errors are single-line.
 // Config holds the serializable settings for New. The env struct tags are inert
 // strings — this package imports no config loader.
 type Config struct {
-    // Level is the minimum level for stdout and file destinations:
+    // Level is the minimum level for the primary destination:
     // "debug", "info", "warn"/"warning", "error" (case-insensitive).
     Level string `env:"LEVEL"`
     // Format selects the handler: "text" or "json" (case-insensitive).
     Format string `env:"FORMAT"`
-    // File, when non-empty, adds a second destination writing to this path. Parent
-    // directories and the file are created if absent. Empty means stdout only.
+    // File, when non-empty, makes the primary destination this file INSTEAD of stdout
+    // (mutually exclusive — never both). Parent directories and the file are created if
+    // absent. Empty means stdout.
     File string `env:"FILE"`
     // AddSource includes the source file:line in records (slog AddSource).
     AddSource bool `env:"ADD_SOURCE"`
@@ -140,7 +147,7 @@ drift from it).
 |---|---|---|
 | `Level` | `"debug"`, `"info"`, `"warn"`/`"warning"`, `"error"` | `ErrInvalidConfig` |
 | `Format` | `"text"`, `"json"` | `ErrInvalidConfig` |
-| `File` | any string, including `""` (= stdout only) | never rejected (created by `New`) |
+| `File` | any string, including `""` (= stdout) | never rejected (created by `New`) |
 | `AddSource` | any bool | never rejected |
 
 `Level`/`Format` parse case-insensitively with surrounding whitespace trimmed; `Level`
@@ -154,9 +161,9 @@ they assume a member of the validated set.
 ```go
 // New builds an *slog.Logger from the options. With no options it returns a
 // text-format, info-level logger writing to os.Stdout. If Config.File is set (via
-// WithConfig or WithFile), records are also written to that file; the file and any
-// missing parent directories are created. Returns ErrInvalidConfig for bad option/
-// Config values and ErrOpenFile if the file cannot be opened.
+// WithConfig or WithFile), the primary destination becomes that file INSTEAD of stdout
+// (the file and any missing parent directories are created). Returns ErrInvalidConfig
+// for bad option/Config values and ErrOpenFile if the file cannot be opened.
 func New(opts ...Option) (*slog.Logger, error)
 
 // NewNope returns a logger that discards all records. Use as a safe default when
@@ -192,22 +199,24 @@ const (
 // you want to keep.
 func WithConfig(cfg Config) Option
 
-// WithLevel sets an explicit code-level minimum for stdout/file. It is an override:
-// it ALWAYS takes precedence over Config.Level regardless of option order. Accepts any
-// slog.Level (including custom levels), so it never round-trips through string parsing.
+// WithLevel sets an explicit code-level minimum for the primary destination. It is an
+// override: it ALWAYS takes precedence over Config.Level regardless of option order.
+// Accepts any slog.Level (incl. custom), so it never round-trips through string parsing.
 func WithLevel(level slog.Level) Option
 
 // WithFormat sets an explicit code format override. Like WithLevel, it ALWAYS takes
 // precedence over Config.Format regardless of option order. Default FormatText.
 func WithFormat(f Format) Option
 
-// WithFile adds a file destination at path (convenience that writes Config.File). An
-// empty path is rejected (ErrInvalidConfig). Because it writes the data block, a later
-// WithConfig overrides it. The file and parent dirs are created at New.
+// WithFile routes the primary destination to a file at path INSTEAD of stdout
+// (convenience that writes Config.File). An empty path is rejected (ErrInvalidConfig).
+// Because it writes the data block, a later WithConfig overrides it. The file and
+// parent dirs are created at New.
 func WithFile(path string) Option
 
-// WithOutput overrides the default stdout destination's writer (tests, custom sinks).
-// A nil writer is rejected (ErrInvalidConfig).
+// WithOutput sets the primary destination's writer directly (tests, custom sinks). As
+// a code override it takes precedence over Config.File: if both are set, the file is
+// NOT opened and w is used. A nil writer is rejected (ErrInvalidConfig).
 func WithOutput(w io.Writer) Option
 
 // WithContextExtractors registers ContextExtractor funcs applied on every log call.
@@ -220,12 +229,17 @@ func WithContextExtractors(ex ...ContextExtractor) Option
 - `Config` string fields (`Level`, `Format`, `File`) are the serializable tier. Among
   options that write them — `WithConfig` (whole block) and `WithFile` (one field) —
   **option order decides** (last writer wins); place `WithConfig` first.
-- `WithLevel`/`WithFormat` set distinct **code-override fields** (`*slog.Level`,
-  `*Format`) on the internal config. They are resolved last and **always win** over
-  the parsed `Config` value, irrespective of where they sit in the option list. This
-  two-representation split exists because a level has both a serializable string form
-  (`Config.Level`) and a precise code form (`slog.Level`); the code form is treated as
-  explicit intent.
+- `WithLevel`/`WithFormat`/`WithOutput` set distinct **code-override fields**
+  (`*slog.Level`, `*Format`, `io.Writer`) on the internal config. They are resolved last
+  and **always win** over the parsed `Config` value, irrespective of where they sit in
+  the option list. The split exists because a level has both a serializable string form
+  (`Config.Level`) and a precise code form (`slog.Level`); the code form is explicit
+  intent.
+
+**Primary-writer resolution (single destination, stdout XOR file):** the one output
+writer is resolved as `WithOutput`'s writer if set, else `openFile(Config.File)` if
+`File != ""`, else `os.Stdout`. There is never more than one local writer; `MultiHandler`
+does not appear in core (it is introduced only by `logger/sentry`).
 
 `Format` is a tiny string enum so `WithFormat` is type-safe while `Config.Format`
 stays an env-friendly string.
@@ -261,7 +275,7 @@ type ContextHandler struct {
 // root == next and ops == nil.
 func NewContextHandler(next slog.Handler, ex ...ContextExtractor) *ContextHandler
 
-// Inner returns the ORIGINAL unwrapped handler (h.root) — the destination fan-out
+// Inner returns the ORIGINAL unwrapped handler (h.root) — the base destination handler
 // BEFORE any recorded WithAttrs/WithGroup ops. Adapters compose a new destination onto
 // this clean base; returning root (not next) is required so that WithInner can replay
 // the ops without double-applying them.
@@ -315,7 +329,7 @@ defensively even if the caller already called it after env loading.
 ## New algorithm
 
 ```
-1. c := defaultConfig()                     // {Config: DefaultConfig(), output: os.Stdout,
+1. c := defaultConfig()                     // {Config: DefaultConfig(), outputOverride: nil,
                                              //  extractors: nil, level/format override: nil}
 2. apply opts in order; each invalid value appends fmt.Errorf("%w: ...", ErrInvalidConfig)
    to c.errs. WithConfig replaces the embedded Config block.
@@ -325,30 +339,36 @@ defensively even if the caller already called it after env loading.
 5. // Two-tier resolution (see Precedence model):
    level  := parseLevel(c.Level);  if c.levelOverride  != nil { level  = *c.levelOverride }
    format := parseFormat(c.Format); if c.formatOverride != nil { format = *c.formatOverride }
-6. handlers := [ newHandler(format, c.output, level, c.AddSource) ]   // stdout/output
-7. if c.File != "":
-       f, err := openFile(c.File)           // mkdir -p dir; O_CREATE|O_APPEND|O_WRONLY
-       if err != nil: return nil, err        // already wrapped with ErrOpenFile
-       handlers = append(handlers, newHandler(format, f, level, c.AddSource))
-8. var base slog.Handler = handlers[0]
-   if len(handlers) > 1: base = slog.NewMultiHandler(handlers...)
-9. // c.extractors holds only non-nil funcs (WithContextExtractors filtered them on apply),
+6. // Resolve the SINGLE primary writer (stdout XOR file), code override wins:
+   var w io.Writer
+   switch {
+   case c.outputOverride != nil:            // WithOutput
+       w = c.outputOverride
+   case c.File != "":                        // file replaces stdout
+       f, err := openFile(c.File)            // mkdir -p dir; O_CREATE|O_APPEND|O_WRONLY
+       if err != nil { return nil, err }     // already wrapped with ErrOpenFile
+       w = f
+   default:
+       w = os.Stdout
+   }
+7. var base slog.Handler = newHandler(format, w, level, c.AddSource)   // exactly one handler
+8. // c.extractors holds only non-nil funcs (WithContextExtractors filtered them on apply),
    // so an all-nil extractor list correctly skips the decorator:
-   if len(c.extractors) > 0: base = NewContextHandler(base, c.extractors...)
-10. return slog.New(base), nil
+   if len(c.extractors) > 0 { base = NewContextHandler(base, c.extractors...) }
+9. return slog.New(base), nil
 ```
 
 The internal `config` embeds `Config` (serializable strings) and adds the
-non-serializable fields: `output io.Writer`, `extractors []ContextExtractor`, the code
-overrides `levelOverride *slog.Level` and `formatOverride *Format`, and `errs []error`
-— mirroring how `httpserver`'s internal `config` embeds its `Config`.
+non-serializable fields: `outputOverride io.Writer` (nil unless `WithOutput`),
+`extractors []ContextExtractor`, the code overrides `levelOverride *slog.Level` and
+`formatOverride *Format`, and `errs []error` — mirroring how `httpserver`'s internal
+`config` embeds its `Config`.
 
 `newHandler` maps `FormatText → slog.NewTextHandler`, `FormatJSON → slog.NewJSONHandler`,
-each with `&slog.HandlerOptions{Level: level, AddSource: addSource}`. Per-destination
-level filtering is handled by slog: `slog.NewMultiHandler` calls each sub-handler's
-`Handle` only when its `Enabled(level)` is true. stdout and file share the global
-level here; an independent level is only meaningful for Sentry, which is a separate
-package.
+each with `&slog.HandlerOptions{Level: level, AddSource: addSource}`. The core builds
+**exactly one** handler over the single resolved writer — `slog.NewMultiHandler` never
+appears here; it is introduced only by `logger/sentry` to run Sentry in parallel. (That
+is where per-handler `Enabled(level)` filtering gives Sentry its independent level.)
 
 `openFile` (in `file.go`): `dir := filepath.Dir(path)`; if `dir != "" && dir != "."`,
 `os.MkdirAll(dir, 0o755)`; then `os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND,
@@ -363,8 +383,8 @@ type Config struct {
     DSN         string `env:"DSN"`
     Environment string `env:"ENVIRONMENT"` // default "production"
     // MinLevel is Sentry's OWN minimum level — the lowest level forwarded to Sentry,
-    // independent of the base logger's stdout/file level. Case-insensitive, one of
-    // "debug", "info", "warn"/"warning", "error".
+    // independent of the base logger's primary-destination level. Case-insensitive, one
+    // of "debug", "info", "warn"/"warning", "error".
     MinLevel    string `env:"MIN_LEVEL"`    // default "warn"
     // EnableLogs forwards non-error log entries to Sentry as Logs (in addition to
     // errors, which always create Issues). Default false (opt-in).
@@ -493,7 +513,7 @@ slog attributes. The package never logs from `New` on success.
 ## Usage
 
 ```go
-// Local development: text to stdout + a file, with a request-id extractor.
+// Local development: text to a file INSTEAD of stdout, with a request-id extractor.
 reqID := func(ctx context.Context) (slog.Attr, bool) {
     if id, ok := ctx.Value(ctxkeys.RequestID).(string); ok && id != "" {
         return slog.String("request_id", id), true
@@ -504,14 +524,14 @@ reqID := func(ctx context.Context) (slog.Attr, bool) {
 log, err := logger.New(
     logger.WithFormat(logger.FormatText),
     logger.WithLevel(slog.LevelDebug),
-    logger.WithFile("./tmp/dev.log"),       // created with parent dirs
+    logger.WithFile("./tmp/dev.log"),       // primary output is this file (not stdout)
     logger.WithContextExtractors(reqID),
 )
 if err != nil { /* handle ErrInvalidConfig / ErrOpenFile */ }
 
 // Production: JSON to stdout, plus Sentry at warn+ (parallel, separate level).
 base, err := logger.New(
-    logger.WithConfig(logger.DefaultConfig()), // info, text — or env-parsed
+    logger.WithConfig(logger.DefaultConfig()), // info, text, stdout — or env-parsed
     logger.WithFormat(logger.FormatJSON),
     logger.WithContextExtractors(reqID),
 )
@@ -526,19 +546,22 @@ if err != nil {
 }
 defer flush(ctx) // ctx carries the shutdown deadline; no-op if Sentry inactive
 
-// request_id is injected into stdout AND Sentry automatically.
+// request_id is injected into the primary destination AND Sentry automatically.
 log.ErrorContext(ctx, "payment failed", slog.String("user_id", "u-456"))
 ```
 
 ## Edge cases
 
 - **No options:** text, info, stdout — a complete logger.
-- **Empty `Config.File`:** stdout only; no file opened.
+- **Empty `Config.File`:** primary destination is stdout; no file opened.
+- **`Config.File` set:** primary destination is the file; **stdout receives nothing**
+  (mutually exclusive).
 - **File path with missing dirs:** `mkdir -p` creates them; failure → `ErrOpenFile`.
 - **Bad level/format string:** `Validate` fails → `ErrInvalidConfig`, no I/O.
-- **`WithOutput(buf)` + `WithFile`:** both destinations receive every record.
-- **No extractors:** `New` skips the decorator entirely; `base.Handler()` is the
-  (multi)handler, and `sentry.Wrap` takes the plain fan-out path.
+- **`WithOutput(buf)` + `WithFile`:** `WithOutput` wins (code override) — the file is
+  **not opened** and records go to `buf` only.
+- **No extractors:** `New` skips the decorator entirely; `base.Handler()` is the single
+  primary handler, and `sentry.Wrap` takes the plain `MultiHandler(base, sentry)` path.
 - **`sentry.Wrap` with empty DSN:** returns `base` immediately; `defer flush(ctx)` is
   a no-op.
 - **`sentry.Wrap` init failure:** returns usable `base` + `ErrSentryInit`; the app
@@ -568,8 +591,9 @@ log.ErrorContext(ctx, "payment failed", slog.String("user_id", "u-456"))
   accumulate `ErrInvalidConfig`; option order/precedence (`WithConfig` then `WithLevel`).
 - `logger_test.go` — `New()` default writes JSON/text to a captured `WithOutput` buffer
   at the right level; `WithFile` creates the file under `t.TempDir()` (incl. a missing
-  nested dir) and appends; both buffer and file receive a record; `ErrOpenFile` on an
-  un-creatable path; `NewNope` discards (buffer stays empty).
+  nested dir) and **all records go to the file**; `WithOutput` + `WithFile` together →
+  file is **not** created and records land in the buffer only (XOR precedence);
+  `ErrOpenFile` on an un-creatable path; `NewNope` discards (buffer stays empty).
 - `decorator_test.go` — extractor injects an attr; returns false → skipped; attr lands
   at top level even after `WithGroup`; nil extractors filtered; **immutability** (
   `WithAttrs`/`WithGroup`/`WithInner` return new handlers, receiver unchanged; safe
@@ -630,6 +654,6 @@ that rule intact:
 ## Deferred
 
 - Log rotation / retention / compression (explicitly out of scope — platform's job).
-- Per-destination level/format for stdout vs file (YAGNI; single global pair today).
-- A `WithFileLevel` to capture more in the file than stdout (add only if needed).
+- Simultaneous stdout **and** file output (deliberately excluded — the primary
+  destination is stdout XOR file; add a teeing option only if a real need appears).
 - Sampling, rate limiting, async/buffered handlers.
