@@ -53,7 +53,7 @@ func TestRun_FirstExitStopsAll(t *testing.T) {
 	require.NoError(t, err, "quick returns nil; sibling returns context.Canceled which is filtered")
 	select {
 	case <-siblingCancelled:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("sibling was not cancelled when quick exited")
 	}
 }
