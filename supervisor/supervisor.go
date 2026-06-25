@@ -54,7 +54,7 @@ func Run(ctx context.Context, opts ...Option) error {
 		remaining[i] = svc.Name()
 		go func() {
 			log.Info("service started", slog.String("service", svc.Name()))
-			err := runService(runCtx, svc, log, cfg.recover)
+			err := runService(runCtx, svc, log, cfg.Recover)
 			results <- result{idx: i, name: svc.Name(), err: err}
 		}()
 	}
@@ -74,8 +74,8 @@ func Run(ctx context.Context, opts ...Option) error {
 		log.Info("shutdown started", slog.String("reason", reason))
 		cancel()
 		done = nil
-		if cfg.shutdownTimeout > 0 {
-			graceCh = time.After(cfg.shutdownTimeout)
+		if cfg.ShutdownTimeout > 0 {
+			graceCh = time.After(cfg.ShutdownTimeout)
 		}
 	}
 
@@ -95,7 +95,7 @@ func Run(ctx context.Context, opts ...Option) error {
 			beginShutdown("context cancelled")
 		case <-graceCh:
 			errs = append(errs, fmt.Errorf("%w: %d service(s) did not stop within %s",
-				ErrShutdownTimeout, len(remaining), cfg.shutdownTimeout))
+				ErrShutdownTimeout, len(remaining), cfg.ShutdownTimeout))
 			log.Error("graceful shutdown timed out", slog.Any("stuck", remainingNames(remaining)))
 			return errors.Join(errs...)
 		}

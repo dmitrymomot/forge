@@ -13,8 +13,8 @@ import (
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := defaultConfig()
-	assert.Equal(t, 30*time.Second, cfg.shutdownTimeout)
-	assert.True(t, cfg.recover)
+	assert.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+	assert.True(t, cfg.Recover)
 	assert.NotNil(t, cfg.logger)
 	assert.Empty(t, cfg.services)
 }
@@ -50,7 +50,7 @@ func TestWithServiceFunc_CreatesNamedService(t *testing.T) {
 func TestWithShutdownTimeout(t *testing.T) {
 	cfg := defaultConfig()
 	WithShutdownTimeout(5 * time.Second)(&cfg)
-	assert.Equal(t, 5*time.Second, cfg.shutdownTimeout)
+	assert.Equal(t, 5*time.Second, cfg.ShutdownTimeout)
 }
 
 func TestWithLogger_StoresValueIncludingNil(t *testing.T) {
@@ -67,7 +67,14 @@ func TestWithLogger_StoresValueIncludingNil(t *testing.T) {
 func TestWithRecover_Toggles(t *testing.T) {
 	cfg := defaultConfig()
 	WithRecover(false)(&cfg)
-	assert.False(t, cfg.recover)
+	assert.False(t, cfg.Recover)
 	WithRecover(true)(&cfg)
-	assert.True(t, cfg.recover)
+	assert.True(t, cfg.Recover)
+}
+
+func TestWithConfig_SetsWholeBlock(t *testing.T) {
+	cfg := defaultConfig()
+	WithConfig(Config{ShutdownTimeout: 7 * time.Second, Recover: false})(&cfg)
+	assert.Equal(t, 7*time.Second, cfg.ShutdownTimeout)
+	assert.False(t, cfg.Recover)
 }
