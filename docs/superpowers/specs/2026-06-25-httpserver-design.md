@@ -58,8 +58,8 @@ on any dependency.
   ```
   httpserver/
     server.go       # Server type, New, Name, Run, shutdown coordination
-    config.go       # Config (exported data) + DefaultConfig
-    options.go      # Option, all With* options, internal config
+    config.go       # Config (exported data) + DefaultConfig + Validate
+    options.go      # Option, all With* options, internal config (incl. errs)
     errors.go       # sentinel errors
     doc.go          # package documentation
     server_test.go
@@ -93,6 +93,11 @@ type Config struct {
 // DefaultConfig returns the optimal defaults. It is the single source of truth
 // for defaults; there are no envDefault tags to drift from it.
 func DefaultConfig() Config
+
+// Validate reports whether the field values are usable, returning an
+// ErrInvalidConfig-wrapped, single-line joined error otherwise. Callers may call
+// it after loading from env (zero-trust); Run also calls it defensively.
+func (c Config) Validate() error
 ```
 
 `DefaultConfig()` values:
@@ -133,7 +138,9 @@ type Server struct { /* unexported */ }
 // New builds a Server. The handler is required and is the only positional
 // argument. New does no I/O: the internal config is seeded from DefaultConfig()
 // and then each option is applied in order, so New(handler) alone is a complete
-// server running on every default. Binding happens in Run.
+// server running on every default. Binding happens in Run. New never fails;
+// invalid option/Config values accumulate and are returned by Run (see
+// "Option validation").
 func New(handler http.Handler, opts ...Option) *Server
 
 func (s *Server) Name() string                  // cfg.Name; else "http "+listener.Addr() if WithListener; else "http "+cfg.Addr
@@ -177,15 +184,60 @@ type config struct {
     tlsConfig   *tls.Config
     baseContext func() context.Context
     connState   func(net.Conn, http.ConnState)
+    errs        []error                             // accumulated option-validation failures
 }
 ```
 
 `New` builds `config{Config: DefaultConfig(), handler: handler, logger: slog.Default()}`,
 applies options, and stores it on the `Server`.
 
+## Option validation (zero-trust)
+
+Every option and every `Config` field is validated; no input is trusted —
+especially `WithConfig` values that may come from the environment. Validation
+never panics and never silently clamps: invalid input produces a single-line,
+`errors.Is`-matchable `ErrInvalidConfig` error.
+
+**Mechanism.** Options stay `func(*config)` and never return errors, so validation
+failures **accumulate** from two sources, both surfaced by `Run` before it does any
+I/O:
+
+1. **Code-only option nil-checks** — `WithListener(nil)`, `WithTLSConfig(nil)`,
+   `WithBaseContext(nil)`, `WithConnState(nil)` (and `WithService(nil)` /
+   `WithServiceFunc(name, nil)` in supervisor) append an `ErrInvalidConfig`-wrapped
+   error to the unexported `errs []error`. (`WithLogger(nil)` is *allowed* — it
+   means "discard".) Data-field convenience setters (`WithAddr`, `WithName`,
+   `WithConfig`) just set values; their rules live in `Config.Validate()` so there
+   is one place to check them regardless of how the field was set.
+2. **Data-field rules** — `Config.Validate()`, exported so callers can check
+   env-loaded config up front (zero-trust); `Run` also calls it defensively.
+
+`Run` begins by joining the accumulated `errs`, `cfg.Config.Validate()`, and (for
+httpserver) the `ErrNoHandler` check; if non-empty it returns `errors.Join(...)`
+and launches nothing. This mirrors supervisor's existing "validate, then return
+`ErrNoServices` / `ErrUnnamedService`" entry check.
+
+**httpserver `Config.Validate()` rules** (each failure → `ErrInvalidConfig`):
+
+| Field | Rule |
+|---|---|
+| `Addr` | non-empty (default is `":8080"`; an explicit `""` is rejected — use `WithListener` for a pre-bound socket) |
+| `ShutdownTimeout`, `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | `>= 0` (`0` is the documented "disabled"/"indefinite" sentinel; negative rejected) |
+| `MaxHeaderBytes` | `>= 0` (`0` = net/http default) |
+| `TLSCertFile` / `TLSKeyFile` | both set or both empty (one without the other is rejected) |
+
+**supervisor `Config.Validate()` rule:** `ShutdownTimeout >= 0`.
+
+Because `WithConfig` replaces the whole data block, a `Config` carrying invalid env
+values (a negative `READ_TIMEOUT`, an `ADDR` blanked to `""`, a half-set TLS pair)
+is caught at `Run` rather than silently accepted — the core reason for the
+zero-trust requirement.
+
 ## Run / shutdown algorithm
 
-1. **Validate & resolve:** if `handler == nil`, return `ErrNoHandler`. Resolve the
+1. **Validate & resolve:** join the accumulated option `errs`, `cfg.Config.Validate()`,
+   and the `handler == nil` → `ErrNoHandler` check; if any are present, return
+   `errors.Join(...)` and launch nothing (see "Option validation"). Then resolve the
    logger once into a local — `log := resolveLogger(cfg.logger)` (`nil` → discard
    handler), exactly as supervisor does — and use `log` for everything below,
    including the `ErrorLog` bridge (so `WithLogger(nil)` never nil-panics).
@@ -278,11 +330,13 @@ applies options, and stores it on the `Server`.
 ```go
 var (
     ErrNoHandler       = errors.New("httpserver: nil handler")
+    ErrInvalidConfig   = errors.New("httpserver: invalid config")
     ErrShutdownTimeout = errors.New("httpserver: graceful shutdown timed out")
 )
 ```
 
-`Run` returns: `nil` on a clean stop (including `http.ErrServerClosed`); the
+`Run` returns: `nil` on a clean stop (including `http.ErrServerClosed`); a joined
+`ErrInvalidConfig` when any option or `Config` field failed validation; the
 bind/serve error on startup failure; `ErrShutdownTimeout` when the drain deadline
 was exceeded and connections were force-closed; `ErrNoHandler` if constructed
 with a nil handler. All matchable with `errors.Is`. Error values are single-line;
@@ -313,6 +367,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config           // { 30 * time.Second, true }
+func (c Config) Validate() error      // ShutdownTimeout >= 0, else ErrInvalidConfig
 func WithConfig(cfg Config) Option    // sets the whole data block
 ```
 
@@ -352,6 +407,13 @@ Like httpserver, `supervisor.WithConfig` replaces the whole data block, so build
 its argument from `DefaultConfig()`. A bare `supervisor.Config{}` sets
 `ShutdownTimeout=0` (wait indefinitely) **and** `Recover=false` (disables panic
 recovery) — a silent, dangerous change for this package; never pass a bare literal.
+
+**Zero-trust validation** (matching httpserver): add `ErrInvalidConfig`;
+`WithService(nil)` and `WithServiceFunc(name, nil)` append an
+`ErrInvalidConfig`-wrapped error to the internal `errs`; `WithShutdownTimeout` /
+`WithConfig` values are checked via `Config.Validate()` (`ShutdownTimeout >= 0`).
+`Run` joins these accumulated errors with the existing `ErrNoServices` /
+`ErrUnnamedService` checks before launching anything.
 
 ## Usage
 
@@ -436,13 +498,20 @@ the config without exporting internals. No third-party test dependencies
   by `Run`, not masked as a clean stop (e.g. close the injected listener out from
   under `Serve` at shutdown and assert the error surfaces).
 - **Nil handler:** `New(nil).Run(ctx)` returns `ErrNoHandler`.
+- **Validation (zero-trust):** each nil code-only option (`WithListener` /
+  `WithTLSConfig` / `WithBaseContext` / `WithConnState`) and each invalid `Config`
+  field (negative timeouts, negative `MaxHeaderBytes`, empty `Addr`, half-set TLS
+  pair) makes `Run` return an `ErrInvalidConfig`-matching error and launch nothing;
+  `Config.Validate()` reports the same independently. `WithLogger(nil)` is accepted.
 - **Supervisor integration:** register a server with `supervisor.Run`; assert
   coordinated shutdown on ctx cancel.
-- **Supervisor Config:** `WithConfig` sets `ShutdownTimeout`/`Recover`; defaults
-  unchanged for existing callers. **Update the existing `supervisor/options_test.go`
-  (and `supervisor_test.go`) references** from `cfg.shutdownTimeout`/`cfg.recover`
-  to the embedded `cfg.ShutdownTimeout` / `cfg.Recover` so the package compiles
-  after the refactor.
+- **Supervisor Config & validation:** `WithConfig` sets `ShutdownTimeout`/`Recover`;
+  defaults unchanged for existing callers; `WithService(nil)` /
+  `WithServiceFunc(_, nil)` and a negative `ShutdownTimeout` yield `ErrInvalidConfig`
+  from `Run`. **Update the existing `supervisor/options_test.go` (and
+  `supervisor_test.go`) references** from `cfg.shutdownTimeout`/`cfg.recover` to the
+  embedded `cfg.ShutdownTimeout` / `cfg.Recover` so the package compiles after the
+  refactor.
 
 Time-based tests use small real durations (tens of ms); no clock abstraction.
 
