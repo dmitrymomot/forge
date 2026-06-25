@@ -29,7 +29,7 @@ func TestConfig_EnvTags(t *testing.T) {
 		"ShutdownTimeout": "SHUTDOWN_TIMEOUT",
 		"Recover":         "RECOVER",
 	}
-	typ := reflect.TypeOf(Config{})
+	typ := reflect.TypeFor[Config]()
 	for name, tag := range want {
 		f, ok := typ.FieldByName(name)
 		require.Truef(t, ok, "field %s missing", name)
