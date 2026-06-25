@@ -165,9 +165,20 @@ func TestRun_GraceTimeout_LogsStuckNamesStructured(t *testing.T) {
 		WithService(stuck), WithService(trigger),
 		WithShutdownTimeout(30*time.Millisecond), WithLogger(logger))
 
-	out := buf.String()
-	assert.Contains(t, out, "graceful shutdown timed out")
-	assert.Contains(t, out, "stuck-svc", "stuck service name must appear in the structured log")
+	// Find the "graceful shutdown timed out" line and assert the stuck service
+	// name is specifically in the structured "stuck" attribute, not merely
+	// somewhere in the buffer (e.g. a "service" field on another line).
+	var timeoutRec map[string]any
+	for line := range bytes.SplitSeq(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal(line, &rec))
+		if rec["msg"] == "graceful shutdown timed out" {
+			timeoutRec = rec
+			break
+		}
+	}
+	require.NotNil(t, timeoutRec, "expected a 'graceful shutdown timed out' log line")
+	assert.Contains(t, timeoutRec["stuck"], "stuck-svc", "stuck name must be in the structured 'stuck' attribute")
 }
 
 func TestRun_ZeroTimeout_DrainsCooperativeService(t *testing.T) {
@@ -234,7 +245,7 @@ func TestRun_PanicTriggersGracefulShutdown(t *testing.T) {
 	require.ErrorIs(t, err, ErrPanic)
 	select {
 	case <-siblingDrained:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("sibling did not drain when the other service panicked")
 	}
 }

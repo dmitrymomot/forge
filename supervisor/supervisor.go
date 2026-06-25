@@ -85,6 +85,8 @@ func Run(ctx context.Context, opts ...Option) error {
 			delete(remaining, res.idx)
 			log.Info("service stopped",
 				slog.String("service", res.name), slog.Any("err", res.err))
+			// context.Canceled is the expected result of our own cancellation and is dropped;
+			// a service's own context.DeadlineExceeded is a real failure and is surfaced.
 			if res.err != nil && !errors.Is(res.err, context.Canceled) {
 				errs = append(errs, fmt.Errorf("service %q: %w", res.name, res.err))
 			}
