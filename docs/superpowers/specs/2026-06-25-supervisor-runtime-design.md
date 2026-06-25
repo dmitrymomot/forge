@@ -140,7 +140,9 @@ func runService(ctx context.Context, svc Service, recoverPanics bool) (err error
 }
 ```
 
-A recovered panic becomes a normal service error, which is itself a "first exit" trigger — so a single panicking worker brings the process down *gracefully* (siblings drain) rather than aborting the whole process immediately.
+A recovered panic becomes a normal service error, which is itself a "first exit" trigger — so a single panicking worker brings the process down *gracefully* (siblings drain) rather than aborting the whole process immediately. Default: enabled.
+
+**Scope caveat (to be stated in the godoc):** recovery only catches panics that propagate out of a service's own top-level `Run` goroutine. It does **not** catch panics in goroutines a service spawns internally — e.g. an HTTP handler panic runs in `net/http`'s per-connection goroutine and must be recovered by HTTP middleware, not here. `WithRecover` is a backstop for the service's main loop, not a process-wide panic shield.
 
 ## Options & defaults
 
