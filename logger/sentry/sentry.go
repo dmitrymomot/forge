@@ -103,23 +103,110 @@ func levelsFrom(min slog.Level) []slog.Level {
 	return out
 }
 
-// sentryOption builds the sentryslog handler options from cfg. It is factored out of
-// realSentryHandler so the level/AddSource mapping is unit-testable without initializing
-// the global Sentry hub (which sentry.Init mutates process-wide).
+// issueLevel is the minimum slog level reported to Sentry as an exception (Issue).
+const issueLevel = slog.LevelError
+
+// sentryOption builds the sentryslog handler options from cfg — the Sentry Logs side only.
+// EventLevel is set empty (not nil) to DISABLE sentryslog's deprecated log->event (Issue)
+// conversion; errors become Issues via captureHandler/sentry.CaptureException instead.
+// Drop the EventLevel line once sentry-go removes the field (slated for v0.48.0); leaving
+// it nil would make the SDK re-enable the deprecated path with its [Error,Fatal] default.
+// Factored out so the level/AddSource mapping is unit-testable without the global hub.
 func sentryOption(cfg Config) sentryslog.Option {
 	return sentryslog.Option{
-		EventLevel: []slog.Level{slog.LevelError},        // errors → Issues (DEPRECATED, removed in v0.48.0)
-		LogLevel:   levelsFrom(parseLevel(cfg.MinLevel)), // MinLevel..error → Logs
-		AddSource:  cfg.AddSource,                        // mirror the primary's AddSource into Sentry events
+		EventLevel: []slog.Level{},                       // disable deprecated log->Issue conversion
+		LogLevel:   levelsFrom(parseLevel(cfg.MinLevel)), // MinLevel..error → Sentry Logs
+		AddSource:  cfg.AddSource,                        // mirror the primary's AddSource
 	}
 }
 
-// realSentryHandler initializes the Sentry SDK and builds the slog handler. Confirmed
-// against sentry-go v0.47.0. The level/AddSource mapping lives in sentryOption (tested);
-// this wrapper is the thin, global-state-mutating glue around it.
+// sentryCapturer reports a record to Sentry as an exception. It is a seam so the capture
+// path is unit-testable without initializing the global Sentry hub.
+type sentryCapturer func(ctx context.Context, rec slog.Record, attrs []slog.Attr)
+
+// captureHandler reports records at or above issueLevel to Sentry as exceptions (Issues)
+// via sentry.CaptureException — the non-deprecated replacement for sentryslog's removed
+// EventLevel log->event conversion — then delegates every record to next (the Logs handler).
+type captureHandler struct {
+	next    slog.Handler
+	capture sentryCapturer
+	attrs   []slog.Attr
+	level   slog.Level
+}
+
+func (h *captureHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.level || h.next.Enabled(ctx, level)
+}
+
+func (h *captureHandler) Handle(ctx context.Context, rec slog.Record) error {
+	if rec.Level >= h.level {
+		h.capture(ctx, rec, h.attrs)
+	}
+	return h.next.Handle(ctx, rec)
+}
+
+func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	merged := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	merged = append(merged, h.attrs...)
+	merged = append(merged, attrs...)
+	return &captureHandler{next: h.next.WithAttrs(attrs), capture: h.capture, attrs: merged, level: h.level}
+}
+
+func (h *captureHandler) WithGroup(name string) slog.Handler {
+	return &captureHandler{next: h.next.WithGroup(name), capture: h.capture, attrs: h.attrs, level: h.level}
+}
+
+// errorFromRecord builds the error passed to CaptureException: the first error-valued
+// attribute wrapped with the record message (preserving the original for grouping and any
+// stack trace), or the message alone when no error attribute is present.
+func errorFromRecord(rec slog.Record) error {
+	var inner error
+	rec.Attrs(func(a slog.Attr) bool {
+		if e, ok := a.Value.Any().(error); ok {
+			inner = e
+			return false
+		}
+		return true
+	})
+	if inner != nil {
+		return fmt.Errorf("%s: %w", rec.Message, inner)
+	}
+	return errors.New(rec.Message)
+}
+
+// captureException is the production sentryCapturer: it reports the record to the context's
+// hub (or the current hub) as an exception, attaching the handler's accumulated attributes
+// and the record's own attributes under a "log" context for triage.
+func captureException(ctx context.Context, rec slog.Record, attrs []slog.Attr) {
+	hub := sentry.GetHubFromContext(ctx)
+	if hub == nil {
+		hub = sentry.CurrentHub()
+	}
+	hub.WithScope(func(scope *sentry.Scope) {
+		data := sentry.Context{}
+		for _, a := range attrs {
+			data[a.Key] = a.Value.Any()
+		}
+		rec.Attrs(func(a slog.Attr) bool {
+			data[a.Key] = a.Value.Any()
+			return true
+		})
+		if len(data) > 0 {
+			scope.SetContext("log", data)
+		}
+		hub.CaptureException(errorFromRecord(rec))
+	})
+}
+
+// realSentryHandler initializes the Sentry SDK and builds the handler: a Sentry Logs
+// handler (sentryslog) wrapped by captureHandler, which sends Error+ records to Sentry as
+// Issues via CaptureException. Confirmed against sentry-go v0.47.0. The thin glue here
+// mutates the global hub via sentry.Init; the testable logic lives in sentryOption,
+// captureHandler, and errorFromRecord.
 func realSentryHandler(cfg Config) (slog.Handler, error) {
 	// v0.47.0: ClientOptions has no EnableLogs; logs are on by default, gated by
-	// DisableLogs — so our opt-in EnableLogs inverts.
+	// DisableLogs — so our opt-in EnableLogs inverts. (DisableLogs gates Sentry Logs only;
+	// Issues via CaptureException are unaffected, so errors are reported regardless.)
 	if err := sentry.Init(sentry.ClientOptions{
 		Dsn:         cfg.DSN,
 		Environment: cfg.Environment,
@@ -127,7 +214,8 @@ func realSentryHandler(cfg Config) (slog.Handler, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return sentryOption(cfg).NewSentryHandler(context.Background()), nil
+	logs := sentryOption(cfg).NewSentryHandler(context.Background())
+	return &captureHandler{next: logs, capture: captureException, level: issueLevel}, nil
 }
 
 // levelByName maps a level name to a slog.Level, reporting whether it is known.
@@ -191,7 +279,9 @@ func WithOutput(w io.Writer) Option {
 }
 
 // New builds a logger that writes to the primary destination and, when DSN is non-empty,
-// also to Sentry in parallel at MinLevel. Empty DSN returns a plain logger and a no-op
+// also reports to Sentry: records at Error and above become Issues (via
+// sentry.CaptureException), and records from MinLevel up to error become Sentry Logs when
+// EnableLogs is set. Empty DSN returns a plain logger and a no-op
 // Flush; an init failure returns a usable plain logger plus an ErrSentryInit-wrapped
 // error. The returned Flush is always non-nil (a no-op when Sentry is inactive), so it is
 // safe to defer regardless of the error; on a fatal config error the logger is nil and the
