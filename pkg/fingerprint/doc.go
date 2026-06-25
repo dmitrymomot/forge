@@ -62,6 +62,12 @@
 //	fp := fingerprint.JWT(r)
 //	err := fingerprint.ValidateJWT(r, storedFP)
 //
+//	// HTMX applications (User-Agent only)
+//	// Excludes Accept headers and header-set presence to avoid false positives
+//	// from HTMX-specific headers (HX-Request, HX-Current-URL, etc.)
+//	fp := fingerprint.HTMX(r)
+//	err := fingerprint.ValidateHTMX(r, storedFP)
+//
 //	// High-security mode (includes IP address)
 //	// WARNING: May cause false positives for mobile users and VPN users
 //	fp := fingerprint.Strict(r)

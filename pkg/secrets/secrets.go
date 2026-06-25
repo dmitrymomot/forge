@@ -68,7 +68,7 @@ func EncryptString(plaintext string, appKey, workspaceKey []byte) (string, error
 func DecryptString(ciphertext string, appKey, workspaceKey []byte) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
-		return "", errors.Join(ErrDecryptionFailed, ErrInvalidCiphertext)
+		return "", errors.Join(ErrDecryptionFailed, ErrInvalidCiphertext, err)
 	}
 
 	plain, err := DecryptBytes(data, appKey, workspaceKey)
@@ -141,6 +141,15 @@ func DecryptBytes(data, appKey, workspaceKey []byte) ([]byte, error) {
 
 // deriveKey uses HKDF-SHA256 to derive a 32-byte encryption key.
 // appKey is used as input key material, workspaceKey as salt.
+//
+// The key is derived fresh on every operation by design, not cached. The
+// (appKey, workspaceKey) inputs vary per call (each workspace/tenant uses a
+// distinct compound key), so a cache would hold long-lived plaintext key
+// material keyed on secret bytes — a security and memory tradeoff that
+// outweighs the cost of HKDF, which is a single HMAC-SHA256 expand step and
+// cheap relative to the AES-GCM work it feeds. Deriving per call also lets the
+// caller zero the derived key immediately after use (see clearBytes), keeping
+// sensitive material in memory only for the duration of one operation.
 func deriveKey(appKey, workspaceKey []byte) ([]byte, error) {
 	reader := hkdf.New(sha256.New, appKey, workspaceKey, hkdfInfo)
 

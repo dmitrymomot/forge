@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
 
@@ -87,6 +88,58 @@ func TestWithYAMLDir(t *testing.T) {
 		require.Equal(t, "Bienvenue, Marie!", inst.T("fr", "common", "welcome", i18n.M{"name": "Marie"}))
 		require.Equal(t, "Enregistrer", inst.T("fr", "common", "buttons.save"))
 		require.Equal(t, "Annuler", inst.T("fr", "common", "buttons.cancel"))
+	})
+}
+
+func TestLoaderErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	t.Run("malformed JSON returns ErrInvalidFile", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"en/common.json": {Data: []byte(`{"hello": "Hello"`)}, // missing closing brace
+		}
+		_, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithJSONDir(fsys),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
+	})
+
+	t.Run("malformed YAML returns ErrInvalidFile", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"fr/common.yaml": {Data: []byte("hello: \"Bonjour\n  bad: indent")},
+		}
+		_, err := i18n.New(i18n.Config{DefaultLanguage: "fr"},
+			i18n.WithYAMLDir(fsys),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
+	})
+
+	t.Run("JSON file outside a language directory returns ErrInvalidFile", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"common.json": {Data: []byte(`{"hello": "Hello"}`)}, // no lang dir
+		}
+		_, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithJSONDir(fsys),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
+	})
+
+	t.Run("YAML file outside a language directory returns ErrInvalidFile", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"common.yaml": {Data: []byte("hello: Bonjour")}, // no lang dir
+		}
+		_, err := i18n.New(i18n.Config{DefaultLanguage: "fr"},
+			i18n.WithYAMLDir(fsys),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
 	})
 }
 

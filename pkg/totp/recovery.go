@@ -16,14 +16,21 @@ func GenerateRecoveryCodes(count int) ([]string, error) {
 		return nil, ErrInvalidRecoveryCodeCount
 	}
 
-	codes := make([]string, count)
-	for i := range count {
+	codes := make([]string, 0, count)
+	seen := make(map[string]struct{}, count)
+	for len(codes) < count {
 		codeBytes := make([]byte, 8)
 		if _, err := rand.Read(codeBytes); err != nil {
 			return nil, errors.Join(ErrFailedToGenerateRecoveryCode, err)
 		}
 		code := fmt.Sprintf("%X", codeBytes)
-		codes[i] = code
+		// Regenerate on the (astronomically rare) 64-bit collision so the
+		// returned set is guaranteed unique.
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
 	}
 	return codes, nil
 }

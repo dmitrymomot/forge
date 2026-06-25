@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -84,7 +84,7 @@ func TestStripHTML(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.StripHTML(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -184,7 +184,7 @@ func TestSanitizeHTML(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SanitizeHTML(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -201,7 +201,7 @@ func TestSanitizeHTMLCustom(t *testing.T) {
 
 		input := `<img src="photo.jpg" alt="photo" onerror="alert('xss')">`
 		result := sanitizer.SanitizeHTMLCustom(input, policy)
-		assert.Equal(t, `<img src="photo.jpg" alt="photo">`, result)
+		require.Equal(t, `<img src="photo.jpg" alt="photo">`, result)
 	})
 
 	t.Run("with nil policy returns input unchanged", func(t *testing.T) {
@@ -209,7 +209,7 @@ func TestSanitizeHTMLCustom(t *testing.T) {
 
 		input := `<script>alert('xss')</script>`
 		result := sanitizer.SanitizeHTMLCustom(input, nil)
-		assert.Equal(t, input, result)
+		require.Equal(t, input, result)
 	})
 
 	t.Run("with strict policy strips everything", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestSanitizeHTMLCustom(t *testing.T) {
 		policy := bluemonday.StrictPolicy()
 		input := `<p>Hello <strong>world</strong></p>`
 		result := sanitizer.SanitizeHTMLCustom(input, policy)
-		assert.Equal(t, "Hello world", result)
+		require.Equal(t, "Hello world", result)
 	})
 }
 
@@ -326,12 +326,12 @@ func TestHTMLSanitizationXSSVectors(t *testing.T) {
 
 			result := sanitizer.StripHTML(v.input)
 			// Should not contain any script or dangerous content
-			assert.NotContains(t, result, "<script")
-			assert.NotContains(t, result, "javascript:")
-			assert.NotContains(t, result, "onerror=")
-			assert.NotContains(t, result, "onload=")
-			assert.NotContains(t, result, "onclick=")
-			assert.NotContains(t, result, "alert(")
+			require.NotContains(t, result, "<script")
+			require.NotContains(t, result, "javascript:")
+			require.NotContains(t, result, "onerror=")
+			require.NotContains(t, result, "onload=")
+			require.NotContains(t, result, "onclick=")
+			require.NotContains(t, result, "alert(")
 		})
 
 		t.Run("SanitizeHTML_"+v.name, func(t *testing.T) {
@@ -339,12 +339,12 @@ func TestHTMLSanitizationXSSVectors(t *testing.T) {
 
 			result := sanitizer.SanitizeHTML(v.input)
 			// Should not contain any script or dangerous content
-			assert.NotContains(t, result, "<script")
-			assert.NotContains(t, result, "javascript:")
-			assert.NotContains(t, result, "onerror=")
-			assert.NotContains(t, result, "onload=")
-			assert.NotContains(t, result, "onclick=")
-			assert.NotContains(t, result, "alert(")
+			require.NotContains(t, result, "<script")
+			require.NotContains(t, result, "javascript:")
+			require.NotContains(t, result, "onerror=")
+			require.NotContains(t, result, "onload=")
+			require.NotContains(t, result, "onclick=")
+			require.NotContains(t, result, "alert(")
 		})
 	}
 }
@@ -396,8 +396,8 @@ func TestHTMLStructTag(t *testing.T) {
 
 			comment := tt.input
 			err := sanitizer.SanitizeStruct(&comment)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, comment)
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, comment)
 		})
 	}
 }

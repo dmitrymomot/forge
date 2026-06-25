@@ -2,6 +2,7 @@ package fingerprint
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"slices"
@@ -75,7 +76,9 @@ func Validate(r *http.Request, sessionFingerprint string, cfg Config) error {
 	}
 
 	currentFingerprint := Generate(r, cfg)
-	if currentFingerprint == sessionFingerprint {
+	// Use a constant-time comparison to avoid leaking information about how
+	// much of the stored fingerprint matches via timing side channels.
+	if subtle.ConstantTimeCompare([]byte(currentFingerprint), []byte(sessionFingerprint)) == 1 {
 		return nil
 	}
 

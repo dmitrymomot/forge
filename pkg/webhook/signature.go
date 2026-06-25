@@ -68,15 +68,19 @@ func VerifySignature(secret string, payload []byte, headers SignatureHeaders, ma
 		return fmt.Errorf("%w: signature is missing", ErrInvalidConfiguration)
 	}
 
-	// Validate timestamp window to prevent replay attacks
-	if maxAge > 0 {
-		age := time.Since(time.Unix(headers.Timestamp, 0))
-		if age > maxAge {
-			return fmt.Errorf("%w: signature timestamp too old: %v", ErrInvalidConfiguration, age)
-		}
-		if age < -1*time.Minute {
-			return fmt.Errorf("%w: signature timestamp is in the future", ErrInvalidConfiguration)
-		}
+	// Validate timestamp window to prevent replay attacks.
+	//
+	// The future-timestamp check runs regardless of maxAge: a maxAge of <= 0
+	// disables only the "too old" age window (callers who manage replay
+	// protection elsewhere), but a far-future timestamp is always suspicious
+	// (clock manipulation / forged future-dated signatures) and is rejected
+	// unconditionally. A one-minute skew is tolerated for clock drift.
+	age := time.Since(time.Unix(headers.Timestamp, 0))
+	if age < -1*time.Minute {
+		return fmt.Errorf("%w: signature timestamp is in the future", ErrInvalidConfiguration)
+	}
+	if maxAge > 0 && age > maxAge {
+		return fmt.Errorf("%w: signature timestamp too old: %v", ErrInvalidConfiguration, age)
 	}
 
 	signaturePayload := fmt.Sprintf("%d.%s", headers.Timestamp, payload)

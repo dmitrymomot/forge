@@ -42,6 +42,10 @@ func NewMaxMindProvider(dbPath string) (*MaxMindProvider, error) {
 // addresses, Lookup returns (nil, nil) to support graceful degradation
 // in development and internal-network environments.
 //
+// Lookup also returns (nil, nil) for a routable public IP that has no
+// matching record in the database, so callers must check loc != nil
+// before dereferencing it.
+//
 // Returns ErrInvalidIP if the IP string cannot be parsed.
 // Returns ErrClosed if Close has been called.
 func (p *MaxMindProvider) Lookup(_ context.Context, ip string) (*Location, error) {
@@ -95,7 +99,10 @@ func (p *MaxMindProvider) Close() error {
 	}
 
 	p.closed = true
-	return p.db.Close()
+	if err := p.db.Close(); err != nil {
+		return fmt.Errorf("geolocation: close database: %w", err)
+	}
+	return nil
 }
 
 // isNonRoutable reports whether addr is private, loopback,

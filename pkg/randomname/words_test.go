@@ -5,13 +5,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/randomname"
 )
 
 func TestWordLists(t *testing.T) {
-	// Test expected word counts from the refactoring plan
+	t.Parallel()
+
+	// expectedCount is the EXACT number of words defined for each type.
+	// These are pinned so that an accidental duplicate or count regression
+	// (e.g. the historical duplicate "radiant" in Adjective, or a stale
+	// Action count) is caught immediately. They are verified exactly in the
+	// internal TestWordListsExact test; here they drive the variety check.
 	tests := []struct {
 		wordType      randomname.WordType
 		expectedCount int
@@ -19,7 +25,7 @@ func TestWordLists(t *testing.T) {
 	}{
 		{
 			wordType:      randomname.Adjective,
-			expectedCount: 142,
+			expectedCount: 141,
 			examples:      []string{"brave", "mighty", "swift", "clever", "elegant"},
 		},
 		{
@@ -44,13 +50,14 @@ func TestWordLists(t *testing.T) {
 		},
 		{
 			wordType:      randomname.Action,
-			expectedCount: 40,
+			expectedCount: 36,
 			examples:      []string{"flying", "running", "dancing", "blazing", "soaring"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run("word type validation", func(t *testing.T) {
+			t.Parallel()
 			// Generate many names with single word type to collect unique words
 			seen := make(map[string]bool)
 			for range 500 {
@@ -61,7 +68,11 @@ func TestWordLists(t *testing.T) {
 			}
 
 			// Check that we're seeing a reasonable variety
-			assert.Greater(t, len(seen), tt.expectedCount/3, "Should see at least 1/3 of available words")
+			require.Greater(t, len(seen), tt.expectedCount/3, "Should see at least 1/3 of available words")
+
+			// Never observe more unique words than are actually defined; this
+			// guards against a generator regression that produces stray words.
+			require.LessOrEqual(t, len(seen), tt.expectedCount, "Should not see more unique words than are defined")
 
 			// Verify examples are being used
 			foundExample := false
@@ -71,13 +82,15 @@ func TestWordLists(t *testing.T) {
 					break
 				}
 			}
-			assert.True(t, foundExample, "Should find at least one example word")
+			require.True(t, foundExample, "Should find at least one example word")
 		})
 	}
 }
 
 func TestCustomWordsMerging(t *testing.T) {
+	t.Parallel()
 	t.Run("custom words are used alongside defaults", func(t *testing.T) {
+		t.Parallel()
 		customAdj := []string{"testadjone", "testadjtwo"}
 		customNoun := []string{"testnounone", "testnountwo"}
 
@@ -119,13 +132,14 @@ func TestCustomWordsMerging(t *testing.T) {
 			}
 		}
 
-		assert.True(t, seenCustomAdj, "Should see custom adjectives")
-		assert.True(t, seenDefaultAdj, "Should see default adjectives")
-		assert.True(t, seenCustomNoun, "Should see custom nouns")
-		assert.True(t, seenDefaultNoun, "Should see default nouns")
+		require.True(t, seenCustomAdj, "Should see custom adjectives")
+		require.True(t, seenDefaultAdj, "Should see default adjectives")
+		require.True(t, seenCustomNoun, "Should see custom nouns")
+		require.True(t, seenDefaultNoun, "Should see default nouns")
 	})
 
 	t.Run("custom words are merged with defaults", func(t *testing.T) {
+		t.Parallel()
 		customWords := map[randomname.WordType][]string{
 			randomname.Adjective: {"customadj", "testadj", "myadj"},
 			randomname.Noun:      {"customnoun", "testnoun", "mynoun"},
@@ -153,11 +167,12 @@ func TestCustomWordsMerging(t *testing.T) {
 				break
 			}
 		}
-		assert.True(t, seenCustomAdj, "Should see custom adjectives in generation")
-		assert.True(t, seenCustomNoun, "Should see custom nouns in generation")
+		require.True(t, seenCustomAdj, "Should see custom adjectives in generation")
+		require.True(t, seenCustomNoun, "Should see custom nouns in generation")
 	})
 
 	t.Run("partial custom words", func(t *testing.T) {
+		t.Parallel()
 		// Only provide custom colors, use default adjectives and nouns
 		customWords := map[randomname.WordType][]string{
 			randomname.Color: {"testcolorone", "testcolortwo"},
@@ -183,11 +198,12 @@ func TestCustomWordsMerging(t *testing.T) {
 				break
 			}
 		}
-		assert.True(t, hasCustomColor, "Should use custom colors")
+		require.True(t, hasCustomColor, "Should use custom colors")
 	})
 }
 
 func TestWordTypesCoverage(t *testing.T) {
+	t.Parallel()
 	// Test that all word types can be used in various combinations
 	patterns := [][]randomname.WordType{
 		{randomname.Adjective},
@@ -204,12 +220,13 @@ func TestWordTypesCoverage(t *testing.T) {
 
 	for _, pattern := range patterns {
 		t.Run("pattern generation", func(t *testing.T) {
+			t.Parallel()
 			name := randomname.Generate(&randomname.Options{
 				Pattern: pattern,
 			})
 			parts := strings.Split(name, "-")
-			assert.Len(t, parts, len(pattern))
-			assert.NotEmpty(t, name)
+			require.Len(t, parts, len(pattern))
+			require.NotEmpty(t, name)
 		})
 	}
 }

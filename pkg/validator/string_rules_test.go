@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/validator"
 )
@@ -247,5 +248,47 @@ func TestStringRulesIntegration(t *testing.T) {
 		assert.Equal(t, "validation.min_length", passwordErrors[0].TranslationKey)
 		assert.Equal(t, "password", passwordErrors[0].TranslationValues["field"])
 		assert.Equal(t, 8, passwordErrors[0].TranslationValues["min"])
+	})
+}
+
+// TestStringLengthRunesNotBytes verifies that Min/Max/Len count characters
+// (runes), not bytes, so multibyte UTF-8 input matches the documented
+// "characters" semantics. Each test string is chosen so that its rune count
+// differs from its byte count.
+func TestStringLengthRunesNotBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("MinLenString counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "héllo" = 5 runes but 6 bytes (é is 2 bytes).
+		require.True(t, validator.MinLenString("name", "héllo", 5).Check(),
+			"5-rune string must satisfy min 5 even though it is 6 bytes")
+		require.False(t, validator.MinLenString("name", "héllo", 6).Check(),
+			"5-rune string must fail min 6 (byte count 6 would have wrongly passed)")
+	})
+
+	t.Run("MaxLenString counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "café" = 4 runes, 5 bytes. With max 4 it must pass (byte count 5 would
+		// have wrongly failed).
+		require.True(t, validator.MaxLenString("name", "café", 4).Check(),
+			"4-rune string must satisfy max 4 even though it is 5 bytes")
+		require.False(t, validator.MaxLenString("name", "café", 3).Check())
+	})
+
+	t.Run("LenString counts runes", func(t *testing.T) {
+		t.Parallel()
+		// "naïve" = 5 runes, 6 bytes.
+		require.True(t, validator.LenString("word", "naïve", 5).Check(),
+			"5-rune string must match exact len 5 even though it is 6 bytes")
+		require.False(t, validator.LenString("word", "naïve", 6).Check())
+	})
+
+	t.Run("emoji counts as single rune", func(t *testing.T) {
+		t.Parallel()
+		// A single emoji is 4 bytes but one rune.
+		require.True(t, validator.LenString("emoji", "🙂", 1).Check(),
+			"single emoji must count as 1 character")
+		require.True(t, validator.MaxLenString("emoji", "🙂", 1).Check())
 	})
 }

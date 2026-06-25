@@ -4,9 +4,12 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"hash"
 	"math"
 	"net/url"
 	"regexp"
@@ -18,12 +21,53 @@ const (
 	DefaultDigits    = 6      // Standard 6-digit TOTP codes
 	DefaultPeriod    = 30     // 30-second validity window (RFC 6238 standard)
 	DefaultAlgorithm = "SHA1" // HMAC-SHA1 algorithm (RFC 6238 standard)
+
+	// minSecretBytes is the minimum decoded secret length (80 bits) accepted by
+	// generation/validation. RFC 4226 recommends a 128-bit (16-byte) secret and
+	// mandates at least 128 bits; we floor at 80 bits to reject obviously weak
+	// or empty keys while still accepting common 16-byte test vectors.
+	minSecretBytes = 10
 )
 
-var (
-	// ValidateSecretKeyRegex ensures Base32 format: uppercase A-Z, digits 2-7, optional padding
-	ValidateSecretKeyRegex = regexp.MustCompile("^[A-Z2-7]+=*$")
-)
+// validateSecretKeyRegex ensures Base32 format: uppercase A-Z, digits 2-7, optional padding.
+// Unexported so consumers cannot clobber the shared compiled regex.
+var validateSecretKeyRegex = regexp.MustCompile("^[A-Z2-7]+=*$")
+
+// hashForAlgorithm maps an RFC 6238 algorithm name to its hash constructor.
+// Returns nil for unsupported algorithms.
+func hashForAlgorithm(algorithm string) func() hash.Hash {
+	switch strings.ToUpper(strings.TrimSpace(algorithm)) {
+	case "", DefaultAlgorithm:
+		return sha1.New
+	case "SHA256":
+		return sha256.New
+	case "SHA512":
+		return sha512.New
+	default:
+		return nil
+	}
+}
+
+// decodeSecret normalizes, validates, and Base32-decodes a TOTP secret.
+// It rejects empty/too-short secrets that would otherwise produce a weak,
+// near-all-zero HMAC key.
+func decodeSecret(secret string) ([]byte, error) {
+	secret = strings.TrimSpace(strings.ToUpper(secret))
+	if !validateSecretKeyRegex.MatchString(secret) {
+		return nil, ErrInvalidSecret
+	}
+
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(key) < minSecretBytes {
+		return nil, ErrSecretTooShort
+	}
+
+	return key, nil
+}
 
 // TOTPParams contains the parameters for TOTP URI generation
 type TOTPParams struct {
@@ -40,14 +84,23 @@ func (p TOTPParams) Validate() error {
 	if p.Secret == "" {
 		return ErrMissingSecret
 	}
-	if !ValidateSecretKeyRegex.MatchString(p.Secret) {
-		return ErrInvalidSecret
+	if _, err := decodeSecret(p.Secret); err != nil {
+		return err
 	}
 	if p.AccountName == "" {
 		return ErrMissingAccountName
 	}
 	if p.Issuer == "" {
 		return ErrMissingIssuer
+	}
+	if p.Algorithm != "" && hashForAlgorithm(p.Algorithm) == nil {
+		return ErrUnsupportedAlgorithm
+	}
+	if p.Digits < 0 {
+		return ErrInvalidDigits
+	}
+	if p.Period < 0 {
+		return ErrInvalidPeriod
 	}
 	return nil
 }
@@ -102,31 +155,96 @@ func GetTOTPURI(params TOTPParams) (string, error) {
 	return uri, nil
 }
 
+// TOTPConfig holds the algorithm parameters used by generation and validation.
+// Construct it from defaults via newTOTPConfig and tune it with TOTPOption values
+// so that codes are produced and verified with the same Algorithm/Digits/Period
+// that GetTOTPURI advertises to authenticator apps.
+type totpConfig struct {
+	algorithm string
+	digits    int
+	period    int
+}
+
+// TOTPOption customizes the algorithm parameters of ValidateTOTP, GenerateTOTP,
+// and GenerateTOTPWithTime so they honor non-default Algorithm/Digits/Period.
+type TOTPOption func(*totpConfig)
+
+// WithAlgorithm sets the HMAC algorithm ("SHA1", "SHA256", or "SHA512").
+func WithAlgorithm(algorithm string) TOTPOption {
+	return func(c *totpConfig) { c.algorithm = algorithm }
+}
+
+// WithDigits sets the number of digits in generated codes (typically 6 or 8).
+func WithDigits(digits int) TOTPOption {
+	return func(c *totpConfig) { c.digits = digits }
+}
+
+// WithPeriod sets the code validity period in seconds (typically 30).
+func WithPeriod(period int) TOTPOption {
+	return func(c *totpConfig) { c.period = period }
+}
+
+// WithParams derives algorithm options from a TOTPParams value (after defaults
+// are applied) so the same parameters used to build the provisioning URI are
+// used for generation and validation.
+func WithParams(params TOTPParams) TOTPOption {
+	params = params.GetDefaults()
+	return func(c *totpConfig) {
+		c.algorithm = params.Algorithm
+		c.digits = params.Digits
+		c.period = params.Period
+	}
+}
+
+// resolveConfig builds a validated totpConfig from defaults and the supplied options.
+func resolveConfig(opts ...TOTPOption) (totpConfig, error) {
+	cfg := totpConfig{
+		algorithm: DefaultAlgorithm,
+		digits:    DefaultDigits,
+		period:    DefaultPeriod,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if hashForAlgorithm(cfg.algorithm) == nil {
+		return cfg, ErrUnsupportedAlgorithm
+	}
+	if cfg.digits < 1 {
+		return cfg, ErrInvalidDigits
+	}
+	if cfg.period < 1 {
+		return cfg, ErrInvalidPeriod
+	}
+	return cfg, nil
+}
+
 // ValidateTOTP validates the TOTP code provided by the user.
-func ValidateTOTP(secret, otp string) (bool, error) {
-	secret = strings.TrimSpace(strings.ToUpper(secret))
-	if !ValidateSecretKeyRegex.MatchString(secret) {
-		return false, ErrInvalidSecret
+//
+// By default it uses the RFC 6238 standard parameters (SHA1, 6 digits, 30s period).
+// Pass options such as WithAlgorithm/WithDigits/WithPeriod (or WithParams) to honor
+// the exact parameters advertised in the provisioning URI from GetTOTPURI.
+func ValidateTOTP(secret, otp string, opts ...TOTPOption) (bool, error) {
+	cfg, err := resolveConfig(opts...)
+	if err != nil {
+		return false, err
 	}
 
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	key, err := decodeSecret(secret)
 	if err != nil {
 		return false, errors.Join(ErrFailedToValidateTOTP, err)
 	}
 
 	otp = strings.TrimSpace(otp)
-	if !regexp.MustCompile(fmt.Sprintf(`^\d{%d}$`, DefaultDigits)).MatchString(otp) {
+	if !regexp.MustCompile(fmt.Sprintf(`^\d{%d}$`, cfg.digits)).MatchString(otp) {
 		return false, ErrInvalidOTP
 	}
 
-	currentTime := time.Now().Unix()
-	interval := int64(DefaultPeriod)
-	counter := currentTime / interval
+	counter := time.Now().Unix() / int64(cfg.period)
 
-	// Accept codes from previous, current, and next 30-second windows to handle clock drift
+	// Accept codes from previous, current, and next windows to handle clock drift
 	for i := -1; i <= 1; i++ {
-		code := GenerateHOTP(key, counter+int64(i), DefaultDigits)
-		if fmt.Sprintf("%06d", code) == otp {
+		code := generateCode(key, counter+int64(i), cfg.digits, cfg.algorithm)
+		if formatCode(code, cfg.digits) == otp {
 			return true, nil
 		}
 	}
@@ -134,30 +252,28 @@ func ValidateTOTP(secret, otp string) (bool, error) {
 	return false, nil
 }
 
-// GenerateTOTP generates a time-based one-time password for the current 30-second window.
+// GenerateTOTP generates a time-based one-time password for the current window.
 // The secret must be a valid Base32-encoded string.
-func GenerateTOTP(secret string) (string, error) {
-	secret = strings.TrimSpace(strings.ToUpper(secret))
-	if !ValidateSecretKeyRegex.MatchString(secret) {
-		return "", ErrInvalidSecret
-	}
-
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
-	if err != nil {
-		return "", errors.Join(ErrFailedToGenerateTOTP, err)
-	}
-
-	currentTime := time.Now().Unix()
-	counter := currentTime / int64(DefaultPeriod)
-
-	code := GenerateHOTP(key, counter, DefaultDigits)
-
-	return fmt.Sprintf("%06d", code), nil
+//
+// By default it uses the RFC 6238 standard parameters (SHA1, 6 digits, 30s period);
+// pass options to match the parameters advertised in the provisioning URI.
+func GenerateTOTP(secret string, opts ...TOTPOption) (string, error) {
+	return GenerateTOTPWithTime(secret, time.Now(), opts...)
 }
 
-// GenerateHOTP implements RFC 4226 HMAC-based One-Time Password algorithm.
-// The algorithm converts a counter value into a numeric code using HMAC-SHA1.
+// GenerateHOTP implements the RFC 4226 HMAC-based One-Time Password algorithm
+// using HMAC-SHA1. The algorithm converts a counter value into a numeric code.
 func GenerateHOTP(key []byte, counter int64, digits int) int {
+	return generateCode(key, counter, digits, DefaultAlgorithm)
+}
+
+// generateCode implements RFC 4226 dynamic truncation for the given HMAC algorithm.
+func generateCode(key []byte, counter int64, digits int, algorithm string) int {
+	hasher := hashForAlgorithm(algorithm)
+	if hasher == nil {
+		hasher = sha1.New
+	}
+
 	// Convert counter to big-endian 8-byte array (RFC 4226 requirement)
 	counterBytes := make([]byte, 8)
 	for i := 7; i >= 0; i-- {
@@ -165,18 +281,17 @@ func GenerateHOTP(key []byte, counter int64, digits int) int {
 		counter = counter >> 8
 	}
 
-	// Calculate HMAC-SHA1 hash of the counter
-	hmacHash := hmac.New(sha1.New, key)
+	hmacHash := hmac.New(hasher, key)
 	hmacHash.Write(counterBytes)
-	hash := hmacHash.Sum(nil)
+	hashSum := hmacHash.Sum(nil)
 
 	// Dynamic truncation (RFC 4226): use last 4 bits as offset into hash
-	offset := hash[len(hash)-1] & 0x0f
+	offset := hashSum[len(hashSum)-1] & 0x0f
 	// Extract 31-bit value (clear MSB to ensure positive number)
-	code := (int(hash[offset]&0x7f) << 24) |
-		(int(hash[offset+1]&0xff) << 16) |
-		(int(hash[offset+2]&0xff) << 8) |
-		(int(hash[offset+3] & 0xff))
+	code := (int(hashSum[offset]&0x7f) << 24) |
+		(int(hashSum[offset+1]&0xff) << 16) |
+		(int(hashSum[offset+2]&0xff) << 8) |
+		(int(hashSum[offset+3] & 0xff))
 
 	// Reduce to desired number of digits
 	code = code % int(math.Pow10(digits))
@@ -184,22 +299,30 @@ func GenerateHOTP(key []byte, counter int64, digits int) int {
 	return code
 }
 
-// GenerateTOTPWithTime generates a TOTP code for the 30-second window containing the specified time.
+// formatCode zero-pads a numeric code to the desired number of digits.
+func formatCode(code, digits int) string {
+	return fmt.Sprintf("%0*d", digits, code)
+}
+
+// GenerateTOTPWithTime generates a TOTP code for the window containing the specified time.
 // Useful for testing or generating codes for specific moments.
-func GenerateTOTPWithTime(secret string, t time.Time) (string, error) {
-	secret = strings.TrimSpace(strings.ToUpper(secret))
-	if !ValidateSecretKeyRegex.MatchString(secret) {
-		return "", ErrInvalidSecret
+//
+// By default it uses the RFC 6238 standard parameters; pass options to match the
+// parameters advertised in the provisioning URI.
+func GenerateTOTPWithTime(secret string, t time.Time, opts ...TOTPOption) (string, error) {
+	cfg, err := resolveConfig(opts...)
+	if err != nil {
+		return "", err
 	}
 
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	key, err := decodeSecret(secret)
 	if err != nil {
 		return "", errors.Join(ErrFailedToGenerateTOTP, err)
 	}
 
-	counter := t.Unix() / int64(DefaultPeriod)
+	counter := t.Unix() / int64(cfg.period)
 
-	code := GenerateHOTP(key, counter, DefaultDigits)
+	code := generateCode(key, counter, cfg.digits, cfg.algorithm)
 
-	return fmt.Sprintf("%06d", code), nil
+	return formatCode(code, cfg.digits), nil
 }

@@ -41,31 +41,32 @@ func ParseAcceptLanguage(header string, available []string) string {
 
 	var bestMatch string
 	var bestQuality float64 = -1
-	var bestIsExact bool
+	var bestExact bool
 
 	for _, avail := range available {
 		availNorm := normalizeLanguageTag(avail)
 
+		// Find this available language's best matching requested tag: the
+		// highest-quality tag that either matches exactly or partially.
+		quality, exact, matched := -1.0, false, false
 		for _, tag := range tags {
-			if tag.tag == availNorm {
-				if tag.quality > bestQuality || (tag.quality == bestQuality && !bestIsExact) {
-					bestMatch = avail
-					bestQuality = tag.quality
-					bestIsExact = true
-				}
-				break
+			if tag.tag != availNorm && !matchesLanguage(tag.tag, avail) {
+				continue
 			}
+			isExact := tag.tag == availNorm
+			// A higher-quality tag, or an exact tag at equal quality, is better.
+			if !matched || tag.quality > quality || (tag.quality == quality && isExact && !exact) {
+				quality, exact, matched = tag.quality, isExact, true
+			}
+		}
+		if !matched {
+			continue
+		}
 
-			if matchesLanguage(tag.tag, avail) {
-				if bestMatch == "" || (!bestIsExact && tag.quality > bestQuality) || (bestIsExact && tag.quality > bestQuality) {
-					if !bestIsExact || tag.quality > bestQuality {
-						bestMatch = avail
-						bestQuality = tag.quality
-						bestIsExact = false
-					}
-				}
-				break
-			}
+		// Compare against the running best. Higher quality wins; on equal
+		// quality an exact match wins; a full tie keeps the earlier available.
+		if bestMatch == "" || quality > bestQuality || (quality == bestQuality && exact && !bestExact) {
+			bestMatch, bestQuality, bestExact = avail, quality, exact
 		}
 	}
 

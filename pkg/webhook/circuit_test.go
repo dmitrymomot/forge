@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/webhook"
 )
@@ -205,18 +206,50 @@ func TestCircuitBreaker_HalfOpenSuccess(t *testing.T) {
 		assert.Equal(t, webhook.CircuitClosed, cb.State())
 	})
 
-	t.Run("Allow Multiple Requests in HalfOpen", func(t *testing.T) {
+	t.Run("Single Probe Allowed in HalfOpen", func(t *testing.T) {
 		t.Parallel()
 
 		cb := webhook.NewCircuitBreaker(1, 2, 50*time.Millisecond)
 
 		cb.RecordFailure()
 		time.Sleep(60 * time.Millisecond)
-		cb.Allow()
 
-		assert.True(t, cb.Allow())
-		assert.True(t, cb.Allow())
-		assert.True(t, cb.Allow())
+		// The transition into half-open consumes the single probe slot.
+		require.True(t, cb.Allow(), "first probe should be allowed in half-open")
+		require.Equal(t, webhook.CircuitHalfOpen, cb.State())
+
+		// Concurrent probes are rejected while the first is still in flight,
+		// matching the documented single-probe contract.
+		require.False(t, cb.Allow(), "second concurrent probe must be blocked")
+		require.False(t, cb.Allow(), "third concurrent probe must be blocked")
+
+		// After the in-flight probe succeeds (but does not yet meet the success
+		// threshold of 2), the next probe slot is released.
+		cb.RecordSuccess()
+		require.Equal(t, webhook.CircuitHalfOpen, cb.State())
+		require.True(t, cb.Allow(), "next probe allowed after previous probe resolves")
+		require.False(t, cb.Allow(), "only one probe at a time after release")
+	})
+
+	t.Run("Failed Probe Releases Slot On Next Recovery", func(t *testing.T) {
+		t.Parallel()
+
+		cb := webhook.NewCircuitBreaker(1, 1, 50*time.Millisecond)
+
+		cb.RecordFailure()
+		time.Sleep(60 * time.Millisecond)
+
+		require.True(t, cb.Allow(), "first probe allowed")
+		require.False(t, cb.Allow(), "second probe blocked while first in flight")
+
+		// Probe fails -> circuit reopens and the probe slot is released so the
+		// next recovery window can issue a fresh probe.
+		cb.RecordFailure()
+		require.Equal(t, webhook.CircuitOpen, cb.State())
+
+		time.Sleep(60 * time.Millisecond)
+		require.True(t, cb.Allow(), "new recovery window allows a fresh single probe")
+		require.False(t, cb.Allow(), "still only one probe at a time")
 	})
 }
 

@@ -182,17 +182,61 @@ func TestLimiter_AllowN(t *testing.T) {
 		require.Equal(t, int64(5), info.Remaining)
 	})
 
-	t.Run("rejects batch exceeding limit", func(t *testing.T) {
+	t.Run("consumes full batch up to the limit", func(t *testing.T) {
 		t.Parallel()
 
 		counter := newMemoryCounter(t)
 		lim, err := ratelimit.New(counter, 10, time.Minute)
 		require.NoError(t, err)
 
-		info, err := lim.AllowN(context.Background(), "key", 11)
+		// A batch exactly equal to the limit is allowed and exhausts the window.
+		info, err := lim.AllowN(context.Background(), "key", 10)
 		require.NoError(t, err)
-		require.False(t, info.IsAllowed())
+		require.True(t, info.IsAllowed())
 		require.Equal(t, int64(0), info.Remaining)
+	})
+
+	t.Run("rejects oversized batch with ErrRateLimited without incrementing", func(t *testing.T) {
+		t.Parallel()
+
+		counter := newMemoryCounter(t)
+		lim, err := ratelimit.New(counter, 10, time.Minute)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// n > limit can never fit a window: rejected up front with ErrRateLimited.
+		info, err := lim.AllowN(ctx, "key", 11)
+		require.ErrorIs(t, err, ratelimit.ErrRateLimited)
+		require.Equal(t, ratelimit.Info{}, info)
+
+		// The window must NOT have been incremented by the rejected batch:
+		// a subsequent in-limit request still sees the full budget.
+		info, err = lim.AllowN(ctx, "key", 1)
+		require.NoError(t, err)
+		require.True(t, info.IsAllowed())
+		require.Equal(t, int64(9), info.Remaining)
+	})
+
+	t.Run("rejects n<=0 with ErrInvalidN without incrementing", func(t *testing.T) {
+		t.Parallel()
+
+		counter := newMemoryCounter(t)
+		lim, err := ratelimit.New(counter, 10, time.Minute)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		for _, n := range []int64{0, -1, -100} {
+			info, err := lim.AllowN(ctx, "key", n)
+			require.ErrorIs(t, err, ratelimit.ErrInvalidN)
+			require.Equal(t, ratelimit.Info{}, info)
+		}
+
+		// None of the rejected calls touched the counter.
+		info, err := lim.Peek(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, int64(10), info.Remaining)
 	})
 }
 
@@ -292,6 +336,95 @@ func TestLimiter_SlidingWindow(t *testing.T) {
 		info, err := lim.Peek(ctx, "key")
 		require.NoError(t, err)
 		require.Equal(t, int64(100), info.Remaining)
+	})
+}
+
+// --- Limiter: deterministic decay math (injected clock) ---
+
+func TestLimiter_DecayMath(t *testing.T) {
+	t.Parallel()
+
+	// All sub-tests pin the Limiter's clock to the midpoint of the current
+	// window (elapsed = window/2, so the previous-window weight is exactly 0.5)
+	// to make the sliding-window blend and RetryAfter solver fully deterministic.
+	const window = time.Minute
+
+	// currWindow is a clean minute boundary; now sits 30s into it.
+	currWindow := time.Date(2025, 1, 1, 0, 1, 0, 0, time.UTC)
+	prevWindow := currWindow.Add(-window)
+	now := currWindow.Add(30 * time.Second) // weight = (60-30)/60 = 0.5
+	clock := func() time.Time { return now }
+
+	t.Run("blends previous window at exactly half weight", func(t *testing.T) {
+		t.Parallel()
+
+		counter := newMemoryCounter(t)
+		lim, err := ratelimit.New(counter, 100, window)
+		require.NoError(t, err)
+		lim.SetClock(clock)
+
+		ctx := context.Background()
+
+		// Seed prev=80, curr=0. weighted = int64(80*0.5)+0 = 40. remaining = 60.
+		_, err = counter.Increment(ctx, "key", prevWindow, 2*window, 80)
+		require.NoError(t, err)
+
+		info, err := lim.Peek(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, int64(60), info.Remaining)
+		require.Zero(t, info.RetryAfter)
+		require.True(t, info.IsAllowed())
+		require.Equal(t, currWindow.Add(window), info.ResetAt)
+	})
+
+	t.Run("RetryAfter solves the decay equation to an exact duration", func(t *testing.T) {
+		t.Parallel()
+
+		counter := newMemoryCounter(t)
+		lim, err := ratelimit.New(counter, 100, window)
+		require.NoError(t, err)
+		lim.SetClock(clock)
+
+		ctx := context.Background()
+
+		// Seed prev=100, curr=60.
+		// weighted = int64(100*0.5)+60 = 110 > 100 -> rate limited.
+		// Solver: needed = 100-60 = 40; t = 60s - 60s*40/100 = 36s.
+		// retryAt = currWindow+36s = 00:01:36; now = 00:01:30 -> RetryAfter = 6s.
+		_, err = counter.Increment(ctx, "key", prevWindow, 2*window, 100)
+		require.NoError(t, err)
+		_, err = counter.Increment(ctx, "key", currWindow, 2*window, 60)
+		require.NoError(t, err)
+
+		info, err := lim.Peek(ctx, "key")
+		require.NoError(t, err)
+		require.False(t, info.IsAllowed())
+		require.Equal(t, int64(0), info.Remaining)
+		require.Equal(t, 6*time.Second, info.RetryAfter)
+		require.Equal(t, currWindow.Add(window), info.ResetAt)
+	})
+
+	t.Run("RetryAfter waits full reset when current window alone exceeds limit", func(t *testing.T) {
+		t.Parallel()
+
+		counter := newMemoryCounter(t)
+		lim, err := ratelimit.New(counter, 100, window)
+		require.NoError(t, err)
+		lim.SetClock(clock)
+
+		ctx := context.Background()
+
+		// curr alone (100) >= limit -> must wait for full window reset.
+		// resetAt = currWindow+60s = 00:02:00; now = 00:01:30 -> RetryAfter = 30s.
+		_, err = counter.Increment(ctx, "key", prevWindow, 2*window, 50)
+		require.NoError(t, err)
+		_, err = counter.Increment(ctx, "key", currWindow, 2*window, 100)
+		require.NoError(t, err)
+
+		info, err := lim.Peek(ctx, "key")
+		require.NoError(t, err)
+		require.False(t, info.IsAllowed())
+		require.Equal(t, 30*time.Second, info.RetryAfter)
 	})
 }
 

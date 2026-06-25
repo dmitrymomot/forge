@@ -85,12 +85,17 @@ func loadDir(i *I18n, fsys fs.FS, ext string, unmarshal func([]byte, any) error)
 			return fmt.Errorf("%w: parsing %q: %s", ErrInvalidFile, filePath, err)
 		}
 
-		flattened := flattenTranslations(translations, "")
+		flattened, err := flattenTranslations(translations, "")
+		if err != nil {
+			return fmt.Errorf("%w: %q: %w", ErrInvalidFile, filePath, err)
+		}
 
 		for key, value := range flattened {
 			compositeKey := buildKey(lang, namespace, key)
 			i.translations[compositeKey] = value
 		}
+
+		i.loadedLangs[lang] = struct{}{}
 
 		if _, exists := i.pluralRules[lang]; !exists {
 			i.pluralRules[lang] = GetPluralRuleForLanguage(lang)

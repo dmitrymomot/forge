@@ -10,6 +10,9 @@ import (
 
 // Sentinel errors for storage operations.
 var (
+	// ErrNotConfigured is returned by the framework integration
+	// (forge.Context storage helpers / internal context) when storage is used
+	// without WithStorage having been configured.
 	ErrNotConfigured    = errors.New("storage: not configured")
 	ErrInvalidConfig    = errors.New("storage: invalid configuration")
 	ErrEmptyFile        = errors.New("storage: file is empty")
@@ -24,6 +27,10 @@ var (
 	ErrInvalidURL       = errors.New("storage: invalid URL")
 	ErrDownloadFailed   = errors.New("storage: failed to download from URL")
 	ErrDownloadTooLarge = errors.New("storage: download exceeds size limit")
+	// ErrBlockedAddress is returned (wrapped by ErrDownloadFailed) when
+	// PutFromURL refuses to connect to a private/loopback/link-local/
+	// unspecified destination as part of its SSRF protection.
+	ErrBlockedAddress = errors.New("storage: destination address is blocked")
 )
 
 // wrapS3Error wraps S3 errors with appropriate sentinel errors.

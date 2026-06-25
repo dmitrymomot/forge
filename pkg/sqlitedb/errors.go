@@ -13,9 +13,6 @@ var (
 	// ErrHealthcheckFailed is returned when the health check fails.
 	ErrHealthcheckFailed = errors.New("sqlitedb: healthcheck failed")
 
-	// ErrSetDialect is returned when setting the goose migration dialect fails.
-	ErrSetDialect = errors.New("sqlitedb: failed to set dialect")
-
 	// ErrApplyMigrations is returned when applying migrations fails.
 	ErrApplyMigrations = errors.New("sqlitedb: failed to apply migrations")
 )

@@ -40,7 +40,8 @@
 //	    ),
 //	)
 //
-//	forge.Run(app, forge.RunConfig{Port: 8080},
+//	forge.Run(forge.RunConfig{Address: ":8080"},
+//	    forge.WithFallback(app),
 //	    forge.WithShutdownHook(sqlitedb.Shutdown(db)),
 //	)
 //

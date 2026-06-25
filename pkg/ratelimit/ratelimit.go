@@ -50,8 +50,11 @@ func (i Info) IsAllowed() bool {
 // burst problems.
 type Limiter struct {
 	counter Counter
-	limit   int64
-	window  time.Duration
+	// now returns the current time. It is a seam for deterministic testing of
+	// the sliding-window decay math and defaults to time.Now.
+	now    func() time.Time
+	limit  int64
+	window time.Duration
 }
 
 // New creates a Limiter with the given counter, limit, and window size.
@@ -70,6 +73,7 @@ func New(counter Counter, limit int64, window time.Duration) (*Limiter, error) {
 	}
 	return &Limiter{
 		counter: counter,
+		now:     time.Now,
 		limit:   limit,
 		window:  window,
 	}, nil
@@ -82,12 +86,38 @@ func (l *Limiter) Allow(ctx context.Context, key string) (Info, error) {
 }
 
 // AllowN reports whether n requests for the given key are allowed.
-// It atomically increments the counter by n and returns the current rate limit info.
 //
-// The counter is incremented before checking the limit (increment-first strategy).
-// This simplifies atomic operations and prevents clients from gaming window boundaries.
+// n must be positive; AllowN returns [ErrInvalidN] for n <= 0 without touching
+// the counter.
+//
+// # Increment-first semantics
+//
+// AllowN uses an increment-first strategy: the counter is incremented by n
+// BEFORE the limit is checked. This keeps the storage operation a single atomic
+// increment and prevents clients from gaming the fixed-window boundary, but it
+// has two consequences callers must understand:
+//
+//   - A request that is throttled still consumes counter capacity. The returned
+//     [Info] reports IsAllowed()==false with a non-zero RetryAfter; it is NOT
+//     returned as an error.
+//   - A batch larger than the configured limit (n > limit) can never fit in any
+//     window. To avoid permanently poisoning the current window with a count it
+//     can never satisfy, AllowN rejects such a batch up front with
+//     [ErrRateLimited] and does NOT increment the counter. Split oversized work
+//     into batches of at most limit, or raise the limit.
+//
+// On success it returns the current rate limit info after the increment.
 func (l *Limiter) AllowN(ctx context.Context, key string, n int64) (Info, error) {
-	now := time.Now()
+	if n <= 0 {
+		return Info{}, ErrInvalidN
+	}
+	if n > l.limit {
+		// An oversized batch can never succeed; reject it without incrementing
+		// so it does not permanently consume the current window's capacity.
+		return Info{}, ErrRateLimited
+	}
+
+	now := l.now()
 	currWindow := now.Truncate(l.window)
 	prevWindow := currWindow.Add(-l.window)
 
@@ -107,7 +137,7 @@ func (l *Limiter) AllowN(ctx context.Context, key string, n int64) (Info, error)
 // Peek returns the current rate limit info for the given key without
 // incrementing the counter. Useful for checking status in non-request contexts.
 func (l *Limiter) Peek(ctx context.Context, key string) (Info, error) {
-	now := time.Now()
+	now := l.now()
 	currWindow := now.Truncate(l.window)
 	prevWindow := currWindow.Add(-l.window)
 

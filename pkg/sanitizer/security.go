@@ -20,6 +20,39 @@ var (
 	reControlSequences    = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 )
 
+// reDangerousAttrs are pre-compiled patterns for dangerous HTML attributes,
+// hoisted to package scope so they are compiled once rather than on every
+// SanitizeHTMLAttributes call.
+var reDangerousAttrs = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\s*onclick\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*onload\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*onerror\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*onmouseover\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*onfocus\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*onblur\s*=\s*["'][^"']*["']`),
+	regexp.MustCompile(`(?i)\s*style\s*=\s*["'][^"']*expression[^"']*["']`),
+	regexp.MustCompile(`(?i)\s*href\s*=\s*["']javascript:[^"']*["']`),
+	regexp.MustCompile(`(?i)\s*src\s*=\s*["']javascript:[^"']*["']`),
+}
+
+// reSQLKeywords are pre-compiled patterns for common SQL keywords, hoisted to
+// package scope so they are compiled once rather than on every
+// RemoveSQLKeywords call.
+var reSQLKeywords = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bSELECT\b`), regexp.MustCompile(`(?i)\bINSERT\b`),
+	regexp.MustCompile(`(?i)\bUPDATE\b`), regexp.MustCompile(`(?i)\bDELETE\b`),
+	regexp.MustCompile(`(?i)\bDROP\b`), regexp.MustCompile(`(?i)\bTABLE\b`),
+	regexp.MustCompile(`(?i)\bCREATE\b`), regexp.MustCompile(`(?i)\bALTER\b`),
+	regexp.MustCompile(`(?i)\bTRUNCATE\b`), regexp.MustCompile(`(?i)\bEXEC\b`),
+	regexp.MustCompile(`(?i)\bEXECUTE\b`), regexp.MustCompile(`(?i)\bUNION\b`),
+	regexp.MustCompile(`(?i)\bJOIN\b`), regexp.MustCompile(`(?i)\bWHERE\b`),
+	regexp.MustCompile(`(?i)\bHAVING\b`), regexp.MustCompile(`(?i)\bORDER\s+BY\b`),
+	regexp.MustCompile(`(?i)\bGROUP\s+BY\b`), regexp.MustCompile(`(?i)\bINTO\b`),
+	regexp.MustCompile(`(?i)\bVALUES\b`), regexp.MustCompile(`(?i)\bFROM\b`),
+	regexp.MustCompile(`(?i)\bSET\b`), regexp.MustCompile(`(?i)\bSCRIPT\b`),
+	regexp.MustCompile(`(?i)\bDATA\b`), regexp.MustCompile(`(?i)\bSCHEMA\b`),
+}
+
 // EscapeHTML escapes HTML special characters to prevent XSS attacks.
 func EscapeHTML(s string) string {
 	return html.EscapeString(s)
@@ -45,37 +78,28 @@ func RemoveJavaScriptEvents(s string) string {
 }
 
 // SanitizeHTMLAttributes removes potentially dangerous HTML attributes.
+//
+// Deprecated: this regex-based scrubber has known bypasses (e.g. unquoted
+// attribute values, newline-separated handlers). It is retained for callers
+// that compose it explicitly; for XSS prevention prefer the bluemonday-backed
+// StripHTML or SanitizeHTML instead.
 func SanitizeHTMLAttributes(s string) string {
-	// Remove dangerous attributes
-	dangerous := []string{
-		`(?i)\s*onclick\s*=\s*["'][^"']*["']`,
-		`(?i)\s*onload\s*=\s*["'][^"']*["']`,
-		`(?i)\s*onerror\s*=\s*["'][^"']*["']`,
-		`(?i)\s*onmouseover\s*=\s*["'][^"']*["']`,
-		`(?i)\s*onfocus\s*=\s*["'][^"']*["']`,
-		`(?i)\s*onblur\s*=\s*["'][^"']*["']`,
-		`(?i)\s*style\s*=\s*["'][^"']*expression[^"']*["']`,
-		`(?i)\s*href\s*=\s*["']javascript:[^"']*["']`,
-		`(?i)\s*src\s*=\s*["']javascript:[^"']*["']`,
-	}
-
 	result := s
-	for _, pattern := range dangerous {
-		re := regexp.MustCompile(pattern)
+	for _, re := range reDangerousAttrs {
 		result = re.ReplaceAllString(result, "")
 	}
 
 	return result
 }
 
-// PreventXSS applies comprehensive XSS prevention measures.
+// PreventXSS removes all HTML, returning plain text safe for display.
+//
+// It delegates to the bluemonday-backed StripHTML so the result is hardened
+// against the bypasses that affect the home-grown regex scrubbers (e.g.
+// malformed tags, unquoted attributes, encoded payloads). Use SanitizeHTML
+// instead when you need to preserve safe formatting tags.
 func PreventXSS(s string) string {
-	result := s
-	result = StripScriptTags(result)
-	result = RemoveJavaScriptEvents(result)
-	result = SanitizeHTMLAttributes(result)
-	result = EscapeHTML(result)
-	return result
+	return StripHTML(s)
 }
 
 // EscapeSQLString escapes single quotes in SQL strings to prevent injection.
@@ -85,18 +109,8 @@ func EscapeSQLString(s string) string {
 
 // RemoveSQLKeywords removes common SQL keywords that could be used for injection.
 func RemoveSQLKeywords(s string) string {
-	keywords := []string{
-		`(?i)\bSELECT\b`, `(?i)\bINSERT\b`, `(?i)\bUPDATE\b`, `(?i)\bDELETE\b`,
-		`(?i)\bDROP\b`, `(?i)\bTABLE\b`, `(?i)\bCREATE\b`, `(?i)\bALTER\b`, `(?i)\bTRUNCATE\b`,
-		`(?i)\bEXEC\b`, `(?i)\bEXECUTE\b`, `(?i)\bUNION\b`, `(?i)\bJOIN\b`,
-		`(?i)\bWHERE\b`, `(?i)\bHAVING\b`, `(?i)\bORDER\s+BY\b`, `(?i)\bGROUP\s+BY\b`,
-		`(?i)\bINTO\b`, `(?i)\bVALUES\b`, `(?i)\bFROM\b`, `(?i)\bSET\b`,
-		`(?i)\bSCRIPT\b`, `(?i)\bDATA\b`, `(?i)\bSCHEMA\b`,
-	}
-
 	result := s
-	for _, keyword := range keywords {
-		re := regexp.MustCompile(keyword)
+	for _, re := range reSQLKeywords {
 		result = re.ReplaceAllString(result, "")
 	}
 

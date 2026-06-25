@@ -304,6 +304,36 @@ func TestMemory_Close(t *testing.T) {
 	})
 }
 
+// --- Memory: read-after-Close returns ErrClosed ---
+
+func TestMemory_ReadAfterClose(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Get returns ErrClosed after Close", func(t *testing.T) {
+		t.Parallel()
+
+		c := cache.NewMemory[string](cache.MemoryConfig{})
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+		require.NoError(t, c.Close())
+
+		_, err := c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrClosed)
+	})
+
+	t.Run("Has returns ErrClosed after Close", func(t *testing.T) {
+		t.Parallel()
+
+		c := cache.NewMemory[string](cache.MemoryConfig{})
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+		require.NoError(t, c.Close())
+
+		_, err := c.Has(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrClosed)
+	})
+}
+
 // --- Memory: MaxEntries / LRU ---
 
 func TestMemory_MaxEntries(t *testing.T) {
@@ -646,6 +676,49 @@ func TestGetOrSet(t *testing.T) {
 		require.LessOrEqual(t, calls.Load(), int64(2),
 			"fn should be called at most twice due to singleflight dedup")
 	})
+
+	t.Run("Set runs once per computation, not once per waiting caller", func(t *testing.T) {
+		t.Parallel()
+
+		// countingCache wraps a real Memory cache and counts Set calls. It
+		// embeds *Memory[int] so the promoted sfDo method makes it satisfy the
+		// unexported deduper interface, routing GetOrSet through singleflight.
+		base := cache.NewMemory[int](cache.MemoryConfig{})
+		defer base.Close()
+		c := &countingCache[int]{Memory: base}
+
+		ctx := context.Background()
+		var wg sync.WaitGroup
+		for range 20 {
+			wg.Go(func() {
+				val, err := cache.GetOrSet(ctx, c, "key", func(_ context.Context) (int, time.Duration, error) {
+					time.Sleep(10 * time.Millisecond) // Hold the singleflight open.
+					return 7, time.Minute, nil
+				})
+				require.NoError(t, err)
+				require.Equal(t, 7, val)
+			})
+		}
+		wg.Wait()
+
+		// With Set inside the singleflight callback, each deduplicated
+		// computation performs exactly one Set — not one per waiting caller.
+		require.LessOrEqual(t, c.sets.Load(), int64(2),
+			"Set should run at most once per deduplicated computation, not per caller")
+	})
+}
+
+// countingCache wraps a Memory cache and counts Set invocations. Embedding
+// *cache.Memory promotes its (unexported) sfDo method so GetOrSet treats this
+// wrapper as a deduper.
+type countingCache[V any] struct {
+	*cache.Memory[V]
+	sets atomic.Int64
+}
+
+func (c *countingCache[V]) Set(ctx context.Context, key string, value V, ttl time.Duration) error {
+	c.sets.Add(1)
+	return c.Memory.Set(ctx, key, value, ttl)
 }
 
 // --- JSON Marshaler ---
@@ -1043,5 +1116,159 @@ func TestRedis_CustomMarshaler(t *testing.T) {
 		raw, err := client.Get(ctx, "test-custom-marshal:key").Result()
 		require.NoError(t, err)
 		require.Equal(t, "olleh", raw)
+	})
+}
+
+// --- Redis: Clear empty-prefix guard ---
+
+func TestRedis_Clear_EmptyPrefix(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrNoPrefix instead of FLUSHDB", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{}) // no prefix
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+
+		// Clear must refuse to wipe the whole DB.
+		err := c.Clear(ctx)
+		require.ErrorIs(t, err, cache.ErrNoPrefix)
+
+		// The data must still be present — nothing was flushed.
+		val, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "value", val)
+	})
+
+	t.Run("FlushDB explicitly wipes the database", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{}) // no prefix
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "value", time.Minute))
+
+		require.NoError(t, c.FlushDB(ctx))
+
+		_, err := c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrNotFound)
+	})
+}
+
+// --- Redis: Marshal / Unmarshal errors ---
+
+// unmarshalable holds a channel, which encoding/json cannot serialize.
+type unmarshalable struct {
+	Ch chan int `json:"ch"`
+}
+
+func TestRedis_MarshalError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Set wraps ErrMarshal for unmarshalable value", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[unmarshalable](client, nil, cache.RedisConfig{Prefix: "test-marshal-err"})
+
+		ctx := context.Background()
+		err := c.Set(ctx, "key", unmarshalable{Ch: make(chan int)}, time.Minute)
+		require.ErrorIs(t, err, cache.ErrMarshal)
+
+		// Nothing should have been written.
+		_, err = client.Get(ctx, "test-marshal-err:key").Result()
+		require.ErrorIs(t, err, goredis.Nil)
+	})
+}
+
+func TestRedis_UnmarshalError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Get wraps ErrUnmarshal for corrupt bytes", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[int](client, nil, cache.RedisConfig{Prefix: "test-unmarshal-err"})
+
+		ctx := context.Background()
+		// Write bytes that are not valid JSON for an int directly to Redis.
+		require.NoError(t, client.Set(ctx, "test-unmarshal-err:key", "not-a-number", time.Minute).Err())
+
+		_, err := c.Get(ctx, "key")
+		require.ErrorIs(t, err, cache.ErrUnmarshal)
+	})
+}
+
+// --- Redis: GetOrSet / singleflight ---
+
+func TestRedis_GetOrSet(t *testing.T) {
+	t.Parallel()
+
+	t.Run("calls fn on miss and caches result", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-redis-getorset"})
+
+		ctx := context.Background()
+		val, err := cache.GetOrSet(ctx, c, "key", func(_ context.Context) (string, time.Duration, error) {
+			return "computed", time.Minute, nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, "computed", val)
+
+		// Verify it was cached in Redis.
+		cached, err := c.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, "computed", cached)
+	})
+
+	t.Run("returns cached value on hit", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[string](client, nil, cache.RedisConfig{Prefix: "test-redis-getorset-hit"})
+
+		ctx := context.Background()
+		require.NoError(t, c.Set(ctx, "key", "cached", time.Minute))
+
+		val, err := cache.GetOrSet(ctx, c, "key", func(_ context.Context) (string, time.Duration, error) {
+			t.Fatal("fn should not be called on cache hit")
+			return "", 0, nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, "cached", val)
+	})
+
+	t.Run("deduplicates concurrent calls via singleflight", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newTestRedis(t)
+		c := cache.NewRedis[int](client, nil, cache.RedisConfig{Prefix: "test-redis-getorset-dedup"})
+
+		ctx := context.Background()
+		var calls atomic.Int64
+		var wg sync.WaitGroup
+
+		for range 10 {
+			wg.Go(func() {
+				val, err := cache.GetOrSet(ctx, c, "dedup", func(_ context.Context) (int, time.Duration, error) {
+					calls.Add(1)
+					time.Sleep(10 * time.Millisecond) // Simulate slow computation.
+					return 42, time.Minute, nil
+				})
+				require.NoError(t, err)
+				require.Equal(t, 42, val)
+			})
+		}
+
+		wg.Wait()
+
+		require.LessOrEqual(t, calls.Load(), int64(2),
+			"fn should be called at most twice due to singleflight dedup")
 	})
 }

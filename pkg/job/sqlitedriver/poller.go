@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// resultWriteTimeout bounds the final status write for a finished job. It uses
+// a context detached from the poller's lifecycle so a job that completes during
+// Stop can still persist its result, while preventing an indefinite hang.
+const resultWriteTimeout = 5 * time.Second
+
 // pollQueue polls for pending jobs in the given queue and dispatches them
 // to the executor. It uses a semaphore to limit concurrency.
 func (d *SQLiteDriver) pollQueue(
@@ -123,24 +128,32 @@ func (d *SQLiteDriver) executeJob(
 
 	execErr := d.safeExecute(ctx, taskName, payload, executor)
 
+	// Persist the result using a context detached from the poller's lifecycle.
+	// On Stop the poller ctx is cancelled, but a job that already finished must
+	// still record its terminal status — otherwise it would be wrongly recovered
+	// as "orphaned" on the next start. A short timeout bounds the write so Stop
+	// cannot hang indefinitely.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultWriteTimeout)
+	defer cancel()
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	if execErr == nil {
 		// Success → completed.
-		_, err := d.db.ExecContext(ctx,
+		_, err := d.db.ExecContext(writeCtx,
 			`UPDATE forge_jobs SET status = 'completed', completed_at = ? WHERE id = ?`,
 			now, jobID,
 		)
 		if err != nil {
-			logger.ErrorContext(ctx, "failed to mark job completed",
+			logger.ErrorContext(writeCtx, "failed to mark job completed",
 				slog.Int64("job_id", jobID), slog.Any("error", err))
 		}
-		logger.DebugContext(ctx, "task completed",
+		logger.DebugContext(writeCtx, "task completed",
 			slog.String("task", taskName), slog.Int64("job_id", jobID))
 		return
 	}
 
-	logger.ErrorContext(ctx, "task failed",
+	logger.ErrorContext(writeCtx, "task failed",
 		slog.String("task", taskName),
 		slog.Int64("job_id", jobID),
 		slog.Any("error", execErr),
@@ -148,30 +161,30 @@ func (d *SQLiteDriver) executeJob(
 
 	// Check if retries remain.
 	var attempt, maxAttempts int
-	err := d.db.QueryRowContext(ctx,
+	err := d.db.QueryRowContext(writeCtx,
 		`SELECT attempt, max_attempts FROM forge_jobs WHERE id = ?`, jobID,
 	).Scan(&attempt, &maxAttempts)
 	if err != nil {
-		logger.ErrorContext(ctx, "failed to read job attempts",
+		logger.ErrorContext(writeCtx, "failed to read job attempts",
 			slog.Int64("job_id", jobID), slog.Any("error", err))
 		return
 	}
 
 	if attempt >= maxAttempts {
 		// No retries left → discarded.
-		_, err = d.db.ExecContext(ctx,
+		_, err = d.db.ExecContext(writeCtx,
 			`UPDATE forge_jobs SET status = 'discarded', completed_at = ? WHERE id = ?`,
 			now, jobID,
 		)
 	} else {
 		// Retries left → back to pending.
-		_, err = d.db.ExecContext(ctx,
+		_, err = d.db.ExecContext(writeCtx,
 			`UPDATE forge_jobs SET status = 'pending', started_at = NULL WHERE id = ?`,
 			jobID,
 		)
 	}
 	if err != nil {
-		logger.ErrorContext(ctx, "failed to update job status after failure",
+		logger.ErrorContext(writeCtx, "failed to update job status after failure",
 			slog.Int64("job_id", jobID), slog.Any("error", err))
 	}
 }

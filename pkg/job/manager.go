@@ -62,8 +62,9 @@ func NewManager(driver Driver, userCfg Config, opts ...Option) (*Manager, error)
 
 	return &Manager{
 		Enqueuer: &Enqueuer{
-			driver: driver,
-			logger: cfg.logger,
+			driver:   driver,
+			logger:   cfg.logger,
+			registry: cfg.registry,
 		},
 		driver:        driver,
 		registry:      cfg.registry,
@@ -147,29 +148,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Enqueue adds a job to the queue for processing.
-// The job will be executed by a registered task handler.
-// Jobs can be enqueued before Start() is called; they will be processed
-// once the manager starts.
-func (m *Manager) Enqueue(ctx context.Context, name string, payload any, opts ...EnqueueOption) error {
-	if _, ok := m.registry.get(name); !ok {
-		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
-	}
-	return m.Enqueuer.Enqueue(ctx, name, payload, opts...)
-}
-
-// EnqueueTx adds a job to the queue within a transaction.
-// The job is only visible after the transaction commits.
-// This ensures atomicity between database changes and job enqueueing.
-// The tx type depends on the driver (pgx.Tx for River, *sql.Tx for SQLite).
-// Jobs can be enqueued before Start() is called; they will be processed
-// once the manager starts.
-func (m *Manager) EnqueueTx(ctx context.Context, tx any, name string, payload any, opts ...EnqueueOption) error {
-	if _, ok := m.registry.get(name); !ok {
-		return fmt.Errorf("%w: %s", ErrUnknownTask, name)
-	}
-	return m.Enqueuer.EnqueueTx(ctx, tx, name, payload, opts...)
-}
+// Enqueue and EnqueueTx are provided by the embedded *Enqueuer. Because the
+// Manager wires its task registry into that Enqueuer (see NewManager), both
+// methods reject unregistered task names with ErrUnknownTask — including when
+// the framework dispatches through the embedded Enqueuer directly (e.g.
+// forge.Context.Enqueue), so the validation cannot be bypassed.
 
 type scheduledTaskExecutor struct {
 	handler scheduledHandler

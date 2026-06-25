@@ -72,7 +72,9 @@ var (
 			return EscapeHTML(RemoveExtraWhitespace(Trim(s)))
 		},
 		"safe_html": func(s string) string {
-			return PreventXSS(Trim(s))
+			// Allow safe formatting tags via the bluemonday-backed
+			// SanitizeHTML rather than the home-grown regex scrubbers.
+			return SanitizeHTML(Trim(s))
 		},
 	}
 )
@@ -82,6 +84,16 @@ func RegisterSanitizer(name string, fn func(string) string) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[name] = fn
+}
+
+// UnregisterSanitizer removes a custom sanitizer from the registry. It is a
+// no-op if the name is not registered. This is primarily useful for tests that
+// register a temporary sanitizer and need to clean up the process-global
+// registry afterwards.
+func UnregisterSanitizer(name string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	delete(registry, name)
 }
 
 // SanitizeStruct applies sanitization to struct fields based on their tags
@@ -175,7 +187,9 @@ func sanitizeStructRecursive(rv reflect.Value) error {
 }
 
 func applySanitizers(value string, tag string) (string, error) {
-	sanitizers := strings.Split(tag, ",")
+	// Tags are separated by ';' (params use ':'), matching the project-wide
+	// convention used by pkg/validator (see CLAUDE.md).
+	sanitizers := strings.Split(tag, ";")
 	result := value
 
 	registryMu.RLock()

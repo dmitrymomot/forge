@@ -3,19 +3,21 @@ package randomname_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/randomname"
 )
 
 func TestDefaultOptions(t *testing.T) {
+	t.Parallel()
 	opts := randomname.Generate(nil)
-	assert.NotEmpty(t, opts)
+	require.NotEmpty(t, opts)
 	// Should generate with default pattern
-	assert.Regexp(t, `^[a-z]+-[a-z]+$`, opts)
+	require.Regexp(t, `^[a-z]+-[a-z]+$`, opts)
 }
 
 func TestOptionsMerge(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		opts     *randomname.Options
@@ -51,13 +53,15 @@ func TestOptionsMerge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			name := randomname.Generate(tt.opts)
-			assert.Regexp(t, tt.expected, name)
+			require.Regexp(t, tt.expected, name)
 		})
 	}
 }
 
 func TestSuffixTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		suffix  randomname.SuffixType
@@ -87,15 +91,17 @@ func TestSuffixTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			name := randomname.Generate(&randomname.Options{
 				Suffix: tt.suffix,
 			})
-			assert.Regexp(t, tt.pattern, name)
+			require.Regexp(t, tt.pattern, name)
 		})
 	}
 }
 
 func TestWordTypes(t *testing.T) {
+	t.Parallel()
 	// Test that all word types have words defined
 	wordTypes := []randomname.WordType{
 		randomname.Adjective,
@@ -108,18 +114,21 @@ func TestWordTypes(t *testing.T) {
 
 	for _, wordType := range wordTypes {
 		t.Run("word type availability", func(t *testing.T) {
+			t.Parallel()
 			// Generate with single word type
 			name := randomname.Generate(&randomname.Options{
 				Pattern: []randomname.WordType{wordType},
 			})
-			assert.NotEmpty(t, name)
-			assert.Regexp(t, `^[a-z]+$`, name)
+			require.NotEmpty(t, name)
+			require.Regexp(t, `^[a-z]+$`, name)
 		})
 	}
 }
 
 func TestValidator(t *testing.T) {
+	t.Parallel()
 	t.Run("accept first attempt", func(t *testing.T) {
+		t.Parallel()
 		attempts := 0
 		name := randomname.Generate(&randomname.Options{
 			Validator: func(s string) bool {
@@ -127,11 +136,12 @@ func TestValidator(t *testing.T) {
 				return true
 			},
 		})
-		assert.NotEmpty(t, name)
-		assert.Equal(t, 1, attempts)
+		require.NotEmpty(t, name)
+		require.Equal(t, 1, attempts)
 	})
 
 	t.Run("reject first few attempts", func(t *testing.T) {
+		t.Parallel()
 		attempts := 0
 		name := randomname.Generate(&randomname.Options{
 			Validator: func(s string) bool {
@@ -139,11 +149,12 @@ func TestValidator(t *testing.T) {
 				return attempts >= 3
 			},
 		})
-		assert.NotEmpty(t, name)
-		assert.Equal(t, 3, attempts)
+		require.NotEmpty(t, name)
+		require.Equal(t, 3, attempts)
 	})
 
 	t.Run("max retries exceeded", func(t *testing.T) {
+		t.Parallel()
 		attempts := 0
 		name := randomname.Generate(&randomname.Options{
 			Validator: func(s string) bool {
@@ -151,7 +162,7 @@ func TestValidator(t *testing.T) {
 				return false // Always reject
 			},
 		})
-		assert.NotEmpty(t, name)
-		assert.Equal(t, 100, attempts) // Should try exactly 100 times
+		require.NotEmpty(t, name)
+		require.Equal(t, 100, attempts) // Should try exactly 100 times
 	})
 }

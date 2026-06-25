@@ -62,27 +62,7 @@ func Open(ctx context.Context, cfg Config, opts ...Option) (*pgxpool.Pool, error
 		return nil, ErrFailedToParseDBConfig
 	}
 
-	if cfg.MaxConns == 0 {
-		cfg.MaxConns = 10
-	}
-	if cfg.MinConns == 0 {
-		cfg.MinConns = 5
-	}
-	if cfg.HealthCheckPeriod == 0 {
-		cfg.HealthCheckPeriod = time.Minute
-	}
-	if cfg.MaxConnIdleTime == 0 {
-		cfg.MaxConnIdleTime = 10 * time.Minute
-	}
-	if cfg.MaxConnLifetime == 0 {
-		cfg.MaxConnLifetime = 30 * time.Minute
-	}
-	if cfg.RetryAttempts == 0 {
-		cfg.RetryAttempts = 3
-	}
-	if cfg.RetryInterval == 0 {
-		cfg.RetryInterval = 5 * time.Second
-	}
+	applyDefaults(&cfg)
 
 	o := &options{}
 	for _, opt := range opts {
@@ -115,6 +95,33 @@ func Open(ctx context.Context, cfg Config, opts ...Option) (*pgxpool.Pool, error
 	return pool, nil
 }
 
+// applyDefaults fills zero-valued pool and retry settings with sensible
+// defaults. It mutates cfg in place and only touches fields left at their zero
+// value, so explicitly-set values are preserved.
+func applyDefaults(cfg *Config) {
+	if cfg.MaxConns == 0 {
+		cfg.MaxConns = 10
+	}
+	if cfg.MinConns == 0 {
+		cfg.MinConns = 5
+	}
+	if cfg.HealthCheckPeriod == 0 {
+		cfg.HealthCheckPeriod = time.Minute
+	}
+	if cfg.MaxConnIdleTime == 0 {
+		cfg.MaxConnIdleTime = 10 * time.Minute
+	}
+	if cfg.MaxConnLifetime == 0 {
+		cfg.MaxConnLifetime = 30 * time.Minute
+	}
+	if cfg.RetryAttempts == 0 {
+		cfg.RetryAttempts = 3
+	}
+	if cfg.RetryInterval == 0 {
+		cfg.RetryInterval = 5 * time.Second
+	}
+}
+
 // MustOpen creates a connection pool or exits on failure.
 // Use for simple applications where startup failure is fatal.
 //
@@ -134,30 +141,34 @@ func MustOpen(ctx context.Context, cfg Config, opts ...Option) *pgxpool.Pool {
 }
 
 // connect establishes a connection with retry logic.
+// Backoff between attempts is linear: the wait before attempt i is i*interval.
+// The underlying error from the final attempt is preserved in the returned error.
 func connect(ctx context.Context, cfg *pgxpool.Config, attempts int, interval time.Duration) (*pgxpool.Pool, error) {
 	attempts = max(attempts, 1)
 
+	var lastErr error
 	for i := range attempts {
 		pool, err := pgxpool.NewWithConfig(ctx, cfg)
 		if err != nil {
-			if waitErr := wait(ctx, time.Duration(i+1)*interval); waitErr != nil {
-				return nil, errors.Join(ErrFailedToOpenDBConnection, waitErr)
-			}
-			continue
-		}
-
-		if err := pool.Ping(ctx); err != nil {
+			lastErr = err
+		} else if pingErr := pool.Ping(ctx); pingErr != nil {
 			pool.Close()
-			if waitErr := wait(ctx, time.Duration(i+1)*interval); waitErr != nil {
-				return nil, errors.Join(ErrFailedToOpenDBConnection, waitErr)
-			}
-			continue
+			lastErr = pingErr
+		} else {
+			return pool, nil
 		}
 
-		return pool, nil
+		// Skip the backoff wait after the final attempt; there is nothing
+		// left to retry, so sleeping would only delay the returned error.
+		if i == attempts-1 {
+			break
+		}
+		if waitErr := wait(ctx, time.Duration(i+1)*interval); waitErr != nil {
+			return nil, errors.Join(ErrFailedToOpenDBConnection, lastErr, waitErr)
+		}
 	}
 
-	return nil, ErrFailedToOpenDBConnection
+	return nil, errors.Join(ErrFailedToOpenDBConnection, lastErr)
 }
 
 func wait(ctx context.Context, d time.Duration) error {

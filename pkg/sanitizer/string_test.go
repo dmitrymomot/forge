@@ -3,7 +3,7 @@ package sanitizer_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/sanitizer"
 )
@@ -48,7 +48,7 @@ func TestTrim(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.Trim(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -93,7 +93,7 @@ func TestToLower(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToLower(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -138,7 +138,7 @@ func TestToUpper(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToUpper(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -173,7 +173,7 @@ func TestToTitle(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToTitle(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -208,7 +208,7 @@ func TestTrimToLower(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.TrimToLower(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -243,7 +243,7 @@ func TestTrimToUpper(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.TrimToUpper(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -306,7 +306,7 @@ func TestMaxLength(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.MaxLength(tt.input, tt.maxLen)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -356,7 +356,7 @@ func TestRemoveExtraWhitespace(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveExtraWhitespace(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -396,7 +396,7 @@ func TestRemoveControlChars(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveControlChars(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -443,7 +443,7 @@ func TestRemoveChars(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.RemoveChars(tt.input, tt.chars)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -493,7 +493,7 @@ func TestReplaceChars(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ReplaceChars(tt.input, tt.old, tt.new)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -533,7 +533,7 @@ func TestKeepAlphanumeric(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.KeepAlphanumeric(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -573,7 +573,7 @@ func TestKeepAlpha(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.KeepAlpha(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -613,7 +613,7 @@ func TestKeepDigits(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.KeepDigits(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -663,7 +663,7 @@ func TestSingleLine(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.SingleLine(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -703,7 +703,7 @@ func TestToKebabCase(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToKebabCase(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -743,7 +743,7 @@ func TestToSnakeCase(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToSnakeCase(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -783,7 +783,7 @@ func TestToCamelCase(t *testing.T) {
 			t.Parallel()
 
 			result := sanitizer.ToCamelCase(tt.input)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }

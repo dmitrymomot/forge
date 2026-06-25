@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -245,6 +247,60 @@ func TestInsert_UniqueFor_AllowsAfterTerminalState(t *testing.T) {
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM forge_jobs`).Scan(&count))
 	require.Equal(t, 2, count)
+}
+
+// concurrentDB creates a file-backed SQLite database that permits multiple
+// open connections, so goroutines genuinely race on inserts (unlike the
+// single-connection in-memory testDB).
+func concurrentDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dsn := "file:" + filepath.Join(t.TempDir(), "jobs.db") + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	d := New(db)
+	require.NoError(t, d.Migrate(context.Background()))
+	return db
+}
+
+func TestInsert_UniqueFor_ConcurrentDedup(t *testing.T) {
+	t.Parallel()
+	db := concurrentDB(t)
+	d := New(db)
+	ctx := context.Background()
+
+	const goroutines = 20
+	ji := &job.JobInsert{
+		TaskName:  "concurrent_task",
+		UniqueKey: "user:race",
+		UniqueFor: 5 * time.Minute,
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make([]error, goroutines)
+	for i := range goroutines {
+		wg.Go(func() {
+			<-start // release all goroutines at once to maximize contention
+			errs[i] = d.Insert(ctx, ji)
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	// No insert should error (duplicates are skipped, not failed).
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+
+	// Exactly one job must be enqueued despite the concurrent inserts.
+	var count int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM forge_jobs WHERE task_name = ? AND unique_key = ?`,
+		ji.TaskName, ji.UniqueKey,
+	).Scan(&count))
+	require.Equal(t, 1, count, "concurrent dedup must enqueue exactly one job")
 }
 
 func TestInsert_UniqueKeyWithoutUniqueFor(t *testing.T) {

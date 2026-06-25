@@ -26,9 +26,12 @@
 //
 // # Custom Size
 //
-// Pass an optional size in pixels:
+// Pass an optional size in pixels (default 256, maximum 4096):
 //
 //	png, err := qrcode.Generate("https://example.com", 512)
+//
+// Non-positive sizes fall back to the default. A size above the maximum
+// returns [ErrSizeTooLarge] to bound the worst-case image allocation.
 //
 // # TOTP Integration
 //
@@ -61,8 +64,10 @@
 //
 // # Error Handling
 //
-// The package returns [ErrEmptyContent] for empty or whitespace-only input
-// and [ErrFailedToGenerateQRCode] for encoding failures:
+// The package returns [ErrEmptyContent] for empty or whitespace-only input,
+// [ErrSizeTooLarge] for a requested size above the maximum, and
+// [ErrFailedToGenerateQRCode] for encoding failures (e.g. content that
+// exceeds the QR code capacity):
 //
 //	png, err := qrcode.Generate("")
 //	if errors.Is(err, qrcode.ErrEmptyContent) {

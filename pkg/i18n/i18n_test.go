@@ -2,6 +2,7 @@ package i18n_test
 
 import (
 	"fmt"
+	"io/fs"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,78 @@ func TestNew(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Equal(t, []string{"en", "de", "pl"}, inst.Languages())
+	})
+}
+
+func TestLanguages(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults to the default language only", func(t *testing.T) {
+		t.Parallel()
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "pl"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"pl"}, inst.Languages())
+	})
+
+	t.Run("returned slice is a defensive copy", func(t *testing.T) {
+		t.Parallel()
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithLanguages("en", "pl", "de"),
+		)
+		require.NoError(t, err)
+
+		original := inst.Languages()
+		require.Equal(t, []string{"en", "de", "pl"}, original)
+
+		// Mutate the returned slice; the internal state must be unaffected.
+		got := inst.Languages()
+		for i := range got {
+			got[i] = "mutated"
+		}
+
+		require.Equal(t, []string{"en", "de", "pl"}, inst.Languages(),
+			"mutating the returned slice must not affect internal state")
+		require.Equal(t, []string{"en", "de", "pl"}, original,
+			"each call must return an independent copy")
+	})
+
+	t.Run("includes languages loaded via WithTranslations", func(t *testing.T) {
+		t.Parallel()
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithTranslations("en", "app", map[string]any{"hello": "Hello"}),
+			i18n.WithTranslations("fr", "app", map[string]any{"hello": "Bonjour"}),
+			i18n.WithTranslations("de", "app", map[string]any{"hello": "Hallo"}),
+		)
+		require.NoError(t, err)
+
+		// Default first, then loaded languages unique and sorted.
+		require.Equal(t, []string{"en", "de", "fr"}, inst.Languages())
+	})
+
+	t.Run("merges explicit and loaded languages without duplicates", func(t *testing.T) {
+		t.Parallel()
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithLanguages("pl"),
+			i18n.WithTranslations("de", "app", map[string]any{"hello": "Hallo"}),
+			i18n.WithTranslations("en", "app", map[string]any{"hello": "Hello"}),
+		)
+		require.NoError(t, err)
+
+		require.Equal(t, []string{"en", "de", "pl"}, inst.Languages())
+	})
+
+	t.Run("includes languages loaded from JSON dir", func(t *testing.T) {
+		t.Parallel()
+		subFS, err := fs.Sub(testdataFS, "testdata")
+		require.NoError(t, err)
+
+		inst, err := i18n.New(i18n.Config{DefaultLanguage: "en"},
+			i18n.WithJSONDir(subFS),
+		)
+		require.NoError(t, err)
+
+		// testdata has en/* and de/* JSON files.
+		require.Equal(t, []string{"en", "de"}, inst.Languages())
 	})
 }
 
@@ -529,6 +602,50 @@ func TestFlattenTranslations(t *testing.T) {
 		require.Equal(t, "Many items", inst.T("en", "test", "plural.other"))
 		require.Equal(t, "42", inst.T("en", "test", "number"))
 		require.Equal(t, "true", inst.T("en", "test", "boolean"))
+	})
+
+	t.Run("supports numeric and boolean scalars", func(t *testing.T) {
+		t.Parallel()
+		inst, err := i18n.New(i18n.Config{},
+			i18n.WithTranslations("en", "test", map[string]any{
+				"int":   7,
+				"int64": int64(9000000000),
+				"float": 3.5,
+				"flag":  false,
+			}),
+		)
+		require.NoError(t, err)
+		require.Equal(t, "7", inst.T("en", "test", "int"))
+		require.Equal(t, "9000000000", inst.T("en", "test", "int64"))
+		require.Equal(t, "3.5", inst.T("en", "test", "float"))
+		require.Equal(t, "false", inst.T("en", "test", "flag"))
+	})
+
+	t.Run("rejects unsupported value types", func(t *testing.T) {
+		t.Parallel()
+		_, err := i18n.New(i18n.Config{},
+			i18n.WithTranslations("en", "test", map[string]any{
+				"bad": []string{"not", "supported"},
+			}),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
+	})
+
+	t.Run("rejects colliding keys", func(t *testing.T) {
+		t.Parallel()
+		// "menu.save" is produced both by the nested map and the
+		// map[string]string branch, which would silently overwrite.
+		_, err := i18n.New(i18n.Config{},
+			i18n.WithTranslations("en", "test", map[string]any{
+				"menu": map[string]any{
+					"save": "Save",
+				},
+				"menu.save": "Collision",
+			}),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, i18n.ErrInvalidFile)
 	})
 }
 

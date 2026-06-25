@@ -2,8 +2,8 @@ package token
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -56,9 +56,16 @@ func ParseToken[T any](tokenStr string, secret []byte) (*T, error) {
 		return nil, ErrInvalidToken
 	}
 
-	// Verify signature before processing payload (security-first)
+	// Verify signature before processing payload (security-first).
+	//
+	// subtle.ConstantTimeCompare short-circuits (non-constant-time) when the two
+	// inputs differ in length, which would leak the attacker-supplied signature
+	// length. To keep the comparison uniformly constant-time regardless of the
+	// received signature's length, HMAC both values to fixed-size digests under a
+	// per-call random key (double-HMAC) before comparing. This avoids leaking any
+	// length information about the attacker-controlled sig segment.
 	expected := sign(encoded, secret)
-	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+	if !constantTimeEqual(sig, expected) {
 		return nil, ErrSignatureInvalid
 	}
 
@@ -81,4 +88,32 @@ func sign(message string, secret []byte) string {
 	h.Write([]byte(message))
 	mac := h.Sum(nil)[:signatureSize]
 	return base64.RawURLEncoding.EncodeToString(mac)
+}
+
+// constantTimeEqual reports whether a and b are equal without leaking the
+// length of a (the attacker-controlled signature segment) through timing.
+//
+// subtle.ConstantTimeCompare returns immediately when its inputs differ in
+// length, so feeding it the raw segments would make the comparison's running
+// time depend on the supplied signature length. To avoid that, both values are
+// reduced to fixed-size HMAC-SHA256 digests under a fresh per-call random key
+// (the double-HMAC construction) before comparison. The digests are always the
+// same length, so hmac.Equal runs in constant time regardless of len(a). The
+// random key makes the digests unpredictable to an attacker, so they cannot be
+// precomputed or used as an oracle.
+func constantTimeEqual(a, b string) bool {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		// crypto/rand failure is catastrophic and effectively never happens;
+		// fail closed rather than fall back to a non-constant-time compare.
+		return false
+	}
+
+	macA := hmac.New(sha256.New, key[:])
+	macA.Write([]byte(a))
+
+	macB := hmac.New(sha256.New, key[:])
+	macB.Write([]byte(b))
+
+	return hmac.Equal(macA.Sum(nil), macB.Sum(nil))
 }

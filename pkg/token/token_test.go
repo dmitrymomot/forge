@@ -76,6 +76,17 @@ func TestGenerateToken(t *testing.T) {
 		require.ErrorIs(t, err, token.ErrEmptySecret)
 		require.Empty(t, tok)
 	})
+
+	t.Run("with unmarshalable payload", func(t *testing.T) {
+		t.Parallel()
+		// A channel cannot be JSON-marshaled, so GenerateToken must surface the
+		// marshal error rather than returning a token.
+		tok, err := token.GenerateToken(make(chan int), secret)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, token.ErrEmptySecret)
+		require.Contains(t, err.Error(), "marshal")
+		require.Empty(t, tok)
+	})
 }
 
 func TestParseToken(t *testing.T) {
@@ -218,6 +229,22 @@ func TestParseToken(t *testing.T) {
 		t.Parallel()
 		result, err := token.ParseToken[EmailVerification]("", secret)
 		require.ErrorIs(t, err, token.ErrInvalidToken)
+		require.Nil(t, result)
+	})
+
+	t.Run("with valid signature but mismatched JSON shape", func(t *testing.T) {
+		t.Parallel()
+		// Sign a numeric payload, then parse it as a struct. The signature is
+		// valid (so it passes verification) but json.Unmarshal of `42` into a
+		// struct fails, exercising the unmarshal-failure path.
+		tok, err := token.GenerateToken(42, secret)
+		require.NoError(t, err)
+
+		result, err := token.ParseToken[EmailVerification](tok, secret)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, token.ErrSignatureInvalid)
+		require.NotErrorIs(t, err, token.ErrInvalidToken)
+		require.Contains(t, err.Error(), "unmarshal")
 		require.Nil(t, result)
 	})
 }

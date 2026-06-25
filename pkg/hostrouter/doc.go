@@ -10,6 +10,10 @@
 //   - Exact: "api.example.com" matches only that host
 //   - Wildcard: "*.example.com" matches any subdomain (foo.example.com, bar.example.com)
 //
+// Wildcards match a single subdomain level only. "*.example.com" matches
+// "foo.example.com" but not "a.b.example.com" (a multi-level subdomain) nor the
+// bare root domain "example.com".
+//
 // Exact matches take priority over wildcard matches. Host matching is case-insensitive,
 // and ports are stripped before matching.
 //

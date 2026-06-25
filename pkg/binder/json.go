@@ -1,6 +1,7 @@
 package binder
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func JSON() Binder {
 			return fmt.Errorf("%w: request body too large (max %d bytes)", ErrFailedToParseJSON, DefaultMaxJSONSize)
 		}
 
-		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields() // Strict mode prevents typos and unexpected fields
 
 		if err := decoder.Decode(v); err != nil {
@@ -135,20 +136,22 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Map:
+		// Map values obtained via MapIndex are never addressable/settable, so they
+		// cannot be mutated in place. Sanitize into an addressable copy and write the
+		// result back with SetMapIndex; otherwise sanitization would be a silent no-op.
 		if rv.IsNil() {
 			return nil
 		}
-		// Map values are not addressable, so reflect.Value.CanSet always reports
-		// false for them and the value cannot be mutated in place. Sanitize an
-		// addressable copy of each value and write it back with SetMapIndex.
 		for _, key := range rv.MapKeys() {
 			value := rv.MapIndex(key)
-			copyVal := reflect.New(value.Type()).Elem()
-			copyVal.Set(value)
-			if err := sanitizeReflectValue(copyVal); err != nil {
+
+			// Copy into an addressable temporary so nested fields can be set.
+			tmp := reflect.New(value.Type()).Elem()
+			tmp.Set(value)
+			if err := sanitizeReflectValue(tmp); err != nil {
 				return err
 			}
-			rv.SetMapIndex(key, copyVal)
+			rv.SetMapIndex(key, tmp)
 		}
 
 	case reflect.Pointer:
@@ -159,20 +162,19 @@ func sanitizeReflectValue(rv reflect.Value) error {
 		}
 
 	case reflect.Interface:
-		if rv.IsNil() {
-			return nil
-		}
-		// An interface's dynamic value is not addressable either (e.g. the string
-		// behind a map[string]any entry), so sanitize an addressable copy and
-		// write it back into the interface when possible.
-		elem := rv.Elem()
-		copyVal := reflect.New(elem.Type()).Elem()
-		copyVal.Set(elem)
-		if err := sanitizeReflectValue(copyVal); err != nil {
-			return err
-		}
-		if rv.CanSet() {
-			rv.Set(copyVal)
+		// The concrete value held by an interface is not addressable, so sanitize a
+		// copy and, when the interface itself is settable (e.g. a map[string]any value
+		// copied into an addressable temporary), write the sanitized value back.
+		if !rv.IsNil() {
+			concrete := rv.Elem()
+			tmp := reflect.New(concrete.Type()).Elem()
+			tmp.Set(concrete)
+			if err := sanitizeReflectValue(tmp); err != nil {
+				return err
+			}
+			if rv.CanSet() {
+				rv.Set(tmp)
+			}
 		}
 	}
 

@@ -86,6 +86,33 @@
 //		return
 //	}
 //
+// # SSRF Protection and Trust Boundary
+//
+// Webhook destination URLs are frequently user-supplied (for example, tenants
+// configuring their own endpoints). An attacker-controlled URL can be used for
+// Server-Side Request Forgery (SSRF) — reaching cloud metadata services,
+// internal databases, or other infrastructure that is only reachable from
+// inside your network.
+//
+// To make the safe behavior the default, the sender resolves each destination
+// host before delivery and rejects any address that is loopback, private
+// (RFC 1918 / RFC 4193 unique-local), link-local, or unspecified. Hostnames are
+// resolved via DNS so names that point at internal addresses are caught too.
+// Blocked destinations fail with ErrBlockedDestination:
+//
+//	err := sender.Send(ctx, userSuppliedURL, event)
+//	if errors.Is(err, webhook.ErrBlockedDestination) {
+//		// URL points at a non-public address; reject it.
+//	}
+//
+// Callers that legitimately deliver to internal endpoints (a service inside
+// their own network, or a local test server) can opt out with
+// WithAllowPrivateNetworks. Only enable this for trusted destinations:
+//
+//	err := sender.Send(ctx, "http://internal-service.local/hook", event,
+//		webhook.WithAllowPrivateNetworks(),
+//	)
+//
 // # Monitoring
 //
 // Track delivery attempts:
@@ -101,6 +128,7 @@
 //
 // The package defines specific error types for different failure modes:
 //   - ErrInvalidURL: URL is malformed or uses unsupported scheme
+//   - ErrBlockedDestination: URL resolves to a non-public address (SSRF protection)
 //   - ErrInvalidPayload: Payload is empty or exceeds size limit
 //   - ErrTimeout: Request exceeded timeout
 //   - ErrCircuitOpen: Circuit breaker is protecting the endpoint

@@ -6,7 +6,6 @@ import (
 
 	"github.com/dmitrymomot/forge/pkg/secrets"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +25,7 @@ func TestGenerateKey(t *testing.T) {
 		require.NoError(t, err)
 		key2, err := secrets.GenerateKey()
 		require.NoError(t, err)
-		assert.NotEqual(t, key1, key2)
+		require.NotEqual(t, key1, key2)
 	})
 }
 
@@ -328,4 +327,77 @@ func TestEncryptString_Uniqueness(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotEqual(t, enc1, enc2, "same plaintext should produce different ciphertext due to random nonce")
+}
+
+func BenchmarkEncryptString(b *testing.B) {
+	appKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+	wsKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+
+	plaintext := "sensitive workspace data that needs encryption"
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := secrets.EncryptString(plaintext, appKey, wsKey); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkDecryptString(b *testing.B) {
+	appKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+	wsKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+
+	encrypted, err := secrets.EncryptString("sensitive workspace data that needs encryption", appKey, wsKey)
+	require.NoError(b, err)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := secrets.DecryptString(encrypted, appKey, wsKey); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEncryptBytes(b *testing.B) {
+	appKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+	wsKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = byte(i)
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := secrets.EncryptBytes(data, appKey, wsKey); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkDecryptBytes(b *testing.B) {
+	appKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+	wsKey, err := secrets.GenerateKey()
+	require.NoError(b, err)
+
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	encrypted, err := secrets.EncryptBytes(data, appKey, wsKey)
+	require.NoError(b, err)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := secrets.DecryptBytes(encrypted, appKey, wsKey); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

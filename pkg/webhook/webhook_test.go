@@ -46,8 +46,8 @@ func TestSender_Send_Success(t *testing.T) {
 	defer server.Close()
 
 	sender := webhook.NewSender()
-	err := sender.Send(context.Background(), server.URL, payload)
-	assert.NoError(t, err)
+	err := sender.Send(context.Background(), server.URL, payload, webhook.WithAllowPrivateNetworks())
+	require.NoError(t, err)
 }
 
 func TestSender_Send_WithOptions(t *testing.T) {
@@ -74,7 +74,7 @@ func TestSender_Send_WithOptions(t *testing.T) {
 
 		body, _ := io.ReadAll(r.Body)
 		err = webhook.VerifySignature(secret, body, headers, 5*time.Minute)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -89,13 +89,14 @@ func TestSender_Send_WithOptions(t *testing.T) {
 		webhook.WithHeader("X-Custom-Header", "test-value"),
 		webhook.WithTimeout(5*time.Second),
 		webhook.WithMaxRetries(2),
+		webhook.WithAllowPrivateNetworks(),
 		webhook.WithOnDelivery(func(result webhook.DeliveryResult) {
 			deliveryResults = append(deliveryResults, result)
 		}),
 	)
 
-	assert.NoError(t, err)
-	assert.Len(t, deliveryResults, 1)
+	require.NoError(t, err)
+	require.Len(t, deliveryResults, 1)
 	assert.True(t, deliveryResults[0].Success)
 	assert.Equal(t, http.StatusOK, deliveryResults[0].StatusCode)
 }
@@ -126,9 +127,10 @@ func TestSender_Send_Retries(t *testing.T) {
 		payload,
 		webhook.WithMaxRetries(3),
 		webhook.WithBackoff(webhook.FixedBackoff{Interval: 10 * time.Millisecond}),
+		webhook.WithAllowPrivateNetworks(),
 	)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, int32(3), atomic.LoadInt32(&attempts))
 }
 
@@ -171,16 +173,17 @@ func TestSender_Send_PermanentFailure(t *testing.T) {
 				map[string]string{"test": "data"},
 				webhook.WithMaxRetries(3),
 				webhook.WithBackoff(webhook.FixedBackoff{Interval: time.Millisecond}),
+				webhook.WithAllowPrivateNetworks(),
 			)
 
 			require.Error(t, err)
 
 			if tt.shouldRetry {
 				assert.Equal(t, int32(4), atomic.LoadInt32(&attempts), "should retry for %d", tt.statusCode)
-				assert.ErrorIs(t, err, webhook.ErrWebhookDeliveryFailed)
+				require.ErrorIs(t, err, webhook.ErrWebhookDeliveryFailed)
 			} else {
 				assert.Equal(t, int32(1), atomic.LoadInt32(&attempts), "should not retry for %d", tt.statusCode)
-				assert.ErrorIs(t, err, webhook.ErrPermanentFailure)
+				require.ErrorIs(t, err, webhook.ErrPermanentFailure)
 			}
 		})
 	}
@@ -204,6 +207,7 @@ func TestSender_Send_CircuitBreaker(t *testing.T) {
 			map[string]string{"test": "data"},
 			webhook.WithCircuitBreaker(cb),
 			webhook.WithNoRetry(),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		require.Error(t, err)
 	}
@@ -215,11 +219,80 @@ func TestSender_Send_CircuitBreaker(t *testing.T) {
 		server.URL,
 		map[string]string{"test": "data"},
 		webhook.WithCircuitBreaker(cb),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.ErrorIs(t, err, webhook.ErrCircuitOpen)
+	require.ErrorIs(t, err, webhook.ErrCircuitOpen)
 
 	time.Sleep(150 * time.Millisecond)
 	assert.Equal(t, webhook.CircuitHalfOpen, cb.State())
+}
+
+func TestSender_Send_CircuitBreaker_ConsultedPerAttempt(t *testing.T) {
+	t.Parallel()
+
+	// Server always fails so every attempt records a circuit-breaker failure.
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	// failureThreshold=2 means the breaker opens after the 2nd failure. With the
+	// breaker consulted on every attempt, the 3rd attempt is short-circuited
+	// before the request is sent, so the server sees exactly 2 hits even though
+	// maxRetries permits up to 6 total attempts.
+	cb := webhook.NewCircuitBreaker(2, 1, time.Hour)
+	sender := webhook.NewSender()
+
+	err := sender.Send(
+		context.Background(),
+		server.URL,
+		map[string]string{"test": "data"},
+		webhook.WithCircuitBreaker(cb),
+		webhook.WithMaxRetries(5),
+		webhook.WithBackoff(webhook.FixedBackoff{Interval: time.Millisecond}),
+		webhook.WithAllowPrivateNetworks(),
+	)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, webhook.ErrCircuitOpen,
+		"once the breaker trips mid-retry, remaining attempts must short-circuit")
+	require.Equal(t, int32(2), atomic.LoadInt32(&attempts),
+		"breaker should stop further attempts after it opens")
+	require.Equal(t, webhook.CircuitOpen, cb.State())
+}
+
+func TestSender_Send_NegativeRetriesClamped(t *testing.T) {
+	t.Parallel()
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	sender := webhook.NewSender()
+
+	// Negative attempt counts must be clamped to 0 (no retries), so the server
+	// is hit exactly once regardless of the negative value supplied.
+	for _, opt := range []webhook.SendOption{
+		webhook.WithBasicRetry(-3, time.Millisecond),
+		webhook.WithExponentialRetry(-3, time.Millisecond, time.Second),
+	} {
+		atomic.StoreInt32(&attempts, 0)
+		err := sender.Send(
+			context.Background(),
+			server.URL,
+			map[string]string{"test": "data"},
+			opt,
+			webhook.WithAllowPrivateNetworks(),
+		)
+		require.Error(t, err)
+		require.Equal(t, int32(1), atomic.LoadInt32(&attempts),
+			"negative retry count must be clamped to a single attempt")
+	}
 }
 
 func TestSender_Send_Timeout(t *testing.T) {
@@ -238,10 +311,11 @@ func TestSender_Send_Timeout(t *testing.T) {
 		map[string]string{"test": "data"},
 		webhook.WithTimeout(50*time.Millisecond),
 		webhook.WithNoRetry(),
+		webhook.WithAllowPrivateNetworks(),
 	)
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, webhook.ErrTimeout)
+	require.ErrorIs(t, err, webhook.ErrTimeout)
 }
 
 func TestSender_Send_ContextCancellation(t *testing.T) {
@@ -261,10 +335,10 @@ func TestSender_Send_ContextCancellation(t *testing.T) {
 	}()
 
 	sender := webhook.NewSender()
-	err := sender.Send(ctx, server.URL, map[string]string{"test": "data"})
+	err := sender.Send(ctx, server.URL, map[string]string{"test": "data"}, webhook.WithAllowPrivateNetworks())
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestSender_Send_ValidationErrors(t *testing.T) {
@@ -315,7 +389,7 @@ func TestSender_Send_ValidationErrors(t *testing.T) {
 
 			err := sender.Send(context.Background(), tt.url, tt.payload)
 			require.Error(t, err)
-			assert.ErrorIs(t, err, tt.wantErr)
+			require.ErrorIs(t, err, tt.wantErr)
 			assert.Contains(t, err.Error(), tt.errMsg)
 		})
 	}
@@ -344,12 +418,13 @@ func TestSender_Send_DeliveryHook(t *testing.T) {
 		map[string]string{"test": "data"},
 		webhook.WithMaxRetries(2),
 		webhook.WithBackoff(webhook.FixedBackoff{Interval: time.Millisecond}),
+		webhook.WithAllowPrivateNetworks(),
 		webhook.WithOnDelivery(func(result webhook.DeliveryResult) {
 			results = append(results, result)
 		}),
 	)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	require.Len(t, results, 2)
 
 	assert.False(t, results[0].Success)
@@ -391,8 +466,8 @@ func TestSender_Send_LargePayload(t *testing.T) {
 	defer server.Close()
 
 	sender := webhook.NewSender()
-	err := sender.Send(context.Background(), server.URL, payload)
-	assert.NoError(t, err)
+	err := sender.Send(context.Background(), server.URL, payload, webhook.WithAllowPrivateNetworks())
+	require.NoError(t, err)
 }
 
 func TestSender_Concurrent(t *testing.T) {
@@ -411,14 +486,14 @@ func TestSender_Concurrent(t *testing.T) {
 	for i := range 10 {
 		go func(id int) {
 			payload := map[string]int{"id": id}
-			err := sender.Send(context.Background(), server.URL, payload)
+			err := sender.Send(context.Background(), server.URL, payload, webhook.WithAllowPrivateNetworks())
 			errCh <- err
 		}(i)
 	}
 
 	for range 10 {
 		err := <-errCh
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	assert.Equal(t, int32(10), atomic.LoadInt32(&requests))
@@ -450,6 +525,7 @@ func TestSender_CircuitBreaker_HalfOpenRecovery(t *testing.T) {
 			map[string]string{"test": "failure"},
 			webhook.WithCircuitBreaker(cb),
 			webhook.WithNoRetry(),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		require.Error(t, err)
 	}
@@ -464,8 +540,9 @@ func TestSender_CircuitBreaker_HalfOpenRecovery(t *testing.T) {
 		map[string]string{"test": "halfopen_fail"},
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithNoRetry(),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Equal(t, webhook.CircuitOpen, cb.State())
 
 	time.Sleep(150 * time.Millisecond)
@@ -476,8 +553,9 @@ func TestSender_CircuitBreaker_HalfOpenRecovery(t *testing.T) {
 		map[string]string{"test": "success1"},
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithNoRetry(),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, webhook.CircuitHalfOpen, cb.State())
 
 	err = sender.Send(
@@ -486,8 +564,9 @@ func TestSender_CircuitBreaker_HalfOpenRecovery(t *testing.T) {
 		map[string]string{"test": "success2"},
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithNoRetry(),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, webhook.CircuitClosed, cb.State())
 
 	err = sender.Send(
@@ -496,8 +575,9 @@ func TestSender_CircuitBreaker_HalfOpenRecovery(t *testing.T) {
 		map[string]string{"test": "verify_closed"},
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithNoRetry(),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, webhook.CircuitClosed, cb.State())
 }
 
@@ -543,6 +623,7 @@ func TestSender_CircuitBreaker_Concurrent(t *testing.T) {
 					webhook.WithCircuitBreaker(cb),
 					webhook.WithNoRetry(),
 					webhook.WithTimeout(100*time.Millisecond),
+					webhook.WithAllowPrivateNetworks(),
 				)
 
 				if err != nil {
@@ -655,7 +736,7 @@ func TestSender_Send_PayloadSizeLimit(t *testing.T) {
 
 			sender := webhook.NewSender()
 
-			var opts []webhook.SendOption
+			opts := []webhook.SendOption{webhook.WithAllowPrivateNetworks()}
 			if tt.maxPayloadSize >= 0 {
 				opts = append(opts, webhook.WithMaxPayloadSize(tt.maxPayloadSize))
 			}
@@ -664,10 +745,10 @@ func TestSender_Send_PayloadSizeLimit(t *testing.T) {
 
 			if tt.expectError {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, webhook.ErrInvalidPayload)
+				require.ErrorIs(t, err, webhook.ErrInvalidPayload)
 				assert.Contains(t, err.Error(), tt.errorContains)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -726,6 +807,7 @@ func TestSender_Send_ResponseSizeLimit(t *testing.T) {
 				map[string]string{"test": "data"},
 				webhook.WithMaxResponseSize(tt.maxResponseSize),
 				webhook.WithNoRetry(),
+				webhook.WithAllowPrivateNetworks(),
 				webhook.WithOnDelivery(func(result webhook.DeliveryResult) {
 					if result.Error != nil {
 						capturedErrorMsg = result.Error.Error()
@@ -791,9 +873,10 @@ func TestSender_CircuitBreaker_WithLargePayload(t *testing.T) {
 			webhook.WithCircuitBreaker(cb),
 			webhook.WithNoRetry(),
 			webhook.WithTimeout(5*time.Second),
+			webhook.WithAllowPrivateNetworks(),
 		)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, webhook.ErrWebhookDeliveryFailed)
+		require.ErrorIs(t, err, webhook.ErrWebhookDeliveryFailed)
 	}
 
 	assert.Equal(t, webhook.CircuitOpen, cb.State())
@@ -804,8 +887,9 @@ func TestSender_CircuitBreaker_WithLargePayload(t *testing.T) {
 		payload,
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithTimeout(5*time.Second),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.ErrorIs(t, err, webhook.ErrCircuitOpen)
+	require.ErrorIs(t, err, webhook.ErrCircuitOpen)
 
 	time.Sleep(150 * time.Millisecond)
 
@@ -816,8 +900,9 @@ func TestSender_CircuitBreaker_WithLargePayload(t *testing.T) {
 		webhook.WithCircuitBreaker(cb),
 		webhook.WithNoRetry(),
 		webhook.WithTimeout(5*time.Second),
+		webhook.WithAllowPrivateNetworks(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, webhook.CircuitClosed, cb.State())
 
 	assert.Equal(t, int32(3), atomic.LoadInt32(&attempts))

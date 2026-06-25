@@ -219,6 +219,18 @@ func TestGetSubdomain(t *testing.T) {
 			baseDomain: "myapp.com",
 			expected:   "acme",
 		},
+		{
+			name:       "base domain with surrounding whitespace is trimmed",
+			host:       "foo.example.com",
+			baseDomain: "  example.com  ",
+			expected:   "foo",
+		},
+		{
+			name:       "base domain with whitespace and mixed case is trimmed",
+			host:       "foo.example.com",
+			baseDomain: "  Example.COM  ",
+			expected:   "foo",
+		},
 	}
 
 	for _, tt := range tests {

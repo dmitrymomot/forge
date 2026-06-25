@@ -10,7 +10,9 @@ import (
 //
 // Example:
 //
-//	app := forge.New(
+//	err := forge.Run(
+//	    forge.RunConfig{},
+//	    forge.WithFallback(app),
 //	    forge.WithShutdownHook(redis.Shutdown(client)),
 //	)
 func Shutdown(client io.Closer) func(ctx context.Context) error {

@@ -80,16 +80,13 @@ var browserPatterns = []BrowserPattern{
 		OrderHint: 30,
 	},
 	{
+		// Match the explicit "qqbrowser" token (covers MQQBrowser too). A bare
+		// "qq" substring is too common in unrelated UAs to detect on, so it is
+		// intentionally not used as a signal.
 		Name:      BrowserQQ,
 		Keywords:  []string{"qqbrowser"},
-		Regex:     regexp.MustCompile(`(?i)(?:qqbrowser|qq)[/\s]([\d.]+)`),
+		Regex:     regexp.MustCompile(`(?i)qqbrowser[/\s]([\d.]+)`),
 		OrderHint: 40,
-	},
-	{
-		Name:      BrowserQQ, // Alternative QQ browser detection
-		Keywords:  []string{"qq", "browser"},
-		Regex:     regexp.MustCompile(`(?i)(?:qqbrowser|qq)[/\s]([\d.]+)`),
-		OrderHint: 45,
 	},
 	{
 		Name:      BrowserHuawei,

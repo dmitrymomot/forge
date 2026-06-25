@@ -42,7 +42,7 @@ func TestOpen_PragmasApplied(t *testing.T) {
 		BusyTimeoutMS: 3000,
 		Synchronous:   "full",
 		CacheSize:     -10000,
-		ForeignKeys:   true,
+		ForeignKeys:   new(true),
 	})
 	require.NoError(t, err)
 	defer db.Close()
@@ -77,7 +77,7 @@ func TestOpen_ForeignKeysDisabled(t *testing.T) {
 
 	db, err := Open(context.Background(), Config{
 		Path:        ":memory:",
-		ForeignKeys: false,
+		ForeignKeys: new(false),
 	})
 	require.NoError(t, err)
 	defer db.Close()
@@ -103,13 +103,32 @@ func TestOpen_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5000, busyTimeout)
 
-	// Verify foreign_keys default (on, since ForeignKeys zero-value is false
-	// but applyDefaults doesn't change it — this tests the zero-value behavior)
+	// Verify foreign_keys default. A Go-constructed Config leaves ForeignKeys
+	// nil, which applyDefaults treats as enabled — matching the documented
+	// "foreign_keys on by default" behavior.
 	var foreignKeys int
 	err = db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys)
 	require.NoError(t, err)
-	// ForeignKeys defaults to false (zero value), so foreign_keys=0
-	assert.Equal(t, 0, foreignKeys)
+	assert.Equal(t, 1, foreignKeys)
+}
+
+func TestApplyDefaults_ForeignKeysDefaultsOn(t *testing.T) {
+	t.Parallel()
+
+	// A Go-constructed Config leaves ForeignKeys nil. applyDefaults must enable
+	// it so the Go-struct path agrees with the env default (envDefault:"true")
+	// and the documented "foreign_keys on by default" behavior.
+	cfg := Config{Path: ":memory:"}
+	applyDefaults(&cfg)
+
+	require.NotNil(t, cfg.ForeignKeys)
+	assert.True(t, *cfg.ForeignKeys)
+
+	// An explicit false must be preserved, not overridden by the default.
+	off := Config{Path: ":memory:", ForeignKeys: new(false)}
+	applyDefaults(&off)
+	require.NotNil(t, off.ForeignKeys)
+	assert.False(t, *off.ForeignKeys)
 }
 
 func TestOpen_PragmasAppliedToAllConnections(t *testing.T) {
@@ -126,7 +145,7 @@ func TestOpen_PragmasAppliedToAllConnections(t *testing.T) {
 		MaxOpenConns:  2,
 		MaxIdleConns:  2,
 		BusyTimeoutMS: 7000,
-		ForeignKeys:   true,
+		ForeignKeys:   new(true),
 	})
 	require.NoError(t, err)
 	defer db.Close()

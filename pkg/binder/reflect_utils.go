@@ -144,14 +144,25 @@ func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string)
 func setSliceValue(field reflect.Value, fieldType reflect.Type, values []string) error {
 	elemType := fieldType.Elem()
 
-	// Handle both multiple form fields and comma-separated values in single field
+	// Determine the list elements.
+	//
+	// Two distinct conventions are supported, and they are intentionally NOT
+	// mixed:
+	//   1. A single combined value is comma-split:
+	//        ?tags=a,b        -> ["a", "b"]
+	//   2. Repeated parameters are treated as literal elements (no further
+	//      comma-splitting), so embedded commas are preserved verbatim:
+	//        ?tags=a,b&tags=c -> ["a,b", "c"]
+	//
+	// Comma-splitting is therefore applied ONLY when exactly one value was
+	// supplied. As soon as the same parameter repeats, each value is taken as a
+	// discrete literal element, so a deliberate "a,b" sent as one of several
+	// repeated values is not silently torn apart.
 	var allValues []string
-	for _, v := range values {
-		if strings.Contains(v, ",") {
-			allValues = append(allValues, strings.Split(v, ",")...)
-		} else {
-			allValues = append(allValues, v)
-		}
+	if len(values) == 1 {
+		allValues = strings.Split(values[0], ",")
+	} else {
+		allValues = values
 	}
 
 	slice := reflect.MakeSlice(fieldType, len(allValues), len(allValues))
@@ -178,19 +189,19 @@ func sanitizeStringValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.ReplaceAll(value, "\n", "")
 
-	// Filter out control characters while preserving printable content. Tab is
-	// kept as legitimate text; everything else in the C0 (0x00-0x1f), DEL (0x7f),
-	// and C1 (0x80-0x9f) ranges is dropped. unicode.IsControl covers all three,
-	// so DEL and C1 bytes — which are >= ' ' and would otherwise slip through —
-	// are stripped too.
+	// Filter out control characters while preserving printable content.
+	//
+	// Tabs are explicitly allowed. Everything else must be both a valid rune and
+	// non-control: this strips C0 controls (below 0x20), DEL (0x7F), and the C1
+	// control block (0x80-0x9F), which unicode.IsControl reports for all of them.
 	var builder strings.Builder
 	builder.Grow(len(value))
 
 	for _, r := range value {
-		if r != '\t' && unicode.IsControl(r) {
+		if !utf8.ValidRune(r) {
 			continue
 		}
-		if utf8.ValidRune(r) {
+		if r == '\t' || !unicode.IsControl(r) {
 			builder.WriteRune(r)
 		}
 	}

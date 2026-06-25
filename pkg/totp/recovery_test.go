@@ -1,13 +1,16 @@
 package totp_test
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/dmitrymomot/forge/pkg/totp"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// hexCodeRegex matches the 16-character uppercase-hex recovery code format.
+var hexCodeRegex = regexp.MustCompile("^[0-9A-F]{16}$")
 
 func TestGenerateRecoveryCodes(t *testing.T) {
 	t.Parallel()
@@ -43,19 +46,19 @@ func TestGenerateRecoveryCodes(t *testing.T) {
 			t.Parallel()
 			codes, err := totp.GenerateRecoveryCodes(tt.count)
 			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, codes)
+				require.ErrorIs(t, err, totp.ErrInvalidRecoveryCodeCount)
+				require.Nil(t, codes)
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Len(t, codes, tt.count)
+			require.Len(t, codes, tt.count)
 
-			// Verify each code is unique and properly formatted
+			// Verify each code is unique and properly formatted (16 uppercase hex chars).
 			seen := make(map[string]bool)
 			for _, code := range codes {
-				assert.Len(t, code, 16) // 8 bytes in hex = 16 characters
-				assert.False(t, seen[code], "Duplicate code found")
+				require.Regexp(t, hexCodeRegex, code)
+				require.False(t, seen[code], "Duplicate code found")
 				seen[code] = true
 			}
 		})
@@ -86,12 +89,12 @@ func TestHashRecoveryCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			hash := totp.HashRecoveryCode(tt.code)
-			assert.NotEmpty(t, hash)
-			assert.Len(t, hash, 64) // SHA-256 produces 32 bytes = 64 hex characters
+			require.NotEmpty(t, hash)
+			require.Len(t, hash, 64) // SHA-256 produces 32 bytes = 64 hex characters
 
 			// Verify deterministic behavior
 			hash2 := totp.HashRecoveryCode(tt.code)
-			assert.Equal(t, hash, hash2)
+			require.Equal(t, hash, hash2)
 		})
 	}
 }
@@ -141,7 +144,7 @@ func TestVerifyRecoveryCode(t *testing.T) {
 			t.Parallel()
 			// Test the verification
 			result := totp.VerifyRecoveryCode(tt.code, tt.hashedCode)
-			assert.Equal(t, tt.wantResult, result)
+			require.Equal(t, tt.wantResult, result)
 		})
 	}
 }
@@ -156,17 +159,17 @@ func TestVerifyRecoveryCodeSecurity(t *testing.T) {
 	// Multiple verifications should yield the same result
 	for range 100 {
 		result := totp.VerifyRecoveryCode(code, hash)
-		assert.True(t, result, "Verification should be consistent")
+		require.True(t, result, "Verification should be consistent")
 	}
 
 	// Test different inputs should not match
 	invalidCode := "FEDCBA0987654321"
 	result := totp.VerifyRecoveryCode(invalidCode, hash)
-	assert.False(t, result, "Different codes should not match")
+	require.False(t, result, "Different codes should not match")
 
 	// Test empty inputs
-	assert.False(t, totp.VerifyRecoveryCode("", hash), "Empty code should not match")
-	assert.False(t, totp.VerifyRecoveryCode(code, ""), "Empty hash should not match")
+	require.False(t, totp.VerifyRecoveryCode("", hash), "Empty code should not match")
+	require.False(t, totp.VerifyRecoveryCode(code, ""), "Empty hash should not match")
 }
 
 // Benchmark recovery code verification

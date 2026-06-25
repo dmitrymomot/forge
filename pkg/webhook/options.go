@@ -36,6 +36,8 @@ type sendOptions struct {
 
 	maxPayloadSize  int64
 	maxResponseSize int64
+
+	allowPrivateNetworks bool
 }
 
 func defaultSendOptions() *sendOptions {
@@ -85,6 +87,7 @@ func WithHeaders(headers map[string]string) SendOption {
 
 // WithMaxRetries sets the maximum number of retry attempts.
 // Default is 3 if not specified. Set to 0 to disable retries.
+// Negative values are ignored, leaving the default in place.
 func WithMaxRetries(n int) SendOption {
 	return func(o *sendOptions) {
 		if n >= 0 {
@@ -138,16 +141,24 @@ func WithOnDelivery(hook DeliveryHook) SendOption {
 }
 
 // WithBasicRetry configures simple retry behavior with fixed intervals.
+// Negative attempt counts are clamped to 0 (no retries), matching WithMaxRetries.
 func WithBasicRetry(attempts int, interval time.Duration) SendOption {
 	return func(o *sendOptions) {
+		if attempts < 0 {
+			attempts = 0
+		}
 		o.maxRetries = attempts
 		o.backoffStrategy = FixedBackoff{Interval: interval}
 	}
 }
 
 // WithExponentialRetry configures exponential backoff with jitter.
+// Negative attempt counts are clamped to 0 (no retries), matching WithMaxRetries.
 func WithExponentialRetry(attempts int, initialInterval, maxInterval time.Duration) SendOption {
 	return func(o *sendOptions) {
+		if attempts < 0 {
+			attempts = 0
+		}
 		o.maxRetries = attempts
 		o.backoffStrategy = ExponentialBackoff{
 			InitialInterval: initialInterval,
@@ -177,10 +188,25 @@ func WithMaxPayloadSize(size int64) SendOption {
 
 // WithMaxResponseSize sets the maximum response body size to read in bytes.
 // Default is 64KB if not specified. This limits memory usage when reading error responses.
+// Zero and negative values are rejected (ignored), keeping the default in place,
+// since a zero-byte read window would suppress all error-body context.
 func WithMaxResponseSize(size int64) SendOption {
 	return func(o *sendOptions) {
 		if size > 0 {
 			o.maxResponseSize = size
 		}
+	}
+}
+
+// WithAllowPrivateNetworks disables the built-in SSRF protection so the webhook
+// may be delivered to private, loopback, link-local, or unspecified addresses.
+//
+// By default the sender blocks delivery to non-public destinations to defend
+// against SSRF when webhook URLs are user-supplied. Only enable this for trusted
+// internal endpoints (for example, delivering to a service inside your own
+// network or to a local test server).
+func WithAllowPrivateNetworks() SendOption {
+	return func(o *sendOptions) {
+		o.allowPrivateNetworks = true
 	}
 }

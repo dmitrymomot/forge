@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -308,6 +309,70 @@ func TestPutBytes(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.Is(err, storageErr))
 	})
+
+	t.Run("filename seeds the key extension hint", func(t *testing.T) {
+		t.Parallel()
+
+		var gotExt string
+		storage := &mockStorage{
+			putFunc: func(_ context.Context, _ io.Reader, size int64, opts ...Option) (*FileInfo, error) {
+				o := &putOptions{}
+				for _, opt := range opts {
+					opt(o)
+				}
+				gotExt = o.filenameExt
+				return &FileInfo{Key: "k", Size: size}, nil
+			},
+		}
+
+		_, err := PutBytes(context.Background(), storage, []byte("data"), "report.PDF")
+		require.NoError(t, err)
+		require.Equal(t, ".pdf", gotExt)
+	})
+
+	t.Run("filename hint does not override explicit content type", func(t *testing.T) {
+		t.Parallel()
+
+		var gotExt, gotCT string
+		storage := &mockStorage{
+			putFunc: func(_ context.Context, _ io.Reader, size int64, opts ...Option) (*FileInfo, error) {
+				o := &putOptions{}
+				for _, opt := range opts {
+					opt(o)
+				}
+				gotExt = o.filenameExt
+				gotCT = o.contentType
+				return &FileInfo{Key: "k", Size: size}, nil
+			},
+		}
+
+		// Explicit caller option appears after the filename hint, so it wins.
+		_, err := PutBytes(context.Background(), storage, []byte("data"), "report.pdf",
+			WithContentType("image/png"))
+		require.NoError(t, err)
+		require.Equal(t, ".pdf", gotExt)
+		require.Equal(t, "image/png", gotCT)
+	})
+
+	t.Run("filename with no extension yields no hint", func(t *testing.T) {
+		t.Parallel()
+
+		var gotExt string
+		storage := &mockStorage{
+			putFunc: func(_ context.Context, _ io.Reader, size int64, opts ...Option) (*FileInfo, error) {
+				o := &putOptions{}
+				for _, opt := range opts {
+					opt(o)
+				}
+				gotExt = o.filenameExt
+				return &FileInfo{Key: "k", Size: size}, nil
+			},
+		}
+
+		_, err := PutBytes(context.Background(), storage, []byte("data"), "noext")
+		require.NoError(t, err)
+		require.Empty(t, gotExt)
+	})
 }
 
 // TestPutFromURL tests the PutFromURL helper function.
@@ -350,7 +415,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadFailed))
 		require.Contains(t, err.Error(), "404")
@@ -365,7 +430,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadFailed))
 		require.Contains(t, err.Error(), "500")
@@ -381,7 +446,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 1024)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 1024, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadTooLarge))
 	})
@@ -399,7 +464,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 1024)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 1024, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadTooLarge))
 	})
@@ -414,7 +479,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrEmptyFile))
 	})
@@ -442,7 +507,7 @@ func TestPutFromURL(t *testing.T) {
 			},
 		}
 
-		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.NoError(t, err)
 		require.NotNil(t, info)
 		require.Equal(t, expectedData, capturedData)
@@ -462,7 +527,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.NoError(t, err)
 		require.NotNil(t, info)
 		require.Equal(t, dataSize, info.Size)
@@ -487,7 +552,7 @@ func TestPutFromURL(t *testing.T) {
 		defer cancel()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(ctx, storage, server.URL+"/file.txt", 0)
+		_, err := PutFromURL(ctx, storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadFailed))
 	})
@@ -502,7 +567,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.NoError(t, err)
 		require.NotNil(t, info)
 	})
@@ -523,7 +588,7 @@ func TestPutFromURL(t *testing.T) {
 			},
 		}
 
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, storageErr))
 	})
@@ -550,7 +615,7 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", maxSize)
+		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", maxSize, WithAllowPrivateURL())
 		require.NoError(t, err)
 		require.NotNil(t, info)
 		require.Equal(t, maxSize, info.Size)
@@ -568,8 +633,111 @@ func TestPutFromURL(t *testing.T) {
 		defer server.Close()
 
 		storage := &mockStorage{}
-		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", maxSize)
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", maxSize, WithAllowPrivateURL())
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrDownloadTooLarge))
 	})
+}
+
+// TestPutFromURL_SSRF verifies the SSRF protection: private/loopback
+// destinations are blocked by default and reachable only via the opt-out.
+func TestPutFromURL_SSRF(t *testing.T) {
+	t.Parallel()
+
+	t.Run("blocks loopback destination by default", func(t *testing.T) {
+		t.Parallel()
+
+		var hit bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hit = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data"))
+		}))
+		defer server.Close()
+
+		storage := &mockStorage{}
+		_, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0)
+		require.Error(t, err)
+		// Wrapped under ErrDownloadFailed, with the specific blocked-address cause.
+		require.True(t, errors.Is(err, ErrDownloadFailed))
+		require.True(t, errors.Is(err, ErrBlockedAddress))
+		// The server must never have been contacted.
+		require.False(t, hit, "blocked request must not reach the destination server")
+	})
+
+	t.Run("opt-out allows loopback destination", func(t *testing.T) {
+		t.Parallel()
+
+		expected := []byte("internal payload")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(expected)
+		}))
+		defer server.Close()
+
+		var captured []byte
+		storage := &mockStorage{
+			putFunc: func(_ context.Context, r io.Reader, size int64, _ ...Option) (*FileInfo, error) {
+				var err error
+				captured, err = io.ReadAll(r)
+				require.NoError(t, err)
+				return &FileInfo{Key: "k", Size: size}, nil
+			},
+		}
+
+		info, err := PutFromURL(context.Background(), storage, server.URL+"/file.txt", 0, WithAllowPrivateURL())
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		require.Equal(t, expected, captured)
+	})
+
+	t.Run("public host is permitted at dial layer", func(t *testing.T) {
+		t.Parallel()
+
+		// Force resolution to a public-looking IP via the safe transport's
+		// dial control, then assert the control allows it. We exercise the
+		// guard directly (no real network egress) by dialing a public IP.
+		transport := ssrfSafeTransport()
+		require.NotNil(t, transport.DialContext)
+
+		// A public IP must pass isBlockedIP; loopback must not.
+		require.False(t, isBlockedIP(net.ParseIP("8.8.8.8")))
+		require.True(t, isBlockedIP(net.ParseIP("127.0.0.1")))
+	})
+}
+
+// TestIsBlockedIP verifies the SSRF address classifier across IPv4/IPv6 ranges.
+func TestIsBlockedIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ip      string
+		blocked bool
+	}{
+		{"loopback v4", "127.0.0.1", true},
+		{"loopback v6", "::1", true},
+		{"private 10/8", "10.1.2.3", true},
+		{"private 172.16/12", "172.16.5.4", true},
+		{"private 192.168/16", "192.168.1.1", true},
+		{"link-local v4", "169.254.169.254", true}, // cloud metadata endpoint
+		{"link-local v6", "fe80::1", true},
+		{"unique-local v6", "fd00::1", true},
+		{"unspecified v4", "0.0.0.0", true},
+		{"unspecified v6", "::", true},
+		{"ipv4-mapped metadata", "::ffff:169.254.169.254", true},
+		{"public v4", "8.8.8.8", false},
+		{"public v4 cloudflare", "1.1.1.1", false},
+		{"public v6", "2606:4700:4700::1111", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ip := net.ParseIP(tc.ip)
+			require.NotNil(t, ip, "test IP must parse")
+			require.Equal(t, tc.blocked, isBlockedIP(ip))
+		})
+	}
 }

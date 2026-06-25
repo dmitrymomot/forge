@@ -15,4 +15,9 @@ var (
 
 	// ErrUnmarshal is returned when value deserialization fails.
 	ErrUnmarshal = errors.New("cache: failed to unmarshal value")
+
+	// ErrNoPrefix is returned by the Redis cache's Clear when no key prefix is
+	// configured. Clearing without a prefix would FLUSHDB the entire Redis
+	// database, so it must be requested explicitly via FlushDB.
+	ErrNoPrefix = errors.New("cache: Clear requires a configured prefix (use FlushDB to wipe the whole database)")
 )

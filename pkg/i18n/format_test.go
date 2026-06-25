@@ -1,6 +1,8 @@
 package i18n_test
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,40 @@ func TestLocaleFormat_FormatNumber(t *testing.T) {
 		require.Equal(t, "1 234", lf.FormatNumber(1234))
 		require.Equal(t, "1 234,5", lf.FormatNumber(1234.5))
 		require.Equal(t, "1 234 567,89", lf.FormatNumber(1234567.89))
+	})
+
+	t.Run("very large float does not overflow int64", func(t *testing.T) {
+		t.Parallel()
+		lf := i18n.FormatEnUS()
+
+		// 1e20 is well beyond int64 range (~9.2e18); the old int64 truncation
+		// path produced a garbage/negative value. Grouping must still be correct.
+		const large = 1e20
+		digits := strconv.FormatFloat(large, 'f', 0, 64)
+		require.NotContains(t, digits, ".")
+		require.Equal(t, 21, len(digits)) // "1" + 20 zeros
+
+		out := lf.FormatNumber(large)
+		require.False(t, strings.HasPrefix(out, "-"), "must not produce a negative result for a positive input: %q", out)
+		// Stripping the thousand separators must recover the original digits.
+		require.Equal(t, digits, strings.ReplaceAll(out, ",", ""))
+		require.Equal(t, "-"+out, lf.FormatNumber(-large))
+	})
+
+	t.Run("very large currency does not overflow int64", func(t *testing.T) {
+		t.Parallel()
+		lf := i18n.FormatEnUS()
+
+		const large = 1e20
+		digits := strconv.FormatFloat(large, 'f', 0, 64)
+
+		out := lf.FormatCurrency(large)
+		require.True(t, strings.HasPrefix(out, "$"), "expected currency symbol prefix: %q", out)
+		require.True(t, strings.HasSuffix(out, ".00"), "expected two decimal places: %q", out)
+
+		// Strip symbol, decimals, and separators to recover the integer digits.
+		intDigits := strings.TrimSuffix(strings.TrimPrefix(out, "$"), ".00")
+		require.Equal(t, digits, strings.ReplaceAll(intDigits, ",", ""))
 	})
 }
 

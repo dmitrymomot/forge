@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,17 +66,30 @@ func (s *Sender) Send(ctx context.Context, webhookURL string, data any, opts ...
 			ErrInvalidPayload, len(payload), options.maxPayloadSize)
 	}
 
+	// SSRF protection: reject delivery to non-public destinations unless the
+	// caller has explicitly opted in via WithAllowPrivateNetworks. Webhook URLs
+	// are commonly user-supplied, which makes them an SSRF vector.
+	if err := validateDestination(webhookURL, options.allowPrivateNetworks, net.LookupIP); err != nil {
+		return err
+	}
+
 	client := s.client
 	if options.httpClient != nil {
 		client = options.httpClient
 	}
 
-	if options.circuitBreaker != nil && !options.circuitBreaker.Allow() {
-		return ErrCircuitOpen
-	}
-
 	var lastErr error
 	for attempt := 0; attempt <= options.maxRetries; attempt++ {
+		// Consult the circuit breaker on every attempt, not just once, so a
+		// breaker that trips mid-retry (or is already open) short-circuits the
+		// remaining attempts instead of hammering a known-failing endpoint.
+		if options.circuitBreaker != nil && !options.circuitBreaker.Allow() {
+			if lastErr != nil {
+				return fmt.Errorf("%w: %w", ErrCircuitOpen, lastErr)
+			}
+			return ErrCircuitOpen
+		}
+
 		if attempt > 0 {
 			delay := options.backoffStrategy.NextInterval(attempt)
 			select {

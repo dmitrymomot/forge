@@ -47,7 +47,10 @@
 //
 // Encrypt secrets before storing in database:
 //
-//	// Load configuration
+//	// Load configuration. The Config struct uses an unprefixed env tag
+//	// (ENCRYPTION_KEY) so consumers can mount it under their own prefix via
+//	// caarlos0/env, e.g. env.ParseWithOptions(&cfg, env.Options{Prefix: "TOTP_"})
+//	// which reads from TOTP_ENCRYPTION_KEY. Constructed directly here:
 //	cfg := totp.Config{
 //		EncryptionKey: "base64-encoded-32-byte-key",
 //	}
@@ -89,7 +92,7 @@
 //	}
 //
 //	// Verify recovery code during authentication
-//	userCode := "A1B2C3D4E5F6G7H8" // user input
+//	userCode := "A1B2C3D4E5F6A7B8" // user input (16 hex chars)
 //	if totp.VerifyRecoveryCode(userCode, hashedCodes[0]) {
 //		fmt.Println("Recovery code valid")
 //		// Remove used code from database
@@ -115,10 +118,12 @@
 //		log.Fatal(err)
 //	}
 //
-//	// Generate base64-encoded key for config
+//	// Generate base64-encoded key for config.
 //	encodedKey, err := totp.GenerateEncodedEncryptionKey()
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-//	fmt.Printf("TOTP_ENCRYPTION_KEY=%s\n", encodedKey)
+//	// The struct env tag is ENCRYPTION_KEY; consumers that mount Config under a
+//	// prefix (e.g. "TOTP_") read it as TOTP_ENCRYPTION_KEY.
+//	fmt.Printf("ENCRYPTION_KEY=%s\n", encodedKey)
 package totp

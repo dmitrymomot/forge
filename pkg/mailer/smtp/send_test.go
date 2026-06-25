@@ -1,7 +1,9 @@
 package smtp_test
 
 import (
+	"bytes"
 	"context"
+	"net/mail"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +187,40 @@ func TestSend(t *testing.T) {
 		require.Contains(t, msgs[0].MailfromRequest(), "test@example.com")
 	})
 
+	t.Run("sends when config sender name contains a comma", func(t *testing.T) {
+		t.Parallel()
+
+		server, cfg := newTestSMTPServer(t)
+		// A display name with a comma must be RFC 5322 quoted, otherwise the
+		// address parses as two recipients and sending silently fails.
+		cfg.SenderName = "Doe, John"
+		cfg.SenderEmail = "john@example.com"
+		sender := smtp.New(cfg)
+
+		err := sender.Send(context.Background(), &mailer.Email{
+			To:      []string{"user@example.com"},
+			Subject: "Comma Name",
+			Text:    "should still send",
+		})
+		require.NoError(t, err)
+
+		msgs := waitForMessages(t, server, 1)
+
+		body := msgs[0].MsgRequest()
+		// The display name must be quoted in the From header.
+		require.Contains(t, body, `From: "Doe, John" <john@example.com>`)
+		// The envelope MAIL FROM must use the bare address.
+		require.Contains(t, msgs[0].MailfromRequest(), "john@example.com")
+
+		// Header must be parseable and yield a single, intact From address.
+		parsed, rerr := mail.ReadMessage(bytes.NewReader([]byte(body)))
+		require.NoError(t, rerr)
+		addr, perr := mail.ParseAddress(parsed.Header.Get("From"))
+		require.NoError(t, perr)
+		require.Equal(t, "Doe, John", addr.Name)
+		require.Equal(t, "john@example.com", addr.Address)
+	})
+
 	t.Run("uses custom From when provided", func(t *testing.T) {
 		t.Parallel()
 
@@ -204,6 +240,35 @@ func TestSend(t *testing.T) {
 		body := msgs[0].MsgRequest()
 		require.Contains(t, body, "From: Custom Name <custom@example.com>")
 		require.Contains(t, msgs[0].MailfromRequest(), "custom@example.com")
+	})
+
+	t.Run("includes Date and Message-ID headers", func(t *testing.T) {
+		t.Parallel()
+
+		server, cfg := newTestSMTPServer(t)
+		sender := smtp.New(cfg)
+
+		err := sender.Send(context.Background(), &mailer.Email{
+			To:      []string{"user@example.com"},
+			Subject: "Headers Test",
+			Text:    "needs Date and Message-ID",
+		})
+		require.NoError(t, err)
+
+		msgs := waitForMessages(t, server, 1)
+
+		parsed, rerr := mail.ReadMessage(strings.NewReader(msgs[0].MsgRequest()))
+		require.NoError(t, rerr)
+
+		dateVal := parsed.Header.Get("Date")
+		require.NotEmpty(t, dateVal)
+		_, derr := time.Parse(time.RFC1123Z, dateVal)
+		require.NoError(t, derr, "Date header %q must be RFC 1123Z", dateVal)
+
+		mid := parsed.Header.Get("Message-ID")
+		require.NotEmpty(t, mid)
+		require.True(t, strings.HasPrefix(mid, "<") && strings.HasSuffix(mid, ">"),
+			"Message-ID %q must be angle-bracket wrapped", mid)
 	})
 
 	t.Run("sends with ReplyTo header", func(t *testing.T) {

@@ -18,6 +18,24 @@ type RedisConfig struct {
 // RedisCounter is a Redis-backed Counter implementation with automatic
 // fallback to an in-memory counter on connection failure.
 //
+// # Consistency limitation
+//
+// Increment and Get are issued as separate, independent round-trips, and each
+// falls back to the in-memory counter independently when its own Redis call
+// fails. This has two consequences:
+//
+//   - A single Limiter call (AllowN/Peek) performs an Increment followed by a
+//     Get; if Redis fails between them, the two operations can briefly read
+//     from different backends (one Redis, one in-memory), so the blended
+//     sliding-window estimate may be momentarily inconsistent.
+//   - The in-memory fallback is per-process, so during a Redis outage limits
+//     are enforced per instance rather than globally.
+//
+// This is an intentional availability-over-strict-accuracy trade-off: rate
+// limiting stays functional during transient Redis failures rather than
+// failing open or erroring. For exact distributed accounting under failure,
+// use a backend that performs the blend in a single atomic operation.
+//
 // Example:
 //
 //	client := redis.MustOpen(ctx, redisConfig)

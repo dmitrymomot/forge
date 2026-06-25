@@ -1,27 +1,38 @@
 package cookie_test
 
 import (
-	"errors"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/cookie"
 )
 
 const testSecret = "this-is-a-32-byte-or-longer-key!"
 
+func mustNew(t *testing.T, cfg cookie.Config) *cookie.Manager {
+	t.Helper()
+	m, err := cookie.New(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, m)
+	return m
+}
+
 func TestNew(t *testing.T) {
+	t.Parallel()
+
 	m, err := cookie.New(cookie.Config{})
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	if m == nil {
-		t.Fatal("New() returned nil")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, m)
 }
 
 func TestNewWithConfig(t *testing.T) {
+	t.Parallel()
+
 	m, err := cookie.New(cookie.Config{
 		Secret:   testSecret,
 		Domain:   "example.com",
@@ -30,333 +41,480 @@ func TestNewWithConfig(t *testing.T) {
 		HTTPOnly: true,
 		SameSite: "strict",
 	})
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	if m == nil {
-		t.Fatal("New() returned nil")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, m)
 }
 
 func TestNewBadSecret(t *testing.T) {
-	_, err := cookie.New(cookie.Config{Secret: "short"})
-	if !errors.Is(err, cookie.ErrBadSecret) {
-		t.Errorf("New() error = %v, want ErrBadSecret", err)
-	}
-}
+	t.Parallel()
 
-func mustNew(t *testing.T, cfg cookie.Config) *cookie.Manager {
-	t.Helper()
-	m, err := cookie.New(cfg)
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	return m
+	_, err := cookie.New(cookie.Config{Secret: "short"})
+	require.ErrorIs(t, err, cookie.ErrBadSecret)
 }
 
 func TestPlainCookies(t *testing.T) {
+	t.Parallel()
+
 	m := mustNew(t, cookie.Config{})
 
 	t.Run("get non-existent cookie", func(t *testing.T) {
+		t.Parallel()
+
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		_, err := m.Get(r, "missing")
-		if !errors.Is(err, cookie.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNotFound)
 	})
 
 	t.Run("set and get cookie", func(t *testing.T) {
+		t.Parallel()
+
 		w := httptest.NewRecorder()
 		m.Set(w, "name", "value", 3600)
 
-		// Extract cookie from response
-		resp := w.Result()
-		cookies := resp.Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("expected 1 cookie, got %d", len(cookies))
-		}
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
 
 		c := cookies[0]
-		if c.Name != "name" || c.Value != "value" {
-			t.Errorf("cookie = %s=%s, want name=value", c.Name, c.Value)
-		}
-		if c.MaxAge != 3600 {
-			t.Errorf("MaxAge = %d, want 3600", c.MaxAge)
-		}
+		require.Equal(t, "name", c.Name)
+		require.Equal(t, "value", c.Value)
+		require.Equal(t, 3600, c.MaxAge)
 
-		// Read the cookie back
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(c)
 
 		val, err := m.Get(r, "name")
-		if err != nil {
-			t.Fatalf("Get() error: %v", err)
-		}
-		if val != "value" {
-			t.Errorf("Get() = %q, want %q", val, "value")
-		}
+		require.NoError(t, err)
+		require.Equal(t, "value", val)
 	})
 
 	t.Run("delete cookie", func(t *testing.T) {
+		t.Parallel()
+
 		w := httptest.NewRecorder()
 		m.Delete(w, "name")
 
-		resp := w.Result()
-		cookies := resp.Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("expected 1 cookie, got %d", len(cookies))
-		}
-
-		c := cookies[0]
-		if c.MaxAge != -1 {
-			t.Errorf("MaxAge = %d, want -1", c.MaxAge)
-		}
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		require.Equal(t, -1, cookies[0].MaxAge)
 	})
 }
 
 func TestSignedCookies(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no secret returns error", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{}) // no secret
 		w := httptest.NewRecorder()
 
 		err := m.SetSigned(w, "session", "data", 3600)
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("SetSigned() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		_, err = m.GetSigned(r, "session")
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("GetSigned() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 	})
 
 	t.Run("short secret returns error on New", func(t *testing.T) {
-		_, err := cookie.New(cookie.Config{Secret: "short"}) // less than 32 bytes
-		if !errors.Is(err, cookie.ErrBadSecret) {
-			t.Errorf("New() error = %v, want ErrBadSecret", err)
-		}
+		t.Parallel()
+
+		_, err := cookie.New(cookie.Config{Secret: "short"})
+		require.ErrorIs(t, err, cookie.ErrBadSecret)
 	})
 
 	t.Run("set and get signed cookie", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
-		if err := m.SetSigned(w, "session", "user123", 3600); err != nil {
-			t.Fatalf("SetSigned() error: %v", err)
-		}
+		require.NoError(t, m.SetSigned(w, "session", "user123", 3600))
 
-		// Extract and re-read
-		resp := w.Result()
-		cookies := resp.Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("expected 1 cookie, got %d", len(cookies))
-		}
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(cookies[0])
 
 		val, err := m.GetSigned(r, "session")
-		if err != nil {
-			t.Fatalf("GetSigned() error: %v", err)
-		}
-		if val != "user123" {
-			t.Errorf("GetSigned() = %q, want %q", val, "user123")
-		}
+		require.NoError(t, err)
+		require.Equal(t, "user123", val)
 	})
 
 	t.Run("tampered cookie fails", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
-		_ = m.SetSigned(w, "session", "user123", 3600)
+		require.NoError(t, m.SetSigned(w, "session", "user123", 3600))
 
-		resp := w.Result()
-		c := resp.Cookies()[0]
-
-		// Tamper with the value
+		c := w.Result().Cookies()[0]
 		c.Value = "dGFtcGVyZWQ.invalid"
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(c)
 
 		_, err := m.GetSigned(r, "session")
-		if !errors.Is(err, cookie.ErrBadSig) {
-			t.Errorf("GetSigned() error = %v, want ErrBadSig", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrBadSig)
 	})
 
 	t.Run("missing cookie returns not found", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		_, err := m.GetSigned(r, "missing")
-		if !errors.Is(err, cookie.ErrNotFound) {
-			t.Errorf("GetSigned() error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNotFound)
+	})
+
+	t.Run("value not valid under different name", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetSigned(w, "session", "user123", 3600))
+
+		// Move the value to a cookie with a different name.
+		c := w.Result().Cookies()[0]
+		c.Name = "other"
+
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		_, err := m.GetSigned(r, "other")
+		require.ErrorIs(t, err, cookie.ErrBadSig)
+	})
+
+	t.Run("expired signed cookie rejected", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetSigned(w, "session", "user123", 1))
+
+		c := w.Result().Cookies()[0]
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		// Wait until the 1s embedded expiry has passed; the value must be rejected.
+		time.Sleep(1100 * time.Millisecond)
+		_, err := m.GetSigned(r, "session")
+		require.ErrorIs(t, err, cookie.ErrExpired)
+	})
+
+	t.Run("zero maxAge embeds no expiry", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetSigned(w, "session", "user123", 0))
+
+		c := w.Result().Cookies()[0]
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		val, err := m.GetSigned(r, "session")
+		require.NoError(t, err)
+		require.Equal(t, "user123", val)
 	})
 }
 
 func TestEncryptedCookies(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no secret returns error", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{}) // no secret
 		w := httptest.NewRecorder()
 
 		err := m.SetEncrypted(w, "data", "secret", 3600)
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("SetEncrypted() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		_, err = m.GetEncrypted(r, "data")
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("GetEncrypted() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 	})
 
 	t.Run("set and get encrypted cookie", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
-		if err := m.SetEncrypted(w, "secret", "confidential", 3600); err != nil {
-			t.Fatalf("SetEncrypted() error: %v", err)
-		}
+		require.NoError(t, m.SetEncrypted(w, "secret", "confidential", 3600))
 
-		// Extract and re-read
-		resp := w.Result()
-		cookies := resp.Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("expected 1 cookie, got %d", len(cookies))
-		}
-
-		// Verify value is not plaintext
-		if cookies[0].Value == "confidential" {
-			t.Error("cookie value should be encrypted")
-		}
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		require.NotEqual(t, "confidential", cookies[0].Value, "cookie value should be encrypted")
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(cookies[0])
 
 		val, err := m.GetEncrypted(r, "secret")
-		if err != nil {
-			t.Fatalf("GetEncrypted() error: %v", err)
-		}
-		if val != "confidential" {
-			t.Errorf("GetEncrypted() = %q, want %q", val, "confidential")
-		}
+		require.NoError(t, err)
+		require.Equal(t, "confidential", val)
 	})
 
 	t.Run("tampered cookie fails", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 
 		w := httptest.NewRecorder()
-		_ = m.SetEncrypted(w, "secret", "confidential", 3600)
+		require.NoError(t, m.SetEncrypted(w, "secret", "confidential", 3600))
 
-		resp := w.Result()
-		c := resp.Cookies()[0]
-
-		// Tamper with the value
+		c := w.Result().Cookies()[0]
 		c.Value = "tamperedvalue"
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(c)
 
 		_, err := m.GetEncrypted(r, "secret")
-		if !errors.Is(err, cookie.ErrDecrypt) {
-			t.Errorf("GetEncrypted() error = %v, want ErrDecrypt", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrDecrypt)
 	})
 
 	t.Run("missing cookie returns not found", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		_, err := m.GetEncrypted(r, "missing")
-		if !errors.Is(err, cookie.ErrNotFound) {
-			t.Errorf("GetEncrypted() error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNotFound)
+	})
+
+	t.Run("value not valid under different name", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetEncrypted(w, "secret", "confidential", 3600))
+
+		// Move the ciphertext to a cookie with a different name. The name is the
+		// GCM AAD, so authentication must fail.
+		c := w.Result().Cookies()[0]
+		c.Name = "other"
+
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		_, err := m.GetEncrypted(r, "other")
+		require.ErrorIs(t, err, cookie.ErrDecrypt)
+	})
+
+	t.Run("large binary value round-trips", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		// 4 KiB of random bytes including NUL and high bytes.
+		buf := make([]byte, 4096)
+		_, err := rand.Read(buf)
+		require.NoError(t, err)
+		value := string(buf)
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetEncrypted(w, "blob", value, 3600))
+
+		c := w.Result().Cookies()[0]
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		got, err := m.GetEncrypted(r, "blob")
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	})
+
+	t.Run("empty value round-trips", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetEncrypted(w, "empty", "", 3600))
+
+		c := w.Result().Cookies()[0]
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		got, err := m.GetEncrypted(r, "empty")
+		require.NoError(t, err)
+		require.Equal(t, "", got)
+	})
+
+	t.Run("expired encrypted cookie rejected", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetEncrypted(w, "secret", "confidential", 1))
+
+		c := w.Result().Cookies()[0]
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(c)
+
+		// Wait until the 1s embedded expiry has passed; GetEncrypted reports it.
+		time.Sleep(1100 * time.Millisecond)
+		_, err := m.GetEncrypted(r, "secret")
+		require.ErrorIs(t, err, cookie.ErrExpired)
 	})
 }
 
 func TestFlash(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no secret returns error", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{})
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		err := m.SetFlash(w, "msg", "hello")
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("SetFlash() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 
 		var dest string
 		err = m.Flash(w, r, "msg", &dest)
-		if !errors.Is(err, cookie.ErrNoSecret) {
-			t.Errorf("Flash() error = %v, want ErrNoSecret", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNoSecret)
 	})
 
 	t.Run("set and get flash", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 
-		// Set flash
 		w := httptest.NewRecorder()
 		msg := map[string]string{"type": "success", "text": "Saved!"}
-		if err := m.SetFlash(w, "msg", msg); err != nil {
-			t.Fatalf("SetFlash() error: %v", err)
-		}
+		require.NoError(t, m.SetFlash(w, "msg", msg))
 
-		// Extract cookie
-		resp := w.Result()
-		cookies := resp.Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("expected 1 cookie, got %d", len(cookies))
-		}
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		require.Equal(t, "flash_msg", cookies[0].Name)
 
-		// Verify cookie name has flash_ prefix
-		if cookies[0].Name != "flash_msg" {
-			t.Errorf("cookie name = %q, want %q", cookies[0].Name, "flash_msg")
-		}
-
-		// Read flash
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.AddCookie(cookies[0])
 
 		w2 := httptest.NewRecorder()
 		var dest map[string]string
-		if err := m.Flash(w2, r, "msg", &dest); err != nil {
-			t.Fatalf("Flash() error: %v", err)
-		}
+		require.NoError(t, m.Flash(w2, r, "msg", &dest))
+		require.Equal(t, "success", dest["type"])
+		require.Equal(t, "Saved!", dest["text"])
 
-		if dest["type"] != "success" || dest["text"] != "Saved!" {
-			t.Errorf("Flash() = %v, want %v", dest, msg)
-		}
-
-		// Verify flash was deleted
-		resp2 := w2.Result()
-		deleteCookies := resp2.Cookies()
-		if len(deleteCookies) != 1 {
-			t.Fatalf("expected 1 delete cookie, got %d", len(deleteCookies))
-		}
-		if deleteCookies[0].MaxAge != -1 {
-			t.Errorf("flash cookie MaxAge = %d, want -1", deleteCookies[0].MaxAge)
-		}
+		// Flash emits a delete cookie (MaxAge=-1) after a successful read.
+		deleteCookies := w2.Result().Cookies()
+		require.Len(t, deleteCookies, 1)
+		require.Equal(t, -1, deleteCookies[0].MaxAge)
 	})
 
-	t.Run("missing flash returns not found", func(t *testing.T) {
+	t.Run("second read returns not found", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		w := httptest.NewRecorder()
+		require.NoError(t, m.SetFlash(w, "msg", "hello"))
+		setCookie := w.Result().Cookies()[0]
+
+		// First read succeeds and consumes the flash.
+		r1 := httptest.NewRequest(http.MethodGet, "/", nil)
+		r1.AddCookie(setCookie)
+		w1 := httptest.NewRecorder()
+		var dest string
+		require.NoError(t, m.Flash(w1, r1, "msg", &dest))
+		require.Equal(t, "hello", dest)
+
+		// Second request lacks the cookie (it was deleted), so re-read is ErrNotFound.
+		r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+		w2 := httptest.NewRecorder()
+		var dest2 string
+		err := m.Flash(w2, r2, "msg", &dest2)
+		require.ErrorIs(t, err, cookie.ErrNotFound)
+	})
+
+	t.Run("missing flash returns not found without delete cookie", func(t *testing.T) {
+		t.Parallel()
+
 		m := mustNew(t, cookie.Config{Secret: testSecret})
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 		var dest string
 		err := m.Flash(w, r, "missing", &dest)
-		if !errors.Is(err, cookie.ErrNotFound) {
-			t.Errorf("Flash() error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, cookie.ErrNotFound)
+
+		// Nothing existed to clear, so no delete cookie should be emitted.
+		require.Empty(t, w.Result().Cookies())
+	})
+
+	t.Run("corrupt flash is deleted on decrypt failure", func(t *testing.T) {
+		t.Parallel()
+
+		m := mustNew(t, cookie.Config{Secret: testSecret})
+
+		// Present a flash cookie whose value cannot be decrypted.
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: "flash_msg", Value: "not-a-valid-ciphertext"})
+
+		w := httptest.NewRecorder()
+		var dest string
+		err := m.Flash(w, r, "msg", &dest)
+		require.ErrorIs(t, err, cookie.ErrDecrypt)
+
+		// The corrupt cookie must be deleted so it cannot persist.
+		deleteCookies := w.Result().Cookies()
+		require.Len(t, deleteCookies, 1)
+		require.Equal(t, "flash_msg", deleteCookies[0].Name)
+		require.Equal(t, -1, deleteCookies[0].MaxAge)
 	})
 }
 
+func TestSameSiteParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		value    string
+		want     http.SameSite
+		forceSec bool // SameSite=None must force Secure on
+	}{
+		{name: "strict", value: "strict", want: http.SameSiteStrictMode},
+		{name: "lax", value: "lax", want: http.SameSiteLaxMode},
+		{name: "none forces secure", value: "none", want: http.SameSiteNoneMode, forceSec: true},
+		{name: "uppercase strict", value: "STRICT", want: http.SameSiteStrictMode},
+		{name: "invalid falls back to lax", value: "bogus", want: http.SameSiteLaxMode},
+		{name: "empty falls back to lax", value: "", want: http.SameSiteLaxMode},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := mustNew(t, cookie.Config{SameSite: tc.value})
+
+			w := httptest.NewRecorder()
+			m.Set(w, "k", "v", 3600)
+			c := w.Result().Cookies()[0]
+
+			require.Equal(t, tc.want, c.SameSite)
+			if tc.forceSec {
+				require.True(t, c.Secure, "SameSite=None must force Secure on")
+			}
+		})
+	}
+}
+
 func TestCookieAttributes(t *testing.T) {
+	t.Parallel()
+
 	m := mustNew(t, cookie.Config{
 		Secret:   testSecret,
 		Domain:   "example.com",
@@ -369,42 +527,26 @@ func TestCookieAttributes(t *testing.T) {
 	w := httptest.NewRecorder()
 	m.Set(w, "test", "value", 3600)
 
-	resp := w.Result()
-	c := resp.Cookies()[0]
-
-	if c.Domain != "example.com" {
-		t.Errorf("Domain = %q, want %q", c.Domain, "example.com")
-	}
-	if c.Path != "/app" {
-		t.Errorf("Path = %q, want %q", c.Path, "/app")
-	}
-	if !c.Secure {
-		t.Error("Secure = false, want true")
-	}
-	if !c.HttpOnly {
-		t.Error("HttpOnly = false, want true")
-	}
-	if c.SameSite != http.SameSiteStrictMode {
-		t.Errorf("SameSite = %v, want %v", c.SameSite, http.SameSiteStrictMode)
-	}
+	c := w.Result().Cookies()[0]
+	require.Equal(t, "example.com", c.Domain)
+	require.Equal(t, "/app", c.Path)
+	require.True(t, c.Secure)
+	require.True(t, c.HttpOnly)
+	require.Equal(t, http.SameSiteStrictMode, c.SameSite)
 }
 
 func TestDefaultAttributes(t *testing.T) {
+	t.Parallel()
+
 	m := mustNew(t, cookie.Config{})
 
 	w := httptest.NewRecorder()
 	m.Set(w, "test", "value", 3600)
 
-	resp := w.Result()
-	c := resp.Cookies()[0]
-
-	if c.Path != "/" {
-		t.Errorf("default Path = %q, want %q", c.Path, "/")
-	}
-	if c.HttpOnly {
-		t.Error("default HttpOnly = true, want false (zero value)")
-	}
-	if c.SameSite != http.SameSiteLaxMode {
-		t.Errorf("default SameSite = %v, want %v", c.SameSite, http.SameSiteLaxMode)
-	}
+	c := w.Result().Cookies()[0]
+	require.Equal(t, "/", c.Path)
+	// HTTPOnly is honored from the config; a directly-constructed Config{} leaves
+	// it at the zero value (false). Env-loaded configs default it to true.
+	require.False(t, c.HttpOnly, "HttpOnly should be the zero value for Config{}")
+	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
 }

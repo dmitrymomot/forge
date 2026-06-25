@@ -7,11 +7,26 @@
 // # Features
 //
 //   - Provider interface for pluggable OAuth2 implementations
-//   - Google OAuth2 with email verification
+//   - Google OAuth2 via the OpenID Connect userinfo endpoint with email verification
 //   - GitHub OAuth2 with primary verified email resolution
 //   - Functional options for custom HTTP clients (testing, custom transports)
 //   - Configuration structs with env tags for environment-based setup
 //   - Sentinel errors with "oauth:" prefix for consistent error handling
+//
+// # GitHub email resolution
+//
+// GitHub user info does not include the primary email directly, so the provider
+// calls the /user/emails endpoint and resolves the email in this order:
+//
+//  1. The primary verified email (GitHub's canonical account email).
+//  2. If no primary verified email exists, any other verified email (a
+//     deliberate fallback for users who switched their primary to an
+//     as-yet-unverified address — the returned address is still
+//     provider-verified).
+//
+// If the email list is empty (e.g. the user:email scope was not granted),
+// ErrNoEmail is returned. If emails exist but none are verified,
+// ErrEmailNotVerified is returned.
 //
 // # Usage
 //
@@ -80,7 +95,8 @@
 //
 //   - ErrMissingClientID: Constructor called without client ID
 //   - ErrMissingClientSecret: Constructor called without client secret
-//   - ErrEmailNotVerified: Provider reports unverified email
+//   - ErrEmailNotVerified: Provider returned emails but none are verified
+//   - ErrNoEmail: Provider returned no email addresses at all
 //   - ErrFetchFailed: HTTP request to provider failed
 //   - ErrNilResponse: Provider returned nil HTTP response
 //   - ErrRequestFailed: Provider returned non-OK HTTP status

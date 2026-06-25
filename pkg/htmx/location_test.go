@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/pkg/htmx"
@@ -24,9 +23,9 @@ func TestLocation(t *testing.T) {
 
 		htmx.Location(rec, req, "/dashboard")
 
-		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "/dashboard", rec.Header().Get("HX-Location"))
-		assert.Empty(t, rec.Header().Get("Location"))
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "/dashboard", rec.Header().Get("HX-Location"))
+		require.Empty(t, rec.Header().Get("Location"))
 	})
 
 	t.Run("non-HTMX request uses standard redirect", func(t *testing.T) {
@@ -37,9 +36,9 @@ func TestLocation(t *testing.T) {
 
 		htmx.Location(rec, req, "/dashboard")
 
-		assert.Equal(t, http.StatusFound, rec.Code)
-		assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
-		assert.Empty(t, rec.Header().Get("HX-Location"))
+		require.Equal(t, http.StatusFound, rec.Code)
+		require.Equal(t, "/dashboard", rec.Header().Get("Location"))
+		require.Empty(t, rec.Header().Get("HX-Location"))
 	})
 
 	t.Run("handles empty path", func(t *testing.T) {
@@ -51,7 +50,7 @@ func TestLocation(t *testing.T) {
 
 		htmx.Location(rec, req, "")
 
-		assert.Equal(t, "", rec.Header().Get("HX-Location"))
+		require.Equal(t, "", rec.Header().Get("HX-Location"))
 	})
 
 	t.Run("handles query parameters", func(t *testing.T) {
@@ -63,7 +62,7 @@ func TestLocation(t *testing.T) {
 
 		htmx.Location(rec, req, "/search?q=test&page=2")
 
-		assert.Equal(t, "/search?q=test&page=2", rec.Header().Get("HX-Location"))
+		require.Equal(t, "/search?q=test&page=2", rec.Header().Get("HX-Location"))
 	})
 
 	t.Run("handles fragment identifiers", func(t *testing.T) {
@@ -75,7 +74,7 @@ func TestLocation(t *testing.T) {
 
 		htmx.Location(rec, req, "/page#section")
 
-		assert.Equal(t, "/page#section", rec.Header().Get("HX-Location"))
+		require.Equal(t, "/page#section", rec.Header().Get("HX-Location"))
 	})
 }
 
@@ -91,14 +90,14 @@ func TestLocationTarget(t *testing.T) {
 
 		htmx.LocationTarget(rec, req, "/content", "#main")
 
-		assert.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, http.StatusOK, rec.Code)
 
 		var opts htmx.LocationOptions
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &opts)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/content", opts.Path)
-		assert.Equal(t, "#main", opts.Target)
+		require.Equal(t, "/content", opts.Path)
+		require.Equal(t, "#main", opts.Target)
 	})
 
 	t.Run("non-HTMX request uses standard redirect", func(t *testing.T) {
@@ -109,8 +108,8 @@ func TestLocationTarget(t *testing.T) {
 
 		htmx.LocationTarget(rec, req, "/content", "#main")
 
-		assert.Equal(t, http.StatusFound, rec.Code)
-		assert.Equal(t, "/content", rec.Header().Get("Location"))
+		require.Equal(t, http.StatusFound, rec.Code)
+		require.Equal(t, "/content", rec.Header().Get("Location"))
 	})
 
 	t.Run("handles empty target", func(t *testing.T) {
@@ -126,8 +125,8 @@ func TestLocationTarget(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &opts)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/content", opts.Path)
-		assert.Empty(t, opts.Target)
+		require.Equal(t, "/content", opts.Path)
+		require.Empty(t, opts.Target)
 	})
 
 	t.Run("handles complex CSS selectors", func(t *testing.T) {
@@ -143,7 +142,7 @@ func TestLocationTarget(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &opts)
 		require.NoError(t, err)
 
-		assert.Equal(t, "div.container > ul:first-child", opts.Target)
+		require.Equal(t, "div.container > ul:first-child", opts.Target)
 	})
 }
 
@@ -166,16 +165,16 @@ func TestLocationWithOptions(t *testing.T) {
 
 		htmx.LocationWithOptions(rec, req, opts)
 
-		assert.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, http.StatusOK, rec.Code)
 
 		var result htmx.LocationOptions
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/api/data", result.Path)
-		assert.Equal(t, "#content", result.Target)
-		assert.Equal(t, "innerHTML", result.Swap)
-		assert.Equal(t, ".items", result.Select)
+		require.Equal(t, "/api/data", result.Path)
+		require.Equal(t, "#content", result.Target)
+		require.Equal(t, "innerHTML", result.Swap)
+		require.Equal(t, ".items", result.Select)
 	})
 
 	t.Run("handles options with values map", func(t *testing.T) {
@@ -199,8 +198,8 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "test", result.Values["q"])
-		assert.Equal(t, "1", result.Values["page"])
+		require.Equal(t, "test", result.Values["q"])
+		require.Equal(t, "1", result.Values["page"])
 	})
 
 	t.Run("handles options with headers map", func(t *testing.T) {
@@ -224,8 +223,8 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "value", result.Headers["X-Custom-Header"])
-		assert.Equal(t, "Bearer token", result.Headers["Authorization"])
+		require.Equal(t, "value", result.Headers["X-Custom-Header"])
+		require.Equal(t, "Bearer token", result.Headers["Authorization"])
 	})
 
 	t.Run("handles all option fields", func(t *testing.T) {
@@ -257,15 +256,15 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/full", result.Path)
-		assert.Equal(t, "#trigger", result.Source)
-		assert.Equal(t, "click", result.Event)
-		assert.Equal(t, "customHandler", result.Handler)
-		assert.Equal(t, "#target", result.Target)
-		assert.Equal(t, "outerHTML", result.Swap)
-		assert.Equal(t, ".content", result.Select)
-		assert.Equal(t, "value", result.Values["key"])
-		assert.Equal(t, "header", result.Headers["X-Test"])
+		require.Equal(t, "/full", result.Path)
+		require.Equal(t, "#trigger", result.Source)
+		require.Equal(t, "click", result.Event)
+		require.Equal(t, "customHandler", result.Handler)
+		require.Equal(t, "#target", result.Target)
+		require.Equal(t, "outerHTML", result.Swap)
+		require.Equal(t, ".content", result.Select)
+		require.Equal(t, "value", result.Values["key"])
+		require.Equal(t, "header", result.Headers["X-Test"])
 	})
 
 	t.Run("omits empty optional fields in JSON", func(t *testing.T) {
@@ -282,14 +281,14 @@ func TestLocationWithOptions(t *testing.T) {
 		htmx.LocationWithOptions(rec, req, opts)
 
 		jsonStr := rec.Header().Get("HX-Location")
-		assert.NotContains(t, jsonStr, "source")
-		assert.NotContains(t, jsonStr, "event")
-		assert.NotContains(t, jsonStr, "handler")
-		assert.NotContains(t, jsonStr, "target")
-		assert.NotContains(t, jsonStr, "swap")
-		assert.NotContains(t, jsonStr, "values")
-		assert.NotContains(t, jsonStr, "headers")
-		assert.NotContains(t, jsonStr, "select")
+		require.NotContains(t, jsonStr, "source")
+		require.NotContains(t, jsonStr, "event")
+		require.NotContains(t, jsonStr, "handler")
+		require.NotContains(t, jsonStr, "target")
+		require.NotContains(t, jsonStr, "swap")
+		require.NotContains(t, jsonStr, "values")
+		require.NotContains(t, jsonStr, "headers")
+		require.NotContains(t, jsonStr, "select")
 	})
 
 	t.Run("non-HTMX request uses standard redirect with path", func(t *testing.T) {
@@ -305,9 +304,9 @@ func TestLocationWithOptions(t *testing.T) {
 
 		htmx.LocationWithOptions(rec, req, opts)
 
-		assert.Equal(t, http.StatusFound, rec.Code)
-		assert.Equal(t, "/target", rec.Header().Get("Location"))
-		assert.Empty(t, rec.Header().Get("HX-Location"))
+		require.Equal(t, http.StatusFound, rec.Code)
+		require.Equal(t, "/target", rec.Header().Get("Location"))
+		require.Empty(t, rec.Header().Get("HX-Location"))
 	})
 
 	t.Run("handles empty maps gracefully", func(t *testing.T) {
@@ -329,7 +328,7 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/test", result.Path)
+		require.Equal(t, "/test", result.Path)
 	})
 
 	t.Run("handles nil maps gracefully", func(t *testing.T) {
@@ -351,7 +350,7 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/test", result.Path)
+		require.Equal(t, "/test", result.Path)
 	})
 
 	t.Run("handles special characters in values", func(t *testing.T) {
@@ -375,7 +374,7 @@ func TestLocationWithOptions(t *testing.T) {
 		err := json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, "test & verify <script>", result.Values["query"])
-		assert.Equal(t, "🚀", result.Values["emoji"])
+		require.Equal(t, "test & verify <script>", result.Values["query"])
+		require.Equal(t, "🚀", result.Values["emoji"])
 	})
 }

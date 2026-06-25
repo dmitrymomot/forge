@@ -55,15 +55,32 @@
 //	err := m.Flash(w, r, "msg", &msg)
 //	// Flash is now deleted (no further reads will return it)
 //
+// # Security Model
+//
+// Signed and encrypted values are bound to their cookie name: the name is mixed
+// into the HMAC for signed cookies and used as AES-GCM additional authenticated
+// data for encrypted cookies, so a value cannot be moved between cookie names.
+//
+// Each signed/encrypted value also embeds an expiry derived from the maxAge
+// passed to Set: a positive maxAge is enforced on read (returning [ErrExpired]
+// once it has passed), bounding the replay window. A zero or negative maxAge
+// embeds no expiry, so such values can be replayed indefinitely until the
+// browser drops the cookie; pair those with server-side state if replay matters.
+//
 // # Configuration
 //
 // Use [Config] to configure cookie attributes:
 //   - Secret: Set the secret for signing/encryption (32+ bytes)
 //   - Domain: Set the cookie domain
 //   - Path: Set the cookie path (default: "/")
-//   - SameSite: Set the SameSite attribute as string (default: "lax")
+//   - SameSite: Set the SameSite attribute as string (default: "lax").
+//     "none" forces Secure on, since browsers reject SameSite=None without it.
 //   - Secure: Set the Secure flag (HTTPS only)
-//   - HTTPOnly: Set the HttpOnly flag (default: false)
+//   - HTTPOnly: Set the HttpOnly flag, honored as given. Configs loaded from the
+//     environment default it to true (a secure default, since server-managed
+//     cookies never need client-side JS access), but a directly-constructed
+//     Config{} leaves HTTPOnly at its zero value (false); set it explicitly to
+//     true for server cookies.
 //
 // # Errors
 //
@@ -72,5 +89,7 @@
 //   - [ErrNoSecret]: Secret required for signed/encrypted operations
 //   - [ErrBadSecret]: Secret must be at least 32 bytes
 //   - [ErrBadSig]: Signature verification failed (tampering detected)
+//   - [ErrBadVersion]: Payload carries an unsupported on-the-wire version
 //   - [ErrDecrypt]: Decryption failed (tampering or corruption detected)
+//   - [ErrExpired]: Embedded expiry has passed
 package cookie

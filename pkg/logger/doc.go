@@ -40,16 +40,24 @@
 //	cfg := logger.SentryConfig{
 //		DSN:         os.Getenv("SENTRY_DSN"),
 //		Environment: "production",
-//		MinLevel:    slog.LevelWarn, // Send warnings and errors to Sentry
+//		MinLevel:    "warn", // Send warnings and errors to Sentry (and stdout)
+//		EnableLogs:  true,   // Forward log entries to Sentry, not just error Issues
 //	}
 //
-//	log := logger.NewWithSentry(cfg, requestIDExtractor)
+//	log, closer := logger.NewWithSentry(cfg, requestIDExtractor)
+//	defer closer(2 * time.Second) // Flush buffered Sentry events before exit
 //
 //	// Errors create Issues in Sentry, warnings are stored for context
 //	log.ErrorContext(ctx, "payment failed", slog.String("user_id", "user-456"))
 //
-// If SENTRY_DSN is empty, the logger gracefully falls back to stdout-only logging,
-// making it safe to use the same code path in development and production.
+// MinLevel is a string ("debug", "info", "warn"/"warning", or "error"; unknown values
+// default to "warn") and controls both the stdout handler's minimum level and the lowest
+// level forwarded to Sentry.
+//
+// The returned closer flushes any buffered Sentry events and must be called before the
+// program exits; when Sentry is not active it is a no-op. If SENTRY_DSN is empty, the
+// logger gracefully falls back to stdout-only logging, making it safe to use the same
+// code path in development and production.
 //
 // # Context Extractors
 //
@@ -83,8 +91,8 @@
 // Decorator Pattern: LogHandlerDecorator wraps any slog.Handler, intercepting
 // Handle calls to inject extracted attributes before delegating to the underlying handler.
 //
-// Multi-Handler Pattern: An internal multiHandler forwards logs to multiple destinations,
-// enabling simultaneous stdout and Sentry logging.
+// Multi-Handler Pattern: slog.NewMultiHandler (standard library) fans logs out to multiple
+// destinations, enabling simultaneous stdout and Sentry logging.
 //
 // Graceful Degradation: Sentry integration fails gracefully - if DSN is missing or
 // initialization fails, logging continues to stdout without disruption.

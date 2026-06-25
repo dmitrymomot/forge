@@ -22,7 +22,7 @@
 //	    fmt.Println(loc.Timezone)  // "Europe/London"
 //	}
 //
-// # Private and Loopback IPs
+// # Nil Results
 //
 // Lookups for private (RFC 1918/4193), loopback, link-local, and unspecified
 // addresses return (nil, nil) instead of an error. This allows middleware
@@ -33,6 +33,13 @@
 //
 //	loc, err = provider.Lookup(ctx, "192.168.1.1")
 //	// loc == nil, err == nil
+//
+// A routable public IP that has no matching record in the database also
+// returns (nil, nil), so callers must always check loc != nil before
+// dereferencing it:
+//
+//	loc, err = provider.Lookup(ctx, "8.8.8.8")
+//	// loc may be nil if the IP is absent from the database
 //
 // # Error Handling
 //
