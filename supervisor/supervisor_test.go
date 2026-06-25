@@ -128,3 +128,59 @@ func TestResolveLogger_PassthroughWhenSet(t *testing.T) {
 	l := slog.New(slog.NewTextHandler(io.Discard, nil))
 	assert.Same(t, l, resolveLogger(l))
 }
+
+func TestRun_GraceTimeout_AbandonsStuckService(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	stuck := fakeService{name: "stuck", run: func(ctx context.Context) error {
+		<-release // deliberately ignores ctx
+		return nil
+	}}
+	trigger := fakeService{name: "trigger", run: func(ctx context.Context) error {
+		return nil // exits immediately -> begins shutdown
+	}}
+
+	start := time.Now()
+	err := Run(context.Background(),
+		WithService(stuck), WithService(trigger),
+		WithShutdownTimeout(50*time.Millisecond),
+		WithLogger(discardLogger()))
+
+	require.ErrorIs(t, err, ErrShutdownTimeout)
+	assert.Less(t, time.Since(start), 2*time.Second, "must return shortly after the grace timeout")
+}
+
+func TestRun_GraceTimeout_LogsStuckNamesStructured(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	stuck := fakeService{name: "stuck-svc", run: func(ctx context.Context) error { <-release; return nil }}
+	trigger := fakeService{name: "trigger", run: func(ctx context.Context) error { return nil }}
+
+	_ = Run(context.Background(),
+		WithService(stuck), WithService(trigger),
+		WithShutdownTimeout(30*time.Millisecond), WithLogger(logger))
+
+	out := buf.String()
+	assert.Contains(t, out, "graceful shutdown timed out")
+	assert.Contains(t, out, "stuck-svc", "stuck service name must appear in the structured log")
+}
+
+func TestRun_ZeroTimeout_DrainsCooperativeService(t *testing.T) {
+	// With timeout 0 there is no abandon; a cooperative service still drains.
+	svc := fakeService{name: "coop", run: func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	err := Run(ctx, WithService(svc), WithShutdownTimeout(0), WithLogger(discardLogger()))
+	require.NoError(t, err)
+}

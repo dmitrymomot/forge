@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
+	"time"
 )
 
 // Run starts every registered service, supervises them, and blocks until
@@ -59,6 +61,7 @@ func Run(ctx context.Context, opts ...Option) error {
 	var (
 		errs         []error
 		done         = runCtx.Done()
+		graceCh      <-chan time.Time // nil until shutdown begins; never armed when timeout == 0
 		shuttingDown bool
 	)
 
@@ -70,6 +73,9 @@ func Run(ctx context.Context, opts ...Option) error {
 		log.Info("shutdown started", slog.String("reason", reason))
 		cancel()
 		done = nil
+		if cfg.shutdownTimeout > 0 {
+			graceCh = time.After(cfg.shutdownTimeout)
+		}
 	}
 
 	for len(remaining) > 0 {
@@ -84,6 +90,11 @@ func Run(ctx context.Context, opts ...Option) error {
 			beginShutdown(fmt.Sprintf("service %q exited", res.name))
 		case <-done:
 			beginShutdown("context cancelled")
+		case <-graceCh:
+			errs = append(errs, fmt.Errorf("%w: %d service(s) did not stop within %s",
+				ErrShutdownTimeout, len(remaining), cfg.shutdownTimeout))
+			log.Error("graceful shutdown timed out", slog.Any("stuck", remainingNames(remaining)))
+			return errors.Join(errs...)
 		}
 	}
 
@@ -116,4 +127,15 @@ func warnDuplicateNames(log *slog.Logger, services []Service) {
 		}
 		seen[name] = struct{}{}
 	}
+}
+
+// remainingNames returns the names of services still running, sorted for
+// deterministic logging.
+func remainingNames(remaining map[int]string) []string {
+	names := make([]string, 0, len(remaining))
+	for _, name := range remaining {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
