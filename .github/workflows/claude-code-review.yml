@@ -4,13 +4,16 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
     paths:
-      - "internal/*.go"
-      - "middlewares/*.go"
-      - "pkg/**/*.go"
-      - "forge.go"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
 
 jobs:
   claude-review:
+    # Only auto-review non-draft PRs authored by the repo owner.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login == github.repository_owner
     runs-on: ubuntu-latest
     permissions:
       contents: read
