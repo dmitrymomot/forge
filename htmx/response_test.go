@@ -329,6 +329,7 @@ func TestRedirectBackFallsBackOnUnsafeTarget(t *testing.T) {
 			rec := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodGet, "/login?redirect="+url.QueryEscape(tc.target), nil)
 			htmx.RedirectBack(rec, r, "/home")
+			assert.Equal(t, http.StatusSeeOther, rec.Code)
 			assert.Equal(t, "/home", rec.Header().Get("Location"))
 		})
 	}
@@ -341,6 +342,7 @@ func TestRedirectBackFallsBackWhenParamMissing(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/login", nil)
 	htmx.RedirectBack(rec, r, "/home")
 
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.Equal(t, "/home", rec.Header().Get("Location"))
 }
 
@@ -352,6 +354,17 @@ func TestRedirectBackParamCustomName(t *testing.T) {
 	htmx.RedirectBackParam(rec, r, "next", "/home")
 
 	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+}
+
+func TestRedirectBackParamFallsBackOnUnsafe(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?next="+url.QueryEscape("https://evil.com"), nil)
+	htmx.RedirectBackParam(rec, r, "next", "/home")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/home", rec.Header().Get("Location"))
 }
 
 func TestLocationTargetHTMX(t *testing.T) {
