@@ -141,9 +141,9 @@ error.**
 | `header.go` | `Header`, `HeaderFunc`, `HasHeader`, `BearerToken` |
 | `cookie.go` | `Cookie`, `CookieFunc`, `HasCookie` |
 | `form.go` | `FormValue`, `FormValueFunc`, `FormSlice`/`Func`, `FormSplit`/`Func`, `HasForm` |
-| `body.go` | `DecodeJSON`, `RawBody`, `File`, `Files`, `IsContentType`, the `Option` type and option funcs |
-| `clientip.go` | `ClientIP` and its options |
-| `pagination.go` | `Page`, `Cursor`, `QueryPage`, `QueryCursor` and their options |
+| `body.go` | `DecodeJSON`, `RawBody`, `File`, `Files`, `IsContentType`, `BodyOption` + funcs |
+| `clientip.go` | `ClientIP`, `ClientIPOption` + funcs |
+| `pagination.go` | `Page`, `Cursor`, `QueryPage`, `QueryCursor`, `PageOption` + funcs |
 | `errors.go` | `Source`, `Kind`, `*Error`, `StatusCode` |
 | `doc.go` | package documentation |
 
@@ -249,7 +249,7 @@ distinct — to read either, the caller calls both explicitly.
 ### `DecodeJSON`
 
 ```go
-func DecodeJSON(r *http.Request, dst any, opts ...Option) error
+func DecodeJSON(r *http.Request, dst any, opts ...BodyOption) error
 ```
 
 Strict-by-default policy, each guard independently overridable:
@@ -269,7 +269,7 @@ too-large case is detected via `errors.As` on `*http.MaxBytesError`, so it maps 
 ### `RawBody`
 
 ```go
-func RawBody(r *http.Request, opts ...Option) ([]byte, error)
+func RawBody(r *http.Request, opts ...BodyOption) ([]byte, error)
 ```
 
 Reads the full body into a byte slice under the **same** `MaxBytes` cap as `DecodeJSON`
@@ -280,8 +280,8 @@ verification and arbitrary payloads — the one body shape `DecodeJSON` can't re
 ### Multipart files
 
 ```go
-func File(r *http.Request, key string, opts ...Option) (multipart.File, *multipart.FileHeader, error)
-func Files(r *http.Request, key string, opts ...Option) ([]*multipart.FileHeader, error)
+func File(r *http.Request, key string, opts ...BodyOption) (multipart.File, *multipart.FileHeader, error)
+func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHeader, error)
 ```
 
 `File` returns the first uploaded file for `key` (caller `defer`s `Close()`); `Files`
@@ -306,38 +306,44 @@ negotiation — it inspects the request's own `Content-Type`, never the `Accept`
 
 ### Options
 
-There is **one** `Option` type and one internal `config`, shared by every
-option-taking function (`DecodeJSON`, `RawBody`, `File`/`Files`, `ClientIP`,
-`QueryPage`, `QueryCursor`). Each such function starts from its own per-function
-defaults, applies the supplied options, and reads only the fields it cares about, so an
-option that doesn't apply to a given function (e.g. `AllowUnknownFields` on `RawBody`)
-is a harmless no-op. The accessor families (`Query`, `Path`, …) take no options.
+Options are **split by concern into three types**, each with its own internal config,
+so a function accepts only the options that apply to it — passing a pagination option to
+`DecodeJSON` is a **compile error**, not a silent no-op:
 
 ```go
-type Option func(*config)
+type BodyOption     func(*bodyConfig)     // DecodeJSON, RawBody, File, Files
+type ClientIPOption func(*clientIPConfig) // ClientIP
+type PageOption     func(*pageConfig)     // QueryPage, QueryCursor
 
-// Body (DecodeJSON / RawBody / File / Files)
-func WithMaxBytes(n int64) Option   // raise/lower the cap; n <= 0 disables the limit
-func AllowUnknownFields() Option    // turn off DisallowUnknownFields (DecodeJSON)
-func SkipContentType() Option       // accept any/absent Content-Type (DecodeJSON)
+// BodyOption
+func WithMaxBytes(n int64) BodyOption    // all body readers; n <= 0 disables the limit
+func AllowUnknownFields() BodyOption     // DecodeJSON only
+func SkipContentType() BodyOption        // DecodeJSON only
 
-// ClientIP
-func WithClientIPHeaders(names ...string) Option
-func WithTrustedProxies(prefixes ...netip.Prefix) Option
+// ClientIPOption
+func WithClientIPHeaders(names ...string) ClientIPOption
+func WithTrustedProxies(prefixes ...netip.Prefix) ClientIPOption
 
-// Pagination
-func WithPageParams(pageKey, sizeKey string) Option
-func WithDefaultPageSize(n int) Option
-func WithMaxPageSize(n int) Option
-func WithCursorParams(cursorKey, limitKey string) Option
+// PageOption
+func WithPageParams(pageKey, sizeKey string) PageOption
+func WithDefaultPageSize(n int) PageOption
+func WithMaxPageSize(n int) PageOption
+func WithCursorParams(cursorKey, limitKey string) PageOption
 ```
 
-Functional options, no builder (per project convention).
+Each function applies its options to a fresh per-call config seeded with that
+function's defaults. Functional options, no builder (per project convention). The
+accessor families (`Query`, `Path`, …) take no options.
+
+`WithMaxBytes` applies to every body reader; `AllowUnknownFields` and `SkipContentType`
+are `BodyOption`s that only `DecodeJSON` consults (`RawBody`/`File` read the size cap
+and ignore the rest — the one residual no-op left inside the body group, which is the
+reason these three share `BodyOption` rather than splitting further per body function).
 
 ## `ClientIP` — real-client-IP resolution
 
 ```go
-func ClientIP(r *http.Request, opts ...Option) string   // "" if nothing parses
+func ClientIP(r *http.Request, opts ...ClientIPOption) string   // "" if nothing parses
 ```
 
 **Default (best-effort):** scan well-known headers in priority order, take the first
@@ -350,8 +356,8 @@ value that parses as an IP (`netip.ParseAddr`), else fall back to the host of
 **Options:**
 
 ```go
-func WithClientIPHeaders(names ...string) Option        // replace the priority list
-func WithTrustedProxies(prefixes ...netip.Prefix) Option // correct XFF resolution
+func WithClientIPHeaders(names ...string) ClientIPOption        // replace the priority list
+func WithTrustedProxies(prefixes ...netip.Prefix) ClientIPOption // correct XFF resolution
 ```
 
 - `WithClientIPHeaders` is the **secure pattern for a known CDN**: pin to exactly the
@@ -374,13 +380,13 @@ type Page struct {
 	Size   int // page size
 	Offset int // derived: (Number - 1) * Size
 }
-func QueryPage(r *http.Request, opts ...Option) (Page, error)
+func QueryPage(r *http.Request, opts ...PageOption) (Page, error)
 
 type Cursor struct {
 	Value string // opaque token, passed through verbatim
 	Limit int
 }
-func QueryCursor(r *http.Request, opts ...Option) (Cursor, error)
+func QueryCursor(r *http.Request, opts ...PageOption) (Cursor, error)
 ```
 
 - `QueryPage` reads `page` + `per_page`; defaults: page 1, size 20. Options:
