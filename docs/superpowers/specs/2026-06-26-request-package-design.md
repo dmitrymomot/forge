@@ -110,9 +110,10 @@ error.**
   be a future sibling package, not part of `request`.)
 - **No struct binding / reflection / tags.** Accessors only; whole structs arrive via
   `DecodeJSON`. There is no `Bind(r, &dto)` pulling from multiple sources by tag.
-- **No content negotiation.** `DecodeJSON` is JSON; there is no `Accept`-driven decoder
-  selection. (`DecodeXML` may be added later as a peer free function; `IsContentType`
-  is a possible light predicate — neither is in this scope.)
+- **No content negotiation.** There is no `Accept`-driven decoder selection.
+  `DecodeJSON` is JSON; `IsContentType` inspects the request's own `Content-Type`, not
+  `Accept`. (`DecodeXML` may be added later as a peer free function; it is not in this
+  scope.)
 - **No query/form merge.** `Query` reads the URL query; `FormValue` reads the body
   form. They stay separate (stdlib's `r.FormValue` merges the two; `request` does not),
   so the caller is explicit about which it wants.
@@ -140,7 +141,7 @@ error.**
 | `header.go` | `Header`, `HeaderFunc`, `HasHeader`, `BearerToken` |
 | `cookie.go` | `Cookie`, `CookieFunc`, `HasCookie` |
 | `form.go` | `FormValue`, `FormValueFunc`, `FormSlice`/`Func`, `FormSplit`/`Func`, `HasForm` |
-| `body.go` | `DecodeJSON`, `RawBody`, `File`, `Files`, the `Option` type and option funcs |
+| `body.go` | `DecodeJSON`, `RawBody`, `File`, `Files`, `IsContentType`, the `Option` type and option funcs |
 | `clientip.go` | `ClientIP` and its options |
 | `pagination.go` | `Page`, `Cursor`, `QueryPage`, `QueryCursor` and their options |
 | `errors.go` | `Source`, `Kind`, `*Error`, `StatusCode` |
@@ -290,6 +291,18 @@ default 32 MiB spills to temp files otherwise). A missing file → `*Error{Kind:
 Malformed}`; a non-multipart request → `*Error{Kind: UnsupportedMediaType}` → `415`.
 Multipart **field** values are already covered by `FormValue`/`FormSlice`, so
 `File`/`Files` handle only the file parts — no overlap.
+
+### `IsContentType`
+
+```go
+func IsContentType(r *http.Request, media string) bool
+```
+
+Reports whether the request's `Content-Type` media type equals `media`, compared via
+`mime.ParseMediaType` (case-insensitive, parameters like `; charset=utf-8` ignored) —
+the same matcher `DecodeJSON` uses. A lightweight predicate for branching on body
+format (e.g. `if request.IsContentType(r, "application/json")`); it is **not** content
+negotiation — it inspects the request's own `Content-Type`, never the `Accept` header.
 
 ### Options
 
@@ -454,6 +467,7 @@ Black-box only (`package request_test`, per project convention; testify for asse
   field → 400, trailing data → 400, empty → 400, and each option
   (`WithMaxBytes`/`AllowUnknownFields`/`SkipContentType`) flipping the outcome.
 - `RawBody`: happy path and oversize → 413.
+- `IsContentType`: exact match, case/parameter insensitivity, mismatch, absent header.
 - Multipart `File`/`Files`: present, absent, non-multipart → 415, in-memory cap.
 - `ClientIP`: header priority order, first-valid selection, `WithClientIPHeaders`
   pinning, `WithTrustedProxies` right-to-left resolution, `RemoteAddr` fallback,
@@ -469,7 +483,5 @@ Black-box only (`package request_test`, per project convention; testify for asse
 
 - `DecodeXML` (`encoding/xml`) can be added later as a peer body decoder without
   touching the existing functions.
-- A lightweight `IsContentType(r, media string) bool` predicate is addable if content
-  branching is ever wanted (full `Accept` negotiation stays out of scope).
 - A validation sibling package can consume `*Error`'s `Source`/`Key` to assemble
   field-keyed error responses, without `request` itself growing a rules engine.
