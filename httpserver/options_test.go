@@ -1,6 +1,7 @@
 package httpserver_test
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"testing"
@@ -48,8 +49,10 @@ func TestRun_NilOptionRejected(t *testing.T) {
 }
 
 func TestRun_WithLoggerNilAllowed(t *testing.T) {
+	// The listener is pre-bound by startServed, so Run reaches its serve/drain path
+	// even with an immediate cancel; the assertion is simply that a nil logger is
+	// accepted and Run returns a clean nil. No sleep needed.
 	_, done, cancel := startServed(t, noopHandler(), httpserver.WithLogger(nil))
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 	select {
 	case err := <-done:
@@ -92,5 +95,40 @@ func TestRun_ConnStateCallbackFires(t *testing.T) {
 		case <-deadline:
 			t.Fatal("ConnState callback never reported http.StateNew")
 		}
+	}
+}
+
+func TestRun_WithBaseContext_IsUsed(t *testing.T) {
+	type ctxKey struct{}
+	got := make(chan any, 1)
+	h := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case got <- r.Context().Value(ctxKey{}): // buffered, non-blocking
+		default:
+		}
+	})
+	base := func() context.Context {
+		return context.WithValue(context.Background(), ctxKey{}, "base-ctx-value")
+	}
+	url, _, cancel := startServed(t, h, httpserver.WithBaseContext(base))
+
+	var ok bool
+	for range 50 {
+		resp, err := http.Get(url)
+		if err == nil && resp != nil {
+			_ = resp.Body.Close()
+			ok = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.True(t, ok, "server did not become ready")
+	cancel()
+
+	select {
+	case v := <-got:
+		assert.Equal(t, "base-ctx-value", v, "the WithBaseContext factory's context must reach request handlers")
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never observed the base-context value")
 	}
 }

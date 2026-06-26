@@ -33,6 +33,10 @@ func TestWithServiceFunc_DelegatesNameAndRun(t *testing.T) {
 	assert.Equal(t, "v", gotVal, "fn must be invoked with ctx passed straight through")
 
 	// The name is observable via the structured "service started" log record.
+	// NOTE: "service started" is the literal message supervisor.Run emits for every
+	// started service. There is no exported constant to reference from a black-box
+	// test, so this string is coupled to that log line — if the message is ever
+	// renamed, update it here too (the assert below would otherwise fail confusingly).
 	var named bool
 	for line := range bytes.SplitSeq(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
 		var rec map[string]any
