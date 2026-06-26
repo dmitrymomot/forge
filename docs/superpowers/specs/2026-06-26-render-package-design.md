@@ -3,7 +3,7 @@
 - **Date:** 2026-06-26
 - **Status:** Draft for review
 - **Scope:** A new standalone `render` package of stateless free functions that write
-  an HTTP response from data a handler already holds — `JSON`, `HTML`
+  an HTTP response from data a handler already holds — `JSON`/`JSONStream`, `HTML`
   (`html/template`), `Templ` (a-h/templ, via a structural interface — **no
   dependency**), `Text`, `Blob`, `CSV`, `Stream`, `Attachment`, `File`/`FileFS`,
   `Redirect`, `NoContent`. No constructor, no options, no global state. Plain
@@ -53,13 +53,18 @@ This is the central behavioral contract, decided during design.
   caller can still send a clean `500`. The buffer copy (pooled, see below) is the
   only cost; for typical payloads it is negligible.
 
-- **Pass-through** (`Text`, `Blob`, `CSV`, `Stream`, `Attachment`): set headers,
-  `WriteHeader(status)`, then write/copy directly. `Text`/`Blob` carry an
-  already-materialized body (the only failure is a dead connection — nothing to
-  buffer). `CSV` and `Stream`/`Attachment` write potentially large output and must
-  **not** be buffered whole in RAM, so they stream; a failure mid-stream leaves a
-  partial body under the sent status, and the returned error is only good for
-  logging. This is documented per-function.
+- **Pass-through** (`JSONStream`, `Text`, `Blob`, `CSV`, `Stream`, `Attachment`): set
+  headers, `WriteHeader(status)`, then write/copy/encode directly. `Text`/`Blob` carry
+  an already-materialized body (the only failure is a dead connection — nothing to
+  buffer). `JSONStream`, `CSV`, and `Stream`/`Attachment` write potentially large
+  output and must **not** be buffered whole in RAM, so they stream; a failure
+  mid-stream leaves a partial body under the sent status, and the returned error is
+  only good for logging. This is documented per-function.
+
+  `JSONStream` is the explicit streaming counterpart to the transactional `JSON`: same
+  output, but `json.NewEncoder(w)` writes straight to the wire for very large payloads
+  where buffering the whole document is wasteful — at the cost of `JSON`'s
+  partial-body safety. `JSON` is the default; reach for `JSONStream` deliberately.
 
 - **Server-owned** (`File`, `FileFS`, `Redirect`, `NoContent`): `Redirect` takes the
   3xx code and returns nothing; `NoContent` hard-codes `204` and returns nothing;
@@ -118,17 +123,18 @@ pass-through.**
   ```
   render/
     doc.go            # package doc + runnable Example
-    json.go           # JSON
+    json.go           # JSON, JSONStream
     html.go           # HTML
     templ.go          # Templ + the local Component interface
-    text.go           # Text, Blob, NoContent, Redirect
+    text.go           # Text, Blob, NoContent
+    redirect.go       # Redirect
     csv.go            # CSV
     stream.go         # Stream, Attachment
     file.go           # File, FileFS
     content.go        # internal: content-type constants, setContentType, buffer pool, contentDisposition
     errors.go         # ErrNilTemplate, ErrNilComponent
-    json_test.go html_test.go templ_test.go text_test.go csv_test.go
-    stream_test.go file_test.go content_test.go example_test.go
+    json_test.go html_test.go templ_test.go text_test.go redirect_test.go
+    csv_test.go stream_test.go file_test.go content_test.go example_test.go
   ```
 
 ## Public API
@@ -141,6 +147,14 @@ pass-through.**
 // and the error is returned (the caller can still send a clean 500). Content-Type
 // defaults to "application/json; charset=utf-8" unless already set.
 func JSON(w http.ResponseWriter, status int, v any) error
+
+// JSONStream is the streaming counterpart to JSON: it writes the status, then encodes
+// v straight to w with json.NewEncoder(w) — no intermediate buffer. Use it for very
+// large payloads where buffering the whole document is wasteful. Unlike JSON it is
+// NOT transactional: an encode error mid-stream leaves a partial body under the
+// already-sent status, so the returned error is only good for logging. Content-Type
+// defaults to "application/json; charset=utf-8" unless already set.
+func JSONStream(w http.ResponseWriter, status int, v any) error
 
 // --- html.go ---------------------------------------------------------------
 
@@ -177,6 +191,8 @@ func Blob(w http.ResponseWriter, status int, contentType string, b []byte) error
 
 // NoContent writes 204 No Content with no body. It cannot fail, so it returns nothing.
 func NoContent(w http.ResponseWriter)
+
+// --- redirect.go -----------------------------------------------------------
 
 // Redirect issues an HTTP redirect to url with status (a 3xx, e.g. http.StatusFound /
 // StatusSeeOther). Thin wrapper over http.Redirect.
@@ -268,8 +284,22 @@ func JSON(w http.ResponseWriter, status int, v any) error {
 }
 ```
 
-`HTML` and `Templ` follow the same pattern (execute/Render into `buf`, return on
-error before touching `w`), with their nil-guards first:
+`JSONStream` skips the buffer — it commits the status first, then encodes to the
+wire (pass-through, so an error is only loggable):
+
+```go
+func JSONStream(w http.ResponseWriter, status int, v any) error {
+    setContentType(w, contentTypeJSON)
+    w.WriteHeader(status)
+    if err := json.NewEncoder(w).Encode(v); err != nil {
+        return fmt.Errorf("render: stream json: %w", err) // status/partial body already sent
+    }
+    return nil
+}
+```
+
+`HTML` and `Templ` follow the same pattern as `JSON` (execute/Render into `buf`,
+return on error before touching `w`), with their nil-guards first:
 
 ```go
 func HTML(w http.ResponseWriter, status int, t *template.Template, name string, data any) error {
@@ -409,6 +439,7 @@ function. `render` never opens a socket.
 // JSON API
 _ = render.JSON(w, http.StatusOK, dto)
 _ = render.JSON(w, http.StatusUnprocessableEntity, validationErrors)
+_ = render.JSONStream(w, http.StatusOK, hugeReport) // stream a large payload, no buffering
 
 // Server-rendered HTML (layout + define blocks)
 _ = render.HTML(w, http.StatusOK, tmpl, "dashboard.html", vm)
@@ -437,6 +468,10 @@ White-box (`package render`) `httptest`-driven tests; testify only.
   errors) → asserts the error is returned **and** the recorder shows nothing written
   (default `200`, empty body, no `Content-Type` set); `nil` → `null`; pre-set
   `Content-Type` is honored.
+- **`JSONStream`:** success (status, CT, body matches `JSON`); **pass-through failure**
+  with an unmarshalable value → asserts the error is returned **and** (unlike `JSON`)
+  the status was already committed (`200` written, CT set) — proving it streams rather
+  than buffers.
 - **`HTML`:** `Execute` (name=="") and `ExecuteTemplate` (named) success; `nil`
   template → `ErrNilTemplate`, nothing written; an execution error (template action
   that fails) → wrapped error, nothing written.
@@ -464,9 +499,13 @@ White-box (`package render`) `httptest`-driven tests; testify only.
 
 - `XML` (`encoding/xml`) and an SSE/event-stream helper can be added later as peer
   free functions without touching the existing ones.
-- A streaming-JSON variant (`json.NewEncoder(w)` straight to the wire for very large
-  arrays) could be added as `render.JSONStream` if a real need appears — kept out now
-  to preserve the transactional default.
+- A future **`htmx` sibling package** (HTMX response/request header helpers —
+  `HX-Redirect`, `HX-Location`, `HX-Trigger`, `htmx.IsRequest(r)`, etc.) is
+  deliberately **out of scope** here and will get its own spec. It would depend on
+  `render`/`net/http` (e.g. its non-HTMX redirect branch calling `render.Redirect`),
+  a one-way dependency — `render` never learns about HTMX. Branching a response on a
+  request header (HTMX-aware redirect) is a form of content negotiation, which this
+  package lists under Non-goals, so it belongs in the dedicated package, not here.
 - If consumers converge on one error-body shape, an opinionated `render.Error` could
   be added on top of `JSON` — deferred until there's a shared convention to encode.
 
