@@ -11,3 +11,13 @@ const (
 	hdrTrigger        = "HX-Trigger" // request: triggering element id; response: events
 	hdrTriggerName    = "HX-Trigger-Name"
 )
+
+// Response header names: history, refresh, and swap controls.
+const (
+	hdrPushURL    = "HX-Push-Url"
+	hdrReplaceURL = "HX-Replace-Url"
+	hdrRefresh    = "HX-Refresh"
+	hdrReswap     = "HX-Reswap"
+	hdrRetarget   = "HX-Retarget"
+	hdrReselect   = "HX-Reselect"
+)
