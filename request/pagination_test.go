@@ -38,6 +38,7 @@ func TestQueryPageClamp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, p.Number) // clamped up to 1
 	assert.Equal(t, 100, p.Size) // clamped down to max
+	assert.Equal(t, 0, p.Offset) // (1-1)*100
 }
 
 func TestQueryPageMalformed(t *testing.T) {
@@ -63,5 +64,39 @@ func TestQueryCursor(t *testing.T) {
 	c, err := request.QueryCursor(r)
 	require.NoError(t, err)
 	assert.Equal(t, "abc123", c.Value)
+	assert.Equal(t, 5, c.Limit)
+}
+
+func TestQueryCursorDefaults(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c, err := request.QueryCursor(r)
+	require.NoError(t, err)
+	assert.Equal(t, "", c.Value)
+	assert.Equal(t, 20, c.Limit)
+}
+
+func TestQueryCursorMalformedLimit(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/?limit=abc", nil)
+	_, err := request.QueryCursor(r)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, request.StatusCode(err))
+}
+
+func TestQueryCursorLimitClamp(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/?limit=9999", nil)
+	c, err := request.QueryCursor(r, request.WithMaxPageSize(100))
+	require.NoError(t, err)
+	assert.Equal(t, 100, c.Limit)
+}
+
+func TestQueryCursorCustomParams(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/?c=tok&n=5", nil)
+	c, err := request.QueryCursor(r, request.WithCursorParams("c", "n"))
+	require.NoError(t, err)
+	assert.Equal(t, "tok", c.Value)
 	assert.Equal(t, 5, c.Limit)
 }

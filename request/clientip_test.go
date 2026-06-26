@@ -68,3 +68,13 @@ func TestClientIPMalformedRemoteAddr(t *testing.T) {
 	r.RemoteAddr = "not-an-ip" // no usable headers, unparseable peer
 	assert.Equal(t, "", request.ClientIP(r))
 }
+
+func TestClientIPAllTrusted(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.1:1"
+	r.Header.Set("X-Forwarded-For", "10.1.1.1, 10.2.2.2")
+	trusted := netip.MustParsePrefix("10.0.0.0/8")
+	// every hop is trusted -> fall back to the left-most (original client)
+	assert.Equal(t, "10.1.1.1", request.ClientIP(r, request.WithTrustedProxies(trusted)))
+}

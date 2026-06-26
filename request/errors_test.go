@@ -46,3 +46,20 @@ func TestErrorStringAndUnwrap(t *testing.T) {
 	assert.Contains(t, e.Error(), "page")
 	assert.Contains(t, e.Error(), "malformed")
 }
+
+func TestErrorStringAllKinds(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		kind request.Kind
+		want string
+	}{
+		{request.KindMalformed, "malformed"},
+		{request.KindTooLarge, "too large"},
+		{request.KindUnsupportedMediaType, "unsupported media type"},
+		{request.KindInvalidBody, "invalid body"},
+	}
+	for _, tc := range cases {
+		e := &request.Error{Source: request.SourceBody, Kind: tc.kind, Err: errors.New("x")}
+		assert.Contains(t, e.Error(), tc.want)
+	}
+}

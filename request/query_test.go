@@ -124,3 +124,50 @@ func TestHasQuery(t *testing.T) {
 	assert.True(t, request.HasQuery(r, "x"))
 	assert.False(t, request.HasQuery(r, "y"))
 }
+
+type noParse struct{ X int } // pointer does NOT implement encoding.TextUnmarshaler
+
+func TestQueryScalarWidths(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet,
+		"/?i8=12&i16=300&i32=70000&i64=5000000000&u=7&u8=200&u16=40000&u32=3000000000&u64=10000000000&f32=1.5", nil)
+
+	i8, err := request.Query[int8](r, "i8")
+	require.NoError(t, err)
+	assert.Equal(t, int8(12), i8)
+	i16, err := request.Query[int16](r, "i16")
+	require.NoError(t, err)
+	assert.Equal(t, int16(300), i16)
+	i32, err := request.Query[int32](r, "i32")
+	require.NoError(t, err)
+	assert.Equal(t, int32(70000), i32)
+	i64, err := request.Query[int64](r, "i64")
+	require.NoError(t, err)
+	assert.Equal(t, int64(5000000000), i64)
+	u, err := request.Query[uint](r, "u")
+	require.NoError(t, err)
+	assert.Equal(t, uint(7), u)
+	u8, err := request.Query[uint8](r, "u8")
+	require.NoError(t, err)
+	assert.Equal(t, uint8(200), u8)
+	u16, err := request.Query[uint16](r, "u16")
+	require.NoError(t, err)
+	assert.Equal(t, uint16(40000), u16)
+	u32, err := request.Query[uint32](r, "u32")
+	require.NoError(t, err)
+	assert.Equal(t, uint32(3000000000), u32)
+	u64, err := request.Query[uint64](r, "u64")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(10000000000), u64)
+	f32, err := request.Query[float32](r, "f32")
+	require.NoError(t, err)
+	assert.InEpsilon(t, float32(1.5), f32, 1e-6)
+}
+
+func TestQueryUnsupportedType(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/?v=anything", nil)
+	_, err := request.Query[noParse](r, "v")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, request.StatusCode(err))
+}

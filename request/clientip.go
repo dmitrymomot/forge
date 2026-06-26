@@ -26,7 +26,8 @@ func WithClientIPHeaders(names ...string) ClientIPOption {
 
 // WithTrustedProxies switches to spoof-resistant X-Forwarded-For resolution: the
 // chain (XFF entries plus RemoteAddr) is walked right-to-left, trusted hops are
-// skipped, and the first untrusted address is returned.
+// skipped, and the first untrusted address is returned. Only X-Forwarded-For is
+// consulted in this mode; the RFC 7239 Forwarded header is not parsed here.
 func WithTrustedProxies(prefixes ...netip.Prefix) ClientIPOption {
 	return func(c *clientIPConfig) { c.trusted = prefixes; c.useTrusted = true }
 }
