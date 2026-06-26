@@ -147,7 +147,7 @@ func Location(w http.ResponseWriter, r *http.Request, status int, url string) {
 // LocationWith is Location with an AJAX context object (target, swap, values, ...).
 // For HTMX requests it sets HX-Location to the JSON form {"path":path, ...opts}
 // and writes 200; a marshal failure returns a wrapped error with nothing written.
-// For non-HTMX requests it falls back to http.Redirect(w, r, status, path),
+// For non-HTMX requests it falls back to http.Redirect(w, r, path, status),
 // dropping the context. Terminal.
 func LocationWith(w http.ResponseWriter, r *http.Request, status int, path string, opts LocationOptions) error {
 	if !IsRequest(r) {
