@@ -209,8 +209,7 @@ func StatusCode(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		switch e.Kind {
 		case KindTooLarge:
 			return http.StatusRequestEntityTooLarge
@@ -563,7 +562,7 @@ func resolveSplit[T any](src Source, key, raw, sep string, p func(string) (T, er
 		return nil, nil
 	}
 	var out []T
-	for _, part := range strings.Split(raw, sep) {
+	for part := range strings.SplitSeq(raw, sep) {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -1206,8 +1205,7 @@ func matchesMediaType(header, media string) bool {
 // decodeError classifies a body read/decode failure: an *http.MaxBytesError maps
 // to KindTooLarge, anything else to KindInvalidBody.
 func decodeError(err error) error {
-	var maxErr *http.MaxBytesError
-	if errors.As(err, &maxErr) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		return &Error{Source: SourceBody, Kind: KindTooLarge, Err: err}
 	}
 	return &Error{Source: SourceBody, Kind: KindInvalidBody, Err: err}
@@ -1589,23 +1587,21 @@ func WithTrustedProxies(prefixes ...netip.Prefix) ClientIPOption {
 	return func(c *clientIPConfig) { c.trusted = prefixes; c.useTrusted = true }
 }
 
-// defaultClientIPHeaders is the best-effort scan order. Note: trusting these is
-// spoofable unless the service sits behind a proxy that overwrites them.
-var defaultClientIPHeaders = []string{
-	"CF-Connecting-IP",
-	"True-Client-IP",
-	"Fastly-Client-IP",
-	"X-Real-IP",
-	"Forwarded",
-	"X-Forwarded-For",
-}
-
 // ClientIP returns the best guess at the originating client IP, or "" if nothing
 // parses. By default it scans well-known CDN/proxy headers in priority order and
 // falls back to RemoteAddr. The default mode trusts client-supplied headers and is
 // spoofable; use WithTrustedProxies or a pinned header for auth/rate-limiting.
 func ClientIP(r *http.Request, opts ...ClientIPOption) string {
-	c := clientIPConfig{headers: defaultClientIPHeaders}
+	// Best-effort scan order. Trusting these is spoofable unless the service sits
+	// behind a proxy that overwrites them.
+	c := clientIPConfig{headers: []string{
+		"CF-Connecting-IP",
+		"True-Client-IP",
+		"Fastly-Client-IP",
+		"X-Real-IP",
+		"Forwarded",
+		"X-Forwarded-For",
+	}}
 	for _, o := range opts {
 		o(&c)
 	}
@@ -1631,7 +1627,7 @@ func headerIP(r *http.Request, name string) string {
 	if strings.EqualFold(name, "Forwarded") {
 		return forwardedFor(raw)
 	}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if ip := validIP(part); ip != "" {
 			return ip
 		}
@@ -1686,7 +1682,7 @@ func forwardedFor(v string) string {
 	if i := strings.IndexByte(v, ','); i >= 0 {
 		first = v[:i]
 	}
-	for _, kv := range strings.Split(first, ";") {
+	for kv := range strings.SplitSeq(first, ";") {
 		key, val, ok := strings.Cut(strings.TrimSpace(kv), "=")
 		if !ok || !strings.EqualFold(strings.TrimSpace(key), "for") {
 			continue
@@ -1919,8 +1915,8 @@ func QueryPage(r *http.Request, opts ...PageOption) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	number = clampMin(number, 1)
-	size = clampRange(size, 1, c.maxSize)
+	number = max(number, 1)
+	size = min(max(size, 1), c.maxSize)
 	return Page{Number: number, Size: size, Offset: (number - 1) * size}, nil
 }
 
@@ -1937,24 +1933,7 @@ func QueryCursor(r *http.Request, opts ...PageOption) (Cursor, error) {
 	if err != nil {
 		return Cursor{}, err
 	}
-	return Cursor{Value: value, Limit: clampRange(limit, 1, c.maxSize)}, nil
-}
-
-func clampMin(v, min int) int {
-	if v < min {
-		return min
-	}
-	return v
-}
-
-func clampRange(v, min, max int) int {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
+	return Cursor{Value: value, Limit: min(max(limit, 1), c.maxSize)}, nil
 }
 ```
 
@@ -2023,7 +2002,7 @@ func ExampleDecodeJSON() {
 func BenchmarkQueryInt(b *testing.B) {
 	r := httptest.NewRequest(http.MethodGet, "/?n=12345", nil)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = request.Query[int](r, "n")
 	}
 }
