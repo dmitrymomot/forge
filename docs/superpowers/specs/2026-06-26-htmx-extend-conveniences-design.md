@@ -6,10 +6,10 @@
   (the headers-only, stdlib-only, free-function `htmx` package).
 - **Scope:** Re-add the genuinely useful conveniences that the v1 `pkg/htmx` package
   had and the v2 rewrite dropped, *without* reopening the boundaries the rewrite drew.
-  Three additions to `htmx` (`RedirectBack`/`RedirectBackParam`, `LocationTarget`, a
-  typed `Swap`), one generic helper in `render` (`Components`), and documentation for
-  out-of-band (OOB) swaps. `htmx` stays headers-only and stdlib-only; `render` stays
-  HTMX-agnostic.
+  Additions to `htmx` (`RedirectBack`/`RedirectBackParam`, `RedirectExternal`,
+  `LocationTarget`, a typed `Swap`), one generic helper in `render` (`Components`), and
+  documentation for out-of-band (OOB) swaps. `htmx` stays headers-only and stdlib-only;
+  `render` stays HTMX-agnostic.
 
 ## Motivation
 
@@ -79,6 +79,34 @@ func safeLocalPath(s string) bool {
 - Both delegate the actual write to `Redirect`, inheriting the HTMX-vs-3xx branch and the
   303 default.
 - New stdlib import: `net/url` (still stdlib-only).
+
+## 1a. `RedirectExternal` (`response.go`)
+
+The deliberate counterpart to `RedirectBack`: an explicit off-site redirect for the
+cases where leaving the app is the intent (OAuth provider, payment gateway, an external
+docs URL). New in v2 (not a v1 symbol) — it closes a real footgun rather than a v1 gap.
+
+```go
+// RedirectExternal performs a full-page client redirect to an external (off-site) URL.
+// It is the explicit counterpart to RedirectBack's local-only safety: it does NOT
+// validate url, so reserve it for developer-controlled destinations, never raw user
+// input. For HTMX requests it uses HX-Redirect (a full window.location navigation, which
+// works cross-origin); for non-HTMX requests it falls back to http.Redirect with the
+// optional status (default 303). Terminal.
+//
+// Use this, not Location/LocationTarget/LocationWith, for external URLs: those use
+// HX-Location, an AJAX swap that is same-origin only and fails on a cross-origin target.
+func RedirectExternal(w http.ResponseWriter, r *http.Request, url string, status ...int) {
+    Redirect(w, r, url, status...)
+}
+```
+
+**Why a wrapper over `Redirect`.** Mechanically, `Redirect` already drives the
+`HX-Redirect` / full-navigation path that external URLs require, so `RedirectExternal`
+delegates to it — zero duplicated logic. Its value is intent and documentation: it reads
+as the opposite of `RedirectBack`, and its godoc is where the "external ⇒ HX-Redirect,
+never HX-Location" rule is stated. `Redirect` remains the general HTMX-aware redirect
+(in-app or external); `RedirectExternal` is the self-documenting form for off-site.
 
 ## 2. `LocationTarget` (`response.go`)
 
@@ -206,9 +234,9 @@ Documentation lands in:
 
 Net new exported surface:
 
-- `htmx`: `RedirectBack`, `RedirectBackParam`, `LocationTarget`, `Swap` (type) — and the
-  `Swap*` constants change from untyped `string` to typed `Swap`; `Reswap` and
-  `LocationOptions.Swap` retype to `Swap`.
+- `htmx`: `RedirectBack`, `RedirectBackParam`, `RedirectExternal`, `LocationTarget`,
+  `Swap` (type) — and the `Swap*` constants change from untyped `string` to typed `Swap`;
+  `Reswap` and `LocationOptions.Swap` retype to `Swap`.
 - `render`: `Components`, `ErrNoComponents`.
 
 Unchanged: all existing request getters, the redirect trio, the trigger family, the
@@ -228,6 +256,11 @@ only the exported surface — matching the existing suites.
     (`https://evil.com`, `//evil.com`, `/\evil.com`, `""`, param absent) fall back to
     `fallback`.
   - `RedirectBackParam` reads the custom param name; `RedirectBack` reads `"redirect"`.
+- `RedirectExternal`:
+  - HTMX request → `HX-Redirect: <external url>`, status 200, no `Location` (full-page
+    navigation, not an AJAX swap).
+  - Non-HTMX request → `Location: <external url>`, fallback `3xx` (default 303, override).
+  - An external URL (`https://example.com/x`) is passed through unchanged (no validation).
 - `LocationTarget`:
   - HTMX request → `HX-Location` is JSON `{"path":...,"target":...}` (asserted by
     unmarshaling), status 200.
