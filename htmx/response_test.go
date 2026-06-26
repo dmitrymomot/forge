@@ -256,7 +256,7 @@ func TestLocationWithMarshalError(t *testing.T) {
 func TestSwapTypeIsTyped(t *testing.T) {
 	t.Parallel()
 
-	var s htmx.Swap = htmx.SwapInnerHTML // compile-time: the Swap* constants are typed Swap
+	s := htmx.SwapInnerHTML // compile-time: the Swap* constants are typed Swap
 	assert.Equal(t, htmx.Swap("innerHTML"), s)
 }
 

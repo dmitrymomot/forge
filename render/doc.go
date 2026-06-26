@@ -1,7 +1,7 @@
 // Package render provides small, stateless helpers for writing HTTP responses from a
 // handler: JSON/JSONStream, HTML (html/template), Templ (a-h/templ components, via a
-// structural interface — no dependency), Text, Blob, CSV, Stream, Attachment,
-// File/FileFS, Redirect, and NoContent.
+// structural interface — no dependency), Components (several components in one body),
+// Text, Blob, CSV, Stream, Attachment, File/FileFS, Redirect, and NoContent.
 //
 // The helpers are free functions — there is no constructor, options, or global state.
 // The caller owns its *template.Template and handles the returned error:
