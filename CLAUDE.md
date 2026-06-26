@@ -1,4 +1,4 @@
-- Work ONLY in main branch!
+- Work ONLY in CURRENT branch, don't switch!
 - Use `just` recipes.
 - Keep repository structure flat, don't create nested folders without reason.
 - DON'T use builder pattern, USE options instead.
