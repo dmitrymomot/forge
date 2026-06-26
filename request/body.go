@@ -97,11 +97,13 @@ func decodeError(err error) error {
 func DecodeJSON(r *http.Request, dst any, opts ...BodyOption) error {
 	c := newBodyConfig(opts)
 
-	if !c.skipCType && !matchesMediaType(r.Header.Get("Content-Type"), "application/json") {
-		return &Error{
-			Source: SourceBody,
-			Kind:   KindUnsupportedMediaType,
-			Err:    fmt.Errorf("content-type %q is not application/json", r.Header.Get("Content-Type")),
+	if !c.skipCType {
+		if ct := r.Header.Get("Content-Type"); !matchesMediaType(ct, "application/json") {
+			return &Error{
+				Source: SourceBody,
+				Kind:   KindUnsupportedMediaType,
+				Err:    fmt.Errorf("content-type %q is not application/json", ct),
+			}
 		}
 	}
 
@@ -160,7 +162,9 @@ func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHe
 		headers = r.MultipartForm.File[key]
 	}
 	if len(headers) == 0 {
-		return nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: errors.New("no file for key")}
+		// http.ErrMissingFile mirrors what File (via r.FormFile) returns, so callers
+		// can errors.Is(err, http.ErrMissingFile) for either.
+		return nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: http.ErrMissingFile}
 	}
 	return headers, nil
 }

@@ -102,3 +102,15 @@ func TestFilesNonMultipart(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusUnsupportedMediaType, request.StatusCode(err))
 }
+
+func TestFileFilesMissingSentinel(t *testing.T) {
+	t.Parallel()
+	// Both File and Files surface http.ErrMissingFile for a missing key.
+	r1 := multipartReq(t, "other", "x.txt", "x")
+	_, _, err := request.File(r1, "doc")
+	assert.ErrorIs(t, err, http.ErrMissingFile)
+
+	r2 := multipartReq(t, "other", "x.txt", "x")
+	_, err = request.Files(r2, "doc")
+	assert.ErrorIs(t, err, http.ErrMissingFile)
+}

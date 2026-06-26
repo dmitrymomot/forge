@@ -3,6 +3,7 @@ package request_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,4 +65,35 @@ func TestCookie(t *testing.T) {
 	assert.Equal(t, "xyz", v)
 	assert.True(t, request.HasCookie(r, "sid"))
 	assert.False(t, request.HasCookie(r, "nope"))
+}
+
+func TestBearerTokenCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "BEARER abc.def")
+	tok, ok := request.BearerToken(r)
+	assert.True(t, ok)
+	assert.Equal(t, "abc.def", tok)
+}
+
+func TestPartFuncVariants(t *testing.T) {
+	t.Parallel()
+	hexParse := func(s string) (int64, error) { return strconv.ParseInt(s, 16, 64) }
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.SetPathValue("id", "ff")
+	r.Header.Set("X-Hex", "10")
+	r.AddCookie(&http.Cookie{Name: "c", Value: "1a"})
+
+	p, err := request.PathFunc(r, "id", hexParse)
+	require.NoError(t, err)
+	assert.Equal(t, int64(255), p)
+
+	h, err := request.HeaderFunc(r, "X-Hex", hexParse)
+	require.NoError(t, err)
+	assert.Equal(t, int64(16), h)
+
+	c, err := request.CookieFunc(r, "c", hexParse)
+	require.NoError(t, err)
+	assert.Equal(t, int64(26), c)
 }

@@ -58,3 +58,29 @@ func TestFormNotMergedWithQuery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 30, v) // body value, not the query's 99
 }
+
+func TestFormValueMalformed(t *testing.T) {
+	t.Parallel()
+	r := formReq(url.Values{"age": {"not-a-number"}})
+
+	_, err := request.FormValue[int](r, "age")
+	require.Error(t, err)
+
+	var re *request.Error
+	require.ErrorAs(t, err, &re)
+	require.NotNil(t, re)
+	if re != nil {
+		assert.Equal(t, request.SourceForm, re.Source)
+		assert.Equal(t, request.KindMalformed, re.Kind)
+		assert.Equal(t, "age", re.Key)
+	}
+}
+
+func TestFormValueAbsentDefault(t *testing.T) {
+	t.Parallel()
+	r := formReq(url.Values{})
+
+	v, err := request.FormValue[int](r, "age", 9)
+	require.NoError(t, err)
+	assert.Equal(t, 9, v)
+}

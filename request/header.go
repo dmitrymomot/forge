@@ -21,7 +21,8 @@ func HasHeader(r *http.Request, key string) bool {
 }
 
 // BearerToken returns the token from an Authorization: Bearer <token> header, or
-// "" and false if the header is absent or not a Bearer credential.
+// "" and false if the header is absent or not a Bearer credential. The scheme is
+// matched case-insensitively and surrounding whitespace is trimmed from the token.
 func BearerToken(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
 	auth := r.Header.Get("Authorization")

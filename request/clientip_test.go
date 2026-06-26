@@ -78,3 +78,13 @@ func TestClientIPAllTrusted(t *testing.T) {
 	// every hop is trusted -> fall back to the left-most (original client)
 	assert.Equal(t, "10.1.1.1", request.ClientIP(r, request.WithTrustedProxies(trusted)))
 }
+
+func TestClientIPTrustedIgnoresForwarded(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.9:443"
+	r.Header.Set("Forwarded", "for=198.51.100.1") // not consulted in trusted mode
+	trusted := netip.MustParsePrefix("10.0.0.0/8")
+	// no XFF; chain is just RemoteAddr (untrusted) -> returned, Forwarded ignored
+	assert.Equal(t, "203.0.113.9", request.ClientIP(r, request.WithTrustedProxies(trusted)))
+}

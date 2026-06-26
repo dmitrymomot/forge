@@ -99,3 +99,11 @@ func TestIsContentType(t *testing.T) {
 	bare := httptest.NewRequest(http.MethodGet, "/", nil)
 	assert.False(t, request.IsContentType(bare, "application/json"))
 }
+
+func TestDecodeJSONMaxBytesZeroDisablesLimit(t *testing.T) {
+	t.Parallel()
+	var p payload
+	big := `{"name":"` + strings.Repeat("x", (1<<20)+1) + `"}` // exceeds the default 1 MiB cap
+	require.NoError(t, request.DecodeJSON(jsonReq(big), &p, request.WithMaxBytes(0)))
+	assert.Len(t, p.Name, (1<<20)+1)
+}

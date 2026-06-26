@@ -63,3 +63,9 @@ func TestErrorStringAllKinds(t *testing.T) {
 		assert.Contains(t, e.Error(), tc.want)
 	}
 }
+
+func TestErrorStringNoCause(t *testing.T) {
+	t.Parallel()
+	e := &request.Error{Source: request.SourcePath, Key: "id", Kind: request.KindMalformed}
+	assert.Equal(t, `request: path "id": malformed`, e.Error())
+}
