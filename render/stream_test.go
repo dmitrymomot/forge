@@ -40,4 +40,12 @@ func TestStream_ReaderErrorPropagates(t *testing.T) {
 	rec := httptest.NewRecorder()
 	err := render.Stream(rec, http.StatusOK, "text/plain", errReader{})
 	require.Error(t, err)
+	assert.ErrorContains(t, err, "render: stream:")
+}
+
+func TestAttachment_ReaderErrorPropagates(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := render.Attachment(rec, http.StatusOK, "f.bin", "", errReader{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "render: attachment:")
 }

@@ -26,8 +26,10 @@ func TestHTML_Execute(t *testing.T) {
 func TestHTML_ExecuteTemplateNamed(t *testing.T) {
 	tmpl := template.Must(template.New("root").Parse(`{{define "page"}}P:{{.}}{{end}}`))
 	rec := httptest.NewRecorder()
-	err := render.HTML(rec, http.StatusOK, tmpl, "page", "x")
+	err := render.HTML(rec, http.StatusCreated, tmpl, "page", "x")
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code) // status committed verbatim on the named-template path
+	assert.Equal(t, "text/html; charset=utf-8", rec.Header().Get("Content-Type"))
 	assert.Equal(t, "P:x", rec.Body.String())
 }
 

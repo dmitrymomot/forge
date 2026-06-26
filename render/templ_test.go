@@ -36,8 +36,9 @@ func TestTempl_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := &fakeComponent{out: "<p>hi</p>"}
 	ctx := context.WithValue(context.Background(), testCtxKey{}, "v")
-	err := render.Templ(ctx, rec, http.StatusOK, c)
+	err := render.Templ(ctx, rec, http.StatusCreated, c)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code) // status committed verbatim (not the recorder default)
 	assert.Equal(t, "text/html; charset=utf-8", rec.Header().Get("Content-Type"))
 	assert.Equal(t, "<p>hi</p>", rec.Body.String())
 	assert.Equal(t, "v", c.ctxValue) // ctx propagated to the component
