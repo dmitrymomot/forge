@@ -53,3 +53,36 @@ func Retarget(w http.ResponseWriter, selector string) {
 func Reselect(w http.ResponseWriter, selector string) {
 	w.Header().Set(hdrReselect, selector)
 }
+
+// Trigger fires client-side events by name (HX-Trigger: "a, b"). No names is a
+// no-op. For events carrying detail, use TriggerWith.
+func Trigger(w http.ResponseWriter, names ...string) {
+	setEventNames(w, hdrTrigger, names)
+}
+
+// TriggerWith fires client-side events with JSON detail
+// (HX-Trigger: {"name": detail, ...}). An empty map is a no-op; a marshal
+// failure returns a wrapped error with no header written.
+func TriggerWith(w http.ResponseWriter, events map[string]any) error {
+	return setEventDetail(w, hdrTrigger, events)
+}
+
+// TriggerAfterSettle fires events after the settle step (HX-Trigger-After-Settle).
+func TriggerAfterSettle(w http.ResponseWriter, names ...string) {
+	setEventNames(w, hdrTriggerAfterSettle, names)
+}
+
+// TriggerAfterSettleWith fires events with JSON detail after the settle step.
+func TriggerAfterSettleWith(w http.ResponseWriter, events map[string]any) error {
+	return setEventDetail(w, hdrTriggerAfterSettle, events)
+}
+
+// TriggerAfterSwap fires events after the swap step (HX-Trigger-After-Swap).
+func TriggerAfterSwap(w http.ResponseWriter, names ...string) {
+	setEventNames(w, hdrTriggerAfterSwap, names)
+}
+
+// TriggerAfterSwapWith fires events with JSON detail after the swap step.
+func TriggerAfterSwapWith(w http.ResponseWriter, events map[string]any) error {
+	return setEventDetail(w, hdrTriggerAfterSwap, events)
+}

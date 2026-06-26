@@ -5,8 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dmitrymomot/forge/htmx"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/forge/htmx"
 )
 
 func TestRequestBooleans(t *testing.T) {
