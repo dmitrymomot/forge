@@ -74,8 +74,7 @@ func StatusCode(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		switch e.Kind {
 		case KindTooLarge:
 			return http.StatusRequestEntityTooLarge
