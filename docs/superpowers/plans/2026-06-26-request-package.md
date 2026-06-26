@@ -1698,10 +1698,7 @@ func isTrusted(addr netip.Addr, trusted []netip.Prefix) bool {
 
 // forwardedFor returns the IP from the first "for=" directive of a Forwarded header.
 func forwardedFor(v string) string {
-	first := v
-	if i := strings.IndexByte(v, ','); i >= 0 {
-		first = v[:i]
-	}
+	first, _, _ := strings.Cut(v, ",")
 	for kv := range strings.SplitSeq(first, ";") {
 		key, val, ok := strings.Cut(strings.TrimSpace(kv), "=")
 		if !ok || !strings.EqualFold(strings.TrimSpace(key), "for") {
