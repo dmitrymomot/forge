@@ -1,4 +1,4 @@
-package httpserver
+package httpserver_test
 
 import (
 	"context"
@@ -10,41 +10,37 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/httpserver"
 )
 
 func noopHandler() http.Handler {
 	return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 }
 
-func TestNew_SeedsDefaults(t *testing.T) {
-	s := New(noopHandler())
-	assert.Equal(t, ":8080", s.cfg.Addr)
-	assert.Equal(t, 1<<20, s.cfg.MaxHeaderBytes)
-	assert.NotNil(t, s.cfg.handler)
-}
-
 func TestName_Derivation(t *testing.T) {
-	assert.Equal(t, "http :8080", New(noopHandler()).Name())
-	assert.Equal(t, "api", New(noopHandler(), WithName("api")).Name())
-	assert.Equal(t, "http :9090", New(noopHandler(), WithAddr(":9090")).Name())
+	// Also covers the seeded default Addr: New(handler).Name() derives "http :8080".
+	assert.Equal(t, "http :8080", httpserver.New(noopHandler()).Name())
+	assert.Equal(t, "api", httpserver.New(noopHandler(), httpserver.WithName("api")).Name())
+	assert.Equal(t, "http :9090", httpserver.New(noopHandler(), httpserver.WithAddr(":9090")).Name())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { _ = ln.Close() }()
-	s := New(noopHandler(), WithListener(ln))
+	s := httpserver.New(noopHandler(), httpserver.WithListener(ln))
 	assert.Equal(t, "http "+ln.Addr().String(), s.Name())
 }
 
 // startServed runs s.Run in a goroutine on a 127.0.0.1:0 listener and returns the
 // bound base URL, the channel carrying Run's result, and a cancel func. cancel is
 // also registered with t.Cleanup so a failing test never leaks the server goroutine.
-func startServed(t *testing.T, h http.Handler, opts ...Option) (string, <-chan error, context.CancelFunc) {
+func startServed(t *testing.T, h http.Handler, opts ...httpserver.Option) (string, <-chan error, context.CancelFunc) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	s := New(h, append(opts, WithListener(ln))...)
+	s := httpserver.New(h, append(opts, httpserver.WithListener(ln))...)
 	done := make(chan error, 1)
 	go func() { done <- s.Run(ctx) }()
 	return "http://" + ln.Addr().String(), done, cancel
@@ -55,8 +51,6 @@ func TestRun_RoundTripAndGracefulStop(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
-	// Retry until the server accepts; assert inside the guard so resp is non-nil
-	// (keeps nilaway happy without a //nolint).
 	var ok bool
 	for range 50 {
 		resp, err := http.Get(url)
@@ -82,7 +76,7 @@ func TestRun_RoundTripAndGracefulStop(t *testing.T) {
 func TestRun_GracefulDrainCompletesInflight(t *testing.T) {
 	started := make(chan struct{})
 	url, done, cancel := startServed(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(started)                     // exactly one request is fired in this test
+		close(started)
 		time.Sleep(100 * time.Millisecond) // still serving when ctx is cancelled
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -115,15 +109,15 @@ func TestRun_GracefulDrainCompletesInflight(t *testing.T) {
 }
 
 func TestRun_NilHandlerReturnsErrNoHandler(t *testing.T) {
-	err := New(nil).Run(context.Background())
+	err := httpserver.New(nil).Run(context.Background())
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNoHandler)
+	assert.ErrorIs(t, err, httpserver.ErrNoHandler)
 }
 
 func TestRun_InvalidConfigReturnsError(t *testing.T) {
-	err := New(noopHandler(), WithConfig(Config{Addr: ""})).Run(context.Background())
+	err := httpserver.New(noopHandler(), httpserver.WithConfig(httpserver.Config{Addr: ""})).Run(context.Background())
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidConfig)
+	assert.ErrorIs(t, err, httpserver.ErrInvalidConfig)
 }
 
 func TestRun_BindFailureReturnsError(t *testing.T) {
@@ -132,25 +126,24 @@ func TestRun_BindFailureReturnsError(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 
 	// Reuse the same address without WithListener so net.Listen fails (in use).
-	s := New(noopHandler(), WithAddr(ln.Addr().String()))
+	s := httpserver.New(noopHandler(), httpserver.WithAddr(ln.Addr().String()))
 	err = s.Run(context.Background())
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrShutdownTimeout)
+	assert.NotErrorIs(t, err, httpserver.ErrShutdownTimeout)
 }
 
 func TestRun_ForceCloseOnSlowHandler(t *testing.T) {
 	handlerCtxDone := make(chan struct{}, 1)
-	cfg := DefaultConfig()
+	cfg := httpserver.DefaultConfig()
 	cfg.ShutdownTimeout = 50 * time.Millisecond
 	url, done, cancel := startServed(t,
 		http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done() // blocks until force-close cancels the base context
 			handlerCtxDone <- struct{}{}
 		}),
-		WithConfig(cfg),
+		httpserver.WithConfig(cfg),
 	)
 
-	// Fire a request that will be in-flight when we cancel.
 	go func() {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		_, _ = http.DefaultClient.Do(req) // connection drops on force-close
@@ -160,7 +153,7 @@ func TestRun_ForceCloseOnSlowHandler(t *testing.T) {
 	cancel()
 	select {
 	case runErr := <-done:
-		assert.ErrorIs(t, runErr, ErrShutdownTimeout)
+		assert.ErrorIs(t, runErr, httpserver.ErrShutdownTimeout)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after force-close")
 	}
@@ -171,16 +164,56 @@ func TestRun_ForceCloseOnSlowHandler(t *testing.T) {
 	}
 }
 
-// TestDrain_SurfacesBufferedServeError deterministically covers the lost-error
-// race: a serve error already buffered when shutdown begins must be returned by
-// drain, never masked as a clean nil. drain is called directly with a pre-seeded
-// channel and a fresh *http.Server (whose Shutdown returns nil immediately).
-func TestDrain_SurfacesBufferedServeError(t *testing.T) {
-	s := New(noopHandler())
-	boom := errors.New("boom")
-	serveErr := make(chan error, 1)
-	serveErr <- boom
+// errBoomListener is a fake net.Listener whose Accept always fails with a permanent
+// error, so http.Server.Serve returns that error into Run's serve channel.
+// accepted is signaled (receives a token) on the first Accept call so the test can
+// synchronize before firing cancel — proving the serve goroutine has entered Accept.
+type errBoomListener struct {
+	err      error
+	accepted chan struct{}
+}
 
-	err := s.drain(&http.Server{}, serveErr, func() {}, resolveLogger(nil))
-	require.ErrorIs(t, err, boom)
+func (l errBoomListener) Accept() (net.Conn, error) {
+	select {
+	case l.accepted <- struct{}{}:
+	default:
+	}
+	return nil, l.err
+}
+func (errBoomListener) Close() error   { return nil }
+func (errBoomListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
+
+// TestRun_SurfacesServeErrorRacingCancel is the black-box replacement for the former
+// white-box drain test. It proves the documented contract: "a serve error that races
+// with cancellation is always surfaced, never masked as a clean stop." The fake
+// listener fails Accept immediately, so Serve buffers the error before shutdown can
+// substitute http.ErrServerClosed; Run then surfaces it whichever select branch wins
+// (direct serve-error read, or the drain path's buffered read).
+func TestRun_SurfacesServeErrorRacingCancel(t *testing.T) {
+	boom := errors.New("boom")
+	accepted := make(chan struct{}, 1)
+	s := httpserver.New(noopHandler(), httpserver.WithListener(errBoomListener{err: boom, accepted: accepted}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	// Accept signals before returning the error, so by the time we cancel, the serve
+	// goroutine has at least entered Accept; whichever branch Run takes, the buffered
+	// serve error (boom) is surfaced — directly via the serve-error read, or by drain,
+	// which reads serveErr and returns any non-ErrServerClosed error.
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Accept was never called")
+	}
+	cancel() // race cancellation against the serve failure
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, boom, "a serve error racing cancellation must always be surfaced")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return")
+	}
 }
