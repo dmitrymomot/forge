@@ -1,4 +1,4 @@
-package httpserver
+package httpserver_test
 
 import (
 	"context"
@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/httpserver"
 )
 
 // selfSigned returns an in-memory cert plus its PEM bytes for the loopback host.
@@ -57,13 +59,13 @@ func tlsClient(t *testing.T, caPEM []byte) *http.Client {
 	}}
 }
 
-func startTLS(t *testing.T, opts ...Option) (string, <-chan error, context.CancelFunc) {
+func startTLS(t *testing.T, opts ...httpserver.Option) (string, <-chan error, context.CancelFunc) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	s := New(h, append(opts, WithListener(ln))...)
+	s := httpserver.New(h, append(opts, httpserver.WithListener(ln))...)
 	done := make(chan error, 1)
 	go func() { done <- s.Run(ctx) }()
 	return "https://" + ln.Addr().String(), done, cancel
@@ -86,7 +88,7 @@ func waitTLS200(t *testing.T, url string, caPEM []byte) {
 
 func TestRun_TLSWithConfig(t *testing.T) {
 	cert, certPEM, _ := selfSigned(t)
-	url, done, cancel := startTLS(t, WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}))
+	url, done, cancel := startTLS(t, httpserver.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}))
 	waitTLS200(t, url, certPEM)
 	cancel()
 	require.NoError(t, <-done)
@@ -100,10 +102,10 @@ func TestRun_TLSWithCertFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(certFile, certPEM, 0o600))
 	require.NoError(t, os.WriteFile(keyFile, keyPEM, 0o600))
 
-	cfg := DefaultConfig()
+	cfg := httpserver.DefaultConfig()
 	cfg.TLSCertFile = certFile
 	cfg.TLSKeyFile = keyFile
-	url, done, cancel := startTLS(t, WithConfig(cfg))
+	url, done, cancel := startTLS(t, httpserver.WithConfig(cfg))
 	waitTLS200(t, url, certPEM)
 	cancel()
 	require.NoError(t, <-done)
@@ -112,12 +114,12 @@ func TestRun_TLSWithCertFiles(t *testing.T) {
 func TestRun_TLSConfigTakesPrecedenceOverFiles(t *testing.T) {
 	cert, certPEM, _ := selfSigned(t)
 	// Bogus cert files that would fail to load IF they were used. WithTLSConfig must win.
-	cfg := DefaultConfig()
+	cfg := httpserver.DefaultConfig()
 	cfg.TLSCertFile = "/nonexistent/cert.pem"
 	cfg.TLSKeyFile = "/nonexistent/key.pem"
 	url, done, cancel := startTLS(t,
-		WithConfig(cfg),
-		WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}),
+		httpserver.WithConfig(cfg),
+		httpserver.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}),
 	)
 	waitTLS200(t, url, certPEM) // would fail if the bogus files were loaded
 	cancel()

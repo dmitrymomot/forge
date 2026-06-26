@@ -1,85 +1,134 @@
-package httpserver
+package httpserver_test
 
 import (
 	"context"
-	"crypto/tls"
-	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/httpserver"
 )
 
-func baseConfig() config {
-	return config{Config: DefaultConfig(), logger: slog.Default()}
+func TestOptions_LastWins(t *testing.T) {
+	// WithConfig applied last replaces the whole block, so Addr resolves to ":1".
+	got := httpserver.New(noopHandler(),
+		httpserver.WithAddr(":9090"),
+		httpserver.WithConfig(httpserver.Config{Addr: ":1", ReadTimeout: 1}),
+	).Name()
+	assert.Equal(t, "http :1", got)
+
+	// WithAddr applied last wins over an earlier WithConfig.
+	got = httpserver.New(noopHandler(),
+		httpserver.WithConfig(httpserver.Config{Addr: ":1"}),
+		httpserver.WithAddr(":9090"),
+	).Name()
+	assert.Equal(t, "http :9090", got)
 }
 
-func TestDataOptions_SetFields(t *testing.T) {
-	c := baseConfig()
-	WithAddr(":9090")(&c)
-	WithName("api")(&c)
-	WithConfig(Config{Addr: ":1", ReadTimeout: 1})(&c)
-
-	// WithConfig replaced the whole block (applied last), so Addr is ":1".
-	assert.Equal(t, ":1", c.Addr)
+func TestRun_NilOptionRejected(t *testing.T) {
+	opts := map[string]httpserver.Option{
+		"listener":    httpserver.WithListener(nil),
+		"tlsconfig":   httpserver.WithTLSConfig(nil),
+		"basecontext": httpserver.WithBaseContext(nil),
+		"connstate":   httpserver.WithConnState(nil),
+	}
+	for name, opt := range opts {
+		t.Run(name, func(t *testing.T) {
+			// A real handler is passed so the failure is unambiguously the option's
+			// rejection (ErrInvalidConfig), not ErrNoHandler. Validation runs before
+			// any net.Listen, so there is no I/O and Run returns immediately.
+			err := httpserver.New(noopHandler(), opt).Run(t.Context())
+			require.Error(t, err)
+			assert.ErrorIs(t, err, httpserver.ErrInvalidConfig)
+		})
+	}
 }
 
-func TestWithLogger_NilAllowed(t *testing.T) {
-	c := baseConfig()
-	l := slog.New(slog.NewTextHandler(io.Discard, nil))
-	WithLogger(l)(&c)
-	assert.Same(t, l, c.logger)
-
-	WithLogger(nil)(&c)
-	assert.Nil(t, c.logger)
-	assert.Empty(t, c.errs, "nil logger is allowed, not a validation error")
+func TestRun_WithLoggerNilAllowed(t *testing.T) {
+	// The listener is pre-bound by startServed, so Run reaches its serve/drain path
+	// even with an immediate cancel; the assertion is simply that a nil logger is
+	// accepted and Run returns a clean nil. No sleep needed.
+	_, done, cancel := startServed(t, noopHandler(), httpserver.WithLogger(nil))
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a nil logger is allowed, not a validation error")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
 }
 
-func TestCodeOptions_NilAppendError(t *testing.T) {
-	t.Run("listener", func(t *testing.T) {
-		c := baseConfig()
-		WithListener(nil)(&c)
-		require.Len(t, c.errs, 1)
-		assert.ErrorIs(t, c.errs[0], ErrInvalidConfig)
-		assert.Nil(t, c.listener)
-	})
-	t.Run("tlsconfig", func(t *testing.T) {
-		c := baseConfig()
-		WithTLSConfig(nil)(&c)
-		require.Len(t, c.errs, 1)
-		assert.ErrorIs(t, c.errs[0], ErrInvalidConfig)
-	})
-	t.Run("basecontext", func(t *testing.T) {
-		c := baseConfig()
-		WithBaseContext(nil)(&c)
-		require.Len(t, c.errs, 1)
-		assert.ErrorIs(t, c.errs[0], ErrInvalidConfig)
-	})
-	t.Run("connstate", func(t *testing.T) {
-		c := baseConfig()
-		WithConnState(nil)(&c)
-		require.Len(t, c.errs, 1)
-		assert.ErrorIs(t, c.errs[0], ErrInvalidConfig)
-	})
+func TestRun_ConnStateCallbackFires(t *testing.T) {
+	states := make(chan http.ConnState, 8)
+	cb := func(_ net.Conn, s http.ConnState) {
+		select {
+		case states <- s: // buffered, non-blocking so the server goroutine never blocks
+		default:
+		}
+	}
+	url, _, cancel := startServed(t, noopHandler(), httpserver.WithConnState(cb))
+
+	var ok bool
+	for range 50 {
+		resp, err := http.Get(url)
+		if err == nil && resp != nil {
+			_ = resp.Body.Close()
+			ok = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.True(t, ok, "server did not become ready")
+	cancel()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case s := <-states:
+			if s == http.StateNew {
+				return // the callback was wired and fired
+			}
+		case <-deadline:
+			t.Fatal("ConnState callback never reported http.StateNew")
+		}
+	}
 }
 
-func TestCodeOptions_StoreNonNil(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer func() { _ = ln.Close() }()
+func TestRun_WithBaseContext_IsUsed(t *testing.T) {
+	type ctxKey struct{}
+	got := make(chan any, 1)
+	h := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case got <- r.Context().Value(ctxKey{}): // buffered, non-blocking
+		default:
+		}
+	})
+	base := func() context.Context {
+		return context.WithValue(context.Background(), ctxKey{}, "base-ctx-value")
+	}
+	url, _, cancel := startServed(t, h, httpserver.WithBaseContext(base))
 
-	c := baseConfig()
-	WithListener(ln)(&c)
-	WithTLSConfig(&tls.Config{})(&c)
-	WithBaseContext(func() context.Context { return context.Background() })(&c)
-	WithConnState(func(net.Conn, http.ConnState) {})(&c)
+	var ok bool
+	for range 50 {
+		resp, err := http.Get(url)
+		if err == nil && resp != nil {
+			_ = resp.Body.Close()
+			ok = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.True(t, ok, "server did not become ready")
+	cancel()
 
-	assert.Empty(t, c.errs)
-	assert.Same(t, ln, c.listener)
-	assert.NotNil(t, c.tlsConfig)
-	assert.NotNil(t, c.baseContext)
-	assert.NotNil(t, c.connState)
+	select {
+	case v := <-got:
+		assert.Equal(t, "base-ctx-value", v, "the WithBaseContext factory's context must reach request handlers")
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never observed the base-context value")
+	}
 }

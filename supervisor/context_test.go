@@ -1,4 +1,4 @@
-package supervisor
+package supervisor_test
 
 import (
 	"context"
@@ -8,10 +8,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/supervisor"
 )
 
 func TestNewContext_CancelsOnSIGTERM(t *testing.T) {
-	ctx, stop := NewContext()
+	ctx, stop := supervisor.NewContext()
 	defer stop()
 
 	require.NoError(t, ctx.Err(), "context must be live before any signal")
@@ -27,6 +29,7 @@ func TestNewContext_CancelsOnSIGTERM(t *testing.T) {
 }
 
 func TestNewContext_StopIsSafe(t *testing.T) {
-	_, stop := NewContext()
+	ctx, stop := supervisor.NewContext()
 	stop() // releasing the handler must not panic
+	assert.ErrorIs(t, ctx.Err(), context.Canceled, "stop cancels the context")
 }

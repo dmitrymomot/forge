@@ -1,8 +1,9 @@
-package supervisor
+package supervisor_test
 
 import "context"
 
-// fakeService is a controllable Service test double shared across test files.
+// fakeService is a controllable Service test double shared across the supervisor
+// black-box test files.
 type fakeService struct {
 	name string
 	run  func(ctx context.Context) error

@@ -1,4 +1,4 @@
-package httpserver
+package httpserver_test
 
 import (
 	"reflect"
@@ -7,10 +7,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/httpserver"
 )
 
 func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := httpserver.DefaultConfig()
 	assert.Equal(t, ":8080", cfg.Addr)
 	assert.Equal(t, 15*time.Second, cfg.ShutdownTimeout)
 	assert.Equal(t, 10*time.Second, cfg.ReadHeaderTimeout)
@@ -25,7 +27,7 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestConfig_Validate(t *testing.T) {
-	tests := map[string]Config{
+	tests := map[string]httpserver.Config{
 		"empty addr":      {Addr: ""},
 		"neg shutdown":    {Addr: ":0", ShutdownTimeout: -1},
 		"neg read header": {Addr: ":0", ReadHeaderTimeout: -1},
@@ -40,13 +42,12 @@ func TestConfig_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := cfg.Validate()
 			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrInvalidConfig)
+			assert.ErrorIs(t, err, httpserver.ErrInvalidConfig)
 		})
 	}
 
-	// Both TLS files set is valid; zero timeouts are valid (disabled/indefinite).
-	require.NoError(t, Config{Addr: ":0", TLSCertFile: "c.pem", TLSKeyFile: "k.pem"}.Validate())
-	require.NoError(t, Config{Addr: ":0", WriteTimeout: 0}.Validate())
+	require.NoError(t, httpserver.Config{Addr: ":0", TLSCertFile: "c.pem", TLSKeyFile: "k.pem"}.Validate())
+	require.NoError(t, httpserver.Config{Addr: ":0", WriteTimeout: 0}.Validate())
 }
 
 func TestConfig_EnvTags(t *testing.T) {
@@ -62,7 +63,7 @@ func TestConfig_EnvTags(t *testing.T) {
 		"TLSCertFile":       "TLS_CERT_FILE",
 		"TLSKeyFile":        "TLS_KEY_FILE",
 	}
-	typ := reflect.TypeFor[Config]()
+	typ := reflect.TypeFor[httpserver.Config]()
 	for fname, tag := range want {
 		f, ok := typ.FieldByName(fname)
 		require.Truef(t, ok, "field %s missing", fname)
