@@ -288,7 +288,9 @@ func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHe
 returns every header for repeated file inputs (open lazily via `fh.Open()`). Both
 trigger `r.ParseMultipartForm`; `WithMaxBytes` caps the in-memory portion (stdlib
 default 32 MiB spills to temp files otherwise). A missing file → `*Error{Kind:
-Malformed}`; a non-multipart request → `*Error{Kind: UnsupportedMediaType}` → `415`.
+Missing, Err: http.ErrMissingFile}` (so `errors.Is(err, http.ErrMissingFile)`
+distinguishes absence from a bad upload); a non-multipart request → `*Error{Kind:
+UnsupportedMediaType}` → `415`.
 Multipart **field** values are already covered by `FormValue`/`FormSlice`, so
 `File`/`Files` handle only the file parts — no overlap.
 
@@ -418,6 +420,7 @@ const (
 	KindTooLarge                         // body exceeded the size cap   → 413
 	KindUnsupportedMediaType             // wrong/absent Content-Type    → 415
 	KindInvalidBody                      // malformed/unknown-field JSON → 400
+	KindMissing                          // required input absent        → 400
 )
 func (k Kind) String() string
 

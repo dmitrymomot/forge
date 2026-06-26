@@ -140,19 +140,27 @@ func RawBody(r *http.Request, opts ...BodyOption) ([]byte, error) {
 }
 
 // File returns the first uploaded file for key. The caller must Close the returned
-// multipart.File. A non-multipart request -> 415; a missing file -> 400.
+// multipart.File. A non-multipart request -> 415. An absent key -> 400 with Kind
+// KindMissing and Err http.ErrMissingFile (use errors.Is(err, http.ErrMissingFile)
+// to distinguish absence from a bad upload, which is KindMalformed).
 func File(r *http.Request, key string, opts ...BodyOption) (multipart.File, *multipart.FileHeader, error) {
 	if err := parseMultipart(r, opts); err != nil {
 		return nil, nil, err
 	}
 	f, h, err := r.FormFile(key)
 	if err != nil {
-		return nil, nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: err}
+		kind := KindMalformed
+		if errors.Is(err, http.ErrMissingFile) {
+			kind = KindMissing // absent key, not an unparseable value
+		}
+		return nil, nil, &Error{Source: SourceForm, Key: key, Kind: kind, Err: err}
 	}
 	return f, h, nil
 }
 
-// Files returns every uploaded file header for key (open each via fh.Open()).
+// Files returns every uploaded file header for key (open each via fh.Open()). An
+// absent key -> 400 with Kind KindMissing and Err http.ErrMissingFile, mirroring
+// File so callers can errors.Is(err, http.ErrMissingFile) for either.
 func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHeader, error) {
 	if err := parseMultipart(r, opts); err != nil {
 		return nil, err
@@ -162,9 +170,7 @@ func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHe
 		headers = r.MultipartForm.File[key]
 	}
 	if len(headers) == 0 {
-		// http.ErrMissingFile mirrors what File (via r.FormFile) returns, so callers
-		// can errors.Is(err, http.ErrMissingFile) for either.
-		return nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: http.ErrMissingFile}
+		return nil, &Error{Source: SourceForm, Key: key, Kind: KindMissing, Err: http.ErrMissingFile}
 	}
 	return headers, nil
 }

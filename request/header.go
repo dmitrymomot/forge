@@ -15,9 +15,10 @@ func HeaderFunc[T any](r *http.Request, key string, parse func(string) (T, error
 	return resolve(SourceHeader, key, r.Header.Get(key), parse, def)
 }
 
-// HasHeader reports whether header key is present and non-empty.
+// HasHeader reports whether header key is present (even with an empty value),
+// consistent with HasQuery/HasForm.
 func HasHeader(r *http.Request, key string) bool {
-	return r.Header.Get(key) != ""
+	return len(r.Header.Values(key)) > 0
 }
 
 // BearerToken returns the token from an Authorization: Bearer <token> header, or

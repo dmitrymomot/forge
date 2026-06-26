@@ -114,3 +114,16 @@ func TestFileFilesMissingSentinel(t *testing.T) {
 	_, err = request.Files(r2, "doc")
 	assert.ErrorIs(t, err, http.ErrMissingFile)
 }
+
+func TestFileMissingKind(t *testing.T) {
+	t.Parallel()
+	r := multipartReq(t, "other", "x.txt", "x")
+	_, _, err := request.File(r, "doc")
+
+	var re *request.Error
+	require.ErrorAs(t, err, &re)
+	require.NotNil(t, re)
+	if re != nil {
+		assert.Equal(t, request.KindMissing, re.Kind) // absent, not malformed
+	}
+}

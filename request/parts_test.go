@@ -97,3 +97,11 @@ func TestPartFuncVariants(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(26), c)
 }
+
+func TestHasHeaderEmptyValue(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Flag", "")
+	assert.True(t, request.HasHeader(r, "X-Flag")) // present, even though empty
+	assert.False(t, request.HasHeader(r, "X-Absent"))
+}

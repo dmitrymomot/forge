@@ -26,6 +26,7 @@ const (
 	KindTooLarge                         // body exceeded the size cap   -> 413
 	KindUnsupportedMediaType             // wrong/absent Content-Type    -> 415
 	KindInvalidBody                      // malformed/unknown-field JSON -> 400
+	KindMissing                          // required input absent        -> 400
 )
 
 // String returns a short human label for k.
@@ -39,6 +40,8 @@ func (k Kind) String() string {
 		return "unsupported media type"
 	case KindInvalidBody:
 		return "invalid body"
+	case KindMissing:
+		return "missing"
 	default:
 		return "unknown"
 	}

@@ -176,5 +176,11 @@ func resolveSplit[T any](src Source, key, raw, sep string, p func(string) (T, er
 		}
 		out = append(out, v)
 	}
+	if len(out) == 0 {
+		if len(def) > 0 {
+			return def[0], nil
+		}
+		return nil, nil
+	}
 	return out, nil
 }

@@ -23,6 +23,7 @@ func TestStatusCode(t *testing.T) {
 		{"too large is 413", &request.Error{Source: request.SourceBody, Kind: request.KindTooLarge}, http.StatusRequestEntityTooLarge},
 		{"unsupported media is 415", &request.Error{Source: request.SourceBody, Kind: request.KindUnsupportedMediaType}, http.StatusUnsupportedMediaType},
 		{"invalid body is 400", &request.Error{Source: request.SourceBody, Kind: request.KindInvalidBody}, http.StatusBadRequest},
+		{"missing is 400", &request.Error{Source: request.SourceForm, Key: "f", Kind: request.KindMissing}, http.StatusBadRequest},
 		{"plain error is 400", errors.New("other"), http.StatusBadRequest},
 	}
 
@@ -57,6 +58,7 @@ func TestErrorStringAllKinds(t *testing.T) {
 		{request.KindTooLarge, "too large"},
 		{request.KindUnsupportedMediaType, "unsupported media type"},
 		{request.KindInvalidBody, "invalid body"},
+		{request.KindMissing, "missing"},
 	}
 	for _, tc := range cases {
 		e := &request.Error{Source: request.SourceBody, Kind: tc.kind, Err: errors.New("x")}

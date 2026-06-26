@@ -15,13 +15,13 @@ func FormValueFunc[T any](r *http.Request, key string, parse func(string) (T, er
 
 // FormSlice reads every repeated body value of key and parses each into T.
 func FormSlice[T any](r *http.Request, key string, def ...[]T) ([]T, error) {
-	_ = r.ParseForm()
+	_ = r.ParseForm() // best-effort: a broken/absent body reads as no values (like net/http)
 	return resolveSlice(SourceForm, key, r.PostForm[key], parse[T], def)
 }
 
 // FormSliceFunc is FormSlice with a caller-supplied element parser.
 func FormSliceFunc[T any](r *http.Request, key string, parse func(string) (T, error), def ...[]T) ([]T, error) {
-	_ = r.ParseForm()
+	_ = r.ParseForm() // best-effort: a broken/absent body reads as no values (like net/http)
 	return resolveSlice(SourceForm, key, r.PostForm[key], parse, def)
 }
 
@@ -37,6 +37,6 @@ func FormSplitFunc[T any](r *http.Request, key, sep string, parse func(string) (
 
 // HasForm reports whether body form field key is present.
 func HasForm(r *http.Request, key string) bool {
-	_ = r.ParseForm()
+	_ = r.ParseForm() // best-effort: a broken/absent body reads as no values (like net/http)
 	return r.PostForm.Has(key)
 }

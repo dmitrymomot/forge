@@ -171,3 +171,11 @@ func TestQueryUnsupportedType(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, request.StatusCode(err))
 }
+
+func TestQuerySplitAllEmptyUsesDefault(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/?tags=,,", nil) // every part empty after split
+	got, err := request.QuerySplit[string](r, "tags", ",", []string{"all"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"all"}, got)
+}
