@@ -47,7 +47,7 @@ func putBuf(b *bytes.Buffer) {
 //
 // It uses only the base name of filename, builds an injection-safe quoted ASCII
 // fallback (control/quote/backslash/non-ASCII bytes replaced with '_'), and appends
-// an RFC 5987 filename* with the exact UTF-8 name percent-encoded. When the name
+// an RFC 8187 filename* with the exact UTF-8 name percent-encoded. When the name
 // reduces to empty, only the disposition type is returned.
 func contentDisposition(disposition, filename string) string {
 	name := baseName(filename)
@@ -65,7 +65,7 @@ func contentDisposition(disposition, filename string) string {
 		}
 	}
 	return fmt.Sprintf("%s; filename=%q; filename*=UTF-8''%s",
-		disposition, ascii.String(), rfc5987Encode(name))
+		disposition, ascii.String(), rfc8187Encode(name))
 }
 
 // baseName returns the final path element, splitting on both '/' and '\' so a
@@ -77,9 +77,9 @@ func baseName(p string) string {
 	return p
 }
 
-// rfc5987Encode percent-encodes s per RFC 5987 ext-value (UTF-8), leaving only the
+// rfc8187Encode percent-encodes s per RFC 8187 ext-value (UTF-8), leaving only the
 // attr-char set unescaped.
-func rfc5987Encode(s string) string {
+func rfc8187Encode(s string) string {
 	const upperhex = "0123456789ABCDEF"
 	var b strings.Builder
 	b.Grow(len(s))
@@ -96,7 +96,7 @@ func rfc5987Encode(s string) string {
 	return b.String()
 }
 
-// isAttrChar reports whether c is in the RFC 5987 attr-char set.
+// isAttrChar reports whether c is in the RFC 8187 attr-char set.
 func isAttrChar(c byte) bool {
 	switch {
 	case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':

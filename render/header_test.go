@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"context"
 	"errors"
 	"html/template"
 	"net/http"
@@ -37,6 +38,11 @@ func TestContentDisposition_FilenameSafety(t *testing.T) {
 			name:     "quote and crlf injection neutralized",
 			filename: "a\"b\r\nc.csv",
 			want:     `attachment; filename="a_b__c.csv"; filename*=UTF-8''a%22b%0D%0Ac.csv`,
+		},
+		{
+			name:     "path-separator-only filename gives no filename params",
+			filename: "/",
+			want:     "attachment",
 		},
 	}
 	for _, tt := range tests {
@@ -99,5 +105,15 @@ func TestWriteErrorPropagates(t *testing.T) {
 	})
 	t.Run("Stream", func(t *testing.T) {
 		require.Error(t, render.Stream(newFailWriter(), http.StatusOK, "text/plain", strings.NewReader("x")))
+	})
+	t.Run("CSV", func(t *testing.T) {
+		require.Error(t, render.CSV(newFailWriter(), http.StatusOK, "", [][]string{{"a"}}))
+	})
+	t.Run("HTML", func(t *testing.T) {
+		tmpl := template.Must(template.New("x").Parse("hi"))
+		require.Error(t, render.HTML(newFailWriter(), http.StatusOK, tmpl, "", nil))
+	})
+	t.Run("Templ", func(t *testing.T) {
+		require.Error(t, render.Templ(context.Background(), newFailWriter(), http.StatusOK, &fakeComponent{out: "hi"}))
 	})
 }

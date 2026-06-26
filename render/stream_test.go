@@ -49,3 +49,19 @@ func TestAttachment_ReaderErrorPropagates(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "render: attachment:")
 }
+
+func TestStream_NilBody(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := render.Stream(rec, http.StatusOK, "text/plain", nil)
+	require.ErrorIs(t, err, render.ErrNilBody)
+	assert.Empty(t, rec.Body.String())
+	assert.Empty(t, rec.Header().Get("Content-Type")) // guard returns before any write
+}
+
+func TestAttachment_NilBody(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := render.Attachment(rec, http.StatusOK, "f.bin", "", nil)
+	require.ErrorIs(t, err, render.ErrNilBody)
+	assert.Empty(t, rec.Body.String())
+	assert.Empty(t, rec.Header().Get("Content-Disposition")) // guard returns before any write
+}

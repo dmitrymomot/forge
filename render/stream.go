@@ -12,6 +12,9 @@ import (
 // returned error is for logging. Use it to proxy an io.Reader (e.g. an upstream or S3
 // response body) inline.
 func Stream(w http.ResponseWriter, status int, contentType string, body io.Reader) error {
+	if body == nil {
+		return ErrNilBody
+	}
 	if contentType != "" {
 		setContentType(w, contentType)
 	}
@@ -23,10 +26,13 @@ func Stream(w http.ResponseWriter, status int, contentType string, body io.Reade
 }
 
 // Attachment is Stream plus a Content-Disposition: attachment header with an RFC
-// 5987-safe filename. contentType defaults to "application/octet-stream" when empty
+// 8187-safe filename. contentType defaults to "application/octet-stream" when empty
 // (download intent). Use it for generated downloads (a built CSV/PDF, an export
 // stream, or a proxied object you want saved rather than displayed).
 func Attachment(w http.ResponseWriter, status int, filename, contentType string, body io.Reader) error {
+	if body == nil {
+		return ErrNilBody
+	}
 	if contentType == "" {
 		contentType = contentTypeOctet
 	}
