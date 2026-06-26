@@ -251,3 +251,18 @@ func TestLocationWithMarshalError(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, rec.Header().Get("HX-Location")) // nothing written
 }
+
+func TestSwapTypeIsTyped(t *testing.T) {
+	t.Parallel()
+
+	var s htmx.Swap = htmx.SwapInnerHTML // compile-time: the Swap* constants are typed Swap
+	assert.Equal(t, htmx.Swap("innerHTML"), s)
+}
+
+func TestReswapModifierStaysTyped(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.Reswap(rec, htmx.SwapInnerHTML+" swap:1s") // untyped string constant added to a Swap stays a Swap
+	assert.Equal(t, "innerHTML swap:1s", rec.Header().Get("HX-Reswap"))
+}

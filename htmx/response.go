@@ -6,17 +6,22 @@ import (
 	"net/http"
 )
 
+// Swap is an hx-swap style (the HX-Reswap value and LocationOptions.Swap). Use a Swap*
+// constant; a modifier reads naturally as SwapInnerHTML + " swap:1s" (an untyped string
+// constant added to a Swap stays a Swap, so no conversion is needed).
+type Swap string
+
 // Swap styles for Reswap and LocationOptions.Swap (the hx-swap values).
 const (
-	SwapInnerHTML   = "innerHTML"
-	SwapOuterHTML   = "outerHTML"
-	SwapTextContent = "textContent"
-	SwapBeforeBegin = "beforebegin"
-	SwapAfterBegin  = "afterbegin"
-	SwapBeforeEnd   = "beforeend"
-	SwapAfterEnd    = "afterend"
-	SwapDelete      = "delete"
-	SwapNone        = "none"
+	SwapInnerHTML   Swap = "innerHTML"
+	SwapOuterHTML   Swap = "outerHTML"
+	SwapTextContent Swap = "textContent"
+	SwapBeforeBegin Swap = "beforebegin"
+	SwapAfterBegin  Swap = "afterbegin"
+	SwapBeforeEnd   Swap = "beforeend"
+	SwapAfterEnd    Swap = "afterend"
+	SwapDelete      Swap = "delete"
+	SwapNone        Swap = "none"
 )
 
 // PreventHistory, passed to PushURL or ReplaceURL, suppresses HTMX's history
@@ -42,8 +47,8 @@ func Refresh(w http.ResponseWriter) {
 
 // Reswap overrides how the response is swapped in (HX-Reswap). swap is a Swap*
 // value, optionally with modifiers (e.g. "innerHTML swap:1s").
-func Reswap(w http.ResponseWriter, swap string) {
-	w.Header().Set(hdrReswap, swap)
+func Reswap(w http.ResponseWriter, swap Swap) {
+	w.Header().Set(hdrReswap, string(swap))
 }
 
 // Retarget changes the element the response is swapped into (HX-Retarget);
@@ -107,7 +112,7 @@ type LocationOptions struct {
 	Event   string            // event that triggered the request
 	Handler string            // callback that handles the response
 	Target  string            // CSS selector to swap into
-	Swap    string            // how to swap (a Swap* value)
+	Swap    Swap              // how to swap (a Swap* value)
 	Select  string            // CSS selector of the response subset to swap
 }
 
@@ -121,7 +126,7 @@ type locationPayload struct {
 	Event   string            `json:"event,omitempty"`
 	Handler string            `json:"handler,omitempty"`
 	Target  string            `json:"target,omitempty"`
-	Swap    string            `json:"swap,omitempty"`
+	Swap    Swap              `json:"swap,omitempty"`
 	Select  string            `json:"select,omitempty"`
 }
 
