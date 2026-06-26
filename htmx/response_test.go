@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -288,4 +289,67 @@ func TestRedirectExternalNonHTMX(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, rec.Code) // default fallback 303
 	assert.Equal(t, "https://example.com/oauth", rec.Header().Get("Location"))
 	assert.Empty(t, rec.Header().Get("HX-Redirect"))
+}
+
+func TestRedirectBackHonorsSafeLocal(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?redirect=/dashboard", nil)
+	htmx.RedirectBack(rec, r, "/home")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+}
+
+func TestRedirectBackHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?redirect=/dashboard", nil)
+	r.Header.Set("HX-Request", "true")
+	htmx.RedirectBack(rec, r, "/home")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Redirect"))
+}
+
+func TestRedirectBackFallsBackOnUnsafeTarget(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, target string }{
+		{"absolute", "https://evil.com"},
+		{"protocol relative", "//evil.com"},
+		{"backslash", "/\\evil.com"},
+		{"empty", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/login?redirect="+url.QueryEscape(tc.target), nil)
+			htmx.RedirectBack(rec, r, "/home")
+			assert.Equal(t, "/home", rec.Header().Get("Location"))
+		})
+	}
+}
+
+func TestRedirectBackFallsBackWhenParamMissing(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login", nil)
+	htmx.RedirectBack(rec, r, "/home")
+
+	assert.Equal(t, "/home", rec.Header().Get("Location"))
+}
+
+func TestRedirectBackParamCustomName(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?next=/dashboard", nil)
+	htmx.RedirectBackParam(rec, r, "next", "/home")
+
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // Swap is an hx-swap style (the HX-Reswap value and LocationOptions.Swap). Use a Swap*
@@ -165,6 +167,43 @@ func Redirect(w http.ResponseWriter, r *http.Request, url string, status ...int)
 // HX-Location, an AJAX swap that is same-origin only and fails on a cross-origin target.
 func RedirectExternal(w http.ResponseWriter, r *http.Request, url string, status ...int) {
 	Redirect(w, r, url, status...)
+}
+
+// defaultRedirectParam is the query parameter RedirectBack reads for the return path.
+const defaultRedirectParam = "redirect"
+
+// RedirectBack redirects to the local path in the "redirect" query parameter, or to
+// fallback when that parameter is absent, empty, or not a safe local path. It is
+// HTMX-aware (delegates to Redirect): HX-Redirect + 200 for HTMX requests, a real 3xx
+// otherwise. The optional status sets the non-HTMX fallback code (only the first value
+// is used), defaulting to http.StatusSeeOther (303). Terminal — call it last.
+func RedirectBack(w http.ResponseWriter, r *http.Request, fallback string, status ...int) {
+	RedirectBackParam(w, r, defaultRedirectParam, fallback, status...)
+}
+
+// RedirectBackParam is RedirectBack reading a caller-named query parameter instead of
+// the default "redirect".
+func RedirectBackParam(w http.ResponseWriter, r *http.Request, param, fallback string, status ...int) {
+	target := r.URL.Query().Get(param)
+	if !safeLocalPath(target) {
+		target = fallback
+	}
+	Redirect(w, r, target, status...)
+}
+
+// safeLocalPath reports whether s is a relative, same-origin path safe to redirect to:
+// it must begin with a single "/" (not "//", which is protocol-relative, and not "/\",
+// which some browsers treat as protocol-relative) and parse to a URL with no scheme and
+// no host. This blocks open redirects to attacker-controlled external destinations.
+func safeLocalPath(s string) bool {
+	if s == "" || s[0] != '/' {
+		return false
+	}
+	if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "/\\") {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "" && u.Host == ""
 }
 
 // Location performs a client-side redirect without a full page reload. For HTMX
