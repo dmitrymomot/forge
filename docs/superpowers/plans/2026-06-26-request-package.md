@@ -1334,7 +1334,7 @@ func TestFile(t *testing.T) {
 
 	f, h, err := request.File(r, "doc")
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	assert.Equal(t, "a.txt", h.Filename)
 	data, err := io.ReadAll(f)
