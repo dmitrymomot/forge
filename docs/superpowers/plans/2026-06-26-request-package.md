@@ -332,9 +332,12 @@ func TestQueryMalformed(t *testing.T) {
 
 	var re *request.Error
 	require.ErrorAs(t, err, &re)
-	assert.Equal(t, request.SourceQuery, re.Source)
-	assert.Equal(t, request.KindMalformed, re.Kind)
-	assert.Equal(t, "n", re.Key)
+	require.NotNil(t, re)
+	if re != nil { // nil-guard so nilaway can follow the deref
+		assert.Equal(t, request.SourceQuery, re.Source)
+		assert.Equal(t, request.KindMalformed, re.Kind)
+		assert.Equal(t, "n", re.Key)
+	}
 }
 
 func TestQueryAbsentAndDefault(t *testing.T) {
