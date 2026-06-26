@@ -203,7 +203,10 @@ func safeLocalPath(s string) bool {
 		return false
 	}
 	u, err := url.Parse(s)
-	return err == nil && u.Scheme == "" && u.Host == ""
+	if err != nil || u == nil {
+		return false
+	}
+	return u.Scheme == "" && u.Host == ""
 }
 
 // Location performs a client-side redirect without a full page reload. For HTMX

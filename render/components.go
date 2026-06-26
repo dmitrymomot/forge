@@ -18,14 +18,12 @@ func Components(ctx context.Context, w http.ResponseWriter, status int, componen
 	if len(components) == 0 {
 		return ErrNoComponents
 	}
+	buf := getBuf()
+	defer putBuf(buf)
 	for _, c := range components {
 		if c == nil {
 			return ErrNilComponent
 		}
-	}
-	buf := getBuf()
-	defer putBuf(buf)
-	for _, c := range components {
 		if err := c.Render(ctx, buf); err != nil {
 			return fmt.Errorf("render: render component: %w", err)
 		}
