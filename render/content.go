@@ -12,6 +12,7 @@ const contentTypeJSON = "application/json; charset=utf-8"
 const contentTypeHTML = "text/html; charset=utf-8"
 const contentTypeText = "text/plain; charset=utf-8"
 const contentTypeCSV = "text/csv; charset=utf-8"
+const contentTypeOctet = "application/octet-stream"
 
 // setContentType sets the Content-Type header to ct only when the caller has not
 // already set one, so a handler can pre-set a custom charset/parameters and win.
