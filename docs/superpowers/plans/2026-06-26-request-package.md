@@ -1367,6 +1367,23 @@ func TestFiles(t *testing.T) {
 	require.Len(t, headers, 1)
 	assert.Equal(t, "a.txt", headers[0].Filename)
 }
+
+func TestFilesMissing(t *testing.T) {
+	t.Parallel()
+	r := multipartReq(t, "other", "x.txt", "x")
+	_, err := request.Files(r, "doc")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, request.StatusCode(err))
+}
+
+func TestFilesNonMultipart(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("x"))
+	r.Header.Set("Content-Type", "application/json")
+	_, err := request.Files(r, "doc")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnsupportedMediaType, request.StatusCode(err))
+}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
