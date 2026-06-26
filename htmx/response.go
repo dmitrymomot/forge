@@ -248,3 +248,12 @@ func LocationWith(w http.ResponseWriter, r *http.Request, path string, opts Loca
 	w.WriteHeader(http.StatusOK)
 	return nil
 }
+
+// LocationTarget is Location that swaps the new content into a target element. For HTMX
+// requests it sets HX-Location to {"path":path,"target":target} and writes 200; for
+// non-HTMX requests it falls back to http.Redirect to path (default 303 See Other).
+// Unlike LocationWith it returns no error — a path+target payload (two strings) cannot
+// fail to marshal. Terminal — call it last.
+func LocationTarget(w http.ResponseWriter, r *http.Request, path, target string, status ...int) {
+	_ = LocationWith(w, r, path, LocationOptions{Target: target}, status...)
+}

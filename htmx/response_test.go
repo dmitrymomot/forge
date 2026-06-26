@@ -353,3 +353,31 @@ func TestRedirectBackParamCustomName(t *testing.T) {
 
 	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
 }
+
+func TestLocationTargetHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.LocationTarget(rec, htmxRequest(), "/dashboard", "#main")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var got struct {
+		Path   string `json:"path"`
+		Target string `json:"target"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &got))
+	assert.Equal(t, "/dashboard", got.Path)
+	assert.Equal(t, "#main", got.Target)
+}
+
+func TestLocationTargetNonHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	htmx.LocationTarget(rec, r, "/dashboard", "#main")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Location"))
+}
