@@ -149,7 +149,10 @@ func validIP(s string) string {
 	if err != nil {
 		return ""
 	}
-	return addr.String()
+	// Unmap normalizes an IPv4-mapped IPv6 address (::ffff:a.b.c.d, as a dual-stack
+	// listener reports IPv4 peers) to plain IPv4, so the string is clean and IPv4
+	// trusted-proxy prefixes match.
+	return addr.Unmap().String()
 }
 
 // remoteHost returns the IP from a RemoteAddr ("ip:port" or bare ip), or "" if it
@@ -160,7 +163,7 @@ func remoteHost(addr string) string {
 		host = h
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
-		return a.String()
+		return a.Unmap().String()
 	}
 	return ""
 }

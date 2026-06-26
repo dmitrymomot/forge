@@ -79,6 +79,45 @@ func TestClientIPAllTrusted(t *testing.T) {
 	assert.Equal(t, "10.1.1.1", request.ClientIP(r, request.WithTrustedProxies(trusted)))
 }
 
+func TestClientIPv6(t *testing.T) {
+	t.Parallel()
+
+	// RemoteAddr fallback: bracketed IPv6 + port.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "[2001:db8::1]:443"
+	assert.Equal(t, "2001:db8::1", request.ClientIP(r))
+
+	// Bare IPv6 in a CDN header.
+	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2.RemoteAddr = "10.0.0.1:1"
+	r2.Header.Set("CF-Connecting-IP", "2001:db8::2")
+	assert.Equal(t, "2001:db8::2", request.ClientIP(r2))
+
+	// RFC 7239 Forwarded with a quoted, bracketed IPv6 + port.
+	r3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r3.RemoteAddr = "10.0.0.1:1"
+	r3.Header.Set("Forwarded", `for="[2001:db8::3]:8080"`)
+	assert.Equal(t, "2001:db8::3", request.ClientIP(r3))
+
+	// Trusted-proxy walk with an IPv6 client behind an IPv6 proxy prefix.
+	r4 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r4.RemoteAddr = "[2001:db8:1::1]:1" // trusted proxy
+	r4.Header.Set("X-Forwarded-For", "2001:db8:abcd::5, 2001:db8:1::2")
+	trusted := netip.MustParsePrefix("2001:db8:1::/48")
+	assert.Equal(t, "2001:db8:abcd::5", request.ClientIP(r4, request.WithTrustedProxies(trusted)))
+
+	// IPv4-mapped IPv6 (dual-stack listener) normalizes to plain IPv4.
+	r5 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r5.RemoteAddr = "[::ffff:192.0.2.7]:443"
+	assert.Equal(t, "192.0.2.7", request.ClientIP(r5))
+
+	// ...and a v4-mapped proxy hop matches an IPv4 trusted prefix.
+	r6 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r6.RemoteAddr = "[::ffff:10.0.0.9]:1"
+	r6.Header.Set("X-Forwarded-For", "203.0.113.5, ::ffff:10.0.0.8")
+	assert.Equal(t, "203.0.113.5", request.ClientIP(r6, request.WithTrustedProxies(netip.MustParsePrefix("10.0.0.0/8"))))
+}
+
 func TestClientIPTrustedIgnoresForwarded(t *testing.T) {
 	t.Parallel()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
