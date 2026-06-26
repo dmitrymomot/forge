@@ -80,9 +80,9 @@ type failWriter struct {
 	code   int
 }
 
-func newFailWriter() *failWriter             { return &failWriter{header: make(http.Header)} }
-func (f *failWriter) Header() http.Header    { return f.header }
-func (f *failWriter) WriteHeader(code int)   { f.code = code }
+func newFailWriter() *failWriter           { return &failWriter{header: make(http.Header)} }
+func (f *failWriter) Header() http.Header  { return f.header }
+func (f *failWriter) WriteHeader(code int) { f.code = code }
 func (f *failWriter) Write([]byte) (int, error) {
 	return 0, errors.New("connection reset")
 }
