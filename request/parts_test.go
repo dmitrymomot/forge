@@ -5,9 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dmitrymomot/forge/request"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/request"
 )
 
 func TestPath(t *testing.T) {

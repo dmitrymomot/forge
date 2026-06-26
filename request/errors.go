@@ -47,10 +47,10 @@ func (k Kind) String() string {
 // Error is the single error type returned by every request-reading helper. Source
 // and Key name the offending input; Kind drives StatusCode; Err is the cause.
 type Error struct {
+	Err    error
 	Source Source
 	Key    string
 	Kind   Kind
-	Err    error
 }
 
 // Error returns a single-line description; the wrapped cause is reached via Unwrap.

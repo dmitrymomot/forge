@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dmitrymomot/forge/request"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/forge/request"
 )
 
 func TestStatusCode(t *testing.T) {

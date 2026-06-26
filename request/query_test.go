@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/forge/request"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/request"
 )
 
 // color is a local TextUnmarshaler type — proves custom types parse with no
