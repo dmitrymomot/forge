@@ -95,19 +95,21 @@ func TriggerAfterSwapWith(w http.ResponseWriter, events map[string]any) error {
 // fields are omitted from the emitted JSON. It is a plain options struct
 // (cf. http.Cookie), not functional options and not a builder.
 type LocationOptions struct {
+	Values  map[string]any    // values submitted with the request
+	Headers map[string]string // headers submitted with the request
 	Source  string            // CSS selector of the element issuing the request
 	Event   string            // event that triggered the request
 	Handler string            // callback that handles the response
 	Target  string            // CSS selector to swap into
 	Swap    string            // how to swap (a Swap* value)
 	Select  string            // CSS selector of the response subset to swap
-	Values  map[string]any    // values submitted with the request
-	Headers map[string]string // headers submitted with the request
 }
 
 // locationPayload is the JSON shape HX-Location expects: the required path plus
 // the set LocationOptions fields.
 type locationPayload struct {
+	Values  map[string]any    `json:"values,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	Path    string            `json:"path"`
 	Source  string            `json:"source,omitempty"`
 	Event   string            `json:"event,omitempty"`
@@ -115,8 +117,6 @@ type locationPayload struct {
 	Target  string            `json:"target,omitempty"`
 	Swap    string            `json:"swap,omitempty"`
 	Select  string            `json:"select,omitempty"`
-	Values  map[string]any    `json:"values,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Redirect performs a client-side redirect. For HTMX requests it sets
