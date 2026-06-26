@@ -3,3 +3,4 @@
 - Keep repository structure flat, don't create nested folders without reason.
 - DON'T use builder pattern, USE options instead.
 - NO external dependencies without a strong reason; small local package or copied code is better than any dependency.
+- black-box testing ONLY!
