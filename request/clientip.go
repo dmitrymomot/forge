@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -88,8 +89,8 @@ func clientIPTrusted(r *http.Request, trusted []netip.Prefix) string {
 	}
 	chain = append(chain, r.RemoteAddr)
 
-	for i := len(chain) - 1; i >= 0; i-- {
-		ip := validIP(chain[i])
+	for _, hop := range slices.Backward(chain) {
+		ip := validIP(hop)
 		if ip == "" {
 			continue
 		}
