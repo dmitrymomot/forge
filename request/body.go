@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"strings"
 )
@@ -122,4 +123,62 @@ func DecodeJSON(r *http.Request, dst any, opts ...BodyOption) error {
 // Content-Type, not the Accept header — it is not content negotiation.
 func IsContentType(r *http.Request, media string) bool {
 	return matchesMediaType(r.Header.Get("Content-Type"), media)
+}
+
+// RawBody reads the entire request body into a byte slice under the configured
+// size cap (default 1 MiB; overflow -> 413). For webhook HMAC verification and
+// arbitrary payloads. No Content-Type check.
+func RawBody(r *http.Request, opts ...BodyOption) ([]byte, error) {
+	c := newBodyConfig(opts)
+	b, err := io.ReadAll(limitedBody(r, c))
+	if err != nil {
+		return nil, decodeError(err)
+	}
+	return b, nil
+}
+
+// File returns the first uploaded file for key. The caller must Close the returned
+// multipart.File. A non-multipart request -> 415; a missing file -> 400.
+func File(r *http.Request, key string, opts ...BodyOption) (multipart.File, *multipart.FileHeader, error) {
+	if err := parseMultipart(r, opts); err != nil {
+		return nil, nil, err
+	}
+	f, h, err := r.FormFile(key)
+	if err != nil {
+		return nil, nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: err}
+	}
+	return f, h, nil
+}
+
+// Files returns every uploaded file header for key (open each via fh.Open()).
+func Files(r *http.Request, key string, opts ...BodyOption) ([]*multipart.FileHeader, error) {
+	if err := parseMultipart(r, opts); err != nil {
+		return nil, err
+	}
+	var headers []*multipart.FileHeader
+	if r.MultipartForm != nil && r.MultipartForm.File != nil {
+		headers = r.MultipartForm.File[key]
+	}
+	if len(headers) == 0 {
+		return nil, &Error{Source: SourceForm, Key: key, Kind: KindMalformed, Err: errors.New("no file for key")}
+	}
+	return headers, nil
+}
+
+// parseMultipart parses the multipart form, using the configured in-memory cap
+// (default 32 MiB). A non-multipart body maps to KindUnsupportedMediaType.
+func parseMultipart(r *http.Request, opts []BodyOption) error {
+	c := newBodyConfig(opts)
+	mem := int64(defaultMultipartMemory)
+	if c.maxBytesSet && c.maxBytes > 0 {
+		mem = c.maxBytes
+	}
+	if err := r.ParseMultipartForm(mem); err != nil {
+		kind := KindInvalidBody
+		if errors.Is(err, http.ErrNotMultipart) {
+			kind = KindUnsupportedMediaType
+		}
+		return &Error{Source: SourceBody, Kind: kind, Err: err}
+	}
+	return nil
 }
