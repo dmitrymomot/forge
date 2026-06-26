@@ -134,8 +134,12 @@ pass-through.**
     content.go        # internal: content-type constants, setContentType, buffer pool, contentDisposition
     errors.go         # ErrNilTemplate, ErrNilComponent
     json_test.go html_test.go templ_test.go text_test.go redirect_test.go
-    csv_test.go stream_test.go file_test.go content_test.go example_test.go
+    csv_test.go stream_test.go file_test.go header_test.go example_test.go
   ```
+
+  All `*_test.go` files are `package render_test` (black-box) — see "Testing".
+  `header_test.go` holds the cross-cutting, public-surface header assertions
+  (`Content-Type` set-if-empty, `Content-Disposition` filename safety).
 
 ## Public API
 
@@ -461,7 +465,14 @@ render.FileFS(w, r, assets, "logo.svg") // embed.FS
 
 ## Testing
 
-White-box (`package render`) `httptest`-driven tests; testify only.
+**Black-box** — all tests live in `package render_test` and import the package, so
+they exercise only the exported surface (no reaching into `setContentType`,
+`bufPool`, or `contentDisposition`). `httptest`-driven; testify only. The unexported
+helpers are covered through the public functions that use them (e.g. the
+`Content-Disposition` encoder via `CSV`/`Attachment` headers; the set-if-empty rule
+via a pre-set `Content-Type`). The buffer pool's `maxReuse` eviction is an internal
+optimization with no observable behavior, so it is left to the benchmark (allocation
+counts), not a direct test.
 
 - **`JSON`:** success (status, `Content-Type`, body, trailing newline); **transactional
   failure** with an unmarshalable value (`make(chan int)` / a `MarshalJSON` that
@@ -487,8 +498,11 @@ White-box (`package render`) `httptest`-driven tests; testify only.
   pass-through).
 - **`File`/`FileFS`:** serve a temp file and an `embed.FS`/`fstest.MapFS`; assert body
   + sniffed content-type; a `Range` request returns `206` (proves stdlib delegation).
-- **`contentDisposition`:** table test — ASCII, unicode (`filename*` correct), and
-  injection inputs (embedded quote, CRLF, `../`) produce a safe single-line value.
+- **Filename safety (through `CSV`/`Attachment`):** drive a table of filenames into
+  `CSV`/`Attachment` and assert the resulting `Content-Disposition` header — ASCII,
+  unicode (`filename*` correct), and injection inputs (embedded quote, CRLF, `../`)
+  all produce a safe single-line value. (The encoder is unexported, so it's verified
+  via the headers it emits, not called directly.)
 - **Write-error propagation:** a failing `http.ResponseWriter` (its `Write` returns an
   error) → every writer surfaces the error.
 - **`example_test.go`:** a runnable `Example` for godoc.
