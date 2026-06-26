@@ -165,7 +165,7 @@ func resolveSplit[T any](src Source, key, raw, sep string, p func(string) (T, er
 		return nil, nil
 	}
 	var out []T
-	for _, part := range strings.Split(raw, sep) {
+	for part := range strings.SplitSeq(raw, sep) {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
