@@ -79,6 +79,8 @@ func TriggerAfterSettle(w http.ResponseWriter, names ...string) {
 }
 
 // TriggerAfterSettleWith fires events with JSON detail after the settle step.
+// An empty map is a no-op; a marshal failure returns a wrapped error with no
+// header written.
 func TriggerAfterSettleWith(w http.ResponseWriter, events map[string]any) error {
 	return setEventDetail(w, hdrTriggerAfterSettle, events)
 }
@@ -89,6 +91,8 @@ func TriggerAfterSwap(w http.ResponseWriter, names ...string) {
 }
 
 // TriggerAfterSwapWith fires events with JSON detail after the swap step.
+// An empty map is a no-op; a marshal failure returns a wrapped error with no
+// header written.
 func TriggerAfterSwapWith(w http.ResponseWriter, events map[string]any) error {
 	return setEventDetail(w, hdrTriggerAfterSwap, events)
 }

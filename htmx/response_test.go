@@ -110,10 +110,23 @@ func TestTriggerAfterSettleWith(t *testing.T) {
 	var got map[string]map[string]string
 	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Settle")), &got))
 	assert.Equal(t, "info", got["toast"]["level"])
+}
 
-	bad := httptest.NewRecorder()
-	require.Error(t, htmx.TriggerAfterSettleWith(bad, map[string]any{"x": make(chan int)}))
-	assert.Empty(t, bad.Header().Get("HX-Trigger-After-Settle")) // nothing written on marshal failure
+func TestTriggerAfterSettleWithEmptyIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, htmx.TriggerAfterSettleWith(rec, map[string]any{}))
+	assert.Empty(t, rec.Header().Get("HX-Trigger-After-Settle"))
+}
+
+func TestTriggerAfterSettleWithMarshalError(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	err := htmx.TriggerAfterSettleWith(rec, map[string]any{"bad": make(chan int)})
+	require.Error(t, err)
+	assert.Empty(t, rec.Header().Get("HX-Trigger-After-Settle")) // nothing written on marshal failure
 }
 
 func TestTriggerAfterSwapWith(t *testing.T) {
@@ -125,10 +138,23 @@ func TestTriggerAfterSwapWith(t *testing.T) {
 	var got map[string]int
 	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Swap")), &got))
 	assert.Equal(t, 1, got["y"])
+}
 
-	bad := httptest.NewRecorder()
-	require.Error(t, htmx.TriggerAfterSwapWith(bad, map[string]any{"x": make(chan int)}))
-	assert.Empty(t, bad.Header().Get("HX-Trigger-After-Swap")) // nothing written on marshal failure
+func TestTriggerAfterSwapWithEmptyIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, htmx.TriggerAfterSwapWith(rec, map[string]any{}))
+	assert.Empty(t, rec.Header().Get("HX-Trigger-After-Swap"))
+}
+
+func TestTriggerAfterSwapWithMarshalError(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	err := htmx.TriggerAfterSwapWith(rec, map[string]any{"bad": make(chan int)})
+	require.Error(t, err)
+	assert.Empty(t, rec.Header().Get("HX-Trigger-After-Swap")) // nothing written on marshal failure
 }
 
 func htmxRequest() *http.Request {
