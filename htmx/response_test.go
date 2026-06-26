@@ -98,3 +98,98 @@ func TestTriggerAfterVariants(t *testing.T) {
 	require.Error(t, htmx.TriggerAfterSettleWith(bad, map[string]any{"x": make(chan int)}))
 	require.NoError(t, htmx.TriggerAfterSwapWith(httptest.NewRecorder(), map[string]any{"y": 1}))
 }
+
+func htmxRequest() *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("HX-Request", "true")
+	return r
+}
+
+func TestRedirectHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.Redirect(rec, htmxRequest(), http.StatusSeeOther, "/dashboard")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Redirect"))
+	assert.Empty(t, rec.Header().Get("Location"))
+}
+
+func TestRedirectNonHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	htmx.Redirect(rec, r, http.StatusSeeOther, "/dashboard")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Redirect"))
+}
+
+func TestLocationHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.Location(rec, htmxRequest(), http.StatusSeeOther, "/dashboard")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Location"))
+}
+
+func TestLocationNonHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	htmx.Location(rec, r, http.StatusSeeOther, "/dashboard")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Location"))
+}
+
+func TestLocationWithHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	err := htmx.LocationWith(rec, htmxRequest(), http.StatusSeeOther, "/dashboard",
+		htmx.LocationOptions{Target: "#main", Swap: htmx.SwapInnerHTML})
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var got struct {
+		Path   string `json:"path"`
+		Target string `json:"target"`
+		Swap   string `json:"swap"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &got))
+	assert.Equal(t, "/dashboard", got.Path)
+	assert.Equal(t, "#main", got.Target)
+	assert.Equal(t, "innerHTML", got.Swap)
+}
+
+func TestLocationWithNonHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	err := htmx.LocationWith(rec, r, http.StatusSeeOther, "/dashboard",
+		htmx.LocationOptions{Target: "#main"})
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Location"))
+}
+
+func TestLocationWithMarshalError(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	err := htmx.LocationWith(rec, htmxRequest(), http.StatusSeeOther, "/dashboard",
+		htmx.LocationOptions{Values: map[string]any{"bad": make(chan int)}})
+	require.Error(t, err)
+	assert.Empty(t, rec.Header().Get("HX-Location")) // nothing written
+}

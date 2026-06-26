@@ -1,6 +1,10 @@
 package htmx
 
-import "net/http"
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
 
 // Swap styles for Reswap and LocationOptions.Swap (the hx-swap values).
 const (
@@ -85,4 +89,86 @@ func TriggerAfterSwap(w http.ResponseWriter, names ...string) {
 // TriggerAfterSwapWith fires events with JSON detail after the swap step.
 func TriggerAfterSwapWith(w http.ResponseWriter, events map[string]any) error {
 	return setEventDetail(w, hdrTriggerAfterSwap, events)
+}
+
+// LocationOptions is the optional AJAX context for LocationWith. Zero-value
+// fields are omitted from the emitted JSON. It is a plain options struct
+// (cf. http.Cookie), not functional options and not a builder.
+type LocationOptions struct {
+	Source  string            // CSS selector of the element issuing the request
+	Event   string            // event that triggered the request
+	Handler string            // callback that handles the response
+	Target  string            // CSS selector to swap into
+	Swap    string            // how to swap (a Swap* value)
+	Select  string            // CSS selector of the response subset to swap
+	Values  map[string]any    // values submitted with the request
+	Headers map[string]string // headers submitted with the request
+}
+
+// locationPayload is the JSON shape HX-Location expects: the required path plus
+// the set LocationOptions fields.
+type locationPayload struct {
+	Path    string            `json:"path"`
+	Source  string            `json:"source,omitempty"`
+	Event   string            `json:"event,omitempty"`
+	Handler string            `json:"handler,omitempty"`
+	Target  string            `json:"target,omitempty"`
+	Swap    string            `json:"swap,omitempty"`
+	Select  string            `json:"select,omitempty"`
+	Values  map[string]any    `json:"values,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// Redirect performs a client-side redirect. For HTMX requests it sets
+// HX-Redirect (a full-page client navigation) and writes 200; otherwise it falls
+// back to http.Redirect with status (a 3xx, e.g. http.StatusSeeOther). It commits
+// the response — call it last.
+func Redirect(w http.ResponseWriter, r *http.Request, status int, url string) {
+	if IsRequest(r) {
+		w.Header().Set(hdrRedirect, url)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, url, status)
+}
+
+// Location performs a client-side redirect without a full page reload. For HTMX
+// requests it sets HX-Location to url and writes 200; otherwise it falls back to
+// http.Redirect with status. Terminal.
+func Location(w http.ResponseWriter, r *http.Request, status int, url string) {
+	if IsRequest(r) {
+		w.Header().Set(hdrLocation, url)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, url, status)
+}
+
+// LocationWith is Location with an AJAX context object (target, swap, values, ...).
+// For HTMX requests it sets HX-Location to the JSON form {"path":path, ...opts}
+// and writes 200; a marshal failure returns a wrapped error with nothing written.
+// For non-HTMX requests it falls back to http.Redirect(w, r, status, path),
+// dropping the context. Terminal.
+func LocationWith(w http.ResponseWriter, r *http.Request, status int, path string, opts LocationOptions) error {
+	if !IsRequest(r) {
+		http.Redirect(w, r, path, status)
+		return nil
+	}
+	b, err := json.Marshal(locationPayload{
+		Path:    path,
+		Source:  opts.Source,
+		Event:   opts.Event,
+		Handler: opts.Handler,
+		Target:  opts.Target,
+		Swap:    opts.Swap,
+		Select:  opts.Select,
+		Values:  opts.Values,
+		Headers: opts.Headers,
+	})
+	if err != nil {
+		return fmt.Errorf("htmx: marshal HX-Location: %w", err)
+	}
+	w.Header().Set(hdrLocation, string(b))
+	w.WriteHeader(http.StatusOK)
+	return nil
 }

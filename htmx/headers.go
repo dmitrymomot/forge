@@ -35,6 +35,12 @@ const (
 	hdrTriggerAfterSwap   = "HX-Trigger-After-Swap"
 )
 
+// Response header names: client-side redirects.
+const (
+	hdrRedirect = "HX-Redirect"
+	hdrLocation = "HX-Location"
+)
+
 // setEventNames writes a bare comma-joined event-name list (the HX-Trigger
 // family's name form). No names is a no-op.
 func setEventNames(w http.ResponseWriter, header string, names []string) {
