@@ -40,3 +40,30 @@ func ExampleRedirect() {
 	// 303
 	// /dashboard
 }
+
+func ExampleRedirectBack() {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login?redirect=/dashboard", nil) // non-HTMX request
+
+	htmx.RedirectBack(rec, r, "/home") // honors the safe local ?redirect=, else /home
+
+	fmt.Println(rec.Code)
+	fmt.Println(rec.Header().Get("Location"))
+	// Output:
+	// 303
+	// /dashboard
+}
+
+func ExampleRedirectExternal() {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/checkout", nil)
+	r.Header.Set("HX-Request", "true") // HTMX request
+
+	htmx.RedirectExternal(rec, r, "https://pay.example.com/session/42")
+
+	fmt.Println(rec.Code)
+	fmt.Println(rec.Header().Get("HX-Redirect"))
+	// Output:
+	// 200
+	// https://pay.example.com/session/42
+}
