@@ -154,6 +154,19 @@ func Redirect(w http.ResponseWriter, r *http.Request, url string, status ...int)
 	http.Redirect(w, r, url, fallbackStatus(status))
 }
 
+// RedirectExternal performs a full-page client redirect to an external (off-site) URL.
+// It is the explicit counterpart to RedirectBack's local-only safety: it does NOT
+// validate url, so reserve it for developer-controlled destinations, never raw user
+// input. For HTMX requests it uses HX-Redirect (a full window.location navigation, which
+// works cross-origin); for non-HTMX requests it falls back to http.Redirect with the
+// optional status (default 303 See Other). Terminal — call it last.
+//
+// Use this, not Location/LocationTarget/LocationWith, for external URLs: those use
+// HX-Location, an AJAX swap that is same-origin only and fails on a cross-origin target.
+func RedirectExternal(w http.ResponseWriter, r *http.Request, url string, status ...int) {
+	Redirect(w, r, url, status...)
+}
+
 // Location performs a client-side redirect without a full page reload. For HTMX
 // requests it sets HX-Location to url and writes 200. For non-HTMX requests it
 // falls back to http.Redirect; the optional status sets that fallback code (only

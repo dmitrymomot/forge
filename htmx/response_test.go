@@ -266,3 +266,26 @@ func TestReswapModifierStaysTyped(t *testing.T) {
 	htmx.Reswap(rec, htmx.SwapInnerHTML+" swap:1s") // untyped string constant added to a Swap stays a Swap
 	assert.Equal(t, "innerHTML swap:1s", rec.Header().Get("HX-Reswap"))
 }
+
+func TestRedirectExternalHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.RedirectExternal(rec, htmxRequest(), "https://example.com/oauth")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "https://example.com/oauth", rec.Header().Get("HX-Redirect")) // full-page nav, cross-origin safe
+	assert.Empty(t, rec.Header().Get("Location"))
+}
+
+func TestRedirectExternalNonHTMX(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	htmx.RedirectExternal(rec, r, "https://example.com/oauth")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code) // default fallback 303
+	assert.Equal(t, "https://example.com/oauth", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Redirect"))
+}
