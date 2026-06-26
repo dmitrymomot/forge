@@ -7,10 +7,11 @@ import (
 )
 
 // Components renders each component into one pooled buffer in order, then writes the
-// result with the given status. It is transactional: any Render error returns with
-// nothing written to w. It returns ErrNilComponent if any component is nil, and
-// ErrNoComponents if none are given (both before writing anything). The Content-Type
-// defaults to "text/html; charset=utf-8" unless the caller has already set one.
+// result with the given status. It is transactional with respect to rendering: an empty
+// input (ErrNoComponents), a nil element (ErrNilComponent), or any Render error returns
+// before a single byte is written to w. A write error after WriteHeader has been called
+// is non-recoverable and returned for logging only (the same contract as Templ). The
+// Content-Type defaults to "text/html; charset=utf-8" unless the caller has already set one.
 //
 // Use it for multi-fragment responses — for example an HTMX main fragment plus
 // out-of-band fragments whose markup carries hx-swap-oob.

@@ -302,6 +302,20 @@ func TestRedirectBackHonorsSafeLocal(t *testing.T) {
 	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
 }
 
+// A percent-encoded "//" stays inside the path: the browser does not treat %2F as an
+// authority separator, so the target remains same-origin and is honored (not an open
+// redirect). Documents the expectation and guards against future validator regressions.
+func TestRedirectBackHonorsEncodedSlash(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?redirect="+url.QueryEscape("/%2F%2Fevil.com"), nil)
+	htmx.RedirectBack(rec, r, "/home")
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/%2F%2Fevil.com", rec.Header().Get("Location")) // same-origin path, not redirected to evil.com
+}
+
 func TestRedirectBackHTMX(t *testing.T) {
 	t.Parallel()
 
