@@ -206,7 +206,7 @@ func TestRun_RecoverEnabled_ReturnsSingleLineErrPanic(t *testing.T) {
 
 func TestRun_RecoverEnabled_LogsStackAsAttribute(t *testing.T) {
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	svc := fakeService{name: "boom", run: func(ctx context.Context) error { panic("kaboom") }}
 
 	_ = supervisor.Run(context.Background(), supervisor.WithService(svc), supervisor.WithLogger(logger))
@@ -239,7 +239,7 @@ func TestRun_RecoverDisabled_PanicCrashesProcess(t *testing.T) {
 			supervisor.WithServiceFunc("boom", func(context.Context) error { panic("kaboom") }),
 			supervisor.WithRecover(false),
 			supervisor.WithLogger(discardLogger()))
-		return // unreachable when the panic propagates as intended
+		return // guard: if recovery were (incorrectly) enabled, Run would return here; without this the child would fall through to the re-exec branch below and fork-bomb
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestRun_RecoverDisabled_PanicCrashesProcess$")
