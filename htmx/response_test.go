@@ -85,18 +85,50 @@ func TestTriggerWithMarshalError(t *testing.T) {
 	assert.Empty(t, rec.Header().Get("HX-Trigger")) // nothing written on marshal failure
 }
 
-func TestTriggerAfterVariants(t *testing.T) {
+func TestTriggerAfterSettle(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
 	htmx.TriggerAfterSettle(rec, "settled")
-	htmx.TriggerAfterSwap(rec, "swapped")
 	assert.Equal(t, "settled", rec.Header().Get("HX-Trigger-After-Settle"))
+}
+
+func TestTriggerAfterSwap(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	htmx.TriggerAfterSwap(rec, "swapped")
 	assert.Equal(t, "swapped", rec.Header().Get("HX-Trigger-After-Swap"))
+}
+
+func TestTriggerAfterSettleWith(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, htmx.TriggerAfterSettleWith(rec, map[string]any{"toast": map[string]any{"level": "info"}}))
+
+	var got map[string]map[string]string
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Settle")), &got))
+	assert.Equal(t, "info", got["toast"]["level"])
 
 	bad := httptest.NewRecorder()
 	require.Error(t, htmx.TriggerAfterSettleWith(bad, map[string]any{"x": make(chan int)}))
-	require.NoError(t, htmx.TriggerAfterSwapWith(httptest.NewRecorder(), map[string]any{"y": 1}))
+	assert.Empty(t, bad.Header().Get("HX-Trigger-After-Settle")) // nothing written on marshal failure
+}
+
+func TestTriggerAfterSwapWith(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, htmx.TriggerAfterSwapWith(rec, map[string]any{"y": 1}))
+
+	var got map[string]int
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger-After-Swap")), &got))
+	assert.Equal(t, 1, got["y"])
+
+	bad := httptest.NewRecorder()
+	require.Error(t, htmx.TriggerAfterSwapWith(bad, map[string]any{"x": make(chan int)}))
+	assert.Empty(t, bad.Header().Get("HX-Trigger-After-Swap")) // nothing written on marshal failure
 }
 
 func htmxRequest() *http.Request {
@@ -109,7 +141,7 @@ func TestRedirectHTMX(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	htmx.Redirect(rec, htmxRequest(), http.StatusSeeOther, "/dashboard")
+	htmx.Redirect(rec, htmxRequest(), "/dashboard") // status omitted — HTMX ignores it
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Redirect"))
@@ -121,9 +153,9 @@ func TestRedirectNonHTMX(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	htmx.Redirect(rec, r, http.StatusSeeOther, "/dashboard")
+	htmx.Redirect(rec, r, "/dashboard", http.StatusTemporaryRedirect) // explicit fallback status
 
-	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
 	assert.Empty(t, rec.Header().Get("HX-Redirect"))
 }
@@ -132,7 +164,7 @@ func TestLocationHTMX(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	htmx.Location(rec, htmxRequest(), http.StatusSeeOther, "/dashboard")
+	htmx.Location(rec, htmxRequest(), "/dashboard") // status omitted — HTMX ignores it
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Location"))
@@ -143,7 +175,7 @@ func TestLocationNonHTMX(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	htmx.Location(rec, r, http.StatusSeeOther, "/dashboard")
+	htmx.Location(rec, r, "/dashboard") // status omitted — defaults to 303 See Other
 
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
@@ -154,8 +186,8 @@ func TestLocationWithHTMX(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	err := htmx.LocationWith(rec, htmxRequest(), http.StatusSeeOther, "/dashboard",
-		htmx.LocationOptions{Target: "#main", Swap: htmx.SwapInnerHTML})
+	err := htmx.LocationWith(rec, htmxRequest(), "/dashboard",
+		htmx.LocationOptions{Target: "#main", Swap: htmx.SwapInnerHTML}) // status omitted — HTMX ignores it
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -175,8 +207,8 @@ func TestLocationWithNonHTMX(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	err := htmx.LocationWith(rec, r, http.StatusSeeOther, "/dashboard",
-		htmx.LocationOptions{Target: "#main"})
+	err := htmx.LocationWith(rec, r, "/dashboard",
+		htmx.LocationOptions{Target: "#main"}) // status omitted — defaults to 303 See Other
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
@@ -188,7 +220,7 @@ func TestLocationWithMarshalError(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	err := htmx.LocationWith(rec, htmxRequest(), http.StatusSeeOther, "/dashboard",
+	err := htmx.LocationWith(rec, htmxRequest(), "/dashboard",
 		htmx.LocationOptions{Values: map[string]any{"bad": make(chan int)}})
 	require.Error(t, err)
 	assert.Empty(t, rec.Header().Get("HX-Location")) // nothing written

@@ -32,7 +32,7 @@ func ExampleRedirect() {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login", nil) // non-HTMX request
 
-	htmx.Redirect(rec, r, http.StatusSeeOther, "/dashboard")
+	htmx.Redirect(rec, r, "/dashboard") // fallback status defaults to 303 See Other
 
 	fmt.Println(rec.Code)
 	fmt.Println(rec.Header().Get("Location"))

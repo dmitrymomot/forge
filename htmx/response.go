@@ -59,7 +59,9 @@ func Reselect(w http.ResponseWriter, selector string) {
 }
 
 // Trigger fires client-side events by name (HX-Trigger: "a, b"). No names is a
-// no-op. For events carrying detail, use TriggerWith.
+// no-op. Each Trigger function sets a single header, so calling any of them more
+// than once for the same header overwrites the previous value (last write wins) —
+// pass every event name in one call. For events carrying detail, use TriggerWith.
 func Trigger(w http.ResponseWriter, names ...string) {
 	setEventNames(w, hdrTrigger, names)
 }
@@ -119,39 +121,52 @@ type locationPayload struct {
 	Select  string            `json:"select,omitempty"`
 }
 
+// fallbackStatus returns the non-HTMX redirect status: the first value supplied
+// to the redirect helpers, or http.StatusSeeOther (303) when none is given.
+func fallbackStatus(status []int) int {
+	if len(status) > 0 {
+		return status[0]
+	}
+	return http.StatusSeeOther
+}
+
 // Redirect performs a client-side redirect. For HTMX requests it sets
-// HX-Redirect (a full-page client navigation) and writes 200; otherwise it falls
-// back to http.Redirect with status (a 3xx, e.g. http.StatusSeeOther). It commits
-// the response — call it last.
-func Redirect(w http.ResponseWriter, r *http.Request, status int, url string) {
+// HX-Redirect (a full-page client navigation) and writes 200. For non-HTMX
+// requests it falls back to http.Redirect; the optional status sets that fallback
+// code (only the first value is used), defaulting to http.StatusSeeOther (303).
+// status never applies to HTMX requests, which always get 200. It commits the
+// response — call it last.
+func Redirect(w http.ResponseWriter, r *http.Request, url string, status ...int) {
 	if IsRequest(r) {
 		w.Header().Set(hdrRedirect, url)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, url, status)
+	http.Redirect(w, r, url, fallbackStatus(status))
 }
 
 // Location performs a client-side redirect without a full page reload. For HTMX
-// requests it sets HX-Location to url and writes 200; otherwise it falls back to
-// http.Redirect with status. Terminal.
-func Location(w http.ResponseWriter, r *http.Request, status int, url string) {
+// requests it sets HX-Location to url and writes 200. For non-HTMX requests it
+// falls back to http.Redirect; the optional status sets that fallback code (only
+// the first value is used), defaulting to http.StatusSeeOther (303). Terminal.
+func Location(w http.ResponseWriter, r *http.Request, url string, status ...int) {
 	if IsRequest(r) {
 		w.Header().Set(hdrLocation, url)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, url, status)
+	http.Redirect(w, r, url, fallbackStatus(status))
 }
 
 // LocationWith is Location with an AJAX context object (target, swap, values, ...).
 // For HTMX requests it sets HX-Location to the JSON form {"path":path, ...opts}
 // and writes 200; a marshal failure returns a wrapped error with nothing written.
-// For non-HTMX requests it falls back to http.Redirect(w, r, path, status),
-// dropping the context. Terminal.
-func LocationWith(w http.ResponseWriter, r *http.Request, status int, path string, opts LocationOptions) error {
+// For non-HTMX requests it falls back to http.Redirect — the optional status sets
+// that fallback code (only the first value is used), defaulting to
+// http.StatusSeeOther (303) — dropping the context. Terminal.
+func LocationWith(w http.ResponseWriter, r *http.Request, path string, opts LocationOptions, status ...int) error {
 	if !IsRequest(r) {
-		http.Redirect(w, r, path, status)
+		http.Redirect(w, r, path, fallbackStatus(status))
 		return nil
 	}
 	b, err := json.Marshal(locationPayload{
