@@ -151,16 +151,15 @@ func validIP(s string) string {
 	return addr.String()
 }
 
-// remoteHost returns the host portion of a RemoteAddr ("ip:port" or bare ip).
+// remoteHost returns the IP from a RemoteAddr ("ip:port" or bare ip), or "" if it
+// does not parse as an IP.
 func remoteHost(addr string) string {
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		if a, err := netip.ParseAddr(host); err == nil {
-			return a.String()
-		}
-		return host
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
 	}
-	if a, err := netip.ParseAddr(addr); err == nil {
+	if a, err := netip.ParseAddr(host); err == nil {
 		return a.String()
 	}
-	return addr
+	return ""
 }

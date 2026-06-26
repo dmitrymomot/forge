@@ -61,3 +61,10 @@ func TestClientIPTrustedProxies(t *testing.T) {
 	trusted := netip.MustParsePrefix("10.0.0.0/8")
 	assert.Equal(t, "203.0.113.5", request.ClientIP(r, request.WithTrustedProxies(trusted)))
 }
+
+func TestClientIPMalformedRemoteAddr(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "not-an-ip" // no usable headers, unparseable peer
+	assert.Equal(t, "", request.ClientIP(r))
+}

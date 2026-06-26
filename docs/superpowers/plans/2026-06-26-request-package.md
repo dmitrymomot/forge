@@ -1563,6 +1563,13 @@ func TestClientIPTrustedProxies(t *testing.T) {
 	trusted := netip.MustParsePrefix("10.0.0.0/8")
 	assert.Equal(t, "203.0.113.5", request.ClientIP(r, request.WithTrustedProxies(trusted)))
 }
+
+func TestClientIPMalformedRemoteAddr(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "not-an-ip" // no usable headers, unparseable peer
+	assert.Equal(t, "", request.ClientIP(r))
+}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1728,18 +1735,17 @@ func validIP(s string) string {
 	return addr.String()
 }
 
-// remoteHost returns the host portion of a RemoteAddr ("ip:port" or bare ip).
+// remoteHost returns the IP from a RemoteAddr ("ip:port" or bare ip), or "" if it
+// does not parse as an IP.
 func remoteHost(addr string) string {
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		if a, err := netip.ParseAddr(host); err == nil {
-			return a.String()
-		}
-		return host
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
 	}
-	if a, err := netip.ParseAddr(addr); err == nil {
+	if a, err := netip.ParseAddr(host); err == nil {
 		return a.String()
 	}
-	return addr
+	return ""
 }
 ```
 
