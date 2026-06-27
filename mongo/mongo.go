@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
@@ -151,4 +152,38 @@ func disconnect(client *mongodriver.Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = client.Disconnect(ctx)
+}
+
+// Close logs a single "closing mongo client" line and disconnects the client
+// under a short internal bounded context (5s), keeping the uniform no-ctx
+// signature. Used as `defer Close(client, logger)` in main, so it runs after
+// supervisor.Run returns — i.e. after every service has drained, the only point at
+// which disconnecting is guaranteed not to race in-flight work. A nil logger is
+// tolerated (the client still closes; the log line is skipped); a nil client is a
+// no-op.
+func Close(c *mongodriver.Client, log *slog.Logger) {
+	if c == nil {
+		return
+	}
+	if log != nil {
+		log.Info("closing mongo client")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Disconnect(ctx); err != nil && log != nil {
+		log.Warn("mongo client disconnect failed", "err", err)
+	}
+}
+
+// Healthcheck returns a stateless closure that pings the primary, wrapping any
+// failure in ErrHealthcheck. Its func(context.Context) error shape is exactly what
+// a readiness/liveness probe wants; hand it to the app's /readyz handler. Safe to
+// call on every probe.
+func Healthcheck(c *mongodriver.Client) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := c.Ping(ctx, readpref.Primary()); err != nil {
+			return fmt.Errorf("%w: %v", ErrHealthcheck, err)
+		}
+		return nil
+	}
 }
