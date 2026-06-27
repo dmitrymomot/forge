@@ -15,6 +15,7 @@ func TestOpen_NilOptionRejected(t *testing.T) {
 	// is unambiguously the option's rejection, not a missing-URI validation error.
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = "mongodb://127.0.0.1:27017"
+	cfg.Database = "forge_test"
 
 	opts := map[string]forgemongo.Option{
 		"clientoptions": forgemongo.WithClientOptions(nil),

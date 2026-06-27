@@ -26,23 +26,24 @@ func replicaSetURI(t *testing.T) string {
 	return uri
 }
 
-func openRSClient(t *testing.T) *mongodriver.Client {
+func openRSDB(t *testing.T) *mongodriver.Database {
 	t.Helper()
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = replicaSetURI(t)
-	c, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
+	cfg.Database = "forge_test"
+	db, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
 	require.NoError(t, err)
-	t.Cleanup(func() { forgemongo.Close(c, nil) })
-	return c
+	t.Cleanup(func() { forgemongo.Close(db, nil) })
+	return db
 }
 
 func TestWithTransaction_CommitsOnSuccess(t *testing.T) {
-	c := openRSClient(t)
-	coll := c.Database("forge_test").Collection("txn_commit")
+	db := openRSDB(t)
+	coll := db.Collection("txn_commit")
 	t.Cleanup(func() { _ = coll.Drop(context.Background()) })
 	require.NoError(t, coll.Drop(t.Context()))
 
-	err := forgemongo.WithTransaction(t.Context(), c, func(ctx context.Context) error {
+	err := forgemongo.WithTransaction(t.Context(), db, func(ctx context.Context) error {
 		_, err := coll.InsertOne(ctx, bson.D{{Key: "k", Value: "v"}})
 		return err
 	})
@@ -54,13 +55,13 @@ func TestWithTransaction_CommitsOnSuccess(t *testing.T) {
 }
 
 func TestWithTransaction_AbortsOnError(t *testing.T) {
-	c := openRSClient(t)
-	coll := c.Database("forge_test").Collection("txn_abort")
+	db := openRSDB(t)
+	coll := db.Collection("txn_abort")
 	t.Cleanup(func() { _ = coll.Drop(context.Background()) })
 	require.NoError(t, coll.Drop(t.Context()))
 
 	sentinel := errors.New("boom")
-	err := forgemongo.WithTransaction(t.Context(), c, func(ctx context.Context) error {
+	err := forgemongo.WithTransaction(t.Context(), db, func(ctx context.Context) error {
 		if _, e := coll.InsertOne(ctx, bson.D{{Key: "k", Value: "v"}}); e != nil {
 			return e
 		}

@@ -16,13 +16,14 @@ import (
 )
 
 func TestClose_NilLoggerTolerated(t *testing.T) {
-	// Close must tolerate a nil *mongo.Client and a nil logger without panicking;
+	// Close must tolerate a nil *mongo.Database and a nil logger without panicking;
 	// the log line is simply skipped. This is the pure, server-free contract.
 	assert.NotPanics(t, func() {
 		forgemongo.Close(nil, nil)
 	})
 	assert.NotPanics(t, func() {
-		forgemongo.Close(nil, slog.New(slog.DiscardHandler))
+		var db *mongodriver.Database
+		forgemongo.Close(db, slog.New(slog.DiscardHandler))
 	})
 }
 
@@ -35,20 +36,21 @@ func mongoURI(t *testing.T) string {
 	return uri
 }
 
-func openTestClient(t *testing.T) *mongodriver.Client {
+func openTestDB(t *testing.T) *mongodriver.Database {
 	t.Helper()
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = mongoURI(t)
-	c, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
+	cfg.Database = "forge_test"
+	db, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
 	require.NoError(t, err)
-	t.Cleanup(func() { forgemongo.Close(c, nil) })
-	return c
+	t.Cleanup(func() { forgemongo.Close(db, nil) })
+	return db
 }
 
 func TestHealthcheck_Integration(t *testing.T) {
-	c := openTestClient(t)
+	db := openTestDB(t)
 
-	hc := forgemongo.Healthcheck(c)
+	hc := forgemongo.Healthcheck(db)
 	require.NotNil(t, hc)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -57,12 +59,12 @@ func TestHealthcheck_Integration(t *testing.T) {
 }
 
 func TestHealthcheck_FailsWrapped(t *testing.T) {
-	c := openTestClient(t)
+	db := openTestDB(t)
 	// Close the client, then the healthcheck must fail with an ErrHealthcheck-wrapped
 	// error rather than panicking.
-	forgemongo.Close(c, nil)
+	forgemongo.Close(db, nil)
 
-	hc := forgemongo.Healthcheck(c)
+	hc := forgemongo.Healthcheck(db)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	err := hc(ctx)

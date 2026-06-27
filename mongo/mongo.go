@@ -16,13 +16,14 @@ import (
 const maxRetryBackoff = 30 * time.Second
 
 // Open turns a Config (typically env-loaded) into a live, pooled, health-checkable
-// *mongo.Client: it applies options over DefaultConfig(), validates, builds the
+// *mongo.Database: it applies options over DefaultConfig(), validates, builds the
 // driver client options from Config (URI, pool limits, timeouts, read/write
-// concerns), runs the WithClientOptions escape hatch last, connects, then pings
-// with bounded exponential-backoff retry. On failure it disconnects any partially
-// opened client and returns a sentinel-wrapped, single-line error. The caller owns
-// the returned client and closes it with Close(client, logger) in main.
-func Open(ctx context.Context, opts ...Option) (*mongodriver.Client, error) {
+// concerns), runs the WithClientOptions escape hatch last, connects, pings with
+// bounded exponential-backoff retry, then returns client.Database(cfg.Database). On
+// failure it disconnects any partially opened client and returns a sentinel-wrapped,
+// single-line error. The caller owns the returned database and closes it with
+// Close(db, logger) in main; use db.Client() to reach client-level ops.
+func Open(ctx context.Context, opts ...Option) (*mongodriver.Database, error) {
 	c := config{Config: DefaultConfig()}
 	for _, opt := range opts {
 		opt(&c)
@@ -50,7 +51,7 @@ func Open(ctx context.Context, opts ...Option) (*mongodriver.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client, nil
+	return client.Database(c.Database), nil
 }
 
 // buildClientOptions assembles *options.ClientOptions from Config. The connection
@@ -164,15 +165,15 @@ func disconnect(client *mongodriver.Client) {
 	_ = client.Disconnect(ctx)
 }
 
-// Close logs a single "closing mongo client" line and disconnects the client
-// under a short internal bounded context (5s), keeping the uniform no-ctx
-// signature. Used as `defer Close(client, logger)` in main, so it runs after
-// supervisor.Run returns — i.e. after every service has drained, the only point at
-// which disconnecting is guaranteed not to race in-flight work. A nil logger is
-// tolerated (the client still closes; the log line is skipped); a nil client is a
-// no-op.
-func Close(c *mongodriver.Client, log *slog.Logger) {
-	if c == nil {
+// Close logs a single "closing mongo client" line and disconnects the underlying
+// client (via db.Client().Disconnect) under a short internal bounded context (5s),
+// keeping the uniform no-ctx signature. Used as `defer Close(db, logger)` in main,
+// so it runs after supervisor.Run returns — i.e. after every service has drained,
+// the only point at which disconnecting is guaranteed not to race in-flight work. A
+// nil logger is tolerated (the client still closes; the log line is skipped); a nil
+// db is a no-op.
+func Close(db *mongodriver.Database, log *slog.Logger) {
+	if db == nil {
 		return
 	}
 	if log != nil {
@@ -180,18 +181,18 @@ func Close(c *mongodriver.Client, log *slog.Logger) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.Disconnect(ctx); err != nil && log != nil {
+	if err := db.Client().Disconnect(ctx); err != nil && log != nil {
 		log.Warn("mongo client disconnect failed", "err", err)
 	}
 }
 
-// Healthcheck returns a stateless closure that pings the primary, wrapping any
-// failure in ErrHealthcheck. Its func(context.Context) error shape is exactly what
-// a readiness/liveness probe wants; hand it to the app's /readyz handler. Safe to
-// call on every probe.
-func Healthcheck(c *mongodriver.Client) func(context.Context) error {
+// Healthcheck returns a stateless closure that pings the primary via
+// db.Client().Ping, wrapping any failure in ErrHealthcheck. Its
+// func(context.Context) error shape is exactly what a readiness/liveness probe
+// wants; hand it to the app's /readyz handler. Safe to call on every probe.
+func Healthcheck(db *mongodriver.Database) func(context.Context) error {
 	return func(ctx context.Context) error {
-		if err := c.Ping(ctx, readpref.Primary()); err != nil {
+		if err := db.Client().Ping(ctx, readpref.Primary()); err != nil {
 			return fmt.Errorf("%w: %v", ErrHealthcheck, err)
 		}
 		return nil

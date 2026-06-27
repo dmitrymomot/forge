@@ -18,6 +18,7 @@ func TestOpen_RetryExhausted(t *testing.T) {
 	// test timeout to catch a hung loop.
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = "mongodb://127.0.0.1:1"
+	cfg.Database = "forge_test"
 	cfg.ServerSelectionTimeout = 100 * time.Millisecond
 	cfg.ConnectTimeout = 100 * time.Millisecond
 	cfg.RetryAttempts = 2
@@ -46,6 +47,7 @@ func TestOpen_ContextCancelled(t *testing.T) {
 
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = "mongodb://127.0.0.1:1"
+	cfg.Database = "forge_test"
 	cfg.ServerSelectionTimeout = 100 * time.Millisecond
 	cfg.ConnectTimeout = 100 * time.Millisecond
 	cfg.RetryAttempts = 5

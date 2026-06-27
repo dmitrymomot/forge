@@ -1,8 +1,9 @@
 // Package mongo turns a Config (typically env-loaded) into a live, pooled,
-// health-checkable MongoDB client and layers the recurring boot-time chores —
-// transactions, index/shard provisioning, and error classification — over the
-// official driver (go.mongodb.org/mongo-driver/v2). It returns the native
-// *mongo.Client and never hides it: full driver access stays available.
+// health-checkable MongoDB database handle and layers the recurring boot-time
+// chores — transactions, index/shard provisioning, and error classification —
+// over the official driver (go.mongodb.org/mongo-driver/v2). Open returns the
+// native *mongo.Database scoped to Config.Database; use db.Client() to reach
+// client-level ops. Full driver access stays available.
 //
 // The forge package is itself named mongo, so callers that also import the driver
 // alias the driver (the idiomatic Go resolution):
@@ -15,12 +16,13 @@
 // # Lifecycle
 //
 // Open applies functional options over DefaultConfig, validates, builds the driver
-// client options (URI, pool limits, timeouts, read/write concerns), connects, and
-// pings with bounded exponential-backoff retry so a container that races its
-// database does not crash-loop. Hand Healthcheck(client) to a readiness probe and
-// defer Close(client, logger) in main so it runs after supervisor.Run returns —
-// after every service has drained, the only point at which disconnecting cannot
-// race in-flight work.
+// client options (URI, pool limits, timeouts, read/write concerns), connects, pings
+// with bounded exponential-backoff retry so a container that races its database
+// does not crash-loop, and returns client.Database(cfg.Database). Hand
+// Healthcheck(db) to a readiness probe and defer Close(db, logger) in main so it
+// runs after supervisor.Run returns — after every service has drained, the only
+// point at which disconnecting cannot race in-flight work. Use db.Client() to reach
+// client-level ops such as StartSession or the sharding helpers.
 //
 //	func main() {
 //		ctx, stop := supervisor.NewContext()
@@ -29,15 +31,15 @@
 //		cfg := mongo.DefaultConfig()
 //		_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "MONGO_"})
 //
-//		client, err := mongo.Open(ctx, mongo.WithConfig(cfg), mongo.WithLogger(logger))
+//		db, err := mongo.Open(ctx, mongo.WithConfig(cfg), mongo.WithLogger(logger))
 //		if err != nil {
 //			logger.Error("mongo open failed", "err", err)
 //			os.Exit(1)
 //		}
-//		defer mongo.Close(client, logger)
+//		defer mongo.Close(db, logger)
 //
 //		err = supervisor.Run(ctx,
-//			supervisor.WithService(httpserver.New(routes(client))),
+//			supervisor.WithService(httpserver.New(routes(db))),
 //		)
 //		if err != nil {
 //			logger.Error("shutdown", "err", err)
@@ -49,13 +51,13 @@
 //
 // EnsureIndexes creates declared indexes per collection idempotently; run it once
 // after Open. EnableSharding and ShardCollection wrap the admin commands for
-// sharded deployments and return the driver's error verbatim on a non-sharded
-// server.
+// sharded deployments and take *mongo.Client (pass db.Client()); they return the
+// driver's error verbatim on a non-sharded server.
 //
 //	specs := map[string][]mongodriver.IndexModel{
 //		"users": {{Keys: bson.D{{Key: "email", Value: 1}}, Options: options.Index().SetUnique(true)}},
 //	}
-//	if err := mongo.EnsureIndexes(ctx, client.Database("app"), specs); err != nil {
+//	if err := mongo.EnsureIndexes(ctx, db, specs); err != nil {
 //		logger.Error("ensure indexes", "err", err)
 //		os.Exit(1)
 //	}
@@ -83,7 +85,7 @@
 //	Env var                            Field                   Default
 //	-----------------------------------------------------------------------------
 //	URI                                URI                     "" (required)
-//	DATABASE                           Database                "" (consumer passthrough; Open does not apply it)
+//	DATABASE                           Database                "" (required; the database Open opens and returns)
 //	READ_PREFERENCE                    ReadPreference          "" (driver default)
 //	READ_CONCERN                       ReadConcern             "" (driver default)
 //	WRITE_CONCERN                      WriteConcern            "" (driver default)

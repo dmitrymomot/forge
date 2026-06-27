@@ -7,18 +7,18 @@ import (
 )
 
 // WithTransaction runs fn inside a single multi-document transaction: it starts a
-// session, calls the driver's Session.WithTransaction (which commits when fn
-// returns nil and aborts when fn returns an error or panics), and ends the session.
-// fn must perform its operations using the context passed to it — that context
-// carries the session, so any collection call made with another context runs
-// outside the transaction.
+// session via db.Client().StartSession(), calls the driver's
+// Session.WithTransaction (which commits when fn returns nil and aborts when fn
+// returns an error or panics), and ends the session. fn must perform its operations
+// using the context passed to it — that context carries the session, so any
+// collection call made with another context runs outside the transaction.
 //
 // This requires a replica set or a sharded (mongos) deployment; on a standalone
 // server the driver returns its own error verbatim (transactions are unsupported
 // there). The driver may run fn more than once on transient transaction errors, so
 // fn must be idempotent in its own bookkeeping.
-func WithTransaction(ctx context.Context, c *mongodriver.Client, fn func(ctx context.Context) error) error {
-	sess, err := c.StartSession()
+func WithTransaction(ctx context.Context, db *mongodriver.Database, fn func(ctx context.Context) error) error {
+	sess, err := db.Client().StartSession()
 	if err != nil {
 		return err
 	}

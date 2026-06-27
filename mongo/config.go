@@ -18,7 +18,7 @@ import (
 // drift from it). Field order is subject to the repo's betteralign tooling.
 type Config struct {
 	URI                    string        `env:"URI"`             // mongodb://… (required)
-	Database               string        `env:"DATABASE"`        // optional default db name; a passthrough the consumer reads (client.Database(cfg.Database)) — Open does NOT apply it
+	Database               string        `env:"DATABASE"`        // database Open opens and returns (required)
 	ReadPreference         string        `env:"READ_PREFERENCE"` // primary, primaryPreferred, secondary, secondaryPreferred, nearest
 	ReadConcern            string        `env:"READ_CONCERN"`    // local, majority, available, linearizable, snapshot
 	WriteConcern           string        `env:"WRITE_CONCERN"`   // majority, journaled, unacknowledged, or a w-number ("1", "2", …)
@@ -32,8 +32,8 @@ type Config struct {
 }
 
 // DefaultConfig returns production-sane defaults and is the single source of truth
-// for them. URI has no default — it is required, so DefaultConfig alone fails
-// Validate. Empty concern strings mean "use the driver default" (no override).
+// for them. URI and Database have no defaults — both are required, so DefaultConfig
+// alone fails Validate. Empty concern strings mean "use the driver default" (no override).
 func DefaultConfig() Config {
 	return Config{
 		MaxPoolSize:            100,
@@ -54,6 +54,9 @@ func (c Config) Validate() error {
 	var errs []error
 	if c.URI == "" {
 		errs = append(errs, fmt.Errorf("%w: URI must not be empty", ErrInvalidConfig))
+	}
+	if c.Database == "" {
+		errs = append(errs, fmt.Errorf("%w: Database must not be empty", ErrInvalidConfig))
 	}
 	for _, f := range []struct {
 		name string

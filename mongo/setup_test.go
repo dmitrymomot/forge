@@ -23,8 +23,7 @@ func TestEnsureIndexes_EmptySpecsNoOp(t *testing.T) {
 }
 
 func TestEnsureIndexes_Integration(t *testing.T) {
-	c := openTestClient(t) // from lifecycle_test.go (skips without FORGE_TEST_MONGO_URI)
-	db := c.Database("forge_test")
+	db := openTestDB(t) // from lifecycle_test.go (skips without FORGE_TEST_MONGO_URI)
 	t.Cleanup(func() { _ = db.Collection("idx_users").Drop(context.Background()) })
 
 	specs := map[string][]mongodriver.IndexModel{
@@ -59,10 +58,11 @@ func TestSharding_Integration(t *testing.T) {
 	}
 	cfg := forgemongo.DefaultConfig()
 	cfg.URI = uri
-	c, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
+	cfg.Database = "forge_test"
+	db, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
 	require.NoError(t, err)
-	t.Cleanup(func() { forgemongo.Close(c, nil) })
+	t.Cleanup(func() { forgemongo.Close(db, nil) })
 
-	require.NoError(t, forgemongo.EnableSharding(t.Context(), c, "forge_test"))
-	require.NoError(t, forgemongo.ShardCollection(t.Context(), c, "forge_test.sharded", bson.D{{Key: "_id", Value: "hashed"}}))
+	require.NoError(t, forgemongo.EnableSharding(t.Context(), db.Client(), "forge_test"))
+	require.NoError(t, forgemongo.ShardCollection(t.Context(), db.Client(), "forge_test.sharded", bson.D{{Key: "_id", Value: "hashed"}}))
 }

@@ -26,11 +26,15 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 3, cfg.RetryAttempts)
 	assert.Equal(t, time.Second, cfg.RetryInterval)
 
-	// DefaultConfig alone is not usable: URI is required.
+	// DefaultConfig alone is not usable: URI and Database are required.
 	require.ErrorIs(t, cfg.Validate(), forgemongo.ErrInvalidConfig)
 
-	// With a URI it validates (empty concerns => driver defaults).
+	// With a URI but no Database it still fails.
 	cfg.URI = "mongodb://127.0.0.1:27017"
+	require.ErrorIs(t, cfg.Validate(), forgemongo.ErrInvalidConfig)
+
+	// With both URI and Database it validates (empty concerns => driver defaults).
+	cfg.Database = "forge_test"
 	require.NoError(t, cfg.Validate())
 }
 
@@ -38,12 +42,18 @@ func TestConfig_Validate(t *testing.T) {
 	base := func() forgemongo.Config {
 		c := forgemongo.DefaultConfig()
 		c.URI = "mongodb://127.0.0.1:27017"
+		c.Database = "forge_test"
 		return c
 	}
 
 	t.Run("empty URI", func(t *testing.T) {
 		c := base()
 		c.URI = ""
+		require.ErrorIs(t, c.Validate(), forgemongo.ErrInvalidConfig)
+	})
+	t.Run("empty Database", func(t *testing.T) {
+		c := base()
+		c.Database = ""
 		require.ErrorIs(t, c.Validate(), forgemongo.ErrInvalidConfig)
 	})
 	t.Run("unknown ReadPreference", func(t *testing.T) {
@@ -116,6 +126,7 @@ func TestParseConcerns(t *testing.T) {
 	withURI := func(mut func(*forgemongo.Config)) forgemongo.Config {
 		c := forgemongo.DefaultConfig()
 		c.URI = "mongodb://127.0.0.1:27017"
+		c.Database = "forge_test"
 		mut(&c)
 		return c
 	}
