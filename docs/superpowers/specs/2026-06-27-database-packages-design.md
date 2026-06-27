@@ -473,6 +473,12 @@ Each after the first is a near-mechanical application of the established pattern
 - **No Redis cluster/sentinel, no Mongo sharded-specific helpers, no OpenSearch
   index/mapping "migrations"** in v1 — added only on real demand.
 - **No `MustOpen`.**
+- **No migration down/reset/test-fixture helpers** — `migration` is strictly up-only.
+  Resetting a test database (TRUNCATE, schema drop, or an ephemeral/template DB) is the
+  consumer's concern. This was considered and deliberately rejected: goose down/reset is
+  only as reliable as hand-written `-- +goose Down` sections, so forge does not pretend to
+  own clean-slate teardown, and "drop my data" verbs stay out of the package called on
+  every boot.
 - **No shared base package** until duplication across the four proves painful.
 
 ## Open questions / future
