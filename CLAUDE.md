@@ -2,5 +2,5 @@
 - Use `just` recipes.
 - Keep repository structure flat, don't create nested folders without reason.
 - DON'T use builder pattern, USE options instead.
-- NO external dependencies without a strong reason; small local package or copied code is better than any dependency.
+- Minimal dependencies, NOT zero. Depend on hardened protocol clients & crypto (pgx, S3 SDK, x/crypto) — don't reinvent wire protocols. Build/copy small utilities that shape our own API (id, validate, request, the job engine). Never wrap large/leaky frameworks (watermill, stripe-go) — expose an interface, let the consumer take the dep. Isolate every real dep behind a subpackage. Postgres is the database; data + messaging layers target pgx.
 - black-box testing ONLY!

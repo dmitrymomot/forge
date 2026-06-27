@@ -9,9 +9,20 @@ _Produced by a 19-agent research workflow (rubric extraction → 12 parallel dom
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no service containers; values via params, not context (context only for request-scoped reads). Public methods never return unexported types.
 - **One of three idioms:** stateless **free-funcs** (`render`, `htmx`) · `New(...Option)` with an env-loadable `Config` + `DefaultConfig` + `Validate` (`logger`, `httpserver`) · a `supervisor.Service`.
 - **Anatomy:** `doc.go` (runnable example) · `config.go` · `options.go` (`type Option func(*config)`, **never** builders) · `errors.go` (`errors.Is`-matchable single-line sentinels) · impl.
-- **stdlib-first:** no external dep without a strong reason. The few justified deps (`x/crypto` for argon2/bcrypt/chacha, `x/crypto/acme` for autocert) and all drivers (sql/redis/nats, provider SDKs) are isolated behind a small forge interface in a subpackage — the `logger/sentry` pattern.
+- **Minimal dependencies, not zero** (see next section): buy the wire, build the ergonomics; isolate every real dep behind a subpackage.
 - **Composition seams:** `http.Handler`, `supervisor.Service`, `middleware.Middleware`, `ctxkey.Key[T]`, `logger.ContextExtractor`, and pluggable `Store`/`Broker`/`Sender` interfaces.
 - Flat, single-responsibility packages (~250–850 LOC); black-box tests only.
+
+## Dependency philosophy — minimal, not zero
+
+forge optimizes for a **small, auditable dependency surface — not stdlib purism.** Rebuilding stdlib-adjacent utilities is worth it; rebuilding a hardened protocol client or a crypto primitive is not. The decision rule:
+
+- **Depend** on what speaks to the outside world or is dangerous to hand-roll — a wire protocol / hardened client (**`pgx`** for Postgres, the **S3 SDK**, a **Mongo** driver) or a security primitive (**`x/crypto`** for argon2/bcrypt). Reimplementing these is huge, risky, and buys no differentiation.
+- **Don't wrap** large, opinionated, or fast-moving frameworks whose model would leak through forge's API (**`watermill`**, **`stripe-go`**). Expose a small interface; let the consumer take the dep in *their* repo.
+- **Build — or copy a small local package** — for anything that is small, that *shapes forge's own API*, or where a third party's opinions would infect the core: `id`, `validate`, `request`, `slugx`, `money`, the SKIP LOCKED job engine.
+- **Always isolate** a real dependency behind a forge interface in a subpackage so it stays a swappable leaf, never woven through core: `logger/sentry`, `jobqueue/sqlbroker`, `objectstore`'s S3 adapter.
+
+**Buy the wire, build the ergonomics.** First-party runtime deps today: `sentry` (isolated in `logger/sentry`) and — newly sanctioned — **`pgx`** for the Postgres-committed data + messaging layer. Everything outside `data/*` and the messaging engine stays stdlib.
 
 ## Shipped today (the seed · 7)
 
@@ -216,7 +227,9 @@ _stdlib-first cryptographic building blocks: constant-time compare, AEAD, HMAC s
 
 ### P2 · Data & persistence · 13 packages
 
-_Relational-data utilities over stdlib database/sql: pool factory, read/write replica routing, transaction/unit-of-work helpers, reflection-free row scanning, migrations, pagination/cursors, multi-tenancy and concurrency guards, per-request batch loading, a blob object store, and a shared KV seam. No ORM, no driver imports._
+_Postgres-native data utilities: pool factory, read/write replica routing, transaction/unit-of-work helpers, reflection-free row scanning, migrations, pagination/cursors, multi-tenancy and concurrency guards, per-request batch loading, a blob object store, and a shared KV seam. No ORM._
+
+> **Driver stance: pgx, not `database/sql`.** forge declares **Postgres as its database** and targets **`pgx/v5` (`pgxpool` + the sqlc `DBTX` interface)** across `data/*` and the messaging engine. Rationale: you always use pgxpool, so `database/sql`'s portability buys nothing while taxing you (manual scan, no `LISTEN/NOTIFY`, no `Batch`/`CopyFrom`); the SKIP LOCKED engine actively needs pgx's `LISTEN/NOTIFY`, `Batch`, `CopyFrom`, and SQLSTATE codes. `pgx` is forge's **one sanctioned DB dependency**, confined to these layers (the rest of the framework stays DB-free). The per-package `deps` lines below that still say "database/sql" predate this — read them as pgx; `sqltx`/`txcontext` carry a `pgx.Tx`, `scan` uses `pgx.CollectRows`, `sqldb` wraps `pgxpool.Pool`. (Anyone wanting the generic path can still drive pgx through `pgx/stdlib`.)
 
 <sub>3 core · 4 recommended · 6 optional</sub>
 
@@ -287,9 +300,17 @@ _Relational-data utilities over stdlib database/sql: pool factory, read/write re
 
 ### P2–P4 · Async, jobs & resilience · 17 packages
 
-_Concurrency, resilience, and background-execution primitives plus supervised long-running services (queues, scheduler, in-process event bus, distributed lock + leader election, relays, backpressure). Pluggable stores/brokers keep external drivers in consumer repos behind small interfaces._
+_Concurrency, resilience, and background-execution primitives plus supervised long-running services (queues, scheduler, event bus, command bus, distributed lock + leader election, backpressure). The resilience primitives are stdlib; the messaging layer is one durable engine (Postgres SKIP LOCKED via pgx) with typed facades._
 
-<sub>2 core · 11 recommended · 4 optional</sub>
+> **Messaging model (revised — supersedes the `eventbus`/`jobqueue`/`scheduler`/`pubsub`/`outbox` entries below).** The four app-level needs — periodic jobs, one-time jobs, events, commands — are **two contracts on one engine**: an *event* = "something happened", 0..N handlers, fan-out; a *command* = "do this", exactly 1 handler, returns an outcome. All durable work rides **one SKIP LOCKED engine** (`jobqueue` core + `jobqueue/sqlbroker` on pgx: claim-with-lease, retry/backoff, dead-letter, at-least-once). Facades:
+> - **`jobqueue`** — one-time jobs (engine, used directly; delayed = `WithRunAt`). Typed handlers over JSON payloads.
+> - **`scheduler`** — periodic jobs; a `supervisor.Service` that *enqueues* into the engine when due, fired once per fleet via a `unique(name, scheduled_for)` constraint (no leader needed).
+> - **`eventbus`** — events. **Sync in-process mode** (observer, no durability) *and* **durable mode** where each handler registration is a named **subscription = its own SKIP LOCKED queue**: publish fans out one delivery row per subscription; within a subscription, instances are competing consumers (one delivery each); at-least-once. Transactional publish (insert in the business `pgx.Tx`) folds in the old `outbox`.
+> - **`commandbus`** *(new)* — commands. **Exactly one handler**, enforced at registration (dup registration fails); returns a result. Sync/in-process by default, optional async-durable via the engine.
+>
+> At-least-once ⇒ **handlers must be idempotent** (stable id + `Seen(id)` inbox check). SKIP LOCKED does not preserve order — per-key ordering is a future knob, not built now. **`pubsub` (cross-broker) is dropped** — every need above is satisfied on Postgres; a consumer who wants Kafka/NATS implements forge's interface over `watermill` in their own repo.
+
+<sub>2 core · 11 recommended · 4 optional · messaging consolidated per note above</sub>
 
 - **`backoff`** — **core**  
   Backoff strategy primitive: compute exponential/constant/jittered delays. The shared math under retry, circuitbreaker half-open, lock retry, and reconnect loops.  
@@ -341,32 +362,37 @@ _Concurrency, resilience, and background-execution primitives plus supervised lo
   `New(store Store, opts...)(*Locker,error); Acquire(ctx,key)(*Lease,error); (Lease) Token() uint64 (fencing)/Release(ctx)/Done() <-chan struct{} (auto-refresh until ctx/loss). Leader: RunAsLeader(ctx,key, fn func(ctx)) implements supervisor.Service; IsLeader() bool. Store{TrySet/Refresh/Delete with fencing}. Sentinels ErrNotAcquired/ErrLeaseLost.`  
   <sub>deps: stdlib-only core + pluggable Store interface (in-process store ships for single-node/tests). Postgres-advisory-lock and Redis-SETNX backends in lock/pglock and lock/redislock subpackages (logger/sentry pattern). · depends on: `supervisor`, `backoff`, `clock`, `logger`</sub>
 
-- **`eventbus`** — recommended  
-  In-process, type-safe generic pub/sub for domain events within a monolith, with sync or buffered-async dispatch and a drop policy. Async mode is a supervisor.Service that drains on shutdown.  
-  `Bus[E any]: New[E](opts...) *Bus[E]; Subscribe(fn func(ctx,E)) (unsub func()); Publish(ctx,E). WithAsync (implements supervisor.Service)/WithDropPolicy/WithLogger.`  
-  <sub>deps: stdlib-only: context, sync, log/slog. Generics, no reflection. Composes supervisor. · depends on: `supervisor`, `logger`</sub>
+- **`eventbus`** — recommended — *events facade; see Messaging model note*  
+  Type-safe generic events. **Sync in-process mode** (observer) for same-process listeners, **and durable mode** where each `Subscribe` declares a named subscription (its own SKIP LOCKED queue): publish fans out one row per subscription, competing consumers per subscription, at-least-once. Transactional publish via the business `pgx.Tx` (folds in `outbox`).  
+  `Bus: eventbus.New(broker?, opts...); Subscribe[E](bus,"subscription",fn func(ctx,E) error); Publish(ctx, tx, E). No broker = sync observer; with broker = durable subscriptions (supervisor.Service workers).`  
+  <sub>deps: stdlib (sync mode) / pgx via the jobqueue engine (durable mode). Generics, no reflection. · depends on: `jobqueue`, `supervisor`, `logger`</sub>
 
-- **`jobqueue`** — recommended  
-  Background job queue with a supervised worker pool (bounded concurrency, per-job retry/backoff, graceful drain) and a pluggable Broker. Producer Client is separate from the worker Service. In-memory broker in core; sql/redis brokers isolated in subpackages. Absorbs deadletter as a WithDeadLetter option.  
-  `Worker: New(opts...) *Worker implementing supervisor.Service; WithHandler(kind, fn)/WithBroker/WithBackoff/WithDeadLetter. Client.Enqueue(ctx, Job) error. Broker interface{ Push/Claim/Ack/Nack }. Job is Kind string + []byte payload.`  
-  <sub>deps: stdlib-only core + in-memory broker. jobqueue/sqlbroker uses database/sql (caller's \*sql.DB, no driver). jobqueue/redisbroker isolates the Redis client. · depends on: `supervisor`, `backoff`, `drain`, `logger`, `sqldb`</sub>
+- **`jobqueue`** — recommended — **THE durable engine** (one-time jobs facade + substrate under scheduler/eventbus/commandbus)  
+  Supervised worker pool (bounded concurrency, per-job retry/backoff, graceful drain) over a pluggable Broker with claim-with-lease (at-least-once), max-attempts → dead-letter. Producer Client separate from worker Service. In-memory broker in core; **`jobqueue/sqlbroker` is the SKIP LOCKED pgx impl** (the only durable broker forge ships). Typed handlers over JSON payloads.  
+  `Worker: NewWorker(broker,opts...) supervisor.Service; Register[T](w,"kind",fn func(ctx,T) error); WithConcurrency/WithBackoff/WithDeadLetter. Client.Enqueue(ctx,"kind",payload, WithRunAt/WithMaxAttempts). Broker interface{ Push/Claim/Ack/Nack }.`  
+  <sub>deps: stdlib core + in-memory broker; **`jobqueue/sqlbroker` uses pgx** (caller's `pgxpool.Pool`) — `LISTEN/NOTIFY` wakeups + poll fallback, SKIP LOCKED claim, SQLSTATE retry classification. · depends on: `supervisor`, `backoff`, `drain`, `logger`</sub>
 
-- **`scheduler`** — recommended  
-  Cron/interval scheduler as a supervisor.Service: named jobs on cron specs or fixed intervals with overlap policy and jitter. Decides WHEN; composes with jobqueue (durable execution) and lock (single-fire across replicas).  
-  `New(opts...) *Scheduler implementing supervisor.Service; WithCron(name,spec,fn)/WithInterval(name,d,fn)/WithLocation/WithOverlap/WithJitter. Schedule interface{ Next(time.Time) time.Time } for custom specs.`  
-  <sub>deps: stdlib-only: time, context. ~150 LOC local 5-field cron parser instead of robfig/cron. Composes supervisor. · depends on: `supervisor`, `logger`, `clock`</sub>
+- **`scheduler`** — recommended — *periodic-jobs facade*  
+  Cron/interval scheduler as a supervisor.Service that **enqueues into the jobqueue engine when due**. Fires **once per fleet** via a `unique(name, scheduled_for)` constraint — every instance races the insert, one wins, the rest no-op (no leader election needed).  
+  `New(client, opts...) supervisor.Service; WithCron(name,spec,fn)/WithInterval(name,d,fn)/WithJitter. Local ~150-LOC 5-field cron parser (no robfig/cron).`  
+  <sub>deps: stdlib (time/context) + pgx via the engine for the dedup insert. · depends on: `jobqueue`, `supervisor`, `logger`, `clock`</sub>
+
+- **`commandbus`** — recommended — *commands facade (NEW)*  
+  Point-to-point command dispatch with **exactly one handler**, enforced at registration (a second handler for the same command type fails). Returns a result (unlike events). Sync/in-process by default; optional async-durable via the jobqueue engine (single logical consumer).  
+  `Bus: commandbus.New(); Handle[C](bus, fn func(ctx,C)(R,error)); Send[C,R](ctx,bus,cmd)(R,error). Async: Enqueue[C](ctx,bus,cmd) onto the engine. Sentinels ErrNoHandler/ErrDuplicateHandler.`  
+  <sub>deps: stdlib (sync) / pgx via the engine (async). Generics, no reflection. · depends on: `jobqueue` (async mode only), `logger`</sub>
 
 - **`watchdog`** — optional  
   Heartbeat/deadman watchdog as a supervisor.Service: components emit periodic Kick()s; a missed deadline fires a callback (alert, flip readiness, controlled crash). Detects a hung-but-not-returned background loop that liveness probes miss; distinct from supervisor (observes Run returning) and health (external probe).  
   `New(opts...)(*Watchdog,error) implementing supervisor.Service; Register(name string, timeout time.Duration)(kick func()); WithOnMiss(func(name string, since time.Duration)). Config{CheckInterval}+Validate. Often wired to readiness.SetReady(false) on miss.`  
   <sub>deps: stdlib-only: context, sync, time. Composes supervisor. · depends on: `supervisor`, `clock`, `logger`</sub>
 
-- **`pubsub`** — optional  
+- **`pubsub`** — ~~optional~~ **DROPPED** (cross-broker not in scope; needs satisfied on Postgres — a consumer wanting Kafka/NATS implements forge's interface over `watermill` in their own repo)  
   Distributed pub/sub abstraction: Publisher/Subscriber interfaces and a supervised Consumer loop, with concrete brokers (Redis/NATS/Postgres LISTEN-NOTIFY) in isolated subpackages. The cross-process sibling of eventbus.  
   `Publisher{ Publish(ctx,topic,[]byte) error }; Subscriber{ Subscribe(ctx,topic)(<-chan Message,error) }. New(broker,opts...) *Consumer implementing supervisor.Service; WithBackoff(reconnect)/WithLogger.`  
   <sub>deps: stdlib-only core (interfaces + consumer loop). pubsub/redisbroker, pubsub/natsbroker, pubsub/pgbroker each isolate their client. Topic/payload are []byte. · depends on: `supervisor`, `backoff`, `logger`</sub>
 
-- **`outbox`** — optional  
+- **`outbox`** — ~~optional~~ **FOLDED into `eventbus` durable mode** (transactional publish = insert in the business `pgx.Tx`; `Seen(id)` inbox dedup stays a helper)  
   Transactional outbox/inbox: Stage(ctx, tx, msg) enqueues in the caller's DB tx; a supervised Relay drains staged rows to a Publisher with retry; Seen(ctx, tx, id) dedupes inbound. Avoids dual-write inconsistency. Gate the relay to one replica via lock.  
   `free-func Stage(ctx,*sql.Tx,Message) error + Seen(ctx,tx,id)(bool,error); Relay: New(db,pub,opts...) *Relay implementing supervisor.Service. WithBatchSize/WithPollInterval/WithBackoff. Consumer owns schema/migration.`  
   <sub>deps: stdlib-only at the seam: database/sql (*sql.Tx/*sql.DB supplied by caller, no driver). Publisher is the pubsub.Publisher interface. SELECT...FOR UPDATE SKIP LOCKED dialect option. · depends on: `supervisor`, `sqltx`, `txcontext`, `pubsub`, `backoff`, `lock`</sub>
