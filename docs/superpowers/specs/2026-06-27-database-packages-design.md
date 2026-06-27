@@ -34,7 +34,8 @@ func main() {
 	cfg := postgres.DefaultConfig()
 	_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "DATABASE_"})
 
-	pool, err := postgres.Open(ctx, cfg,
+	pool, err := postgres.Open(ctx,
+		postgres.WithConfig(cfg),
 		postgres.WithLogger(logger),
 		postgres.WithMigrator(migration.New(migrationsFS)), // up-migrate on app start
 	)
@@ -117,31 +118,37 @@ func DefaultConfig() Config { ... }
 func (c Config) Validate() error { ... }
 ```
 
-### Options (code-only values)
+### Options (config + code values)
 
-Every package ships the same two: `WithLogger(*slog.Logger)` and a single **native-config
-escape hatch** — `WithPoolConfig(func(*pgxpool.Config))` (postgres),
-`WithOptions(func(*redis.Options))` (redis), `WithClientOptions(func(*options.ClientOptions))`
-(mongo), `WithClientConfig(func(*opensearch.Config))` (opensearch) — which runs **last** in
-`Open`, after the `Config` overlay, so anything the serializable fields don't cover (TLS,
-tracers, connect hooks, custom dialers) stays reachable. `postgres` adds `WithMigrator`.
-There is **no `WithConfig`** — `cfg` is already the positional second argument to `Open`, so
-an option to set it again would be redundant (this differs from `httpserver`, whose
-`New(handler, opts...)` has no positional cfg). Nil function/pointer arguments are rejected
-into an accumulated error surfaced by `Open` (the `httpserver` option-error pattern).
+Every package ships **`WithConfig(cfg Config)`** — the serializable block — plus
+`WithLogger(*slog.Logger)` and a single **native-config escape hatch**:
+`WithPoolConfig(func(*pgxpool.Config))` (postgres), `WithOptions(func(*redis.Options))`
+(redis), `WithClientOptions(func(*options.ClientOptions))` (mongo),
+`WithClientConfig(func(*opensearch.Config))` (opensearch). `postgres` adds `WithMigrator`.
+
+There is **no positional `cfg`** on `Open` — config arrives through `WithConfig`, exactly
+as `httpserver.New(handler, opts...)` and `supervisor.Run(ctx, opts...)` take their config.
+This keeps every forge constructor the same shape: `Verb(required, opts...)`. Options apply
+in order: `WithConfig` sets the whole block, the escape hatch runs **last** (after the
+`Config` overlay) so anything the serializable fields don't cover (TLS, tracers, connect
+hooks, custom dialers) stays reachable. Nil function/pointer arguments are rejected into an
+accumulated error surfaced by `Open` (the `httpserver` option-error pattern).
 
 ### `Open`
 
 ```go
-func Open(ctx context.Context, cfg Config, opts ...Option) (*Client, error)
+func Open(ctx context.Context, opts ...Option) (*Client, error)
 ```
 
-Flow: apply options → `Validate()` (return `ErrInvalidConfig` on failure) → parse the
-URL/URI into the driver's config → overlay pool limits + timeouts from `Config` →
-**connect with bounded retry/backoff** (below) → **ping** to confirm a live server →
-(postgres only) run the migrator if one was supplied → return the native client. Any
-failure returns a sentinel-wrapped, single-line error and leaks nothing (a partially
-opened client is closed before returning).
+Flow: start from `DefaultConfig()` → apply options (`WithConfig` replaces the block; code
+options set loggers/hooks/migrator) → `Validate()` (return `ErrInvalidConfig` on failure,
+e.g. a missing `URL`) → parse the URL/URI into the driver's config → overlay pool limits +
+timeouts from `Config` → run the escape hatch → **connect with bounded retry/backoff**
+(below) → **ping** to confirm a live server → (postgres only) run the migrator if one was
+supplied → return the native client. Any failure returns a sentinel-wrapped, single-line
+error and leaks nothing (a partially opened client is closed before returning). Omitting
+`WithConfig` runs on pure `DefaultConfig()` — which fails `Validate` for backends whose URL
+is required.
 
 `MustOpen` is intentionally **omitted** (the old wrapper's `os.Exit` convenience);
 applications handle the returned error.
@@ -227,7 +234,7 @@ type Config struct {
 func DefaultConfig() Config // MaxConns 10, MinConns 2, MaxConnLifetime 30m,
                             // MaxConnIdleTime 10m, HealthCheckPeriod 1m,
                             // ConnectTimeout 5s, RetryAttempts 3, RetryInterval 1s
-func Open(ctx context.Context, cfg Config, opts ...Option) (*pgxpool.Pool, error)
+func Open(ctx context.Context, opts ...Option) (*pgxpool.Pool, error)
 func Close(pool *pgxpool.Pool, log *slog.Logger)                 // log + pool.Close()
 func Healthcheck(pool *pgxpool.Pool) func(context.Context) error // pool.Ping closure for /readyz
 
@@ -238,6 +245,7 @@ type Migrator interface {
 }
 
 // Options
+func WithConfig(cfg Config) Option                   // the serializable block; defaults to DefaultConfig()
 func WithLogger(l *slog.Logger) Option
 func WithPoolConfig(fn func(*pgxpool.Config)) Option // escape hatch: tracers/hooks/anything not in Config
 func WithMigrator(m Migrator) Option                 // runs m.Up after connect; nil is rejected
@@ -305,10 +313,12 @@ dependency) but **not goose**; `migration` imports goose but **not pgx**. A cons
 wants no migrations pays for neither.
 
 ```go
-pool, err := postgres.Open(ctx, cfg,
+pool, err := postgres.Open(ctx,
+	postgres.WithConfig(cfg),
 	postgres.WithMigrator(migration.New(migrationsFS)))                       // defaults
 // or, overriding the version table:
-pool, err = postgres.Open(ctx, cfg,
+pool, err = postgres.Open(ctx,
+	postgres.WithConfig(cfg),
 	postgres.WithMigrator(migration.New(migrationsFS, migration.WithTable("schema_migrations"))))
 ```
 
@@ -334,11 +344,12 @@ type Config struct {
 	RetryInterval   time.Duration `env:"RETRY_INTERVAL"`
 }
 
-func Open(ctx context.Context, cfg Config, opts ...Option) (*redis.Client, error)
+func Open(ctx context.Context, opts ...Option) (*redis.Client, error)
 func Close(c *redis.Client, log *slog.Logger)                 // log + c.Close()
 func Healthcheck(c *redis.Client) func(context.Context) error // PING closure
 
 // Options (same shape as postgres)
+func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
 func WithOptions(fn func(*redis.Options)) Option // escape hatch: TLS, hooks, anything not in Config
 ```
@@ -365,11 +376,12 @@ type Config struct {
 	RetryInterval          time.Duration `env:"RETRY_INTERVAL"`
 }
 
-func Open(ctx context.Context, cfg Config, opts ...Option) (*mongo.Client, error)
+func Open(ctx context.Context, opts ...Option) (*mongo.Client, error)
 func Close(c *mongo.Client, log *slog.Logger)                 // log + c.Disconnect(ctx)
 func Healthcheck(c *mongo.Client) func(context.Context) error // Ping(readpref.Primary) closure
 
 // Options (same shape as postgres)
+func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
 func WithClientOptions(fn func(*options.ClientOptions)) Option // escape hatch: driver options
 
@@ -401,11 +413,12 @@ type Config struct {
 	RetryInterval      time.Duration `env:"RETRY_INTERVAL"`
 }
 
-func Open(ctx context.Context, cfg Config, opts ...Option) (*opensearch.Client, error)
+func Open(ctx context.Context, opts ...Option) (*opensearch.Client, error)
 func Close(c *opensearch.Client, log *slog.Logger)                 // idles transport; mostly a no-op
 func Healthcheck(c *opensearch.Client) func(context.Context) error // cluster health / info closure
 
 // Options (same shape as postgres)
+func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
 func WithClientConfig(fn func(*opensearch.Config)) Option // escape hatch: custom transport/TLS
 ```
@@ -431,8 +444,8 @@ These are thin connection-convenience wrappers, so real-server integration tests
 exercise the *driver*, not forge code — low ROI. The plan reflects that:
 
 - **Pure black-box unit tests** (always run under `just test`, no server, no Docker):
-  `DefaultConfig` values; `Validate` accept/reject matrix; option wiring including
-  last-write-wins ordering and nil-argument rejection; error sentinel mapping; **the
+  `DefaultConfig` values; `Validate` accept/reject matrix; option wiring (`WithConfig` sets
+  the block, the escape hatch runs last, nil args rejected); error sentinel mapping; **the
   connect-retry loop** pointed at an unreachable address with tiny timeouts, asserting
   attempt count, `ErrConnect` wrapping, and `ctx`-cancellation mid-backoff. Env-tag
   presence verified by reflection (the `httpserver` config-tag test pattern).
