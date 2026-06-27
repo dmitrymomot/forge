@@ -120,7 +120,19 @@ func openTestPool(t *testing.T, dsn string) *pgxpool.Pool {
 	t.Helper()
 	cfg := postgres.DefaultConfig()
 	cfg.URL = dsn
-	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))
+	pool, err := postgres.Open(context.Background(),
+		postgres.WithConfig(cfg),
+		postgres.WithPoolConfig(func(pc *pgxpool.Config) {
+			// Run every transaction on this pool at SERIALIZABLE so the concurrent
+			// read-then-write in TestWithTxRetry_RetriesOnSerializationFailure actually
+			// raises SQLSTATE 40001 and exercises WithTxRetry's retry loop. (pgx
+			// initializes RuntimeParams during ParseConfig, but guard against nil.)
+			if pc.ConnConfig.RuntimeParams == nil {
+				pc.ConnConfig.RuntimeParams = map[string]string{}
+			}
+			pc.ConnConfig.RuntimeParams["default_transaction_isolation"] = "serializable"
+		}),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { postgres.Close(pool, nil) })
 	return pool
