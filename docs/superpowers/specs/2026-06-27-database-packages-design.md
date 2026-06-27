@@ -35,7 +35,7 @@ func main() {
 
 	pool, err := postgres.Open(ctx, cfg,
 		postgres.WithLogger(logger),
-		postgres.WithMigrator(migration.New(migrationsFS).Up), // run on app start
+		postgres.WithMigrator(migration.New(migrationsFS)), // up-migrate on app start
 	)
 	if err != nil {
 		logger.Error("db open failed", "err", err)
@@ -242,11 +242,17 @@ func Healthcheck(pool *pgxpool.Pool) func(context.Context) error
 func Shutdown(pool *pgxpool.Pool) func(context.Context) error
 func NewService(pool *pgxpool.Pool, opts ...ServiceOption) Service
 
+// Migrator is the one-method seam to migration (structural; postgres does not import it).
+// *migration.Migrator satisfies it, so WithMigrator(migration.New(fsys)) just works.
+type Migrator interface {
+	Up(ctx context.Context, db *sql.DB) error
+}
+
 // Options
 func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
-func WithPoolConfig(fn func(*pgxpool.Config)) Option              // escape hatch for advanced tuning
-func WithMigrator(run func(ctx context.Context, db *sql.DB) error) Option
+func WithPoolConfig(fn func(*pgxpool.Config)) Option // escape hatch for advanced tuning
+func WithMigrator(m Migrator) Option                 // runs m.Up after connect; nil is rejected
 
 // Transaction helper
 func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error
@@ -258,49 +264,59 @@ rolls back then re-panics on panic (the old wrapper's semantics, preserved).
 ## Package: `migration`
 
 Goose-backed, operating purely on `*sql.DB` and `io/fs`. Knows nothing about pgx.
+Deliberately **up-only** — it applies all pending migrations and nothing else. There is no
+`Down`/`Version`/`Status`/`reset`/`redo`/step API; rollbacks and inspection are done with
+the `goose` CLI against the same table, out of band. This is the whole package surface:
 
 ```go
 func New(fsys fs.FS, opts ...Option) *Migrator
 
-func (m *Migrator) Up(ctx context.Context, db *sql.DB) error       // matches postgres.WithMigrator
-func (m *Migrator) Down(ctx context.Context, db *sql.DB) error
-func (m *Migrator) Version(ctx context.Context, db *sql.DB) (int64, error)
-func (m *Migrator) Status(ctx context.Context, db *sql.DB) ([]MigrationStatus, error)
+func (m *Migrator) Up(ctx context.Context, db *sql.DB) error // apply all pending migrations
 
-// Options
-func WithTable(name string) Option    // default "schema_migrations"
-func WithDir(dir string) Option       // default "." (root of fsys)
-func WithDialect(d string) Option     // default "postgres"
+// Options (minimal)
+func WithTable(name string) Option    // goose version table; default "schema_migrations"
 func WithLogger(l *slog.Logger) Option
 ```
+
+Dialect is fixed to Postgres (the framework's declared database), so there is no dialect
+option. Migrations live at the root of `fsys`; embed a subdirectory with `fs.Sub` if
+needed (no `WithDir` knob).
 
 **Improvement over the old `pkg/db.Migrate`:** it used goose's *global* mutable state
 (`goose.SetBaseFS`, `goose.SetTableName`, `goose.SetDialect`) — unsafe for a library and
 non-reentrant. This package uses goose's instance-based **`Provider` API**
-(`goose.NewProvider(dialect, db, fsys, opts...)`), so each `Migrator` is self-contained
-and two of them never clobber each other.
+(`goose.NewProvider(goose.DialectPostgres, db, fsys, goose.WithTableName(...))` then
+`provider.Up(ctx)`), so each `Migrator` is self-contained and two of them never clobber
+each other.
 
 `migration` deliberately exposes no pgx and no pool. The pgx → `*sql.DB` bridge is the
-*caller's* concern, performed by `postgres.WithMigrator`.
+*caller's* concern, performed by `postgres.WithMigrator`. `*Migrator` satisfies the
+one-method `postgres.Migrator` interface, so it is passed straight in.
 
 ## The migration seam (`postgres` ↔ `migration`)
 
-The two packages meet only at the function type `func(ctx context.Context, db *sql.DB) error`.
+The two packages meet only at the one-method interface `postgres.Migrator`
+(`Up(ctx, *sql.DB) error`), which `*migration.Migrator` satisfies structurally — so the
+`*Migrator` value is passed straight into `WithMigrator`, no `.Up`, no closure, and
+`postgres` never imports `migration`.
 
-`postgres.WithMigrator` stores the closure; inside `Open`, after the pool is live and
+`postgres.WithMigrator` stores the `Migrator`; inside `Open`, after the pool is live and
 pinged, it bridges with `stdlib.OpenDBFromPool(pool)` (from `github.com/jackc/pgx/v5/stdlib`)
-and invokes the closure with the resulting `*sql.DB`. **It must not `Close()` that
-`*sql.DB`** — `OpenDBFromPool` shares the pool's connections, and closing it would tear
-down the live pool (the old wrapper's warning, preserved). Migration failure closes the
-pool and returns the error, so a failed migration is a failed `Open`.
+and calls `m.Up` with the resulting `*sql.DB`. **It must not `Close()` that `*sql.DB`** —
+`OpenDBFromPool` shares the pool's connections, and closing it would tear down the live
+pool (the old wrapper's warning, preserved). Migration failure closes the pool and returns
+the error, so a failed migration is a failed `Open`.
 
 Result: `postgres` imports `pgx/v5/stdlib` (part of the already-sanctioned pgx
 dependency) but **not goose**; `migration` imports goose but **not pgx**. A consumer who
-wants neither migrations pays for neither.
+wants no migrations pays for neither.
 
 ```go
-m := migration.New(migrationsFS, migration.WithTable("schema_migrations"))
-pool, err := postgres.Open(ctx, cfg, postgres.WithMigrator(m.Up))
+pool, err := postgres.Open(ctx, cfg,
+	postgres.WithMigrator(migration.New(migrationsFS)))                       // defaults
+// or, overriding the version table:
+pool, err = postgres.Open(ctx, cfg,
+	postgres.WithMigrator(migration.New(migrationsFS, migration.WithTable("schema_migrations"))))
 ```
 
 ## Package: `redis` (Redis + Valkey)
@@ -412,7 +428,7 @@ exercise the *driver*, not forge code — low ROI. The plan reflects that:
   attempt count, `ErrConnect` wrapping, and `ctx`-cancellation mid-backoff. Env-tag
   presence verified by reflection (the `httpserver` config-tag test pattern).
 - **Optional env-gated smoke tests** for the real happy path (`Open` → `Healthcheck` →
-  `WithTx`/`WithTransaction` → `migration.Up`), `t.Skip`-ped when `FORGE_TEST_POSTGRES_DSN`
+  `WithTx`/`WithTransaction` → `migration.New(fsys).Up`), `t.Skip`-ped when `FORGE_TEST_POSTGRES_DSN`
   / `FORGE_TEST_REDIS_URL` / `FORGE_TEST_MONGO_URI` / `FORGE_TEST_OPENSEARCH_ADDR` is
   unset. CI may provide these via GitHub Actions **service containers**; they are never
   required for a green local `just test`.
