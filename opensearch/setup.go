@@ -130,7 +130,7 @@ func indexExists(ctx context.Context, api *osapi.Client, name string) (bool, err
 		return false, err
 	}
 	if resp == nil {
-		return false, nil
+		return false, errors.New("opensearch: index existence check returned no response and no error")
 	}
 	return resp.StatusCode >= 200 && resp.StatusCode < 300, nil
 }
