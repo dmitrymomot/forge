@@ -1,0 +1,31 @@
+package opensearch_test
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+
+	osgo "github.com/opensearch-project/opensearch-go/v4"
+	"github.com/stretchr/testify/assert"
+
+	forgeos "github.com/dmitrymomot/forge/opensearch"
+)
+
+func TestIsNotFound(t *testing.T) {
+	// opensearch-go v4 parses api errors into *StructError / *StringError, each
+	// carrying Status. A 404 in either shape must classify as not-found, including
+	// when wrapped by fmt.Errorf.
+	structErr := &osgo.StructError{Status: 404}
+	stringErr := &osgo.StringError{Status: 404, Err: "no such index"}
+
+	assert.True(t, forgeos.IsNotFound(structErr))
+	assert.True(t, forgeos.IsNotFound(stringErr))
+	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", structErr)))
+	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", stringErr)))
+
+	// Non-404 statuses and unrelated errors are not not-found.
+	assert.False(t, forgeos.IsNotFound(&osgo.StructError{Status: 500}))
+	assert.False(t, forgeos.IsNotFound(&osgo.StringError{Status: 403, Err: "forbidden"}))
+	assert.False(t, forgeos.IsNotFound(errors.New("connection refused")))
+	assert.False(t, forgeos.IsNotFound(nil))
+}
