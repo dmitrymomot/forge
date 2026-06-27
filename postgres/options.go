@@ -9,10 +9,10 @@ import (
 
 // config holds resolved settings for a single Open. The embedded Config carries
 // serializable data; the remaining fields are non-serializable code values.
-// (PG-6 adds a `migrator Migrator` field here alongside the Migrator type.)
 type config struct {
 	logger     *slog.Logger
 	poolConfig func(*pgxpool.Config)
+	migrator   Migrator
 	errs       []error
 	Config
 }
@@ -37,6 +37,20 @@ func WithLogger(l *slog.Logger) Option {
 			return
 		}
 		c.logger = l
+	}
+}
+
+// WithMigrator registers a Migrator that Open runs after the pool is live and
+// pinged but before Open returns. A failed migration fails Open. A nil Migrator is
+// rejected (ErrInvalidConfig). Pass migration.New(fsys) directly — *migration.Migrator
+// satisfies the Migrator interface.
+func WithMigrator(m Migrator) Option {
+	return func(c *config) {
+		if m == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithMigrator received a nil Migrator", ErrInvalidConfig))
+			return
+		}
+		c.migrator = m
 	}
 }
 

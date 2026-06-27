@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // maxRetryBackoff caps the exponential wait between connect attempts so a large
@@ -73,7 +74,16 @@ func Open(ctx context.Context, opts ...Option) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	// Migrator wiring is added in PG-6.
+	if cfg.migrator != nil {
+		// OpenDBFromPool shares the pool's connections; the *sql.DB must NOT be
+		// closed or it would tear down the live pool. A failed migration is a failed
+		// Open, so we close the pool and surface the error.
+		sqlDB := stdlib.OpenDBFromPool(pool)
+		if err := cfg.migrator.Up(ctx, sqlDB); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("postgres: migrate: %w", err)
+		}
+	}
 
 	return pool, nil
 }
