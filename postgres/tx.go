@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -104,12 +103,8 @@ func WithTxRetry(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error,
 	return lastErr
 }
 
-// isSerializationFailure reports whether err carries SQLSTATE 40001 (serialization
-// failure) or 40P01 (deadlock detected) — the two retryable transaction codes.
+// isSerializationFailure delegates to the public predicate so the retry loop and
+// classification helpers share one SQLSTATE definition.
 func isSerializationFailure(err error) bool {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "40001" || pgErr.Code == "40P01"
+	return IsSerializationFailure(err)
 }
