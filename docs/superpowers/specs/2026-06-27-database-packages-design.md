@@ -7,24 +7,25 @@
   (mongo-driver/v2), `redis` (go-redis/v9, Valkey-compatible), `opensearch`
   (opensearch-go/v4), and `migration` (goose/v3 over the stdlib `*sql.DB` seam). Each
   connectivity package applies one shared convention — `Config` + `DefaultConfig` +
-  `Validate`, code-only functional options, `Open` with connect-retry, a `Healthcheck`
-  closure, a `Shutdown` closure, and a supervised health-monitor `Service` — and returns
-  the **native driver client**. No ORM, no query builder, no row scanning, no
-  cross-backend abstraction. Each driver dependency is confined to its own package.
+  `Validate`, code-only functional options, and just three lifecycle helpers: `Open`
+  (with connect-retry), `Close(client, logger)`, and a `Healthcheck` ping closure — and
+  returns the **native driver client**. No `supervisor.Service` adapter, no ORM, no query
+  builder, no row scanning, no cross-backend abstraction. Each driver dependency is
+  confined to its own package.
 
 ## Overview
 
 These packages do one thing: turn a `Config` (typically loaded from the environment)
 into a live, pooled, health-checkable driver client with production-sane defaults,
 bounded startup retry, and clean shutdown — then get out of the way. They are the
-data-layer analogue of `httpserver`: a thin, well-tested "port" around a hardened
+data-layer analogue of `httpserver`: a thin, well-tested helper around a hardened
 third-party client, exposing forge's house conventions (`Config`/`Validate`, options,
-sentinel errors, structural `supervisor.Service`) without hiding the client underneath.
+sentinel errors) without hiding the client underneath.
 
 A consumer calls `Open`, uses the returned `*pgxpool.Pool` / `*mongo.Client` /
-`*redis.Client` / `*opensearch.Client` directly with the full driver API, registers
-`Healthcheck(client)` on a health endpoint, optionally hands `NewService(client)` to the
-supervisor as a liveness probe, and `defer`s `Shutdown(client)` for ordered close.
+`*redis.Client` / `*opensearch.Client` directly with the full driver API, hands
+`Healthcheck(client)` to its readiness probe, and `defer`s `Close(client, logger)` for
+ordered shutdown.
 
 ```go
 func main() {
@@ -41,11 +42,11 @@ func main() {
 		logger.Error("db open failed", "err", err)
 		os.Exit(1)
 	}
-	defer postgres.Shutdown(pool)(context.Background()) // closes AFTER Run returns
+	defer postgres.Close(pool, logger) // logs + closes AFTER Run returns
 
 	err = supervisor.Run(ctx,
+		// routes wires postgres.Healthcheck(pool) — func(ctx) error — into /readyz
 		supervisor.WithService(httpserver.New(routes(pool))),
-		supervisor.WithService(postgres.NewService(pool)), // liveness probe
 	)
 	if err != nil {
 		logger.Error("shutdown", "err", err)
@@ -80,20 +81,18 @@ Three structural rules, all inherited from existing forge packages:
    `forge/postgres` is the deliberate act of taking the pgx dependency; nothing else in
    the framework pulls it in. This is the `logger/sentry` isolation pattern applied at
    the top level (the package *is* the boundary). The rest of forge stays driver-free.
-2. **No package imports `supervisor`.** `supervisor.Service` is a two-method structural
-   interface (`Name() string` + `Run(ctx context.Context) error`). `NewService` returns a
-   concrete type that satisfies it by shape, exactly as `render` satisfies templ's
-   `Component` without importing templ. Zero coupling; the consumer wires it to
-   `supervisor.Run`.
+2. **No package imports `supervisor`.** The connectivity packages open and close *resources*,
+   not long-running services. A pool is opened in `main` and closed with `defer Close(...)`;
+   it is not wrapped as a `supervisor.Service`. So these packages have no relationship to
+   `supervisor` at all — they are plain constructors plus three lifecycle helpers.
 3. **No shared base package (yet).** The convention below is *copied* into each
    connectivity package rather than factored into a `dataconn` helper. This follows the
    framework's standing decision to defer a shared base until 2–3 real implementations
-   exist and duplication actually hurts. The connect-retry loop (~15 lines) and the
-   `Service` monitor are the only real candidates for later extraction; the spec flags
-   them but does not build them.
+   exist and duplication actually hurts. The connect-retry loop (~15 lines) is the only
+   real candidate for later extraction; the spec flags it but does not build it.
 
 `migration` is independent of all four connectivity packages and of pgx — it operates on
-the stdlib `*sql.DB` interface. It meets `postgres` only at a function-value seam
+the stdlib `*sql.DB` interface. It meets `postgres` only at a one-method interface seam
 (below). It is forge's goose-isolation boundary.
 
 ## The shared convention (identical shape in `postgres`, `mongo`, `redis`, `opensearch`)
@@ -120,11 +119,12 @@ func (c Config) Validate() error { ... }
 
 ### Options (code-only values)
 
-`Option func(*options)` for non-serializable values: `WithConfig(cfg)` (set the whole
-serializable block; place first so later `WithX` convenience options win), `WithLogger`,
-and per-package code options (`WithMigrator`, `WithPoolConfig`, `WithTLSConfig`, …). Nil
-function/pointer arguments are rejected into an accumulated error surfaced by `Open`
-(the `httpserver` option-error pattern).
+`Option func(*options)` for non-serializable values: `WithLogger` and per-package code
+options (`WithMigrator`, `WithPoolConfig`, `WithTLSConfig`, …). There is **no `WithConfig`**
+— `cfg` is already the positional second argument to `Open`, so an option to set it again
+would be redundant (this differs from `httpserver`, whose `New(handler, opts...)` has no
+positional cfg). Nil function/pointer arguments are rejected into an accumulated error
+surfaced by `Open` (the `httpserver` option-error pattern).
 
 ### `Open`
 
@@ -152,39 +152,32 @@ ceiling (mild improvement over the old wrapper's linear `(i+1)·interval`), hono
 attempt with no wait. This is the one piece of genuinely testable logic that needs no
 real server (point it at an unreachable address with short timeouts).
 
-### `Healthcheck`
+### `Healthcheck` — ping closure for readiness
 
 ```go
 func Healthcheck(client *Client) func(ctx context.Context) error
 ```
 
-Returns a closure that pings the backend and wraps failure in `ErrHealthcheck`. Suitable
-for a `func(context.Context) error` health endpoint. Stateless; safe to call repeatedly.
+Returns a closure that pings the backend (wrapping failure in `ErrHealthcheck`) — the
+exact `func(context.Context) error` shape a readiness/liveness probe wants. Hand it to the
+app's `/readyz` handler; it is stateless and safe to call on every probe.
 
-### `Shutdown` — the lifecycle closer
-
-```go
-func Shutdown(client *Client) func(ctx context.Context) error
-```
-
-Returns a closure that closes the client/pool. **This is the package's ordered-shutdown
-mechanism**, used as `defer Shutdown(client)(context.Background())` so it runs *after*
-`supervisor.Run` returns — i.e., after every service has drained. See the next section
-for why this, and not the `Service`, owns close.
-
-### `NewService` — a supervised liveness probe (NOT a closer)
+### `Close` — log-and-close lifecycle helper
 
 ```go
-func NewService(client *Client, opts ...ServiceOption) Service // structurally a supervisor.Service
+func Close(client *Client, log *slog.Logger)
 ```
 
-`Run(ctx)` pings the backend every `WithPingInterval` (default 30s). It returns `nil` on
-`ctx` cancellation (a clean stop), and returns an `ErrHealthcheck`-wrapped error after
-`WithFailureThreshold` (default 3) consecutive ping failures — tripping supervisor's
-first-exit-stops-all so a process manager restarts the app against a dead backend.
-`Name()` defaults to the package name, overridable with `WithName`. It does **not** close
-the client. An opt-in `WithCloseOnStop(true)` closes on stop for standalone cases where
-nothing else shares the client (documented foot-gun; off by default).
+Logs a single "closing …" line and closes the client/pool. Used as
+`defer Close(client, logger)` in `main`, so it runs *after* `supervisor.Run` returns —
+i.e., after the HTTP server and every worker have drained, which is the only point at
+which closing is guaranteed not to race in-flight work (see next section). A nil logger is
+tolerated (close still happens; the log line is skipped). It takes no `ctx` because the
+underlying client closes are synchronous and unconditional.
+
+That is the **entire lifecycle surface** — `Open`, `Close`, `Healthcheck`. There is no
+`supervisor.Service` adapter: a connection pool is a resource managed by `main`, not a
+supervised unit of work.
 
 ### Errors, docs, tests
 
@@ -193,28 +186,21 @@ per-package ones), all `errors.Is`-matchable, single-line, no embedded blobs. `d
 carries the package doc with the env-var table and runnable examples. Tests are
 black-box (`package postgres_test`).
 
-## Lifecycle & shutdown ordering (the decisive design point)
+## Lifecycle & shutdown ordering
 
 `supervisor.Run`, on shutdown, cancels **all** services' contexts at once and drains them
-**in parallel** — there is no ordering or phasing. Therefore a DB `Service` that called
-`Close()` on its own `ctx.Done()` would race a still-draining `httpserver` and **kill
-in-flight queries** mid-request. The only code guaranteed to run *after* every service has
-drained is code that runs *after* `supervisor.Run` returns.
+**in parallel** — there is no ordering or phasing. So the pool must outlive the drain: if
+anything closed it mid-shutdown, a still-draining `httpserver` could lose **in-flight
+queries** mid-request. The clean guarantee is structural — `defer Close(pool, logger)` in
+`main` runs only *after* `supervisor.Run` returns, i.e. after the HTTP server and every
+worker have finished draining. Closing the pool last therefore needs no machinery: it
+falls out of ordinary `defer` ordering, which is exactly why the connectivity packages
+ship **no `supervisor.Service` adapter** and model the client as a `main`-owned resource.
 
-This dictates the split:
-
-- **`Shutdown(client)` via `defer` is the closer.** Placed in `main` after `Open`, it
-  fires when `supervisor.Run` has already returned — i.e., after the HTTP server and all
-  workers finished draining. Close-after-drain is guaranteed.
-- **`NewService(client)` is a liveness probe, not a closer.** It observes health and
-  fails fast on a dead backend, but leaves the client open so dependents can drain. This
-  is the role a peer service can fulfill *correctly* under parallel shutdown.
-
-`WithCloseOnStop(true)` exists for the genuinely standalone case (a one-off job that owns
-its client and shares it with nobody), where the drain race cannot occur.
-
-This was confirmed during design over the simpler "Service owns Close" model precisely to
-avoid the in-flight-query race.
+(An earlier draft modeled each pool as a supervised liveness probe; it was dropped — the
+probe is generic, not per-DB, and the bulk of its value, "restart on a dead backend," is a
+~5-line `supervisor.WithServiceFunc` over `Healthcheck(pool)` the consumer writes if and
+when they want it.)
 
 ## Package: `postgres`
 
@@ -238,9 +224,8 @@ func DefaultConfig() Config // MaxConns 10, MinConns 2, MaxConnLifetime 30m,
                             // MaxConnIdleTime 10m, HealthCheckPeriod 1m,
                             // ConnectTimeout 5s, RetryAttempts 3, RetryInterval 1s
 func Open(ctx context.Context, cfg Config, opts ...Option) (*pgxpool.Pool, error)
-func Healthcheck(pool *pgxpool.Pool) func(context.Context) error
-func Shutdown(pool *pgxpool.Pool) func(context.Context) error
-func NewService(pool *pgxpool.Pool, opts ...ServiceOption) Service
+func Close(pool *pgxpool.Pool, log *slog.Logger)                 // log + pool.Close()
+func Healthcheck(pool *pgxpool.Pool) func(context.Context) error // pool.Ping closure for /readyz
 
 // Migrator is the one-method seam to migration (structural; postgres does not import it).
 // *migration.Migrator satisfies it, so WithMigrator(migration.New(fsys)) just works.
@@ -249,17 +234,21 @@ type Migrator interface {
 }
 
 // Options
-func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
-func WithPoolConfig(fn func(*pgxpool.Config)) Option // escape hatch for advanced tuning
+func WithPoolConfig(fn func(*pgxpool.Config)) Option // escape hatch: tracers/hooks/anything not in Config
 func WithMigrator(m Migrator) Option                 // runs m.Up after connect; nil is rejected
 
 // Transaction helper
 func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error
 ```
 
-`WithTx` begins a transaction, runs `fn`, commits on success, rolls back on error, and
-rolls back then re-panics on panic (the old wrapper's semantics, preserved).
+The whole package is `Open` / `Close` / `Healthcheck` / `WithTx` plus the migrator seam —
+everything pgx already does well (pooling, `Ping`, `Close`, DSN parsing) is left to pgx.
+`WithPoolConfig` runs last in `Open` (after the `Config` overlay), so it is the final
+escape hatch for anything the `Config` fields don't cover — a query tracer, `AfterConnect`
+hooks, a custom TLS config. `WithTx` begins a transaction, runs `fn`, commits on success,
+rolls back on error, and rolls back then re-panics on panic (the old wrapper's semantics,
+preserved).
 
 ## Package: `migration`
 
@@ -342,9 +331,8 @@ type Config struct {
 }
 
 func Open(ctx context.Context, cfg Config, opts ...Option) (*redis.Client, error)
-func Healthcheck(c *redis.Client) func(context.Context) error // PING
-func Shutdown(c *redis.Client) func(context.Context) error    // Close
-func NewService(c *redis.Client, opts ...ServiceOption) Service
+func Close(c *redis.Client, log *slog.Logger)                 // log + c.Close()
+func Healthcheck(c *redis.Client) func(context.Context) error // PING closure
 ```
 
 No SQL-style transaction helper (callers use go-redis `TxPipeline`/`Watch` directly).
@@ -367,18 +355,19 @@ type Config struct {
 }
 
 func Open(ctx context.Context, cfg Config, opts ...Option) (*mongo.Client, error)
-func Healthcheck(c *mongo.Client) func(context.Context) error // Ping(readpref.Primary)
-func Shutdown(c *mongo.Client) func(context.Context) error    // Disconnect
-func NewService(c *mongo.Client, opts ...ServiceOption) Service
+func Close(c *mongo.Client, log *slog.Logger)                 // log + c.Disconnect(ctx)
+func Healthcheck(c *mongo.Client) func(context.Context) error // Ping(readpref.Primary) closure
 
 // Transaction helper (requires a replica set / mongos — documented)
 func WithTransaction(ctx context.Context, c *mongo.Client, fn func(ctx context.Context) error) error
 ```
 
-`WithTransaction` runs `fn` inside a session via the driver's `WithTransaction`, which
-commits on success and aborts on error. It is documented as requiring a replica set
-(MongoDB's transaction precondition), so it returns the driver's error verbatim on a
-standalone server rather than pretending.
+`mongo.Client.Disconnect` takes a `ctx`, but `Close` keeps the uniform no-`ctx`
+signature by disconnecting under a short internal bounded context (so a wedged shutdown
+can't hang forever). `WithTransaction` runs `fn` inside a session via the driver's
+`WithTransaction`, which commits on success and aborts on error. It is documented as
+requiring a replica set (MongoDB's transaction precondition), so it returns the driver's
+error verbatim on a standalone server rather than pretending.
 
 ## Package: `opensearch`
 
@@ -398,14 +387,13 @@ type Config struct {
 }
 
 func Open(ctx context.Context, cfg Config, opts ...Option) (*opensearch.Client, error)
-func Healthcheck(c *opensearch.Client) func(context.Context) error // cluster health / info request
-func Shutdown(c *opensearch.Client) func(context.Context) error    // no-op close; returns nil (HTTP client)
-func NewService(c *opensearch.Client, opts ...ServiceOption) Service
+func Close(c *opensearch.Client, log *slog.Logger)                 // idles transport; mostly a no-op
+func Healthcheck(c *opensearch.Client) func(context.Context) error // cluster health / info closure
 ```
 
-`opensearch.Client` is HTTP-based with no long-lived sockets to close, so `Shutdown`
-returns a closure that idles transport connections and returns `nil` — kept for
-surface-symmetry across the four packages.
+`opensearch.Client` is HTTP-based with no long-lived sockets to close, so `Close` just
+idles transport connections (and logs) — kept for surface-symmetry across the four
+packages so every backend reads `Open` / `Close` / `Healthcheck`.
 
 ## Errors convention
 
@@ -423,7 +411,7 @@ exercise the *driver*, not forge code — low ROI. The plan reflects that:
 
 - **Pure black-box unit tests** (always run under `just test`, no server, no Docker):
   `DefaultConfig` values; `Validate` accept/reject matrix; option wiring including
-  `WithConfig` precedence and nil-argument rejection; error sentinel mapping; **the
+  last-write-wins ordering and nil-argument rejection; error sentinel mapping; **the
   connect-retry loop** pointed at an unreachable address with tiny timeouts, asserting
   attempt count, `ErrConnect` wrapping, and `ctx`-cancellation mid-backoff. Env-tag
   presence verified by reflection (the `httpserver` config-tag test pattern).
@@ -450,8 +438,8 @@ latest at design time:
 
 `pgx` was already the framework's one sanctioned DB dependency; the other four extend the
 "buy the wire, build the ergonomics" rule to the remaining backends, each behind its own
-import boundary. No package imports `supervisor` (structural `Service`). `testify` remains
-test-only.
+import boundary. No package imports `supervisor` — the pools are `main`-owned resources,
+not services. `testify` remains test-only.
 
 ## Build order
 
@@ -483,9 +471,13 @@ Each after the first is a near-mechanical application of the established pattern
 
 ## Open questions / future
 
-- **Retry-loop / Service-monitor extraction** — if the copied connect-retry and the
-  health-monitor `Service` turn out byte-identical across all four, extract a tiny
-  internal helper *after* the fourth lands, not before.
+- **Retry-loop extraction** — if the copied connect-retry loop turns out byte-identical
+  across all four packages, extract a tiny internal helper *after* the fourth lands, not
+  before.
+- **Generic liveness probe** — if "restart the app when a backend dies" is wanted as more
+  than a hand-written `supervisor.WithServiceFunc`, a single DB-agnostic probe (wrapping
+  any `Healthcheck`-style `func(ctx) error`) belongs in a future shared package, not in
+  each connectivity package.
 - **`redis` UniversalClient** — revisit if cluster/sentinel demand appears.
 - **Naming collisions** — `redis`, `mongo`, `opensearch` share their package names with
   the underlying drivers; a consumer importing both forge's package and the driver's
