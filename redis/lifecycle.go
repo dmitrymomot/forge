@@ -8,8 +8,9 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// Close logs a single "closing redis client" line (when log is non-nil) and closes
-// the client. It is the defer helper used in main — `defer Close(client, logger)` —
+// Close announces intent by logging "closing redis client" (when log is non-nil),
+// then closes the client. On close error it additionally logs an error line.
+// It is the defer helper used in main — `defer Close(client, logger)` —
 // so it runs after supervisor.Run returns, once in-flight work has drained. It takes
 // no context because the driver's Close is synchronous. A nil client and/or a nil
 // logger are tolerated: the log line is skipped and no close is attempted on nil.
@@ -17,14 +18,11 @@ func Close(c goredis.UniversalClient, log *slog.Logger) {
 	if c == nil {
 		return
 	}
-	if err := c.Close(); err != nil {
-		if log != nil {
-			log.Error("redis client close failed", "err", err)
-		}
-		return
-	}
 	if log != nil {
 		log.Info("closing redis client")
+	}
+	if err := c.Close(); err != nil && log != nil {
+		log.Error("redis client close failed", "err", err)
 	}
 }
 
