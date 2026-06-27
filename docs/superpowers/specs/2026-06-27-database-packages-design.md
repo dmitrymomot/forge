@@ -119,12 +119,16 @@ func (c Config) Validate() error { ... }
 
 ### Options (code-only values)
 
-`Option func(*options)` for non-serializable values: `WithLogger` and per-package code
-options (`WithMigrator`, `WithPoolConfig`, `WithTLSConfig`, …). There is **no `WithConfig`**
-— `cfg` is already the positional second argument to `Open`, so an option to set it again
-would be redundant (this differs from `httpserver`, whose `New(handler, opts...)` has no
-positional cfg). Nil function/pointer arguments are rejected into an accumulated error
-surfaced by `Open` (the `httpserver` option-error pattern).
+Every package ships the same two: `WithLogger(*slog.Logger)` and a single **native-config
+escape hatch** — `WithPoolConfig(func(*pgxpool.Config))` (postgres),
+`WithOptions(func(*redis.Options))` (redis), `WithClientOptions(func(*options.ClientOptions))`
+(mongo), `WithClientConfig(func(*opensearch.Config))` (opensearch) — which runs **last** in
+`Open`, after the `Config` overlay, so anything the serializable fields don't cover (TLS,
+tracers, connect hooks, custom dialers) stays reachable. `postgres` adds `WithMigrator`.
+There is **no `WithConfig`** — `cfg` is already the positional second argument to `Open`, so
+an option to set it again would be redundant (this differs from `httpserver`, whose
+`New(handler, opts...)` has no positional cfg). Nil function/pointer arguments are rejected
+into an accumulated error surfaced by `Open` (the `httpserver` option-error pattern).
 
 ### `Open`
 
@@ -333,9 +337,16 @@ type Config struct {
 func Open(ctx context.Context, cfg Config, opts ...Option) (*redis.Client, error)
 func Close(c *redis.Client, log *slog.Logger)                 // log + c.Close()
 func Healthcheck(c *redis.Client) func(context.Context) error // PING closure
+
+// Options (same shape as postgres)
+func WithLogger(l *slog.Logger) Option
+func WithOptions(fn func(*redis.Options)) Option // escape hatch: TLS, hooks, anything not in Config
 ```
 
-No SQL-style transaction helper (callers use go-redis `TxPipeline`/`Watch` directly).
+Same three-helper lifecycle as `postgres`. `WithOptions` is redis's `WithPoolConfig`
+analogue — it runs last in `Open` (after `redis.ParseURL` + the `Config` overlay) so it can
+reach anything the fields don't (`TLSConfig`, `OnConnect`, a custom dialer). No SQL-style
+transaction helper (callers use go-redis `TxPipeline`/`Watch` directly).
 
 ## Package: `mongo`
 
@@ -357,6 +368,10 @@ type Config struct {
 func Open(ctx context.Context, cfg Config, opts ...Option) (*mongo.Client, error)
 func Close(c *mongo.Client, log *slog.Logger)                 // log + c.Disconnect(ctx)
 func Healthcheck(c *mongo.Client) func(context.Context) error // Ping(readpref.Primary) closure
+
+// Options (same shape as postgres)
+func WithLogger(l *slog.Logger) Option
+func WithClientOptions(fn func(*options.ClientOptions)) Option // escape hatch: driver options
 
 // Transaction helper (requires a replica set / mongos — documented)
 func WithTransaction(ctx context.Context, c *mongo.Client, fn func(ctx context.Context) error) error
@@ -389,11 +404,17 @@ type Config struct {
 func Open(ctx context.Context, cfg Config, opts ...Option) (*opensearch.Client, error)
 func Close(c *opensearch.Client, log *slog.Logger)                 // idles transport; mostly a no-op
 func Healthcheck(c *opensearch.Client) func(context.Context) error // cluster health / info closure
+
+// Options (same shape as postgres)
+func WithLogger(l *slog.Logger) Option
+func WithClientConfig(fn func(*opensearch.Config)) Option // escape hatch: custom transport/TLS
 ```
 
-`opensearch.Client` is HTTP-based with no long-lived sockets to close, so `Close` just
-idles transport connections (and logs) — kept for surface-symmetry across the four
-packages so every backend reads `Open` / `Close` / `Healthcheck`.
+Same three-helper lifecycle as `postgres`; `WithClientConfig` is the `WithPoolConfig`
+analogue (it runs last over the `Config`-built `opensearch.Config`, before
+`opensearch.NewClient`). `opensearch.Client` is HTTP-based with no long-lived sockets to
+close, so `Close` just idles transport connections (and logs) — kept for surface-symmetry
+so every backend reads `Open` / `Close` / `Healthcheck`.
 
 ## Errors convention
 
