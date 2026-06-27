@@ -255,7 +255,7 @@ git add postgres/ go.mod go.sum && git commit -m "feat(postgres): add Config, De
 
 **Interfaces:**
 - Produces: `postgres.Option`; `WithConfig(Config) Option`; `WithLogger(*slog.Logger) Option`; `WithPoolConfig(func(*pgxpool.Config)) Option`; `Open(ctx, ...Option) (*pgxpool.Pool, error)`.
-- Internal: lowercase `config` struct embedding `Config` plus `logger *slog.Logger`, `poolConfig func(*pgxpool.Config)`, `migrator Migrator`, `errs []error`. (`migrator` field is declared now and wired in PG-6.)
+- Internal: lowercase `config` struct embedding `Config` plus `logger *slog.Logger`, `poolConfig func(*pgxpool.Config)`, `errs []error`. (The `migrator` field and the `Migrator` type are added together in PG-6 — do NOT reference `Migrator` here, it does not exist yet.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -410,10 +410,10 @@ import (
 
 // config holds resolved settings for a single Open. The embedded Config carries
 // serializable data; the remaining fields are non-serializable code values.
+// (PG-6 adds a `migrator Migrator` field here alongside the Migrator type.)
 type config struct {
 	logger     *slog.Logger
 	poolConfig func(*pgxpool.Config)
-	migrator   Migrator
 	errs       []error
 	Config
 }
@@ -1258,7 +1258,19 @@ type Migrator interface {
 }
 ```
 
-- [ ] **Step 4: Add `WithMigrator` to `postgres/options.go`**
+- [ ] **Step 4: Add the `migrator` field and `WithMigrator` to `postgres/options.go`**
+
+First add the `migrator Migrator` field to the `config` struct (the `Migrator` type now exists from Step 3), so it becomes:
+```go
+type config struct {
+	logger     *slog.Logger
+	poolConfig func(*pgxpool.Config)
+	migrator   Migrator
+	errs       []error
+	Config
+}
+```
+Then add the option:
 ```go
 // WithMigrator registers a Migrator that Open runs after the pool is live and
 // pinged but before Open returns. A failed migration fails Open. A nil Migrator is
@@ -2719,6 +2731,13 @@ git add redis/ && git commit -m "docs(redis): add package doc with env-var table
 **Interfaces:**
 - Produces: `mongo.Config`; `DefaultConfig() Config`; `(Config) Validate() error`; sentinels `ErrInvalidConfig`/`ErrConnect`/`ErrHealthcheck`; unexported pure parsers `parseReadPreference`/`parseReadConcern`/`parseWriteConcern`.
 
+- [ ] **Step 0: Add the driver dependency** (required before this task's `config.go`, which imports the driver's readconcern/readpref/writeconcern subpackages)
+Run:
+```bash
+go get go.mongodb.org/mongo-driver/v2@v2.7.0
+```
+Expected: `go.mod`/`go.sum` updated with `go.mongodb.org/mongo-driver/v2 v2.7.0`. Include `go.mod`/`go.sum` in this task's commit.
+
 - [ ] **Step 1: Write the failing test**
 ```go
 package mongo_test
@@ -3050,7 +3069,7 @@ Run: `just test ./mongo/...`
 Expected: PASS
 - [ ] **Step 6: Commit**
 ```bash
-git add mongo/ && git commit -m "feat(mongo): add Config, DefaultConfig, Validate, concern parsers, sentinels"
+git add go.mod go.sum mongo/ && git commit -m "feat(mongo): add Config, DefaultConfig, Validate, concern parsers, sentinels"
 ```
 
 ---
@@ -3058,7 +3077,6 @@ git add mongo/ && git commit -m "feat(mongo): add Config, DefaultConfig, Validat
 ### Task MG-2: dependency, options, and `Open` (connect-retry)
 
 **Files:**
-- Modify: `go.mod` / `go.sum` (via `go get`)
 - Create: `mongo/options.go`
 - Create: `mongo/mongo.go`
 - Test: `mongo/options_test.go`
@@ -3067,12 +3085,7 @@ git add mongo/ && git commit -m "feat(mongo): add Config, DefaultConfig, Validat
 **Interfaces:**
 - Produces: internal `config` struct + `type Option func(*config)`; `WithConfig`/`WithLogger`/`WithClientOptions`; `Open(ctx, opts...) (*mongo.Client, error)`.
 
-- [ ] **Step 1: Add the driver dependency**
-Run:
-```bash
-go get go.mongodb.org/mongo-driver/v2@v2.7.0
-```
-Expected: `go.mod`/`go.sum` updated; module resolves.
+The driver dependency (`go.mongodb.org/mongo-driver/v2@v2.7.0`) was already added in MG-1 Step 0; no `go get` is needed here.
 
 - [ ] **Step 2: Write the failing tests**
 
