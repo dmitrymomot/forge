@@ -48,13 +48,13 @@ func Open(ctx context.Context, opts ...Option) (*mongodriver.Client, error) {
 	return client, nil
 }
 
-// buildClientOptions assembles *options.ClientOptions from Config. The concern
-// parsers are pure and were already accepted by Validate, but errors are still
-// checked defensively. Empty concern strings leave the driver defaults untouched.
-// ApplyURI is called LAST so that URI-encoded parameters (e.g. serverSelectionTimeoutMS)
-// take precedence over Config-derived values, acting as a fine-grained override.
+// buildClientOptions assembles *options.ClientOptions from Config. The connection
+// string is the base (ApplyURI runs first); non-zero Config fields override any
+// overlapping URI query-string parameters, matching the convention used by
+// postgres.Open. Empty concern strings leave the driver defaults untouched.
 func buildClientOptions(cfg Config) (*options.ClientOptions, error) {
-	o := options.Client()
+	// Connection string is the base; Config fields overlay it below.
+	o := options.Client().ApplyURI(cfg.URI)
 	o.SetMaxPoolSize(cfg.MaxPoolSize)
 	o.SetMinPoolSize(cfg.MinPoolSize)
 	if cfg.ConnectTimeout > 0 {
@@ -88,9 +88,6 @@ func buildClientOptions(cfg Config) (*options.ClientOptions, error) {
 	if wc != nil {
 		o.SetWriteConcern(wc)
 	}
-	// ApplyURI runs last so URI query-string params (e.g. serverSelectionTimeoutMS)
-	// override Config-derived values and act as a fine-grained escape hatch.
-	o.ApplyURI(cfg.URI)
 	return o, nil
 }
 
