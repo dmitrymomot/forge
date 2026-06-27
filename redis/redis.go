@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -35,6 +36,10 @@ func Open(ctx context.Context, opts ...Option) (goredis.UniversalClient, error) 
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
+	logger := c.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	uopts := buildOptions(c.Config)
 	if c.universalOptions != nil {
@@ -42,7 +47,7 @@ func Open(ctx context.Context, opts ...Option) (goredis.UniversalClient, error) 
 	}
 
 	client := goredis.NewUniversalClient(uopts)
-	if err := pingWithRetry(ctx, client, c.Config); err != nil {
+	if err := pingWithRetry(ctx, client, c.Config, logger); err != nil {
 		_ = client.Close()
 		return nil, err
 	}
@@ -53,7 +58,7 @@ func Open(ctx context.Context, opts ...Option) (goredis.UniversalClient, error) 
 // RetryInterval·2^attempt (capped at maxConnectBackoff) between tries and honoring
 // ctx cancellation during the wait. RetryAttempts <= 1 means a single attempt with no
 // wait. After exhausting attempts it returns ErrConnect joined with the last error.
-func pingWithRetry(ctx context.Context, client goredis.UniversalClient, cfg Config) error {
+func pingWithRetry(ctx context.Context, client goredis.UniversalClient, cfg Config, logger *slog.Logger) error {
 	attempts := max(cfg.RetryAttempts, 1)
 
 	var lastErr error
@@ -72,6 +77,12 @@ func pingWithRetry(ctx context.Context, client goredis.UniversalClient, cfg Conf
 			break
 		}
 		wait := backoff(cfg.RetryInterval, attempt)
+		logger.Warn("redis connect attempt failed; retrying",
+			slog.Int("attempt", attempt+1),
+			slog.Int("attempts", attempts),
+			slog.Duration("wait", wait),
+			slog.String("err", lastErr.Error()),
+		)
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():

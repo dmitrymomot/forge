@@ -41,6 +41,5 @@
 //
 // Options: WithTable sets the goose version table (default "schema_migrations");
 // WithLogger routes goose progress through an *slog.Logger. Errors wrap the
-// single-line sentinels ErrInvalidConfig and ErrMigrate and are matchable with
-// errors.Is.
+// single-line sentinel ErrMigrate and are matchable with errors.Is.
 package migration

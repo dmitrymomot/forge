@@ -83,7 +83,7 @@
 //	Env var                            Field                   Default
 //	-----------------------------------------------------------------------------
 //	URI                                URI                     "" (required)
-//	DATABASE                           Database                ""
+//	DATABASE                           Database                "" (consumer passthrough; Open does not apply it)
 //	READ_PREFERENCE                    ReadPreference          "" (driver default)
 //	READ_CONCERN                       ReadConcern             "" (driver default)
 //	WRITE_CONCERN                      WriteConcern            "" (driver default)

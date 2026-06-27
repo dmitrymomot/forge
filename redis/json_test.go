@@ -1,6 +1,7 @@
 package redis_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -42,7 +43,7 @@ func TestGetSetJSON_RoundTrip(t *testing.T) {
 	defer forgeredis.Close(c, slogDiscard())
 
 	key := fmt.Sprintf("forge:test:json:%d", time.Now().UnixNano())
-	t.Cleanup(func() { c.Del(t.Context(), key) })
+	t.Cleanup(func() { c.Del(context.Background(), key) })
 
 	want := jsonValue{Name: "forge", Count: 7}
 	require.NoError(t, forgeredis.SetJSON(t.Context(), c, key, want, time.Minute))

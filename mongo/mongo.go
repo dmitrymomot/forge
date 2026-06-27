@@ -33,6 +33,10 @@ func Open(ctx context.Context, opts ...Option) (*mongodriver.Client, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
+	logger := c.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	clientOpts, err := buildClientOptions(c.Config)
 	if err != nil {
@@ -42,7 +46,7 @@ func Open(ctx context.Context, opts ...Option) (*mongodriver.Client, error) {
 		c.clientOptions(clientOpts) // escape hatch runs LAST
 	}
 
-	client, err := connectWithRetry(ctx, c.Config, clientOpts)
+	client, err := connectWithRetry(ctx, c.Config, clientOpts, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +102,7 @@ func buildClientOptions(cfg Config) (*options.ClientOptions, error) {
 // leaks. The wait is RetryInterval·2^attempt capped at maxRetryBackoff and honors
 // ctx cancellation. After RetryAttempts it returns ErrConnect joined with the last
 // driver error. RetryAttempts <= 1 means a single attempt with no wait.
-func connectWithRetry(ctx context.Context, cfg Config, clientOpts *options.ClientOptions) (*mongodriver.Client, error) {
+func connectWithRetry(ctx context.Context, cfg Config, clientOpts *options.ClientOptions, logger *slog.Logger) (*mongodriver.Client, error) {
 	attempts := max(cfg.RetryAttempts, 1)
 
 	var lastErr error
@@ -123,6 +127,12 @@ func connectWithRetry(ctx context.Context, cfg Config, clientOpts *options.Clien
 			break
 		}
 		wait := backoff(cfg.RetryInterval, attempt)
+		logger.Warn("mongo connect attempt failed; retrying",
+			slog.Int("attempt", attempt+1),
+			slog.Int("attempts", attempts),
+			slog.Duration("wait", wait),
+			slog.String("err", lastErr.Error()),
+		)
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():

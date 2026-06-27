@@ -18,7 +18,7 @@ import (
 // drift from it). Field order is subject to the repo's betteralign tooling.
 type Config struct {
 	URI                    string        `env:"URI"`             // mongodb://… (required)
-	Database               string        `env:"DATABASE"`        // optional default db name
+	Database               string        `env:"DATABASE"`        // optional default db name; a passthrough the consumer reads (client.Database(cfg.Database)) — Open does NOT apply it
 	ReadPreference         string        `env:"READ_PREFERENCE"` // primary, primaryPreferred, secondary, secondaryPreferred, nearest
 	ReadConcern            string        `env:"READ_CONCERN"`    // local, majority, available, linearizable, snapshot
 	WriteConcern           string        `env:"WRITE_CONCERN"`   // majority, journaled, unacknowledged, or a w-number ("1", "2", …)
