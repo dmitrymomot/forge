@@ -118,7 +118,7 @@ func connectWithRetry(ctx context.Context, cfg Config, clientOpts *options.Clien
 		} else if err = client.Ping(ctx, readpref.Primary()); err != nil {
 			lastErr = err
 			// Disconnect the partially opened client under a short bounded context.
-			disconnect(client)
+			_ = disconnect(client)
 		} else {
 			return client, nil
 		}
@@ -157,12 +157,12 @@ func backoff(interval time.Duration, attempt int) time.Duration {
 	return wait
 }
 
-// disconnect tears down a client under a short bounded context, ignoring errors
-// (the caller is already on a failure path).
-func disconnect(client *mongodriver.Client) {
+// disconnect tears down a client under a short bounded context and returns any
+// error from Disconnect.
+func disconnect(client *mongodriver.Client) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = client.Disconnect(ctx)
+	return client.Disconnect(ctx)
 }
 
 // Close logs a single "closing mongo client" line and disconnects the underlying
@@ -179,9 +179,7 @@ func Close(db *mongodriver.Database, log *slog.Logger) {
 	if log != nil {
 		log.Info("closing mongo client")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.Client().Disconnect(ctx); err != nil && log != nil {
+	if err := disconnect(db.Client()); err != nil && log != nil {
 		log.Warn("mongo client disconnect failed", "err", err)
 	}
 }

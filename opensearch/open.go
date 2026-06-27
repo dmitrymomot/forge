@@ -79,6 +79,9 @@ func waitForCluster(ctx context.Context, base *osgo.Client, cfg Config, logger *
 
 	var lastErr error
 	for attempt := range attempts {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: %v", ErrConnect, errors.Join(err, lastErr))
+		}
 		if attempt > 0 {
 			wait := backoff(cfg.RetryInterval, attempt)
 			timer := time.NewTimer(wait)
@@ -135,9 +138,11 @@ func ping(ctx context.Context, base *osgo.Client, timeout time.Duration) error {
 // function, so a throwaway api client is built and its base swapped out; every
 // typed call routes through apiClient.Client.Do.
 func apiFor(base *osgo.Client) *osapi.Client {
-	api, err := osapi.NewClient(osapi.Config{Client: osgo.Config{Addresses: []string{"http://localhost:9200"}}})
+	// TODO: opensearch-go v4 exposes no public "wrap an existing client" call, so we
+	// build a throwaway api client and swap its .Client field. The placeholder address
+	// (port 0, never client-connectable) only has to be syntactically valid.
+	api, err := osapi.NewClient(osapi.Config{Client: osgo.Config{Addresses: []string{"http://127.0.0.1:0"}}})
 	if err != nil {
-		// osapi.NewClient with a syntactically valid address cannot fail; guard anyway.
 		return &osapi.Client{Client: base}
 	}
 	api.Client = base

@@ -3,18 +3,10 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 )
-
-// IsNil reports whether err is (or wraps) goredis.Nil, the sentinel go-redis returns
-// for a key that does not exist — a cache miss, not a failure. App code branches with
-// IsNil instead of importing the driver to compare against goredis.Nil.
-func IsNil(err error) bool {
-	return errors.Is(err, goredis.Nil)
-}
 
 // GetJSON fetches key and json.Unmarshals it into a T. On a cache miss it returns the
 // zero T together with the goredis.Nil error, so callers can branch with IsNil(err);

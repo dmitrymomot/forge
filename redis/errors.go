@@ -1,6 +1,10 @@
 package redis
 
-import "errors"
+import (
+	"errors"
+
+	goredis "github.com/redis/go-redis/v9"
+)
 
 // Sentinel errors returned by this package, wrapped around the underlying driver
 // error. Match them with errors.Is. They are single-line and carry no embedded
@@ -15,3 +19,10 @@ var (
 	// ErrHealthcheck is returned by the Healthcheck closure when a PING fails.
 	ErrHealthcheck = errors.New("redis: healthcheck failed")
 )
+
+// IsNil reports whether err is (or wraps) goredis.Nil, the sentinel go-redis returns
+// for a key that does not exist — a cache miss, not a failure. App code branches with
+// IsNil instead of importing the driver to compare against goredis.Nil.
+func IsNil(err error) bool {
+	return errors.Is(err, goredis.Nil)
+}

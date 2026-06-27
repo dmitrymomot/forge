@@ -94,10 +94,12 @@ func WithTxRetry(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error,
 		if attempt == rc.attempts-1 {
 			break
 		}
+		timer := time.NewTimer(backoff(rc.interval, attempt))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return errors.Join(lastErr, ctx.Err())
-		case <-time.After(backoff(rc.interval, attempt)):
+		case <-timer.C:
 		}
 	}
 	return lastErr

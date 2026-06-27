@@ -15,10 +15,12 @@ import (
 // `defer Close(client, logger)` in main. A nil logger is tolerated (the log line is
 // skipped); a nil client is tolerated (no-op).
 func Close(c *osgo.Client, log *slog.Logger) {
+	if c == nil {
+		return
+	}
 	if log != nil {
 		log.Info("opensearch: closing client")
 	}
-	_ = c
 }
 
 // Healthcheck returns a stateless closure that probes the cluster's health,

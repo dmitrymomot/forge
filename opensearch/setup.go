@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	osgo "github.com/opensearch-project/opensearch-go/v4"
@@ -195,8 +195,8 @@ func parseSetupFS(fsys fs.FS) ([]indexDef, []templateDef, error) {
 	}
 
 	// Deterministic order so Apply is reproducible.
-	sort.Slice(indices, func(i, j int) bool { return indices[i].name < indices[j].name })
-	sort.Slice(templates, func(i, j int) bool { return templates[i].name < templates[j].name })
+	slices.SortFunc(indices, func(a, b indexDef) int { return strings.Compare(a.name, b.name) })
+	slices.SortFunc(templates, func(a, b templateDef) int { return strings.Compare(a.name, b.name) })
 	return indices, templates, nil
 }
 

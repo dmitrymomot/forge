@@ -135,6 +135,9 @@ func connectWithRetry(ctx context.Context, poolCfg *pgxpool.Config, attempts int
 
 // backoff returns interval · 2^attempt, capped at maxRetryBackoff.
 func backoff(interval time.Duration, attempt int) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
 	wait := interval << attempt // interval * 2^attempt
 	if wait <= 0 || wait > maxRetryBackoff {
 		return maxRetryBackoff
