@@ -2,30 +2,33 @@
 
 - **Date:** 2026-06-27
 - **Status:** Draft for review
-- **Scope:** Five new flat top-level packages that manage **connection lifecycle** for
-  the framework's data backends — `postgres` (pgx/v5 + pgxpool), `mongo`
-  (mongo-driver/v2), `redis` (go-redis/v9, Valkey-compatible), `opensearch`
+- **Scope:** Five new flat top-level packages that cut the **per-app boilerplate** of the
+  framework's data backends — `postgres` (pgx/v5 + pgxpool), `mongo` (mongo-driver/v2),
+  `redis` (go-redis/v9, Valkey-compatible, standalone/cluster/sentinel), `opensearch`
   (opensearch-go/v4), and `migration` (goose/v3 over the stdlib `*sql.DB` seam). Each
   connectivity package applies one shared convention — `Config` + `DefaultConfig` +
-  `Validate`, code-only functional options, and just three lifecycle helpers: `Open`
-  (with connect-retry), `Close(client, logger)`, and a `Healthcheck` ping closure — and
-  returns the **native driver client**. No `supervisor.Service` adapter, no ORM, no query
-  builder, no row scanning, no cross-backend abstraction. Each driver dependency is
-  confined to its own package.
+  `Validate`, code-only functional options, the three lifecycle helpers `Open` (with
+  connect-retry) / `Close(client, logger)` / `Healthcheck` — and **returns the native
+  driver client**, then layers the recurring chores every app re-hand-rolls: transactions,
+  **boot-time schema setup** (migrations, index/mapping/shard provisioning), **error
+  classification** (`Is…` predicates over driver errors), and a few **typed conveniences**.
+  It draws the line short of a general ORM/query-builder/row-scanner — broad typed
+  data-access stays with the future `kv`/`data` layer. No `supervisor.Service` adapter. Each
+  driver dependency is confined to its own package.
 
 ## Overview
 
 These packages do one thing: turn a `Config` (typically loaded from the environment)
 into a live, pooled, health-checkable driver client with production-sane defaults,
 bounded startup retry, and clean shutdown — then get out of the way. They are the
-data-layer analogue of `httpserver`: a thin, well-tested helper around a hardened
-third-party client, exposing forge's house conventions (`Config`/`Validate`, options,
-sentinel errors) without hiding the client underneath.
+data-layer analogue of `httpserver`: a well-tested helper layer over a hardened
+third-party client — house conventions (`Config`/`Validate`, options, sentinel errors) and
+the recurring setup/error/transaction chores — without ever hiding the client underneath.
 
 A consumer calls `Open`, uses the returned `*pgxpool.Pool` / `*mongo.Client` /
-`*redis.Client` / `*opensearch.Client` directly with the full driver API, hands
-`Healthcheck(client)` to its readiness probe, and `defer`s `Close(client, logger)` for
-ordered shutdown.
+`redis.UniversalClient` / `*opensearch.Client` directly with the full driver API, hands
+`Healthcheck(client)` to its readiness probe, `defer`s `Close(client, logger)` for ordered
+shutdown, and reaches for the per-package setup/error/typed helpers to delete boilerplate.
 
 ```go
 func main() {
@@ -71,7 +74,7 @@ Five flat packages at the repo root, beside `supervisor/`, `httpserver/`, `rende
 ```
 postgres/      pgx/v5 + pgxpool                  → *pgxpool.Pool
 mongo/         go.mongodb.org/mongo-driver/v2    → *mongo.Client
-redis/         github.com/redis/go-redis/v9      → *redis.Client      (talks to Valkey too)
+redis/         github.com/redis/go-redis/v9      → redis.UniversalClient (standalone/cluster/sentinel; Valkey too)
 opensearch/    opensearch-project/opensearch-go/v4 → *opensearch.Client
 migration/     github.com/pressly/goose/v3       → *migration.Migrator (operates on *sql.DB)
 ```
@@ -250,17 +253,28 @@ func WithLogger(l *slog.Logger) Option
 func WithPoolConfig(fn func(*pgxpool.Config)) Option // escape hatch: tracers/hooks/anything not in Config
 func WithMigrator(m Migrator) Option                 // runs m.Up after connect; nil is rejected
 
-// Transaction helper
+// Transaction helpers
 func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error
+func WithTxRetry(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error, opts ...RetryOption) error
+
+// Error classification (over *pgconn.PgError SQLSTATE; all take a wrapped error)
+func IsUniqueViolation(err error) bool     // 23505
+func IsForeignKeyViolation(err error) bool // 23503
+func IsNotFound(err error) bool            // pgx.ErrNoRows
+func IsSerializationFailure(err error) bool // 40001 / 40P01 (deadlock)
 ```
 
-The whole package is `Open` / `Close` / `Healthcheck` / `WithTx` plus the migrator seam —
-everything pgx already does well (pooling, `Ping`, `Close`, DSN parsing) is left to pgx.
 `WithPoolConfig` runs last in `Open` (after the `Config` overlay), so it is the final
 escape hatch for anything the `Config` fields don't cover — a query tracer, `AfterConnect`
 hooks, a custom TLS config. `WithTx` begins a transaction, runs `fn`, commits on success,
 rolls back on error, and rolls back then re-panics on panic (the old wrapper's semantics,
-preserved).
+preserved). `WithTxRetry` is `WithTx` plus an automatic retry loop when the transaction
+fails with a serialization failure or deadlock (SQLSTATE `40001`/`40P01`) — bounded by
+`RetryOption`s (max attempts, backoff), removing the hand-rolled retry every
+`SERIALIZABLE`/`REPEATABLE READ` workload otherwise grows. The **error-classification
+predicates** wrap `errors.As(err, &*pgconn.PgError)` + SQLSTATE comparison (and
+`pgx.ErrNoRows` for `IsNotFound`), so app code writes `if postgres.IsUniqueViolation(err)`
+instead of importing `pgconn` and string-matching codes at every call site.
 
 ## Package: `migration`
 
@@ -322,18 +336,22 @@ pool, err = postgres.Open(ctx,
 	postgres.WithMigrator(migration.New(migrationsFS, migration.WithTable("schema_migrations"))))
 ```
 
-## Package: `redis` (Redis + Valkey)
+## Package: `redis` (Redis + Valkey; standalone / cluster / sentinel)
 
 go-redis/v9 talks to Redis and Valkey identically (same RESP protocol); the package is
-documented and smoke-tested against both. Single-node `*redis.Client`; cluster/sentinel
-are out of scope for now (a later `WithCluster`/`UniversalClient` variant if real demand
-appears).
+documented and smoke-tested against both. All three topologies are covered through
+go-redis's **`UniversalClient`**: `Open` builds via `redis.NewUniversalClient`, which
+selects standalone, cluster, or sentinel from the options — so `Open` returns the
+`redis.UniversalClient` **interface** (the price of one topology-agnostic constructor;
+`*redis.Client`/`*redis.ClusterClient`/`*redis.FailoverClient` all satisfy it).
 
 ```go
 type Config struct {
-	URL             string        `env:"URL"`               // redis://… ; parsed via redis.ParseURL
-	Password        string        `env:"PASSWORD"`          // overrides URL credential
-	DB              int           `env:"DB"`
+	Addresses       []string      `env:"ADDRESSES"`     // 1 = standalone, many = cluster
+	MasterName      string        `env:"MASTER_NAME"`   // set → sentinel/failover mode
+	Username        string        `env:"USERNAME"`
+	Password        string        `env:"PASSWORD"`
+	DB              int           `env:"DB"`            // standalone/sentinel only (cluster ignores)
 	PoolSize        int           `env:"POOL_SIZE"`
 	MinIdleConns    int           `env:"MIN_IDLE_CONNS"`
 	DialTimeout     time.Duration `env:"DIAL_TIMEOUT"`
@@ -344,20 +362,29 @@ type Config struct {
 	RetryInterval   time.Duration `env:"RETRY_INTERVAL"`
 }
 
-func Open(ctx context.Context, opts ...Option) (*redis.Client, error)
-func Close(c *redis.Client, log *slog.Logger)                 // log + c.Close()
-func Healthcheck(c *redis.Client) func(context.Context) error // PING closure
+func Open(ctx context.Context, opts ...Option) (redis.UniversalClient, error)
+func Close(c redis.UniversalClient, log *slog.Logger)                 // log + c.Close()
+func Healthcheck(c redis.UniversalClient) func(context.Context) error // PING closure
 
 // Options (same shape as postgres)
 func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
-func WithOptions(fn func(*redis.Options)) Option // escape hatch: TLS, hooks, anything not in Config
+func WithUniversalOptions(fn func(*redis.UniversalOptions)) Option // escape hatch: TLS, hooks, dialer
+
+// Error classification + typed JSON convenience (reduce app boilerplate)
+func IsNil(err error) bool // redis.Nil — a cache miss, not a failure
+func GetJSON[T any](ctx context.Context, c redis.Cmdable, key string) (T, error)            // json.Unmarshal; IsNil on miss
+func SetJSON(ctx context.Context, c redis.Cmdable, key string, v any, ttl time.Duration) error // json.Marshal + Set
 ```
 
-Same three-helper lifecycle as `postgres`. `WithOptions` is redis's `WithPoolConfig`
-analogue — it runs last in `Open` (after `redis.ParseURL` + the `Config` overlay) so it can
-reach anything the fields don't (`TLSConfig`, `OnConnect`, a custom dialer). No SQL-style
-transaction helper (callers use go-redis `TxPipeline`/`Watch` directly).
+Topology is chosen from `Config`: a single `Addresses` entry → standalone, multiple →
+cluster, a non-empty `MasterName` → sentinel. `WithUniversalOptions` runs last (after the
+`Config` overlay) for `TLSConfig`/`OnConnect`/custom dialer. `IsNil` names the most-checked
+redis error (`redis.Nil` = key absent). `GetJSON[T]`/`SetJSON` collapse the ubiquitous
+`json.Marshal` → `Set` / `Get` → `json.Unmarshal` dance into one call over any
+`redis.Cmdable`; they are point conveniences, not a cache abstraction — the broader cached
+`Store` seam remains the future `kv` layer's job. No SQL-style transaction helper (callers
+use go-redis `TxPipeline`/`Watch`).
 
 ## Package: `mongo`
 
@@ -372,6 +399,9 @@ type Config struct {
 	ConnectTimeout         time.Duration `env:"CONNECT_TIMEOUT"`
 	ServerSelectionTimeout time.Duration `env:"SERVER_SELECTION_TIMEOUT"`
 	MaxConnIdleTime        time.Duration `env:"MAX_CONN_IDLE_TIME"`
+	ReadPreference         string        `env:"READ_PREFERENCE"`           // primary, primaryPreferred, secondary, …
+	ReadConcern            string        `env:"READ_CONCERN"`              // local, majority, snapshot, …
+	WriteConcern           string        `env:"WRITE_CONCERN"`             // majority, or a w-number; journaled
 	RetryAttempts          int           `env:"RETRY_ATTEMPTS"`
 	RetryInterval          time.Duration `env:"RETRY_INTERVAL"`
 }
@@ -387,14 +417,38 @@ func WithClientOptions(fn func(*options.ClientOptions)) Option // escape hatch: 
 
 // Transaction helper (requires a replica set / mongos — documented)
 func WithTransaction(ctx context.Context, c *mongo.Client, fn func(ctx context.Context) error) error
+
+// Boot-time schema setup (idempotent)
+func EnsureIndexes(ctx context.Context, db *mongo.Database, specs map[string][]mongo.IndexModel) error
+func EnableSharding(ctx context.Context, c *mongo.Client, db string) error
+func ShardCollection(ctx context.Context, c *mongo.Client, namespace string, key bson.D) error
+
+// Error classification
+func IsDuplicateKey(err error) bool // E11000 (incl. inside BulkWriteException)
+func IsNotFound(err error) bool     // mongo.ErrNoDocuments
 ```
 
-`mongo.Client.Disconnect` takes a `ctx`, but `Close` keeps the uniform no-`ctx`
-signature by disconnecting under a short internal bounded context (so a wedged shutdown
-can't hang forever). `WithTransaction` runs `fn` inside a session via the driver's
-`WithTransaction`, which commits on success and aborts on error. It is documented as
-requiring a replica set (MongoDB's transaction precondition), so it returns the driver's
-error verbatim on a standalone server rather than pretending.
+*Connection (concerns):* `ReadPreference`/`ReadConcern`/`WriteConcern` are parsed into the
+driver's typed values and applied to the client — the verbose-to-hand-build knobs that
+matter most on replica sets and sharded clusters. `mongo.Client.Disconnect` takes a `ctx`,
+but `Close` keeps the uniform no-`ctx` signature by disconnecting under a short internal
+bounded context.
+
+*Setup (run at boot, after `Open`):* `EnsureIndexes` creates the declared indexes per
+collection idempotently (`CreateMany` is itself idempotent by index spec) — the
+ever-present "make sure my indexes exist" boilerplate, in one declarative call.
+`EnableSharding`/`ShardCollection` wrap the `admin` commands so a sharded deployment can be
+provisioned from app setup; on a non-sharded server they return the driver error verbatim
+rather than pretending. (Targeted vs scatter-gather reads need no helper — include the
+shard key in the filter; forge documents this rather than wrapping queries, staying clear
+of data-access.)
+
+*Errors:* `IsDuplicateKey`/`IsNotFound` name the two most-checked Mongo conditions so app
+code stops unwrapping `mongo.WriteException`/`mongo.ErrNoDocuments` by hand.
+
+`WithTransaction` runs `fn` inside a session via the driver's `WithTransaction` (commit on
+success, abort on error); documented as requiring a replica set/mongos, returning the
+driver's error verbatim on a standalone server.
 
 ## Package: `opensearch`
 
@@ -421,13 +475,29 @@ func Healthcheck(c *opensearch.Client) func(context.Context) error // cluster he
 func WithConfig(cfg Config) Option
 func WithLogger(l *slog.Logger) Option
 func WithClientConfig(fn func(*opensearch.Config)) Option // escape hatch: custom transport/TLS
+
+// Declarative index/mapping setup — the search analogue of migration (run at boot)
+func NewSetup(fsys fs.FS, opts ...SetupOption) *Setup
+func (s *Setup) Apply(ctx context.Context, c *opensearch.Client) error
+func WithUpdateMappings(enabled bool) SetupOption // PUT additive mappings onto existing indices; default false
+
+// Error classification
+func IsNotFound(err error) bool // 404 (index/document absent)
 ```
 
 Same three-helper lifecycle as `postgres`; `WithClientConfig` is the `WithPoolConfig`
-analogue (it runs last over the `Config`-built `opensearch.Config`, before
-`opensearch.NewClient`). `opensearch.Client` is HTTP-based with no long-lived sockets to
-close, so `Close` just idles transport connections (and logs) — kept for surface-symmetry
-so every backend reads `Open` / `Close` / `Healthcheck`.
+analogue. `opensearch.Client` is HTTP-based with no long-lived sockets, so `Close` just
+idles transport connections (and logs) — kept so every backend reads `Open` / `Close` /
+`Healthcheck`.
+
+**`Setup` is OpenSearch's `migration`.** You embed index and template definitions as JSON
+in an `fs.FS` (`<name>.index.json`, `<name>.template.json`); `Apply` creates each absent
+index/template idempotently (templates `PUT`-upsert; indices create-if-absent). With
+`WithUpdateMappings(true)` it also `PUT`s mappings onto already-existing indices for
+additive field changes (OpenSearch forbids non-additive mapping changes — those remain a
+reindex the consumer drives, the same boundary `migration` draws at destructive SQL). It is
+deliberately **forward-only**, matching `migration`'s up-only stance. `IsNotFound` names the
+404 every "does this index/doc exist" check reduces to.
 
 ## Errors convention
 
@@ -438,22 +508,36 @@ Each package defines `errors.New("postgres: ...")`-style sentinels:
 framework's structured-logging rule (no embedded stacks/multi-line blobs). Callers branch
 with `errors.Is`.
 
+Distinct from forge's own sentinels are the **`Is…` classification predicates** over the
+*driver's* errors — `postgres.IsUniqueViolation`/`IsForeignKeyViolation`/`IsNotFound`/`IsSerializationFailure`
+(SQLSTATE on `*pgconn.PgError`), `mongo.IsDuplicateKey`/`IsNotFound`, `redis.IsNil`,
+`opensearch.IsNotFound`. Each unwraps with `errors.As`/`errors.Is` against the driver's
+typed error, so app code asks "was this a duplicate key?" without importing `pgconn`,
+matching SQLSTATE strings, or unwrapping `mongo.WriteException` at every call site. They are
+the single highest-leverage boilerplate cut in this group.
+
 ## Testing strategy
 
-These are thin connection-convenience wrappers, so real-server integration tests mostly
-exercise the *driver*, not forge code — low ROI. The plan reflects that:
+The *connection* layer is thin enough that real-server tests mostly exercise the driver,
+but the added helpers (error classification, schema setup, `WithTxRetry`, typed JSON, the
+`opensearch` `Setup` runner) carry genuine forge logic that does deserve coverage — split
+across two tiers:
 
 - **Pure black-box unit tests** (always run under `just test`, no server, no Docker):
   `DefaultConfig` values; `Validate` accept/reject matrix; option wiring (`WithConfig` sets
   the block, the escape hatch runs last, nil args rejected); error sentinel mapping; **the
-  connect-retry loop** pointed at an unreachable address with tiny timeouts, asserting
-  attempt count, `ErrConnect` wrapping, and `ctx`-cancellation mid-backoff. Env-tag
-  presence verified by reflection (the `httpserver` config-tag test pattern).
-- **Optional env-gated smoke tests** for the real happy path (`Open` → `Healthcheck` →
-  `WithTx`/`WithTransaction` → `migration.New(fsys).Up`), `t.Skip`-ped when `FORGE_TEST_POSTGRES_DSN`
-  / `FORGE_TEST_REDIS_URL` / `FORGE_TEST_MONGO_URI` / `FORGE_TEST_OPENSEARCH_ADDR` is
-  unset. CI may provide these via GitHub Actions **service containers**; they are never
-  required for a green local `just test`.
+  connect-retry loop** pointed at an unreachable address with tiny timeouts (attempt count,
+  `ErrConnect` wrapping, `ctx`-cancellation mid-backoff); **redis topology selection** from
+  `Config` (addresses/MasterName → which `UniversalOptions`); **error-classification
+  predicates** fed synthetic `*pgconn.PgError`/`mongo.WriteException`/`redis.Nil` values to
+  assert each `Is…` matches the right code without a live server. Env-tag presence verified
+  by reflection (the `httpserver` config-tag test pattern).
+- **Env-gated integration tests** — now higher-ROI than the connection layer alone:
+  `WithTxRetry` actually retrying a forced `40001`; `EnsureIndexes` idempotency on re-run;
+  `GetJSON`/`SetJSON` round-trip + `IsNil` miss; the `opensearch` `Setup` runner being a
+  no-op on second `Apply`. `t.Skip`-ped when `FORGE_TEST_POSTGRES_DSN` / `FORGE_TEST_REDIS_URL`
+  / `FORGE_TEST_MONGO_URI` / `FORGE_TEST_OPENSEARCH_ADDR` is unset; CI supplies them via
+  GitHub Actions **service containers**, never required for a green local `just test`.
 - **No `testcontainers` and no new test-only dependency** — consistent with "minimal
   deps" and "black-box only."
 
@@ -479,21 +563,23 @@ not services. `testify` remains test-only.
 
 1. **`postgres` + `migration`** together — the reference implementation of the convention
    plus the migrator seam they share. Establishes the copied-convention shape the rest
-   follow.
-2. **`redis`** — simplest of the remaining (URL parse, single client).
-3. **`mongo`** — adds the session transaction helper.
-4. **`opensearch`** — HTTP client, no-op shutdown.
+   follow; postgres also lands `WithTx`/`WithTxRetry` and the SQLSTATE `Is…` predicates.
+2. **`redis`** — `UniversalClient` topology selection, `IsNil`, typed `GetJSON`/`SetJSON`.
+3. **`mongo`** — concern config, `WithTransaction`, `EnsureIndexes`/sharding setup, error helpers.
+4. **`opensearch`** — HTTP client + the declarative `Setup` runner, `IsNotFound`.
 
-Each after the first is a near-mechanical application of the established pattern.
+Within each package the lifecycle trio comes first; the boilerplate-reducers (setup,
+typed/error helpers) layer on top and can land as follow-up commits.
 
 ## Non-goals (anti-scope)
 
-- **No ORM, query builder, or row scanning** — these packages return the raw client; data
-  access is the consumer's (or a future `data/*` package's) concern.
-- **No cross-backend abstraction / unified `Store` interface** — that is the downstream
-  `kv`/caching layer's job; here each package exposes its native client.
-- **No Redis cluster/sentinel, no Mongo sharded-specific helpers, no OpenSearch
-  index/mapping "migrations"** in v1 — added only on real demand.
+- **No general ORM, query builder, or row scanning** — these packages return the raw
+  client for all real data access. The included typed helpers are deliberately narrow point
+  conveniences (`redis.GetJSON`/`SetJSON`), not an entity/repository layer; anything that
+  would grow into struct-tag mapping, query construction, or a `Store` abstraction belongs
+  to the future `kv`/`data` layer, not here.
+- **No cross-backend abstraction / unified `Store` interface** — each package exposes its
+  native client; unifying them is the downstream `kv`/caching layer's job.
 - **No `MustOpen`.**
 - **No migration down/reset/test-fixture helpers** — `migration` is strictly up-only.
   Resetting a test database (TRUNCATE, schema drop, or an ephemeral/template DB) is the
@@ -512,7 +598,12 @@ Each after the first is a near-mechanical application of the established pattern
   than a hand-written `supervisor.WithServiceFunc`, a single DB-agnostic probe (wrapping
   any `Healthcheck`-style `func(ctx) error`) belongs in a future shared package, not in
   each connectivity package.
-- **`redis` UniversalClient** — revisit if cluster/sentinel demand appears.
+- **OpenSearch non-additive mappings** — `Setup` is forward/additive-only; a
+  reindex-on-breaking-change helper is deferred until there's demand (a real reindex needs
+  app-specific source/target/transform decisions forge shouldn't guess).
+- **Typed conveniences vs the `kv` layer** — `redis.GetJSON`/`SetJSON` are point helpers
+  here; if a cross-backend cached `Store` materializes in the `kv` layer, these stay as
+  thin shortcuts and do not grow into it.
 - **Naming collisions** — `redis`, `mongo`, `opensearch` share their package names with
   the underlying drivers; a consumer importing both forge's package and the driver's
   aliases the driver (`goredis "github.com/redis/go-redis/v9"`), the idiomatic Go
