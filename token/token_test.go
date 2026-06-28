@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/clock"
+	"github.com/dmitrymomot/forge/keyset"
 	"github.com/dmitrymomot/forge/secret"
 	"github.com/dmitrymomot/forge/token"
 )
@@ -90,7 +91,7 @@ func TestParse_Malformed(t *testing.T) {
 	c, err := token.New[Reset]([]byte("0123456789abcdef"))
 	require.NoError(t, err)
 	_, err = c.Parse("garbage-no-dots")
-	require.Error(t, err)
+	require.ErrorIs(t, err, token.ErrMalformed)
 }
 
 func TestEncrypted_RoundTrip(t *testing.T) {
@@ -116,4 +117,34 @@ func TestUniqueTokensForSamePayload(t *testing.T) {
 	b, err := c.Issue(Reset{UserID: "u_1"})
 	require.NoError(t, err)
 	assert.NotEqual(t, a, b) // per-token nonce
+}
+
+func TestFromKeyset_RoundTrip(t *testing.T) {
+	ks, err := keyset.New(keyset.WithPrimary(1, []byte("key-v1-secret-bytes")))
+	require.NoError(t, err)
+	c, err := token.FromKeyset[Reset](ks, token.WithPurpose("invite"))
+	require.NoError(t, err)
+	tok, err := c.Issue(Reset{UserID: "u_42"})
+	require.NoError(t, err)
+	got, err := c.Parse(tok)
+	require.NoError(t, err)
+	assert.Equal(t, "u_42", got.UserID)
+}
+
+func TestEncrypted_AEADFailureMapsToBadSignature(t *testing.T) {
+	signKey := []byte("0123456789abcdef")
+	boxA, err := secret.New([]byte("0123456789abcdef0123456789abcdef")) // 32 bytes
+	require.NoError(t, err)
+	issuer, err := token.New[Reset](signKey, token.WithEncrypt(boxA))
+	require.NoError(t, err)
+	tok, err := issuer.Issue(Reset{UserID: "u_1"})
+	require.NoError(t, err)
+
+	// Same signing key → signature verifies; different box key → AEAD decrypt fails.
+	boxB, err := secret.New([]byte("ffffffffffffffffffffffffffffffff")) // 32 bytes, different key
+	require.NoError(t, err)
+	parser, err := token.New[Reset](signKey, token.WithEncrypt(boxB))
+	require.NoError(t, err)
+	_, err = parser.Parse(tok)
+	require.ErrorIs(t, err, token.ErrBadSignature)
 }
