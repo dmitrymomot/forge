@@ -20,7 +20,7 @@ func TestSecret_StringMasks(t *testing.T) {
 	s := redact.New("super-secret")
 	assert.Equal(t, "REDACTED", s.String())
 	assert.Equal(t, "REDACTED", fmt.Sprintf("%v", s))
-	assert.Equal(t, "REDACTED", s.String())
+	assert.Equal(t, "REDACTED", fmt.Sprintf("%s", s))  //nolint:staticcheck // exercises the fmt %s Stringer path explicitly
 	assert.Equal(t, "REDACTED", fmt.Sprintf("%#v", s)) // GoString
 }
 
