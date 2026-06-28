@@ -79,8 +79,11 @@ func TestAll_DescendingOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	var versions []int
-	for v := range ks.All() {
+	got := map[int]string{}
+	for v, k := range ks.All() {
 		versions = append(versions, v)
+		got[v] = string(k)
 	}
 	assert.Equal(t, []int{3, 2, 1}, versions)
+	assert.Equal(t, map[int]string{3: "c", 2: "b", 1: "a"}, got)
 }

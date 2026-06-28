@@ -25,9 +25,10 @@ func TestHashVerify_Argon2id(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 
-	ok, _, err = password.Verify("wrong", enc)
-	require.NoError(t, err)
-	assert.False(t, ok)
+	ok2, needsRehash, err2 := password.Verify("wrong", enc)
+	require.NoError(t, err2)
+	assert.False(t, ok2)
+	assert.False(t, needsRehash)
 }
 
 func TestVerify_NeedsRehash(t *testing.T) {

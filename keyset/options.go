@@ -52,6 +52,8 @@ func WithBase64Keys(s string) Option {
 			c.errs = append(c.errs, fmt.Errorf("%w: empty key material", ErrBadKeyMaterial))
 			return
 		}
+		// Parsing fails fast on the first malformed pair: one ErrBadKeyMaterial is enough
+		// to reject the whole env value, and continuing would report noise.
 		for pair := range strings.SplitSeq(s, ",") {
 			verStr, b64, ok := strings.Cut(strings.TrimSpace(pair), ":")
 			if !ok {

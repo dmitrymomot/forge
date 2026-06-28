@@ -30,6 +30,7 @@ func TestHex(t *testing.T) {
 	assert.Len(t, s, 16) // 2 hex chars per byte
 	_, err := hex.DecodeString(s)
 	require.NoError(t, err)
+	assert.NotEqual(t, randx.Hex(8), randx.Hex(8))
 }
 
 func TestURLSafe(t *testing.T) {
@@ -37,6 +38,7 @@ func TestURLSafe(t *testing.T) {
 	decoded, err := base64.RawURLEncoding.DecodeString(s)
 	require.NoError(t, err)
 	assert.Len(t, decoded, 16)
+	assert.NotEqual(t, randx.URLSafe(16), randx.URLSafe(16))
 }
 
 func TestInt_InRange(t *testing.T) {

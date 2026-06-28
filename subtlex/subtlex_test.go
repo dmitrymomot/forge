@@ -15,6 +15,8 @@ func TestBytesEqual(t *testing.T) {
 	assert.True(t, subtlex.BytesEqual(nil, nil))
 	assert.True(t, subtlex.BytesEqual([]byte{}, []byte{}))
 	assert.False(t, subtlex.BytesEqual([]byte("x"), nil))
+	assert.False(t, subtlex.BytesEqual(nil, []byte("x")))      // symmetric to the existing ("x", nil) case
+	assert.False(t, subtlex.BytesEqual([]byte{}, []byte("x"))) // empty vs non-empty
 }
 
 func TestStringEqual(t *testing.T) {

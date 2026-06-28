@@ -30,9 +30,13 @@ func TestSHA256Base64(t *testing.T) {
 	assert.Equal(t, want, hashx.SHA256Base64([]byte("abc")))
 }
 
+// SHA-512("abc") — FIPS 180-4 known-answer vector.
+const sha512abcHex = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+
 func TestSHA512(t *testing.T) {
 	assert.Len(t, hashx.SHA512([]byte("abc")), 64)
 	assert.Len(t, hashx.SHA512Hex([]byte("abc")), 128)
+	assert.Equal(t, sha512abcHex, hashx.SHA512Hex([]byte("abc")))
 }
 
 func TestHMACSHA256_KnownAnswer(t *testing.T) {
@@ -55,4 +59,5 @@ func TestFileSHA256(t *testing.T) {
 func TestFileSHA256_Missing(t *testing.T) {
 	_, err := hashx.FileSHA256(filepath.Join(t.TempDir(), "nope"))
 	require.Error(t, err)
+	assert.ErrorContains(t, err, "hashx: open ")
 }
