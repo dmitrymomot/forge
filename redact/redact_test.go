@@ -45,6 +45,11 @@ func TestString(t *testing.T) {
 	assert.Equal(t, "REDACTED", redact.String("12345678"))                        // == 2*keep, still masked whole
 }
 
+func TestString_Unicode(t *testing.T) {
+	// Multi-byte UTF-8 must mask on rune boundaries, not byte boundaries.
+	assert.Equal(t, "一二三四***七八九十", redact.String("一二三四五六七八九十"))
+}
+
 func TestMap_ScrubsWithoutMutating(t *testing.T) {
 	in := map[string]any{"user": "ada", "password": "hunter2", "token": "t_abc"}
 	out := redact.Map(in, "password", "token", "absent")

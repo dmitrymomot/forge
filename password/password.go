@@ -2,6 +2,7 @@ package password
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -68,7 +69,7 @@ func Verify(password, encoded string) (ok bool, needsRehash bool, err error) {
 }
 
 func errIsBcryptMismatch(e error) bool {
-	return e == bcrypt.ErrMismatchedHashAndPassword
+	return errors.Is(e, bcrypt.ErrMismatchedHashAndPassword)
 }
 
 func verifyArgon(password, encoded string) (bool, bool, error) {

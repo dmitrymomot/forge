@@ -52,23 +52,23 @@ func WithBase64Keys(s string) Option {
 			c.errs = append(c.errs, fmt.Errorf("%w: empty key material", ErrBadKeyMaterial))
 			return
 		}
-		// Parsing fails fast on the first malformed pair: one ErrBadKeyMaterial is enough
-		// to reject the whole env value, and continuing would report noise.
+		// Each malformed pair is recorded and skipped so the caller sees every bad entry
+		// in the env value at once (consistent with WithPrimary/WithRetired accumulation).
 		for pair := range strings.SplitSeq(s, ",") {
 			verStr, b64, ok := strings.Cut(strings.TrimSpace(pair), ":")
 			if !ok {
 				c.errs = append(c.errs, fmt.Errorf("%w: %q missing version", ErrBadKeyMaterial, pair))
-				return
+				continue
 			}
 			v, err := strconv.Atoi(strings.TrimSpace(verStr))
 			if err != nil || v < 0 || v > 255 {
 				c.errs = append(c.errs, fmt.Errorf("%w: bad version %q (must be 0..255)", ErrBadKeyMaterial, verStr))
-				return
+				continue
 			}
 			key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
 			if err != nil || len(key) == 0 {
 				c.errs = append(c.errs, fmt.Errorf("%w: bad base64 for version %d", ErrBadKeyMaterial, v))
-				return
+				continue
 			}
 			c.keys[v] = key
 			if !c.hasPrimary || v > c.primary {

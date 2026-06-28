@@ -33,13 +33,14 @@ func (s Secret[T]) MarshalJSON() ([]byte, error) { return json.Marshal(placehold
 func (s Secret[T]) LogValue() slog.Value { return slog.StringValue(placeholder) }
 
 // String returns a partially masked copy of s, keeping a short prefix and suffix for
-// correlation (e.g. "sk_l***f8a2"). Strings of 8 characters or fewer are fully masked.
+// correlation (e.g. "sk_l***f8a2"). Strings of 8 runes or fewer are fully masked.
 func String(s string) string {
 	const keep = 4
-	if len(s) <= keep*2 {
+	r := []rune(s)
+	if len(r) <= keep*2 {
 		return placeholder
 	}
-	return s[:keep] + "***" + s[len(s)-keep:]
+	return string(r[:keep]) + "***" + string(r[len(r)-keep:])
 }
 
 // Map returns a shallow copy of m with the named keys replaced by "REDACTED". The

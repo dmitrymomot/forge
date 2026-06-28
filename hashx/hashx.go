@@ -26,6 +26,9 @@ func SHA512(b []byte) []byte { s := sha512.Sum512(b); return s[:] }
 // SHA512Hex returns the lowercase-hex SHA-512 digest of b.
 func SHA512Hex(b []byte) string { return hex.EncodeToString(SHA512(b)) }
 
+// SHA512Base64 returns the unpadded standard-base64 SHA-512 digest of b.
+func SHA512Base64(b []byte) string { return base64.RawStdEncoding.EncodeToString(SHA512(b)) }
+
 // HMACSHA256 returns the HMAC-SHA256 of msg under key.
 func HMACSHA256(key, msg []byte) []byte {
 	m := hmac.New(sha256.New, key)

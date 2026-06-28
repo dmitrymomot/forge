@@ -39,6 +39,15 @@ func TestSHA512(t *testing.T) {
 	assert.Equal(t, sha512abcHex, hashx.SHA512Hex([]byte("abc")))
 }
 
+func TestSHA512Base64(t *testing.T) {
+	// Derive the expected value from the known digest rather than hardcoding a
+	// base64 literal (avoids transcription errors).
+	digest, err := hex.DecodeString(sha512abcHex)
+	require.NoError(t, err)
+	want := base64.RawStdEncoding.EncodeToString(digest)
+	assert.Equal(t, want, hashx.SHA512Base64([]byte("abc")))
+}
+
 func TestHMACSHA256_KnownAnswer(t *testing.T) {
 	// RFC 4231 test case 2
 	const want = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"

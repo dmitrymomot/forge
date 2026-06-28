@@ -50,9 +50,6 @@ func FromKeyset(ks *keyset.Keyset, opts ...Option) (*Box, error) {
 
 // Encrypt seals plaintext, returning version-byte || nonce || ciphertext+tag.
 func (b *Box) Encrypt(plaintext []byte) ([]byte, error) {
-	if b.ver < 0 || b.ver > 255 {
-		return nil, ErrInvalidKeySize
-	}
 	aead, err := b.newAEAD(b.key)
 	if err != nil {
 		return nil, err
