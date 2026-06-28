@@ -7,5 +7,9 @@
 //	// FORGE_SECRET_KEYS = "2:<base64 new>,1:<base64 old>"
 //	box, _ := secret.FromKeyset(ks)
 //
+// Key versions must be in the range 0..255. The secret and token packages encode the
+// version as a single byte in the wire format (version-byte || nonce || ciphertext+tag),
+// so versions outside this range are rejected at keyset construction with ErrBadKeyMaterial.
+//
 // It is not a cloud KMS client; fetching secrets from a vault belongs to secretsource.
 package keyset

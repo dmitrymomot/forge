@@ -19,10 +19,11 @@ type config struct {
 type Option func(*config)
 
 // WithPrimary registers key as the primary (encrypting/signing) key at version.
+// Version must be in 0..255: the secret/token wire format encodes it as a single byte.
 func WithPrimary(version int, key []byte) Option {
 	return func(c *config) {
-		if version < 0 || len(key) == 0 {
-			c.errs = append(c.errs, fmt.Errorf("%w: primary version %d", ErrBadKeyMaterial, version))
+		if version < 0 || version > 255 || len(key) == 0 {
+			c.errs = append(c.errs, fmt.Errorf("%w: primary version %d (must be 0..255)", ErrBadKeyMaterial, version))
 			return
 		}
 		c.keys[version] = key
@@ -32,10 +33,11 @@ func WithPrimary(version int, key []byte) Option {
 }
 
 // WithRetired registers a retired (decrypt/verify-only) key at version.
+// Version must be in 0..255: the secret/token wire format encodes it as a single byte.
 func WithRetired(version int, key []byte) Option {
 	return func(c *config) {
-		if version < 0 || len(key) == 0 {
-			c.errs = append(c.errs, fmt.Errorf("%w: retired version %d", ErrBadKeyMaterial, version))
+		if version < 0 || version > 255 || len(key) == 0 {
+			c.errs = append(c.errs, fmt.Errorf("%w: retired version %d (must be 0..255)", ErrBadKeyMaterial, version))
 			return
 		}
 		c.keys[version] = key
@@ -57,8 +59,8 @@ func WithBase64Keys(s string) Option {
 				return
 			}
 			v, err := strconv.Atoi(strings.TrimSpace(verStr))
-			if err != nil || v < 0 {
-				c.errs = append(c.errs, fmt.Errorf("%w: bad version %q", ErrBadKeyMaterial, verStr))
+			if err != nil || v < 0 || v > 255 {
+				c.errs = append(c.errs, fmt.Errorf("%w: bad version %q (must be 0..255)", ErrBadKeyMaterial, verStr))
 				return
 			}
 			key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))

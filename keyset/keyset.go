@@ -29,10 +29,12 @@ func New(opts ...Option) (*Keyset, error) {
 	return &Keyset{keys: c.keys, primary: c.primary}, nil
 }
 
-// Primary returns the current primary version and key.
+// Primary returns the current primary version and key. The returned slice aliases
+// the keyset's internal storage and must NOT be mutated by the caller.
 func (k *Keyset) Primary() (int, []byte) { return k.primary, k.keys[k.primary] }
 
-// ByVersion returns the key for v, and whether it exists.
+// ByVersion returns the key for v, and whether it exists. The returned slice aliases
+// the keyset's internal storage and must NOT be mutated by the caller.
 func (k *Keyset) ByVersion(v int) ([]byte, bool) {
 	key, ok := k.keys[v]
 	return key, ok

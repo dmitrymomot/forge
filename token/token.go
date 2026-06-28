@@ -60,6 +60,8 @@ func FromKeyset[T any](ks *keyset.Keyset, opts ...Option) (*Codec[T], error) {
 
 // Issue marshals payload into a signed (optionally encrypted) url-safe token string.
 func (c *Codec[T]) Issue(payload T) (string, error) {
+	// Nonce makes identical payloads produce distinct tokens (token-distinctness);
+	// unforgeability comes from the HMAC signature, not the nonce.
 	env := envelope[T]{Purpose: c.purpose, Nonce: randx.URLSafe(8), Payload: payload}
 	if c.ttl > 0 {
 		env.Exp = c.clk.Now().Add(c.ttl).Unix()

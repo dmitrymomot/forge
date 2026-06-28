@@ -62,6 +62,14 @@ func TestWithBase64Keys_Bad(t *testing.T) {
 	require.ErrorIs(t, err, keyset.ErrBadKeyMaterial)
 }
 
+func TestNew_VersionTooLarge(t *testing.T) {
+	_, err := keyset.New(keyset.WithPrimary(256, []byte("k")))
+	require.ErrorIs(t, err, keyset.ErrBadKeyMaterial)
+
+	_, err = keyset.New(keyset.WithRetired(300, []byte("k")), keyset.WithPrimary(1, []byte("k")))
+	require.ErrorIs(t, err, keyset.ErrBadKeyMaterial)
+}
+
 func TestAll_DescendingOrder(t *testing.T) {
 	ks, err := keyset.New(
 		keyset.WithPrimary(3, []byte("c")),
