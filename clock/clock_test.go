@@ -39,5 +39,5 @@ func TestMock_Advance(t *testing.T) {
 
 func TestMock_ImplementsClock(t *testing.T) {
 	var _ clock.Clock = clock.NewMock(time.Now())
-	var _ = clock.System()
+	var _ clock.Clock = clock.System() //nolint:staticcheck // compile-time interface assertion; QF1011 inference suggestion does not apply
 }
