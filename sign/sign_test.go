@@ -1,6 +1,7 @@
 package sign_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,4 +58,24 @@ func TestVerifyString_Rotation(t *testing.T) {
 
 	assert.True(t, signerNew.VerifyString("invite-payload", signed))
 	assert.False(t, signerNew.VerifyString("tampered", signed))
+}
+
+func TestFromKeyset_Nil(t *testing.T) {
+	_, err := sign.FromKeyset(nil)
+	require.ErrorIs(t, err, sign.ErrInvalidKey)
+}
+
+func TestNew_NilHash(t *testing.T) {
+	_, err := sign.New([]byte("0123456789abcdef"), sign.WithHash(nil))
+	require.ErrorIs(t, err, sign.ErrInvalidKey)
+}
+
+func TestVerifyString_SingleKeyVersionMismatch(t *testing.T) {
+	s, err := sign.New([]byte("0123456789abcdef"))
+	require.NoError(t, err)
+	signed := s.SignString("payload") // "0.<base64url-mac>"
+	_, mac, ok := strings.Cut(signed, ".")
+	require.True(t, ok)
+	// Same MAC bytes but a different version prefix: a single-key signer must reject it.
+	assert.False(t, s.VerifyString("payload", "1."+mac))
 }
