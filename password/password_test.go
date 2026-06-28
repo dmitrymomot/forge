@@ -1,6 +1,7 @@
 package password_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,5 +71,15 @@ func TestVerify_Malformed(t *testing.T) {
 	require.ErrorIs(t, err, password.ErrInvalidHash)
 
 	_, _, err = password.Verify("pw", "$argon2id$v=19$bad")
+	require.ErrorIs(t, err, password.ErrInvalidHash)
+}
+
+func TestVerify_UnsupportedArgonVersion(t *testing.T) {
+	enc, err := password.Hash("pw", password.WithArgon2Params(lightParams()))
+	require.NoError(t, err)
+	// Tamper the argon2 version tag to an unsupported value.
+	bad := strings.Replace(enc, "$v=19$", "$v=20$", 1)
+	require.NotEqual(t, enc, bad) // the replace must have happened
+	_, _, err = password.Verify("pw", bad)
 	require.ErrorIs(t, err, password.ErrInvalidHash)
 }

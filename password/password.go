@@ -27,7 +27,7 @@ func Hash(password string, opts ...Option) (string, error) {
 		return string(h), nil
 	}
 	if err := c.argon.Validate(); err != nil {
-		return "", err
+		return "", fmt.Errorf("password: invalid params: %w", err)
 	}
 	salt := randx.Bytes(saltLen)
 	key := argon2.IDKey([]byte(password), salt, c.argon.Time, c.argon.Memory, c.argon.Threads, c.argon.KeyLen)
@@ -78,6 +78,9 @@ func verifyArgon(password, encoded string) (bool, bool, error) {
 	}
 	var version int
 	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
+		return false, false, ErrInvalidHash
+	}
+	if version != argon2.Version {
 		return false, false, ErrInvalidHash
 	}
 	var p kdf.Params
