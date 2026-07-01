@@ -17,6 +17,7 @@
 - **Errors** are `errors.Is`-matchable single-line sentinels in an `errors.go`; wrap underlying causes with `fmt.Errorf("%w: …", Sentinel, …)`.
 - **Anatomy:** `doc.go` (package doc comment), `errors.go` (if the package has sentinels), impl file(s). Public methods never return unexported types.
 - **Verify each task** with `just check` (fmt + lint + test) from the worktree root; commit only when green. No Claude attribution in commit messages.
+- **Benchmarks:** each package ships a `<pkg>_bench_test.go` (black-box) with `Benchmark*` funcs using `for b.Loop()` + `b.ReportAllocs()`. Performance-contract packages (`bufpool`, `typeconv`, `iox`) also assert allocation invariants with `testing.AllocsPerRun` in a `Test*` so `just test` enforces them. Run benchmarks with `just bench ./<pkg>/...`.
 - Module path: `github.com/dmitrymomot/forge`.
 
 ---
@@ -455,7 +456,64 @@ func ParseSlice[T any](s, sep string) ([]T, error) {
 Run: `just test ./typeconv/... && just lint`
 Expected: PASS; lint clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write benchmarks and allocation invariants**
+
+Create `typeconv/typeconv_bench_test.go`:
+
+```go
+package typeconv_test
+
+import (
+	"testing"
+
+	"github.com/dmitrymomot/forge/typeconv"
+)
+
+func BenchmarkParseInt(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = typeconv.ParseInt[int]("2147483")
+	}
+}
+
+func BenchmarkParseGeneric(b *testing.B) {
+	// Parse boxes the result into any: small ints avoid the alloc, larger
+	// values box onto the heap — prefer the typed helpers on hot paths.
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = typeconv.Parse[int]("2147483")
+	}
+}
+
+func BenchmarkFormat(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = typeconv.Format(2147483)
+	}
+}
+
+func BenchmarkParseSlice(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = typeconv.ParseSlice[int]("1,2,3,4,5", ",")
+	}
+}
+
+func TestParseIntZeroAlloc(t *testing.T) {
+	if n := testing.AllocsPerRun(100, func() {
+		_, _ = typeconv.ParseInt[int]("2147483")
+	}); n != 0 {
+		t.Fatalf("ParseInt allocs = %v, want 0", n)
+	}
+}
+```
+
+- [ ] **Step 7: Run benchmarks and allocation checks**
+
+Run: `just test ./typeconv/... && just bench ./typeconv/...`
+Expected: `TestParseIntZeroAlloc` PASS; benchmarks report (BenchmarkParseGeneric may read 0 allocs for this small value but allocates for large ones — that is the point of contrasting it with BenchmarkParseInt).
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add typeconv/
@@ -719,7 +777,58 @@ func (nopWriteCloser) Close() error { return nil }
 Run: `just test ./iox/... && just lint`
 Expected: PASS; lint clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write benchmarks and allocation invariants**
+
+Create `iox/iox_bench_test.go`:
+
+```go
+package iox_test
+
+import (
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/dmitrymomot/forge/iox"
+)
+
+func BenchmarkLimitReaderRead(b *testing.B) {
+	src := strings.NewReader(strings.Repeat("x", 4096))
+	buf := make([]byte, 4096)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = src.Seek(0, io.SeekStart)
+		r := iox.LimitReader(src, 4096)
+		_, _ = io.ReadFull(r, buf)
+	}
+}
+
+func BenchmarkCountingWriter(b *testing.B) {
+	cw := iox.NewCountingWriter(io.Discard)
+	p := []byte("hello world")
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = cw.Write(p)
+	}
+}
+
+func TestCountingWriterZeroAlloc(t *testing.T) {
+	cw := iox.NewCountingWriter(io.Discard)
+	p := []byte("hello world")
+	if n := testing.AllocsPerRun(100, func() {
+		_, _ = cw.Write(p)
+	}); n != 0 {
+		t.Fatalf("CountingWriter.Write allocs = %v, want 0", n)
+	}
+}
+```
+
+- [ ] **Step 7: Run benchmarks and allocation checks**
+
+Run: `just test ./iox/... && just bench ./iox/...`
+Expected: `TestCountingWriterZeroAlloc` PASS; benchmarks report (BenchmarkLimitReaderRead includes the per-request reader construction, ~1 alloc/op).
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add iox/
@@ -886,7 +995,59 @@ func Do(fn func(*bytes.Buffer) error) error {
 Run: `just test ./bufpool/... && go test -race ./bufpool/... && just lint`
 Expected: PASS; no race; lint clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Write benchmarks and allocation invariants**
+
+Create `bufpool/bufpool_bench_test.go`:
+
+```go
+package bufpool_test
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/dmitrymomot/forge/bufpool"
+)
+
+func BenchmarkGetPut(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		buf := bufpool.Get()
+		buf.WriteString("hello world")
+		bufpool.Put(buf)
+	}
+}
+
+func BenchmarkDo(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = bufpool.Do(func(buf *bytes.Buffer) error {
+			buf.WriteString("hello world")
+			return nil
+		})
+	}
+}
+
+func TestGetPutZeroAlloc(t *testing.T) {
+	// Warm the pool, then steady-state reuse must not allocate. If this proves
+	// platform-flaky under GC pressure, relax to n > 1 (mirroring the id
+	// package's <=1 alloc precedent) rather than deleting the guard.
+	if n := testing.AllocsPerRun(1000, func() {
+		buf := bufpool.Get()
+		buf.WriteString("hello world")
+		bufpool.Put(buf)
+	}); n != 0 {
+		t.Fatalf("Get/Put steady-state allocs = %v, want 0", n)
+	}
+}
+```
+
+- [ ] **Step 6: Run benchmarks and allocation checks**
+
+Run: `just test ./bufpool/... && just bench ./bufpool/...`
+Expected: `TestGetPutZeroAlloc` PASS; BenchmarkGetPut reports 0 allocs/op on the steady state.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add bufpool/
@@ -1113,7 +1274,43 @@ func (n *Null[T]) UnmarshalJSON(b []byte) error {
 Run: `just test ./nullx/... && just lint`
 Expected: PASS; lint clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Write benchmarks**
+
+Create `nullx/nullx_bench_test.go`:
+
+```go
+package nullx_test
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/dmitrymomot/forge/nullx"
+)
+
+func BenchmarkMarshalJSON(b *testing.B) {
+	n := nullx.Of("hello")
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = json.Marshal(n)
+	}
+}
+
+func BenchmarkGet(b *testing.B) {
+	n := nullx.Of(42)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = n.Get()
+	}
+}
+```
+
+- [ ] **Step 6: Run benchmarks**
+
+Run: `just bench ./nullx/...`
+Expected: benchmarks report (JSON marshaling allocates inherently; no zero-alloc invariant is asserted for this package).
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add nullx/
@@ -1420,7 +1617,41 @@ func (b *ByteSize) UnmarshalText(p []byte) error {
 Run: `just test ./bytesize/... && just lint`
 Expected: PASS (including the 1537→"1537B" byte-count fallback round-trip); lint clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write benchmarks**
+
+Create `bytesize/bytesize_bench_test.go`:
+
+```go
+package bytesize_test
+
+import (
+	"testing"
+
+	"github.com/dmitrymomot/forge/bytesize"
+)
+
+func BenchmarkParse(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = bytesize.Parse("1.5GiB")
+	}
+}
+
+func BenchmarkString(b *testing.B) {
+	v := 10 * bytesize.MiB
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = v.String()
+	}
+}
+```
+
+- [ ] **Step 7: Run benchmarks**
+
+Run: `just bench ./bytesize/...`
+Expected: benchmarks report (config-load path; no zero-alloc invariant is asserted for this package).
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add bytesize/
@@ -1431,7 +1662,8 @@ git commit -m "feat(bytesize): SI/IEC byte-size parse/format + ByteSize config t
 
 ## Final verification
 
-- [ ] Run the full suite and lint once more: `just check`
+- [ ] Run the full suite and lint once more: `just check` (this runs the `AllocsPerRun` invariant tests for `typeconv`/`iox`/`bufpool`).
+- [ ] Run all benchmarks once for a sanity sweep: `just bench ./...` (no panics; allocation numbers look sane).
 - [ ] Confirm all five packages are present and each committed separately.
 
 ## Self-review notes (author)
@@ -1440,3 +1672,4 @@ git commit -m "feat(bytesize): SI/IEC byte-size parse/format + ByteSize config t
 - **Deviation from spec, deliberate:** width-correct generic int parsing uses a narrowing round-trip check (`int64(T(v)) != v`) instead of `unsafe.Sizeof`, because the repo uses no `unsafe`. Same observable behavior (overflow → ErrSyntax), reflection-free, handles defined types.
 - **bytesize round-trip:** the exact-or-byte-count `format` makes String→Parse total (the `1537 → "1537B"` case in the test proves the fallback), satisfying spec risk #3.
 - **cap-drop (bufpool):** the 64 KiB drop is not directly black-box observable (sync.Pool is nondeterministic); it is covered by the constant + code review, not a dedicated test. Documented here so it is not mistaken for missing coverage.
+- **benchmarks:** all five packages ship `Benchmark*` suites; `bufpool`/`typeconv`/`iox` additionally lock zero-alloc contracts via `testing.AllocsPerRun` `Test*`s enforced by `just check`. `nullx`/`bytesize` get benchmarks only (JSON and the config-load path allocate; no hard invariant).
