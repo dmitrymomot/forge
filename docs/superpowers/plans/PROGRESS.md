@@ -30,7 +30,11 @@ Branch: claude/musing-williams-ec21ce
   - R1 structfields (regression, med): `Set` guard `in.Len() != arr` over-rejected valid longer slices (reflect only panics on *shorter*). Fixed `!=`→`<`. `9c315f3` fix(structfields): only reject slice-to-array when slice is shorter than array.
   - R2 slug (regression, HIGH): `trimDanglingSeparator` stripped legitimate content when the separator overlapped `[a-z0-9]` (e.g. "banana"+sep"a-" → "banan"). Redesigned truncation to be separator-boundary-aware (foldWords/joinWords, no content-blind trim). `2447722` fix(slug): separator-boundary-aware max-length truncation (no content loss).
   - R3 validate (incomplete, med): `Positive`/`Negative` still accepted `NaN`. Added `isNaN` gate. `9b6ddce` fix(validate): reject NaN in Positive and Negative sign rules.
-  - Post-fix full `just check` clean; `go mod tidy` clean. Running one final focused adversarial pass over the 3 regression fixes before finalizing.
+  - Post-fix full `just check` clean; `go mod tidy` clean.
+- **Phase 4 — Third-pass review** (focused on the slug redesign) found 1 more slug regression, fixed via TDD with a permanent property-test safety net:
+  - R4 slug (regression, HIGH): `withRandomSuffix` passed `baseMax=0` to `joinWords`, which treats `<=0` as *unlimited* → result exceeded maxLength when `maxLength <= sepLen+suffixLen` (e.g. `Make("hello world foobar", maxLen 3, suffix 4)` → 21 runes). Fixed by explicitly dropping the base + clamping suffix in the capped branch. Added `TestMake_MaxLength_LengthCap_Property` (grid of inputs×separators×maxLength×suffix×reserved asserting `len(runes) ≤ maxLength`) — guards the whole class. `ab0cffe` fix(slug): cap length when suffix exceeds max-length budget.
+  - Review rounds converged 9 → 3 → 1 findings; final slug invariant is now property-tested + fuzzed. Post-fix full `just check` clean; tidy clean.
+- **Phase 4 — Converged.** All findings fixed & verified. Pushing final state; confirming CI green + zero unresolved threads.
 
 ## Packages
 | Package | Wave | Status | Last commit | Notes |
@@ -54,4 +58,4 @@ Status ∈ {PENDING, DONE, BACKED OUT, BLOCKED}.
 - Loop iterations used: 0/10
 
 ## Deferred / follow-ups for the human
-- none yet
+- **slug, minor/degenerate (out of scope, not a regression):** with a separator whose runes can be legitimate folded content (e.g. `WithSeparator("oo")`) and a tiny `WithMaxLength`, mid-word truncation can leave a fragment coinciding with a separator prefix (e.g. `Make("one", WithSeparator("oo"), WithMaxLength(1))` == "o"). This is a pre-existing artifact of allowing arbitrary content-colliding separators (present independent of the fixes), not introduced by this run. The length-cap and no-leading/trailing/over-length-separator invariants all still hold. Left as-is; revisit only if content-colliding separators become a real use case.
