@@ -3,8 +3,6 @@ package id
 import "time"
 
 // putMillis writes the low 48 bits of ms as a big-endian value into dst[0:6].
-//
-//nolint:unused // consumed by the ULID/Short generators landing in later tasks
 func putMillis(dst []byte, ms uint64) {
 	dst[0] = byte(ms >> 40)
 	dst[1] = byte(ms >> 32)
