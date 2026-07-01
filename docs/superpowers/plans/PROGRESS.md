@@ -15,7 +15,7 @@ Branch: claude/musing-williams-ec21ce
 | structfields | 1 | DONE | 839931d | 5 commits, 97.1% cov, lint clean, verified; test fixture embed made exported (reflect contract) |
 | decimal | 1 | DONE | ce19880 | 9 commits, 94.5% cov, lint clean, fuzz clean; fixed InEpsilon-on-zero test + removed dead isBig() |
 | filetype | 1 | DONE | 9107ac0 | 3 commits, 96.8% cov, lint clean; empty-input→octet-stream guard added |
-| slug | 2 | PENDING | | |
+| slug | 2 | DONE | 9a157ed | 7 commits, 94.3% cov, lint clean, fuzz clean; x/text promoted to direct (only go.mod change in run); NFKD uppercase-leak fix |
 | money | 2 | PENDING | | |
 | validate | 2 | PENDING | | |
 
