@@ -3,6 +3,8 @@ package bytesize_test
 import (
 	"encoding/json"
 	"errors"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/bytesize"
@@ -72,6 +74,32 @@ func TestFormatFamilies(t *testing.T) {
 	}
 	if got := bytesize.FormatIEC(1024); got != "1KiB" {
 		t.Errorf("FormatIEC(1024) = %q", got)
+	}
+}
+
+func TestParseOverflow(t *testing.T) {
+	for _, in := range []string{"9999999PiB", "9999999999999999999", "1e30MB", "NaNMB", "InfB", "-InfKB"} {
+		if _, err := bytesize.Parse(in); !errors.Is(err, bytesize.ErrInvalidSize) {
+			t.Errorf("Parse(%q): want ErrInvalidSize, got %v", in, err)
+		}
+	}
+}
+
+func TestNegativeRoundTrip(t *testing.T) {
+	vals := []bytesize.ByteSize{-1536, -1 * bytesize.MiB, math.MinInt64}
+	for _, v := range vals {
+		s := v.String()
+		if strings.HasPrefix(s, "--") {
+			t.Errorf("String(%d) has doubled sign: %q", int64(v), s)
+		}
+		got, err := bytesize.Parse(s)
+		if err != nil {
+			t.Errorf("Parse(String(%d)=%q) error: %v", int64(v), s, err)
+			continue
+		}
+		if got != v {
+			t.Errorf("negative round-trip %d -> %q -> %d", int64(v), s, int64(got))
+		}
 	}
 }
 

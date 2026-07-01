@@ -2,6 +2,7 @@ package bytesize
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -57,13 +58,21 @@ func parseNumber(num string, mult ByteSize, orig string) (ByteSize, error) {
 		return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
 	}
 	if i, err := strconv.ParseInt(num, 10, 64); err == nil {
+		m := int64(mult)
+		if i > math.MaxInt64/m || i < math.MinInt64/m {
+			return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
+		}
 		return ByteSize(i) * mult, nil
 	}
 	f, err := strconv.ParseFloat(num, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
 	}
-	return ByteSize(f * float64(mult)), nil
+	prod := f * float64(mult)
+	if prod > math.MaxInt64 || prod < math.MinInt64 {
+		return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
+	}
+	return ByteSize(prod), nil
 }
 
 // String formats b using IEC units (the default for infra config).
@@ -84,35 +93,36 @@ func FormatSI(b ByteSize) string {
 // through Parse. rem*100 cannot overflow int64: rem < base^i <= 1024^5.
 func format(n int64, base int64, units []string) string {
 	sign := ""
+	mag := uint64(n)
 	if n < 0 {
 		sign = "-"
-		n = -n
+		mag = uint64(-(n + 1)) + 1 // negate safely, including math.MinInt64
 	}
-	// Climb to the largest unit whose multiplier does not exceed n.
-	pow := int64(1)
+	ubase := uint64(base)
+	pow := uint64(1)
 	i := 0
-	for i+1 < len(units) && n >= pow*base {
-		pow *= base
+	for i+1 < len(units) && mag >= pow*ubase {
+		pow *= ubase
 		i++
 	}
 	// Step back down until the value is exact to at most two decimals.
 	for i > 0 {
-		rem := n % pow
+		rem := mag % pow
 		if rem == 0 || (rem*100)%pow == 0 {
 			break
 		}
-		pow /= base
+		pow /= ubase
 		i--
 	}
 	if i == 0 {
-		return sign + strconv.FormatInt(n, 10) + units[0]
+		return sign + strconv.FormatUint(mag, 10) + units[0]
 	}
-	whole := n / pow
-	rem := n % pow
+	whole := mag / pow
+	rem := mag % pow
 	if rem == 0 {
-		return sign + strconv.FormatInt(whole, 10) + units[i]
+		return sign + strconv.FormatUint(whole, 10) + units[i]
 	}
-	frac := (rem * 100) / pow // 0..99, exact by the loop's invariant
+	frac := (rem * 100) / pow // 0..99, exact by the loop invariant
 	s := fmt.Sprintf("%d.%02d", whole, frac)
 	s = strings.TrimRight(s, "0")
 	s = strings.TrimRight(s, ".")
