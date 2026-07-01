@@ -51,11 +51,13 @@ Branch: claude/musing-williams-ec21ce
 Status ∈ {PENDING, DONE, BACKED OUT, BLOCKED}.
 
 ## Delivery
-- PR: #24 — https://github.com/dmitrymomot/forge/pull/24 (non-draft, base main)
-- CI: <awaiting first run>
-- Review threads: <awaiting Claude review>
-- Deferred (not in this PR): none — all 8 packages green
-- Loop iterations used: 0/10
+- PR: #24 — https://github.com/dmitrymomot/forge/pull/24 (non-draft, base main). Head `7c281b8`.
+- CI: **test = pass, lint = pass** on head `7c281b8` (all three checks incl. claude-review = pass).
+- Review threads: **0 unresolved / 0 total** (0 inline comments). The automated `claude-code-review.yml` workflow times out on this large PR (855-line spec + 8 packages) — it repeatedly ends stuck at "compiling findings" and posts no inline comments/threads, so nothing to resolve there.
+- Substitute review: orchestrator ran **3 rounds of multi-agent adversarial review** (fan-out per package + adversarial verify). Found and fixed **13 real bugs total** via TDD (9 correctness + 3 self-introduced regressions + 1 more regression), each verified `just check` green; slug length invariant now property-tested + fuzzed. 9 `fix(...)` commits.
+- Deferred (not in this PR): none blocking — all 8 packages green. One minor degenerate slug artifact documented under follow-ups (pre-existing, not a regression).
+- Loop iterations used: 4/10 (initial PR + fix push + regression-fix push + final).
+- Not merged (per instructions — human merges).
 
 ## Deferred / follow-ups for the human
 - **slug, minor/degenerate (out of scope, not a regression):** with a separator whose runes can be legitimate folded content (e.g. `WithSeparator("oo")`) and a tiny `WithMaxLength`, mid-word truncation can leave a fragment coinciding with a separator prefix (e.g. `Make("one", WithSeparator("oo"), WithMaxLength(1))` == "o"). This is a pre-existing artifact of allowing arbitrary content-colliding separators (present independent of the fixes), not introduced by this run. The length-cap and no-leading/trailing/over-length-separator invariants all still hold. Left as-is; revisit only if content-colliding separators become a real use case.
