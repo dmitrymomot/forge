@@ -34,6 +34,25 @@ func TestLimitReaderOverLimit(t *testing.T) {
 	}
 }
 
+func TestLimitReaderZeroAndNegativeLimit(t *testing.T) {
+	// n == 0 with data present: any byte exceeds the limit.
+	r := iox.LimitReader(strings.NewReader("x"), 0)
+	if _, err := io.ReadAll(r); !errors.Is(err, iox.ErrLimitExceeded) {
+		t.Fatalf("n=0 with data: want ErrLimitExceeded, got %v", err)
+	}
+	// n == 0 with empty input: clean EOF, no error.
+	r = iox.LimitReader(strings.NewReader(""), 0)
+	if b, err := io.ReadAll(r); err != nil || len(b) != 0 {
+		t.Fatalf("n=0 empty: got %q, %v", b, err)
+	}
+	// Negative n must not panic (clamped to 0) and must not return a negative
+	// byte count; any input immediately exceeds the limit.
+	r = iox.LimitReader(strings.NewReader("hello"), -5)
+	if _, err := io.ReadAll(r); !errors.Is(err, iox.ErrLimitExceeded) {
+		t.Fatalf("negative n: want ErrLimitExceeded (no panic), got %v", err)
+	}
+}
+
 func TestDrainClose(t *testing.T) {
 	rc := io.NopCloser(strings.NewReader("data"))
 	if err := iox.DrainClose(rc); err != nil {

@@ -8,7 +8,14 @@ import (
 // LimitReader returns a reader that yields at most n bytes from r and then
 // returns ErrLimitExceeded. Unlike io.LimitReader (which reports io.EOF at the
 // cap), it distinguishes "hit the limit" from "clean end of input".
+//
+// A negative n is treated as 0 (any input immediately exceeds the limit), so a
+// misconfigured or negative body-size limit fails cleanly with ErrLimitExceeded
+// rather than panicking or returning a negative byte count from Read.
 func LimitReader(r io.Reader, n int64) io.Reader {
+	if n < 0 {
+		n = 0
+	}
 	return &limitReader{r: r, n: n}
 }
 
