@@ -34,6 +34,34 @@ func noDanglingSeparator(t *testing.T, got, sep string) {
 	}
 }
 
+// REGRESSION (9b06c52): separator-boundary-aware truncation must never delete
+// real folded content, even when the separator's leading rune(s) coincide with a
+// prefix of legitimate word content. The prior content-string-matching trim
+// greedily stripped such content; these repros must be content-preserving.
+func TestMake_MaxLength_SeparatorPrefixContentPreserved(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		opts []slug.Option
+		want string
+	}{
+		// separator "a-": "banana" fits in maxLen 20 as a single word, so no
+		// inserted separator exists to trim. The trailing "a" is content.
+		{"sep-a-dash", "banana", []slug.Option{slug.WithSeparator("a-"), slug.WithMaxLength(20)}, "banana"},
+		// separator "oo": "zoo cat" -> word "zoo" alone fits in maxLen 5; the "oo"
+		// is content, not an inserted joiner.
+		{"sep-oo", "zoo cat", []slug.Option{slug.WithSeparator("oo"), slug.WithMaxLength(5)}, "zoo"},
+		// separator "2x": "abc2" folds to a single word "abc2" within maxLen 20;
+		// the trailing "2" is content.
+		{"sep-2x", "abc2", []slug.Option{slug.WithSeparator("2x"), slug.WithMaxLength(20)}, "abc2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, slug.Make(tt.in, tt.opts...), "Make(%q)", tt.in)
+		})
+	}
+}
+
 // BUG C7: WithCustomReplace must apply replacements in a deterministic order so
 // chained/overlapping keys yield the same output on every run.
 func TestMake_CustomReplace_Deterministic(t *testing.T) {

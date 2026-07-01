@@ -32,11 +32,53 @@ func build(s string, cfg *config) string {
 	for _, ch := range cfg.stripChars {
 		s = strings.ReplaceAll(s, string(ch), "")
 	}
-	// 3. per-rune fold: ASCII [a-z0-9] passes through; letters fold via NFKD +
-	//    special-case map; every other run collapses to a single separator.
-	var b strings.Builder
-	b.Grow(len(s))
-	lastWasSep := true // true ⇒ suppress a leading separator
+	// 3. per-rune fold into a list of WORDS: ASCII [a-z0-9] passes through;
+	//    letters fold via NFKD + special-case map; every other run marks a word
+	//    boundary. Keeping words separate (instead of pre-joining) lets truncation
+	//    stay separator-boundary-aware — the joining separator is inserted by us,
+	//    never by folded content, so it can never be mistaken for content.
+	words := foldWords(s, cfg)
+
+	// 4. max-length truncation over whole words (separator-boundary-aware). This
+	//    only ever drops inserted joiners or cuts the FIRST word mid-word, so it
+	//    never strips real content that coincidentally matches a separator prefix
+	//    and never leaves a partial/whole trailing separator.
+	result := joinWords(words, cfg.separator, cfg.maxLength)
+
+	// 5. determine whether a RANDOM suffix is required, and its length.
+	suffixLen := cfg.suffixLength
+	if suffixLen == 0 && isReserved(result, cfg.reservedSlugs) {
+		suffixLen = defaultSuffixLength
+	}
+	if suffixLen > 0 {
+		result = withRandomSuffix(words, suffixLen, cfg)
+	}
+
+	// 6. min-length padding (after any random suffix already applied).
+	if cfg.minLength > 0 && utf8.RuneCountInString(result) < cfg.minLength {
+		pad := cfg.minLength - utf8.RuneCountInString(result)
+		if result != "" {
+			pad += len([]rune(cfg.separator)) // account for the joining separator
+		}
+		result = padStringWithSuffix(result, pad, cfg)
+	}
+	return result
+}
+
+// foldWords runs the per-rune fold and returns the sequence of folded word runs.
+// ASCII [a-z0-9] passes through untouched; Latin letters fold via NFKD + the
+// special-case map; every maximal run of non-sluggable runes ends the current
+// word. No separators are inserted here — joining is the caller's job, which keeps
+// the separator strictly out of the content so truncation can be boundary-aware.
+func foldWords(s string, cfg *config) []string {
+	var words []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			words = append(words, cur.String())
+			cur.Reset()
+		}
+	}
 	for _, r := range s {
 		if cfg.lowercase {
 			r = unicode.ToLower(r)
@@ -47,41 +89,88 @@ func build(s string, cfg *config) string {
 			if cfg.lowercase {
 				folded = strings.ToLower(folded)
 			}
-			b.WriteString(folded)
-			lastWasSep = false
+			cur.WriteString(folded)
 			continue
 		}
-		if !lastWasSep {
-			b.WriteString(cfg.separator)
-			lastWasSep = true
-		}
+		flush() // non-sluggable run ends the current word
 	}
-	result := strings.TrimSuffix(b.String(), cfg.separator)
+	flush()
+	return words
+}
 
-	// 4. max-length truncation (rune-safe), trimming a dangling separator.
+// joinWords joins words with sep, honoring a maxLen rune cap (0 = unlimited).
+// Truncation is separator-boundary-aware: whole words are appended only while the
+// running total (including the joining separator) stays within maxLen. If not even
+// the first word fits, that single word is cut mid-word — a word contains no
+// inserted separator, so this can never leave a partial/whole separator, and no
+// word other than the (possibly cut) first is ever partially emitted.
+func joinWords(words []string, sep string, maxLen int) string {
+	if len(words) == 0 {
+		return ""
+	}
+	if maxLen <= 0 {
+		return strings.Join(words, sep)
+	}
+	sepLen := utf8.RuneCountInString(sep)
+	var b strings.Builder
+	total := 0
+	for i, w := range words {
+		wLen := utf8.RuneCountInString(w)
+		if i == 0 {
+			// The first word carries no leading separator. If it overflows on its
+			// own, cut it mid-word to exactly maxLen (never a separator fragment).
+			if wLen > maxLen {
+				return truncateRunes(w, maxLen)
+			}
+			b.WriteString(w)
+			total = wLen
+			continue
+		}
+		// Subsequent words cost sep+word; stop before any word that would overflow.
+		if total+sepLen+wLen > maxLen {
+			break
+		}
+		b.WriteString(sep)
+		b.WriteString(w)
+		total += sepLen + wLen
+	}
+	return b.String()
+}
+
+// withRandomSuffix builds a slug from base words plus a random suffix of suffixLen
+// runes, honoring cfg.maxLength. The suffix is treated as a trailing word: room is
+// reserved for the separator + suffix, the base is truncated by whole words (or the
+// first word mid-word) to fit, then base+sep+suffix are joined. This keeps the
+// result free of partial/whole dangling separators and preserves base content.
+func withRandomSuffix(words []string, suffixLen int, cfg *config) string {
+	baseMax := cfg.maxLength
 	if cfg.maxLength > 0 {
-		result = truncateRunes(result, cfg.maxLength)
-		result = trimDanglingSeparator(result, cfg.separator)
-	}
-
-	// 5. determine whether a RANDOM suffix is required, and its length.
-	suffixLen := cfg.suffixLength
-	if suffixLen == 0 && isReserved(result, cfg.reservedSlugs) {
-		suffixLen = defaultSuffixLength
-	}
-	if suffixLen > 0 {
-		result = withRandomSuffix(result, suffixLen, cfg)
-	}
-
-	// 6. min-length padding (after any random suffix already applied).
-	if cfg.minLength > 0 && utf8.RuneCountInString(result) < cfg.minLength {
-		pad := cfg.minLength - utf8.RuneCountInString(result)
-		if result != "" {
-			pad += len([]rune(cfg.separator)) // account for the joining separator
+		sepLen := utf8.RuneCountInString(cfg.separator)
+		// Reserve room for sep+suffix; clamp the suffix if it cannot fit at all.
+		if suffixLen+sepLen > cfg.maxLength {
+			suffixLen = max(cfg.maxLength-sepLen, 0)
 		}
-		result = withRandomSuffix(result, pad, cfg)
+		baseMax = max(cfg.maxLength-sepLen-suffixLen, 0)
 	}
-	return result
+	base := joinWords(words, cfg.separator, baseMax)
+	return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
+}
+
+// padStringWithSuffix appends a random suffix of suffixLen runes to an
+// already-joined base string, honoring cfg.maxLength. Used by the min-length pad
+// step where the base is a finished slug rather than a word list; it only shrinks
+// the suffix (never the base) since padding never intends to drop base content.
+func padStringWithSuffix(base string, suffixLen int, cfg *config) string {
+	if cfg.maxLength > 0 {
+		sepLen := 0
+		if base != "" {
+			sepLen = utf8.RuneCountInString(cfg.separator)
+		}
+		if utf8.RuneCountInString(base)+sepLen+suffixLen > cfg.maxLength {
+			suffixLen = max(cfg.maxLength-utf8.RuneCountInString(base)-sepLen, 0)
+		}
+	}
+	return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
 }
 
 // isReserved reports whether slug (lowercased) is in the reserved set.
@@ -91,36 +180,6 @@ func isReserved(slug string, reserved []string) bool {
 	}
 	lower := strings.ToLower(slug)
 	return slices.Contains(reserved, lower)
-}
-
-// withRandomSuffix appends a random suffix of suffixLen runes to base, honoring
-// cfg.maxLength by shrinking the suffix and, if needed, truncating the base so the
-// total rune count never exceeds the cap.
-func withRandomSuffix(base string, suffixLen int, cfg *config) string {
-	sepLen := 0
-	if base != "" {
-		sepLen = utf8.RuneCountInString(cfg.separator)
-	}
-	if cfg.maxLength > 0 {
-		// Shrink the suffix if the whole thing would overflow.
-		if utf8.RuneCountInString(base)+sepLen+suffixLen > cfg.maxLength {
-			// First try trimming the base to make room for the full suffix.
-			maxBase := max(cfg.maxLength-sepLen-suffixLen, 0)
-			base = truncateRunes(base, maxBase)
-			base = trimDanglingSeparator(base, cfg.separator)
-			if base == "" {
-				sepLen = 0
-			}
-			// If even a zero-length base cannot fit the suffix, clamp the suffix.
-			if suffixLen > cfg.maxLength-sepLen {
-				suffixLen = cfg.maxLength - sepLen
-			}
-			if suffixLen < 0 {
-				suffixLen = 0
-			}
-		}
-	}
-	return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
 }
 
 // appendSuffix joins base and suffix with sep, or returns suffix alone when base
@@ -150,40 +209,6 @@ func sortedReplaceKeys(repl map[string]string) []string {
 		return strings.Compare(a, b) // stable lexicographic tie-break
 	})
 	return keys
-}
-
-// trimDanglingSeparator removes a trailing and leading run of separator
-// characters left behind after truncation. Because a multi-rune separator can be
-// cut mid-separator, a plain TrimSuffix would leave a partial fragment; this
-// trims any trailing bytes that form a (non-empty) prefix of the separator, then
-// removes any remaining whole separators from both ends.
-func trimDanglingSeparator(s, sep string) string {
-	if sep == "" || s == "" {
-		return s
-	}
-	sepRunes := []rune(sep)
-	// Trim a trailing partial-or-whole separator: try the longest separator
-	// prefix that s ends with and strip it, repeating until none remains.
-	for {
-		trimmed := false
-		for n := len(sepRunes); n >= 1; n-- {
-			frag := string(sepRunes[:n])
-			if strings.HasSuffix(s, frag) {
-				s = s[:len(s)-len(frag)]
-				trimmed = true
-				break
-			}
-		}
-		if !trimmed {
-			break
-		}
-	}
-	// Trim any leading whole separators (a leading fragment cannot occur because
-	// folding never emits a leading separator, but be defensive and symmetric).
-	for sep != "" && strings.HasPrefix(s, sep) {
-		s = s[len(sep):]
-	}
-	return s
 }
 
 // isASCIIAlphaNum reports whether r is a-z, A-Z, or 0-9.
