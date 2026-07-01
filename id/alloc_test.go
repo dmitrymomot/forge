@@ -13,7 +13,7 @@ import (
 // some platforms (e.g. darwin/arm64) but 1 on others (e.g. linux/amd64), because
 // crypto/rand.Read's escape analysis is platform-dependent and can force the
 // stack buffer to the heap; the <=1 bound guards against real regressions (a
-// pointer type, randx.Bytes, fmt, etc. would push it far higher) while staying
+// pointer type, random.Bytes, fmt, etc. would push it far higher) while staying
 // portable. If this ever exceeds 1, tighten the implementation, not the bound.
 
 func TestAlloc_Generation(t *testing.T) {

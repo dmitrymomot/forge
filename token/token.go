@@ -9,7 +9,7 @@ import (
 
 	"github.com/dmitrymomot/forge/clock"
 	"github.com/dmitrymomot/forge/keyset"
-	"github.com/dmitrymomot/forge/randx"
+	"github.com/dmitrymomot/forge/random"
 	"github.com/dmitrymomot/forge/secret"
 	"github.com/dmitrymomot/forge/sign"
 )
@@ -62,7 +62,7 @@ func FromKeyset[T any](ks *keyset.Keyset, opts ...Option) (*Codec[T], error) {
 func (c *Codec[T]) Issue(payload T) (string, error) {
 	// Nonce makes identical payloads produce distinct tokens (token-distinctness);
 	// unforgeability comes from the HMAC signature, not the nonce.
-	env := envelope[T]{Purpose: c.purpose, Nonce: randx.URLSafe(8), Payload: payload}
+	env := envelope[T]{Purpose: c.purpose, Nonce: random.URLSafe(8), Payload: payload}
 	if c.ttl > 0 {
 		env.Exp = c.clk.Now().Add(c.ttl).Unix()
 	}

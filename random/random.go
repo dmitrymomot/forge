@@ -1,4 +1,4 @@
-package randx
+package random
 
 import (
 	"crypto/rand"
@@ -12,7 +12,7 @@ import (
 // escape hatch; most callers want Bytes.
 func Read(p []byte) error {
 	if _, err := rand.Read(p); err != nil {
-		return fmt.Errorf("randx: read: %w", err)
+		return fmt.Errorf("random: read: %w", err)
 	}
 	return nil
 }
@@ -22,7 +22,7 @@ func Read(p []byte) error {
 func Bytes(n int) []byte {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Errorf("randx: crypto/rand failed: %w", err))
+		panic(fmt.Errorf("random: crypto/rand failed: %w", err))
 	}
 	return b
 }
@@ -36,11 +36,11 @@ func URLSafe(n int) string { return base64.RawURLEncoding.EncodeToString(Bytes(n
 // Int returns an unbiased random integer in [0, max). It panics if max <= 0.
 func Int(max int) int {
 	if max <= 0 {
-		panic("randx: Int max must be > 0")
+		panic("random: Int max must be > 0")
 	}
 	v, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
 	if err != nil {
-		panic(fmt.Errorf("randx: crypto/rand failed: %w", err))
+		panic(fmt.Errorf("random: crypto/rand failed: %w", err))
 	}
 	return int(v.Int64())
 }

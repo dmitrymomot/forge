@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/dmitrymomot/forge/kdf"
-	"github.com/dmitrymomot/forge/randx"
+	"github.com/dmitrymomot/forge/random"
 	"github.com/dmitrymomot/forge/subtlex"
 )
 
@@ -30,7 +30,7 @@ func Hash(password string, opts ...Option) (string, error) {
 	if err := c.argon.Validate(); err != nil {
 		return "", fmt.Errorf("password: invalid params: %w", err)
 	}
-	salt := randx.Bytes(saltLen)
+	salt := random.Bytes(saltLen)
 	key := argon2.IDKey([]byte(password), salt, c.argon.Time, c.argon.Memory, c.argon.Threads, c.argon.KeyLen)
 	return encodeArgon(c.argon, salt, key), nil
 }
