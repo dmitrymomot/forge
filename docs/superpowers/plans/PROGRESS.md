@@ -12,7 +12,7 @@ Branch: claude/musing-williams-ec21ce
 | errorsx | 1 | DONE | a86cf09 | 3 commits, 100% cov, lint clean, verified by orchestrator |
 | sanitize | 1 | DONE | 1f19196 | 6 commits, 98.9% cov, lint clean, verified |
 | structfields | 1 | DONE | 839931d | 5 commits, 97.1% cov, lint clean, verified; test fixture embed made exported (reflect contract) |
-| decimal | 1 | PENDING | | |
+| decimal | 1 | DONE | ce19880 | 9 commits, 94.5% cov, lint clean, fuzz clean; fixed InEpsilon-on-zero test + removed dead isBig() |
 | filetype | 1 | PENDING | | |
 | slug | 2 | PENDING | | |
 | money | 2 | PENDING | | |
