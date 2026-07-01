@@ -69,6 +69,10 @@ func Parse[T any](s string) (T, error) {
 		out = uint32(v)
 	case uint64:
 		out, err = strconv.ParseUint(s, 10, 64)
+	case uintptr:
+		var v uint64
+		v, err = strconv.ParseUint(s, 10, strconv.IntSize)
+		out = uintptr(v)
 	case float32:
 		var v float64
 		v, err = strconv.ParseFloat(s, 32)

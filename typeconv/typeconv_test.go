@@ -223,6 +223,22 @@ func TestParseTime(t *testing.T) {
 	})
 }
 
+func TestParseFormatUintptr(t *testing.T) {
+	// Parse and Format must cover the same scalar set (Format's "lossless
+	// inverse of Parse" contract): uintptr is handled by both.
+	v, err := typeconv.Parse[uintptr]("42")
+	if err != nil || v != 42 {
+		t.Fatalf("Parse[uintptr] = %d, %v", v, err)
+	}
+	if got := typeconv.Format(uintptr(42)); got != "42" {
+		t.Fatalf("Format(uintptr) = %q", got)
+	}
+	round, err := typeconv.Parse[uintptr](typeconv.Format(uintptr(65535)))
+	if err != nil || round != 65535 {
+		t.Fatalf("round-trip = %d, %v", round, err)
+	}
+}
+
 func TestParseSlice(t *testing.T) {
 	t.Run("ints", func(t *testing.T) {
 		v, err := typeconv.ParseSlice[int]("1, 2, 3", ",")
