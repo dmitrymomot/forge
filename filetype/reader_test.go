@@ -80,6 +80,26 @@ func TestDetectReader_PropagatesReadError(t *testing.T) {
 	assert.ErrorIs(t, err, boom)
 }
 
+func TestDetectReader_ComposesWithDetectAndIs(t *testing.T) {
+	// End-to-end: a JPEG stream is detected via DetectReader, and the replayed
+	// bytes still satisfy Detect and Is identically to the raw head.
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	full := append(append([]byte{}, jpeg...), bytes.Repeat([]byte("d"), 1000)...)
+
+	typ, r, err := filetype.DetectReader(bytes.NewReader(full))
+	require.NoError(t, err)
+	assert.Equal(t, "image/jpeg", typ.MIME)
+	assert.Equal(t, "jpg", typ.Ext)
+
+	replayed, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	got, ok := filetype.Detect(replayed)
+	assert.True(t, ok)
+	assert.Equal(t, typ, got)
+	assert.True(t, filetype.Is(replayed, "image/jpeg"))
+}
+
 // readerOnly hides any Seeker/WriterTo methods of the wrapped reader.
 type readerOnly struct{ r io.Reader }
 
