@@ -20,11 +20,15 @@ func TestPtrAndFromPtr(t *testing.T) {
 	if nullx.Empty[int]().Ptr() != nil {
 		t.Fatal("want nil Ptr")
 	}
-	p := nullx.Of(9).Ptr()
+	orig := nullx.Of(9)
+	p := orig.Ptr()
 	if p == nil || *p != 9 {
 		t.Fatalf("got %v", p)
 	}
-	*p = 100 // must be a copy; mutating it affects nothing else
+	*p = 100 // mutating the returned pointer must not affect the source Null
+	if v, ok := orig.Get(); !ok || v != 9 {
+		t.Fatalf("Ptr() aliased internal storage: orig became %d (ok=%v)", v, ok)
+	}
 
 	x := 3
 	if v, ok := nullx.FromPtr(&x).Get(); !ok || v != 3 {
