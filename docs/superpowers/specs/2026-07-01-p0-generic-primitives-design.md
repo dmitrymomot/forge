@@ -96,8 +96,12 @@ func Chunk[T any](s []T, n int) [][]T                           // materialized;
 Trivial pointer helpers for optional struct fields / JSON `omitempty` / SQL nullables, plus a
 small `Optional[T]` type for "was this field provided?" semantics.
 
+**No `To` helper.** Go 1.26's built-in `new(expr)` returns a pointer to a copy of an
+expression (`new(42)` → `*int`), so a pointer-to-literal helper would just wrap a language
+builtin — and the repo's `modernize` lint rejects it. `ptr` therefore does **not** ship `To`;
+callers use `new(v)`.
+
 ```go
-func To[T any](v T) *T
 func From[T any](p *T) T                 // zero value if p == nil
 func FromOr[T any](p *T, def T) T        // def if p == nil
 func Equal[T comparable](a, b *T) bool   // both nil => true; one nil => false; else *a == *b
