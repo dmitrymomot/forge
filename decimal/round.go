@@ -79,6 +79,27 @@ func roundBig(coef *big.Int, drop int32, mode RoundingMode) *big.Int {
 	return q
 }
 
+// divRound computes round(num / den) as a *big.Int using mode. den must be
+// nonzero. The sign of the true quotient is num.Sign() * den.Sign().
+func divRound(num, den *big.Int, mode RoundingMode) *big.Int {
+	// Determine result sign, then work on absolute magnitudes.
+	neg := (num.Sign() < 0) != (den.Sign() < 0)
+	an := new(big.Int).Abs(num)
+	ad := new(big.Int).Abs(den)
+
+	q := new(big.Int)
+	r := new(big.Int)
+	q.QuoRem(an, ad, r) // an = q*ad + r, 0 ≤ r < ad
+
+	if r.Sign() != 0 && roundAwayFromZero(q, r, ad, mode, neg) {
+		q.Add(q, big.NewInt(1))
+	}
+	if neg {
+		q.Neg(q)
+	}
+	return q
+}
+
 // roundAwayFromZero decides, for a positive magnitude quotient q with nonzero
 // remainder r (0 < r < div), whether to increment the magnitude by one. neg is
 // the sign of the original value, used by the sign-aware modes.

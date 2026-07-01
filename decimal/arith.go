@@ -1,6 +1,9 @@
 package decimal
 
-import "math/big"
+import (
+	"fmt"
+	"math/big"
+)
 
 // Add returns d + e, exact, at scale max(d.scale, e.scale). Never rounds.
 func (d Decimal) Add(e Decimal) Decimal { return d.addSub(e, false) }
@@ -56,6 +59,36 @@ func (d Decimal) Mul(e Decimal) Decimal {
 	}
 	prod := new(big.Int).Mul(d.bigCoef(), e.bigCoef())
 	return fromBig(prod, scale)
+}
+
+// Div returns d / e computed to exactly `scale` fractional digits using mode.
+// A non-terminating quotient (e.g. 1/3) is well-defined because the caller names
+// the scale and rounding mode. e == 0 returns ErrDivByZero.
+func (d Decimal) Div(e Decimal, scale int32, mode RoundingMode) (Decimal, error) {
+	if e.IsZero() {
+		return Decimal{}, fmt.Errorf("decimal: %w", ErrDivByZero)
+	}
+	if scale < 0 {
+		scale = 0
+	}
+
+	// We want quotient = d / e rounded to `scale` fractional digits.
+	// numerator   = coefₐ × 10^(scale + scale_e − scaleₐ), scaled so the integer
+	//               division by coef_e yields exactly `scale` fractional digits.
+	// If the exponent is negative, scale the denominator instead.
+	num := d.bigCoef()
+	den := e.bigCoef()
+
+	exp := int64(scale) + int64(e.scale) - int64(d.scale)
+	if exp >= 0 {
+		num.Mul(num, pow10Big(int32(exp)))
+	} else {
+		den.Mul(den, pow10Big(int32(-exp)))
+	}
+
+	// Rounded integer division: q = round(num / den) with the requested mode.
+	q := divRound(num, den, mode)
+	return fromBig(q, scale), nil
 }
 
 // scaleInt64 returns c * 10^n staying in int64, reporting ok=false on overflow.
