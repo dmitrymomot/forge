@@ -289,8 +289,7 @@ git commit -m "feat(slicex): generic slice gap-fillers (Map/Filter/Reduce/GroupB
 
 **Interfaces:**
 - Consumes: stdlib `encoding/json`.
-- Produces:
-  - `func To[T any](v T) *T`
+- Produces (note: **no `To`** — Go 1.26's `new(expr)` builtin supersedes it; the repo `modernize` lint rejects the wrapper):
   - `func From[T any](p *T) T`
   - `func FromOr[T any](p *T, def T) T`
   - `func Equal[T comparable](a, b *T) bool`
@@ -311,27 +310,22 @@ import (
 	"github.com/dmitrymomot/forge/ptr"
 )
 
-func TestTo(t *testing.T) {
-	p := ptr.To(42)
-	assert.Equal(t, 42, *p)
-}
-
 func TestFrom(t *testing.T) {
-	assert.Equal(t, 7, ptr.From(ptr.To(7)))
+	assert.Equal(t, 7, ptr.From(new(7)))
 	assert.Equal(t, 0, ptr.From[int](nil), "nil -> zero value")
 }
 
 func TestFromOr(t *testing.T) {
-	assert.Equal(t, 7, ptr.FromOr(ptr.To(7), 99))
+	assert.Equal(t, 7, ptr.FromOr(new(7), 99))
 	assert.Equal(t, 99, ptr.FromOr[int](nil, 99))
 }
 
 func TestEqual(t *testing.T) {
 	assert.True(t, ptr.Equal[int](nil, nil), "both nil equal")
-	assert.False(t, ptr.Equal(ptr.To(1), nil), "one nil unequal")
-	assert.False(t, ptr.Equal[int](nil, ptr.To(1)))
-	assert.True(t, ptr.Equal(ptr.To(5), ptr.To(5)))
-	assert.False(t, ptr.Equal(ptr.To(5), ptr.To(6)))
+	assert.False(t, ptr.Equal(new(1), nil), "one nil unequal")
+	assert.False(t, ptr.Equal[int](nil, new(1)))
+	assert.True(t, ptr.Equal(new(5), new(5)))
+	assert.False(t, ptr.Equal(new(5), new(6)))
 }
 ```
 
@@ -442,9 +436,8 @@ Create `ptr/ptr.go`:
 ```go
 package ptr
 
-// To returns a pointer to a copy of v. Handy for optional struct fields and
-// JSON/SQL nullable values.
-func To[T any](v T) *T { return &v }
+// (No To helper: Go 1.26's new(expr) builtin returns a pointer to a copy of an
+// expression, e.g. new(42), so a pointer-to-literal helper is redundant.)
 
 // From dereferences p, returning the zero value of T when p is nil.
 func From[T any](p *T) T {
@@ -543,9 +536,10 @@ func (o *Optional[T]) UnmarshalJSON(b []byte) error {
 Create `ptr/doc.go`:
 
 ```go
-// Package ptr provides generic pointer helpers (To, From, FromOr, Equal) for
+// Package ptr provides generic pointer helpers (From, FromOr, Equal) for
 // optional struct fields, JSON omitempty, and SQL nullables, plus Optional[T],
-// a two-state "provided?" wrapper for JSON PATCH semantics.
+// a two-state "provided?" wrapper for JSON PATCH semantics. A pointer to a
+// literal is the Go 1.26 new(expr) builtin, so ptr does not wrap it.
 package ptr
 ```
 
