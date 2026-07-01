@@ -60,6 +60,15 @@ Each package follows the conventions established by the shipped packages:
 Generic helpers that stdlib `slices` does not provide. Fills gaps **only** — does not
 re-implement Sort/SortFunc/Contains/Index/Equal/Reverse/Compact, which are stdlib.
 
+**No aliasing of stdlib (framework-wide rule, stated in `doc.go`).** `slicex` neither
+re-implements nor re-exports stdlib `slices` functions — consumers import `slices` directly
+alongside `slicex`. Reasons: generic functions can't be cheaply aliased (`var Sort = slices.Sort`
+is illegal; each "alias" would be a hand-written generic wrapper with copied constraints), such
+wrappers drift as stdlib grows new helpers/variants, and two names for one function (`slices.Sort`
+vs `slicex.Sort`) is a two-sources-of-truth footgun. stdlib is the most stable dependency possible
+and needs no wrapper; the one-extra-import cost is idiomatic Go and free. The same
+**gap-fill-only, never-re-export-stdlib** rule applies to `mapx` (vs `maps`) and `set`.
+
 ```go
 func Map[T, U any](s []T, fn func(T) U) []U
 func Filter[T any](s []T, pred func(T) bool) []T
@@ -305,6 +314,10 @@ func Pluralize(word string, n int) string     // BASIC English only
 - `Pluralize` is deliberately **naive**: append `s`; `es` for words ending in s/x/z/ch/sh;
   `y → ies` (consonant + y). It is documented as a best-effort helper, **not** a linguistics
   engine (no irregular plurals). Returns the singular unchanged when `n == 1`.
+  **Locale-aware / rule-based pluralization is out of scope here** — that will be owned by the
+  future `i18n` package (multi-language + custom CLDR-style plural rules). `stringsx.Pluralize`
+  is only the naive English helper for trusted, developer-facing strings; `doc.go` cross-references
+  `i18n` so consumers don't reach for it when they need real localization.
 - **Deps:** `strings`, `unicode`, `unicode/utf8`.
 
 ---
