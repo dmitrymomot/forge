@@ -2,6 +2,7 @@ package decimal
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 )
 
@@ -115,7 +116,8 @@ func addInt64(a, b int64) (int64, bool) {
 // subInt64 returns a-b, reporting ok=false on overflow.
 func subInt64(a, b int64) (int64, bool) {
 	s := a - b
-	if (b < 0 && a > 0 && s < 0) || (b > 0 && a < 0 && s >= 0) {
+	// a >= 0 (not a > 0): the a==0, b==MinInt64 case (0 - MinInt64) overflows too.
+	if (b < 0 && a >= 0 && s < 0) || (b > 0 && a < 0 && s >= 0) {
 		return 0, false
 	}
 	return s, true
@@ -126,11 +128,14 @@ func mulInt64(a, b int64) (int64, bool) {
 	if a == 0 || b == 0 {
 		return 0, true
 	}
+	// MinInt64 * -1 overflows, but both the product and the p/b division below
+	// wrap back to MinInt64, so the p/b check passes; catch it explicitly.
+	if (a == math.MinInt64 && b == -1) || (b == math.MinInt64 && a == -1) {
+		return 0, false
+	}
 	p := a * b
 	if p/b != a {
 		return 0, false
 	}
-	// -MinInt64 special case guard: a*b == MinInt64 with a==-1 is fine; the p/b
-	// check above already catches the overflowing pairs.
 	return p, true
 }

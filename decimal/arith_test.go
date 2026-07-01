@@ -1,6 +1,7 @@
 package decimal_test
 
 import (
+	"math"
 	"math/big"
 	"math/rand/v2"
 	"testing"
@@ -56,6 +57,39 @@ func TestAdd_OverflowPromotesAndDemotes(t *testing.T) {
 	back := sum.Sub(one)
 	assert.Equal(t, "9223372036854775807", back.String())
 	assert.True(t, back.Equal(max))
+}
+
+func TestSub_MinInt64OverflowPromotes(t *testing.T) {
+	// C4: 0 - MinInt64 overflows int64 and must promote to big.Int, yielding
+	// the correct positive magnitude rather than wrapping back to MinInt64.
+	got := decimal.Zero.Sub(decimal.New(math.MinInt64, 0))
+	assert.Equal(t, "9223372036854775808", got.String())
+
+	// Boundary: MinInt64 - (-1) also overflows and must promote.
+	got2 := decimal.New(math.MinInt64, 0).Sub(decimal.FromInt(-1))
+	assert.Equal(t, "-9223372036854775807", got2.String())
+
+	// A normal in-range subtraction must stay exact on the fast path.
+	inRange := decimal.FromInt(5).Sub(decimal.FromInt(3))
+	assert.Equal(t, "2", inRange.String())
+}
+
+func TestMul_MinInt64OverflowPromotes(t *testing.T) {
+	// C3: MinInt64 * -1 overflows int64 and must promote to big.Int, yielding
+	// the correct positive magnitude rather than wrapping back to MinInt64.
+	minInt := decimal.New(math.MinInt64, 0)
+	negOne := decimal.FromInt(-1)
+
+	got := minInt.Mul(negOne)
+	assert.Equal(t, "9223372036854775808", got.String())
+
+	// Operand order must not matter.
+	gotRev := negOne.Mul(minInt)
+	assert.Equal(t, "9223372036854775808", gotRev.String())
+
+	// A normal in-range multiplication must stay exact on the fast path.
+	inRange := decimal.FromInt(6).Mul(decimal.FromInt(7))
+	assert.Equal(t, "42", inRange.String())
 }
 
 func TestAlgebraicLaws(t *testing.T) {
