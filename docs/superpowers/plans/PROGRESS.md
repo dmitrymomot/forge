@@ -16,7 +16,7 @@ Branch: claude/musing-williams-ec21ce
 | decimal | 1 | DONE | ce19880 | 9 commits, 94.5% cov, lint clean, fuzz clean; fixed InEpsilon-on-zero test + removed dead isBig() |
 | filetype | 1 | DONE | 9107ac0 | 3 commits, 96.8% cov, lint clean; empty-input→octet-stream guard added |
 | slug | 2 | DONE | 9a157ed | 7 commits, 94.3% cov, lint clean, fuzz clean; x/text promoted to direct (only go.mod change in run); NFKD uppercase-leak fix |
-| money | 2 | PENDING | | |
+| money | 2 | DONE | d0ed821 | 7 commits, 98.8% cov, lint clean, fuzz clean; built on decimal (unmodified), go.mod unchanged |
 | validate | 2 | PENDING | | |
 
 Status ∈ {PENDING, DONE, BACKED OUT, BLOCKED}.
