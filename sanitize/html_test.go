@@ -48,7 +48,7 @@ func TestStripTags(t *testing.T) {
 		{`a <a href="http://x">link</a> b`, `a link b`},
 		{`<img src="x"/>caption`, `caption`},
 		{`no tags here`, `no tags here`},
-		{`unclosed <b tag`, `unclosed `},                 // trailing unclosed '<' onward dropped
+		{`unclosed <b tag`, `unclosed `},                  // trailing unclosed '<' onward dropped
 		{`<script>alert(1)</script>keep`, `alert(1)keep`}, // NOTE: extraction, NOT XSS-safe
 		{"", ""},
 	}

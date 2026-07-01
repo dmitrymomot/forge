@@ -66,7 +66,7 @@ func TestStripControl(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"a\x00b", "ab"},               // NUL dropped
 		{"a\x07b", "ab"},               // BEL (Cc) dropped
-		{"a​b", "ab"},             // zero-width space (Cf) dropped
+		{"a\u200bb", "ab"},             // zero-width space (Cf) dropped
 		{"keep me", "keep me"},         // normal spaces preserved
 		{"tab\there", "tab\there"},     // tab is a normal space, kept
 		{"line\nbreak", "line\nbreak"}, // newline is a normal space, kept
