@@ -10,7 +10,7 @@ remaining gap in the P0 layer of `docs/maximal-package-set.md`.
 | Package | Tier | Purpose |
 |---|---|---|
 | `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English). The no-magic alternative to go-playground/validator. |
-| `sanitize` | recommended | Plain-text normalization/escaping at trust boundaries (trim/collapse/strip-control, email/username canonicalization, filename + header-value + HTML escaping). |
+| `sanitize` | recommended | Plain-text normalization/escaping at trust boundaries + a generic `Apply`/`Compose` pipeline: whitespace/control, char-class filters, HTML escape/strip, email/username/filename/header/URL canonicalizers. |
 | `slug` | recommended | URL-safe slug generation with Unicode→ASCII folding, an options API (length/separator/case/strip/replace/suffix/reserved), and predicate-based uniqueness. |
 | `structfields` | recommended | The **one sanctioned reflection helper**: walk an exported struct's fields once (name/parsed-tag/value/Set), confining all `reflect` use to one audited primitive. |
 | `filetype` | recommended | Detect a file's real MIME type from magic-byte signatures (not the client-supplied extension), closing the renamed-`.exe`-as-`.png` upload hole. |
@@ -108,35 +108,82 @@ Deps: `errors`, `fmt`.
 
 ## 2. `sanitize` — plain-text normalization at trust boundaries (recommended)
 
-For **untrusted** input. NOT a rich-HTML sanitizer (no bluemonday); `HTML` only
-escapes. Trusted developer-facing string shaping lives in `stringsx` — `sanitize`
-deliberately does **not** duplicate `Truncate`.
+For **untrusted** input. NOT a rich-HTML sanitizer (no bluemonday) — see the
+explicit exclusions below. Trusted developer-facing string shaping (case
+conversion, `Truncate`, `Mask`) lives in `stringsx`; `sanitize` does not duplicate it.
+
+**Composition primitive** (ported from the reference `pkg/sanitizer` — the pattern
+the user liked). Every one-arg sanitizer has signature `func(string) string`, so
+they chain cleanly:
 
 ```go
-func Trim(s string) string          // strings.TrimSpace
-func Collapse(s string) string      // trim + collapse internal whitespace runs → single space
-func StripControl(s string) string  // drop Unicode Cc/Cf control chars, keep printable + normal spaces
-func SingleLine(s string) string    // remove line breaks (CR/LF/Unicode) then Collapse
-func Email(s string) string         // canonicalize: trim + lowercase (NOT validation — see validate.Email)
-func Username(s string) string      // trim + lowercase + keep [a-z0-9._-], trim leading/trailing separators
-func HTML(s string) string          // html.EscapeString
-func Filename(s string) string      // base name; strip path separators, control, leading dots ("" if nothing safe remains)
-func HeaderValue(s string) string   // strip CR/LF + control to prevent header/response-splitting injection
+// Apply runs transforms left-to-right; Compose returns a reusable pipeline.
+// Generic so non-string transform chains compose too.
+func Apply[T any](value T, transforms ...func(T) T) T
+func Compose[T any](transforms ...func(T) T) func(T) T
+
+// e.g.
+clean := sanitize.Compose(sanitize.Trim, strings.ToLower, sanitize.Collapse)
+name  := clean("  Ann   Lee ")   // "ann lee"  (strings.ToLower composes directly)
+```
+
+**Sanitizers** (grouped; one-arg funcs compose via `Apply`/`Compose`):
+
+```go
+// whitespace / control
+func Trim(s string) string            // strings.TrimSpace
+func Collapse(s string) string        // trim + collapse internal whitespace runs → single space
+func SingleLine(s string) string      // remove line breaks (CR/LF/Unicode) then Collapse
+func NoSpaces(s string) string        // remove ALL whitespace
+func StripControl(s string) string    // drop Unicode Cc/Cf control chars (incl. NUL), keep printable + normal spaces
+
+// character-class filters
+func KeepAlpha(s string) string        // letters + spaces only
+func KeepDigits(s string) string       // 0-9 only
+func KeepAlphanumeric(s string) string // letters + digits + spaces
+func RemoveChars(s, chars string) string // delete every rune in chars
+
+// HTML (escape/strip only — NOT a policy-based sanitizer)
+func EscapeHTML(s string) string      // html.EscapeString
+func UnescapeHTML(s string) string    // html.UnescapeString
+func StripTags(s string) string       // remove <…> tags → plain text (extraction, NOT XSS-safe output)
+
+// format canonicalizers (canonicalize, do NOT validate)
+func Email(s string) string           // trim + lowercase (validation → validate.Email)
+func Username(s string) string        // trim + lowercase + keep [a-z0-9._-], trim leading/trailing separators
+func Filename(s string) string        // base name; strip path separators, control, leading dots ("" if nothing safe remains)
+func HeaderValue(s string) string     // strip CR/LF + control (HTTP header/response-splitting guard)
+func SanitizeURL(s string) string     // neutralize dangerous schemes (javascript:/data:/vbscript:) → "" ; else trimmed URL
 ```
 
 **Decisions**
 
-- `Email` **canonicalizes, it does not validate** — validation (structure, MX) is
-  `validate.Email`. Canonicalization is trim + `ToLower` of the whole address.
-- `Filename` strips both `/` and `\` (OS-independent, via `strings`, not
-  `filepath`), removes control chars and leading dots (blocks `.`/`..`/hidden), and
-  returns `""` when nothing safe remains (caller decides the fallback name).
-- `HeaderValue` removes `\r`, `\n`, and other control runes — the CRLF-injection
-  guard for any value flowing into a response header.
-- `StripControl` keeps regular spaces; `SingleLine` is the line-break-specific
-  variant used for single-line form fields.
+- **Composition is the headline pattern.** `Apply`/`Compose` (generic) are the reason
+  sanitizers are all `func(string) string`; stdlib string funcs (`strings.ToLower`,
+  `strings.TrimSpace`) drop into the same chain. This replaces the old package's
+  per-field struct-tag pipeline with explicit, no-reflection composition.
+- **HTML: escape or strip, never "sanitize a policy".** `EscapeHTML`/`UnescapeHTML`
+  wrap stdlib; `StripTags` removes tags for *plain-text extraction* and is documented
+  as **not** producing XSS-safe HTML (for safe output, escape). No bluemonday, no
+  regex "PreventXSS" — those give false confidence at the wrong layer.
+- `Email`/`Username`/`Filename` **canonicalize, they do not validate**; `Filename`
+  strips `/` and `\` (via `strings`, OS-independent), control chars, and leading dots,
+  returning `""` when nothing safe remains. `HeaderValue` removes `\r`/`\n`/control.
+- `SanitizeURL` parses with `net/url`, lower-cases the scheme, and rejects any scheme
+  outside an allowlist (`http`/`https`/`mailto`/relative) → `""` — the safe-link guard
+  for user-supplied hrefs.
+- **Deliberately NOT ported** (DNA violations / wrong package): the `sanitize:"…"`
+  **struct-tag reflection DSL** + `SanitizeStruct`/`RegisterSanitizer` (no magic, no
+  reflection — reflection lives only in `structfields`); **SQL string escaping**
+  (`EscapeSQLString`/`RemoveSQLKeywords`/`SanitizeSQLIdentifier` — forge uses pgx
+  parameterized queries); regex **injection "prevention"** (`PreventXSS`/`PreventLDAP`/
+  shell-arg escaping — false security); **numeric** clamp/abs/round (not text; a future
+  numeric helper); **slice/map** helpers (→ `slicex`/`set`); **PII formatting** (phone/
+  SSN/credit-card/postal, `Mask*` → `stringsx.Mask`) and **path normalization** (→
+  `path/filepath`). These are named here so the omission is a decision, not an oversight.
 
-Deps: `strings`, `unicode`, `unicode/utf8`, `html`.
+Deps: `strings`, `unicode`, `unicode/utf8`, `html`, `net/url`, `regexp` (compiled
+tag-strip pattern).
 
 ---
 
@@ -283,20 +330,69 @@ func (v *Validator) Field(name string, rules ...Rule) *Validator // runs all rul
 func (v *Validator) Add(field, key string, params map[string]any) // manual violation
 func (v *Validator) Err() error         // nil when clean, else the Errors value
 
-// Rules — each is pre-bound to its value and returns a Rule:
+// Rules — each is pre-bound to its value and returns a Rule. Keys are namespaced
+// "validation.<rule>"; the {…} after each is its Params (i18n + Msg interpolation).
+
+// presence / length
 func Required[T comparable](value T) Rule            // validation.required (zero-value ⇒ fail)
 func NotBlank(s string) Rule                         // validation.not_blank (whitespace-only ⇒ fail)
 func MinLen(s string, n int) Rule                    // validation.min_len   {min}
 func MaxLen(s string, n int) Rule                    // validation.max_len   {max}
 func LenBetween(s string, min, max int) Rule         // validation.len_between {min,max}
-func Email(s string) Rule                            // validation.email
-func URL(s string) Rule                              // validation.url (http/https absolute)
+
+// string content
+func Alpha(s string) Rule                            // validation.alpha        (letters only)
+func Alphanumeric(s string) Rule                     // validation.alphanumeric
+func Numeric(s string) Rule                          // validation.numeric      (digits only)
+func ASCII(s string) Rule                            // validation.ascii
+func Lowercase(s string) Rule                        // validation.lowercase
+func Uppercase(s string) Rule                        // validation.uppercase
+func Contains(s, sub string) Rule                    // validation.contains     {sub}
+func HasPrefix(s, prefix string) Rule                // validation.has_prefix   {prefix}
+func HasSuffix(s, suffix string) Rule                // validation.has_suffix   {suffix}
 func Match(s string, re *regexp.Regexp, key string) Rule // caller-named key
-func OneOf[T comparable](value T, allowed ...T) Rule // validation.one_of  {allowed}
-func Min[T cmp.Ordered](value, min T) Rule           // validation.min     {min}
-func Max[T cmp.Ordered](value, max T) Rule           // validation.max     {max}
-func Between[T cmp.Ordered](value, min, max T) Rule  // validation.between {min,max}
-func True(ok bool, key string) Rule                  // escape hatch for a custom predicate
+
+// formats / encodings
+func Email(s string) Rule                            // validation.email   (net/mail, no DNS)
+func URL(s string) Rule                              // validation.url     (http/https absolute)
+func UUID(s string) Rule                             // validation.uuid
+func Slug(s string) Rule                             // validation.slug    (^[a-z0-9]+(-[a-z0-9]+)*$)
+func Hex(s string) Rule                              // validation.hex
+func Base64(s string) Rule                           // validation.base64
+func JSON(s string) Rule                             // validation.json    (json.Valid)
+
+// network
+func IP(s string) Rule                               // validation.ip      (net.ParseIP)
+func IPv4(s string) Rule                             // validation.ipv4
+func IPv6(s string) Rule                             // validation.ipv6
+func MAC(s string) Rule                              // validation.mac     (net.ParseMAC)
+func Domain(s string) Rule                           // validation.domain  (hostname)
+
+// ordered / numeric (generic; local unexported constraints à la typeconv)
+func Min[T cmp.Ordered](value, min T) Rule           // validation.min      {min}
+func Max[T cmp.Ordered](value, max T) Rule           // validation.max      {max}
+func Between[T cmp.Ordered](value, min, max T) Rule  // validation.between  {min,max}
+func Positive[T number](value T) Rule                // validation.positive (> 0)
+func Negative[T number](value T) Rule                // validation.negative (< 0)
+func MultipleOf[T integer](value, n T) Rule          // validation.multiple_of {n}
+
+// equality / choice (generic)
+func OneOf[T comparable](value T, allowed ...T) Rule // validation.one_of   {allowed}
+func Equal[T comparable](value, other T) Rule        // validation.equal    (e.g. confirm-password)
+func NotEqual[T comparable](value, other T) Rule     // validation.not_equal
+
+// time
+func Before(t, u time.Time) Rule                     // validation.before   {other}
+func After(t, u time.Time) Rule                      // validation.after    {other}
+
+// collections (generic)
+func MinItems[T any](items []T, n int) Rule          // validation.min_items {min}
+func MaxItems[T any](items []T, n int) Rule          // validation.max_items {max}
+func UniqueItems[T comparable](items []T) Rule       // validation.unique_items
+func Each[T any](items []T, rule func(T) Rule) Rule  // first failing element's Violation + {index}
+
+// escape hatch
+func True(ok bool, key string) Rule                  // custom predicate, caller-named key
 
 // Overrides — decorate ANY rule; take effect only when the wrapped rule fails.
 // Msg sets a literal message, interpolating the failing rule's Params into
@@ -306,17 +402,18 @@ func Msg(r Rule, template string) Rule
 func WithKey(r Rule, key string) Rule
 ```
 
-**Per-rule error structure (the Key + Params contract — stable public API):**
+**Per-rule error structure (the Key + Params contract — stable public API).** The
+authoritative list is the inline `validation.<rule>` key + `{params}` on each rule
+above; a representative slice:
 
 | Rule | `Key` | `Params` |
 |---|---|---|
 | `Required` / `NotBlank` | `validation.required` / `validation.not_blank` | — |
 | `MinLen(n)` / `MaxLen(n)` | `validation.min_len` / `validation.max_len` | `{min}` / `{max}` |
-| `LenBetween(min,max)` | `validation.len_between` | `{min, max}` |
-| `Email` / `URL` | `validation.email` / `validation.url` | — |
-| `OneOf(a…)` | `validation.one_of` | `{allowed}` (slice) |
-| `Min(m)` / `Max(m)` | `validation.min` / `validation.max` | `{min}` / `{max}` |
 | `Between(min,max)` | `validation.between` | `{min, max}` |
+| `OneOf(a…)` | `validation.one_of` | `{allowed}` (slice) |
+| `Contains(sub)` / `MultipleOf(n)` | `validation.contains` / `validation.multiple_of` | `{sub}` / `{n}` |
+| `Each(items, rule)` | wrapped rule's key | `{index}` (of first failure) |
 | `Match(re,key)` / `True(ok,key)` | caller's `key` | — |
 
 So `validate.Msg(validate.Between(age, 18, 72), "Your age must be between {min} and {max}")`
@@ -328,8 +425,8 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   rule's `Params` keys are documented and stable so i18n catalogs can target them.
   `Match`/`True` take a caller-supplied key (there is no default sentence to emit).
 - **Overrides are decorator combinators**, chosen so they wrap *any* rule uniformly —
-  built-ins, `Match`/`True`, and arbitrary `func() *Violation` closures — without
-  growing 12 rule signatures. `Msg(rule, template)` interpolates the failing rule's
+  every built-in, `Match`/`True`, and arbitrary `func() *Violation` closures — without
+  touching a single rule signature. `Msg(rule, template)` interpolates the failing rule's
   `Params` into `{name}` placeholders and stores the result in `Violation.Message`
   (a literal, display-ready string that bypasses i18n). `WithKey(rule, key)` swaps the
   key while keeping `Params`. Both are no-ops when the wrapped rule passes.
@@ -342,6 +439,15 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   are "missing"); whitespace-only strings pass `Required` but fail `NotBlank`.
 - `Email` = `net/mail.ParseAddress` + a light structural check (no DNS). `URL` =
   `net/url.Parse` requiring an `http`/`https` scheme and a host.
+- **Format rules prefer stdlib parsers over regex** where one exists (correctness over
+  a hand-rolled pattern): `IP`/`IPv4`/`IPv6`→`net.ParseIP`, `MAC`→`net.ParseMAC`,
+  `JSON`→`json.Valid`, `Hex`→`encoding/hex`, `Base64`→`encoding/base64`. `UUID`/`Slug`/
+  `Domain`/`Alpha`… use small precompiled `regexp` patterns. All emit `validation.<rule>`.
+- **Numeric/collection rules are generic and stdlib-only.** `Min`/`Max`/`Between` use
+  `cmp.Ordered`; `Positive`/`Negative` (`number`) and `MultipleOf` (`integer`) use local
+  unexported constraints mirroring `typeconv` (no `x/exp/constraints` dep). `MinItems`/
+  `MaxItems`/`UniqueItems`/`Each` operate on `[]T`; `Each` runs a per-element rule and
+  reports the first failing element's `Violation` with an added `{index}` param.
 - `Violation` implements `fmt.Stringer` — `String()` returns `Message` when set,
   otherwise `Key` — so a violation is always printable (logs, `%v`, quick debug)
   without an i18n layer. `Errors.Error()` builds on this.
@@ -351,9 +457,11 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
 - **Out of scope:** struct-tag binding (→ `structfields` + these rules); *key-based*
   message rendering (→ future `i18n`; `validate` only emits Key+Params) — note the
   *literal* `Msg` template is interpolated in-package, so it needs no i18n layer;
-  cross-field rules beyond what `Add`/`True`/closures express.
+  cross-field rules beyond what `Equal`/`NotEqual`/`Before`/`After`/`Add`/`True`/
+  closures express; credit-card/phone/SSN and other locale/PII formats (domain-specific).
 
-Deps: `regexp`, `net/mail`, `net/url`, `strings`, `unicode/utf8`, `cmp`, `sort`, `fmt`.
+Deps: `regexp`, `net`, `net/mail`, `net/url`, `encoding/hex`, `encoding/base64`,
+`encoding/json`, `strings`, `unicode`, `unicode/utf8`, `cmp`, `time`, `sort`, `fmt`.
 
 ---
 
@@ -576,10 +684,10 @@ Deps: `bytes`, `io`, `net/http`, `strings`, `errors`.
 | Package | Non-stdlib | stdlib |
 |---|---|---|
 | `errorsx` | — | errors, fmt |
-| `sanitize` | — | strings, unicode, unicode/utf8, html |
+| `sanitize` | — | strings, unicode, unicode/utf8, html, net/url, regexp |
 | `slug` | **golang.org/x/text/unicode/norm** | forge `random`; strings, unicode, unicode/utf8 |
 | `structfields` | — | reflect, strings, errors, fmt |
-| `validate` | — | regexp, net/mail, net/url, strings, unicode/utf8, cmp, sort, fmt |
+| `validate` | — | regexp, net, net/mail, net/url, encoding/{hex,base64,json}, strings, unicode, cmp, time, sort, fmt |
 | `decimal` | — | math/big, strings, strconv, errors, fmt |
 | `money` | forge `decimal` | strings, errors, fmt |
 | `filetype` | — | bytes, io, net/http, strings, errors |
@@ -615,7 +723,10 @@ declaring any package done.
 ### Out of scope (deliberate)
 
 - `errorsx`: stack traces; HTTP-status mapping (→ `problem`).
-- `sanitize`: rich-HTML sanitization (bluemonday); `Truncate` (→ `stringsx`).
+- `sanitize`: rich-HTML/policy sanitization (bluemonday); `Truncate`/`Mask`/case
+  conversion (→ `stringsx`); struct-tag reflection DSL (`SanitizeStruct`); SQL/LDAP/
+  shell "injection prevention"; numeric clamp (→ future numeric helper); slice/map
+  helpers (→ `slicex`/`set`); PII/locale formatting (phone/SSN/credit-card/postal).
 - `slug`: per-language transliteration (`MakeLang`).
 - `structfields`: embedded-struct flattening; struct-tag *binding* (→ consumers).
 - `validate`: message rendering (→ `i18n`); struct-tag DSL.
