@@ -9,7 +9,7 @@ Branch: claude/musing-williams-ec21ce
 ## Packages
 | Package | Wave | Status | Last commit | Notes |
 |---|---|---|---|---|
-| errorsx | 1 | PENDING | | |
+| errorsx | 1 | DONE | a86cf09 | 3 commits, 100% cov, lint clean, verified by orchestrator |
 | sanitize | 1 | PENDING | | |
 | structfields | 1 | PENDING | | |
 | decimal | 1 | PENDING | | |
