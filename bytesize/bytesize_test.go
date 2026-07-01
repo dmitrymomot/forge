@@ -78,10 +78,21 @@ func TestFormatFamilies(t *testing.T) {
 }
 
 func TestParseOverflow(t *testing.T) {
-	for _, in := range []string{"9999999PiB", "9999999999999999999", "1e30MB", "NaNMB", "InfB", "-InfKB"} {
+	for _, in := range []string{"9999999PiB", "9999999999999999999", "1e30MB", "NaNMB", "InfB", "-InfKB", "8192.0PiB"} {
 		if _, err := bytesize.Parse(in); !errors.Is(err, bytesize.ErrInvalidSize) {
 			t.Errorf("Parse(%q): want ErrInvalidSize, got %v", in, err)
 		}
+	}
+}
+
+func TestParseFloatLowerBoundary(t *testing.T) {
+	// -8192.0PiB == math.MinInt64 exactly (valid lower boundary; must NOT be rejected).
+	got, err := bytesize.Parse("-8192.0PiB")
+	if err != nil {
+		t.Fatalf("Parse(-8192.0PiB) unexpected err: %v", err)
+	}
+	if int64(got) != math.MinInt64 {
+		t.Fatalf("Parse(-8192.0PiB) = %d, want math.MinInt64", int64(got))
 	}
 }
 

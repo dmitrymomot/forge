@@ -69,7 +69,11 @@ func parseNumber(num string, mult ByteSize, orig string) (ByteSize, error) {
 		return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
 	}
 	prod := f * float64(mult)
-	if prod > math.MaxInt64 || prod < math.MinInt64 {
+	// int64 range is [-2^63, 2^63). Compare against the exact power-of-two
+	// boundary: float64(math.MaxInt64) rounds UP to 2^63, which would let
+	// prod == 2^63 slip through and clamp to MaxInt64 on conversion.
+	const twoTo63 = 9223372036854775808.0 // 2^63
+	if prod >= twoTo63 || prod < -twoTo63 {
 		return 0, fmt.Errorf("%w: %q", ErrInvalidSize, orig)
 	}
 	return ByteSize(prod), nil
