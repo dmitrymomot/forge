@@ -127,3 +127,86 @@ func TestWalk_PropagatesCallbackError(t *testing.T) {
 	assert.Equal(t, 1, visited, "traversal stops on first callback error")
 	assert.True(t, errors.Is(err, sentinel))
 }
+
+func TestWalk_RejectsNonStruct(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"int", 42},
+		{"string", "hello"},
+		{"slice", []int{1, 2}},
+		{"map", map[string]int{"a": 1}},
+		{"nil interface", nil},
+		{"pointer to int", new(int)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := structfields.Walk(c.in, "env", func(structfields.Field) error {
+				t.Fatal("callback must not run for non-struct input")
+				return nil
+			})
+			assert.True(t, errors.Is(err, structfields.ErrNotStruct), "want ErrNotStruct for %s", c.name)
+		})
+	}
+}
+
+func TestWalk_RejectsNilStructPointer(t *testing.T) {
+	var s *walkSample
+	err := structfields.Walk(s, "env", func(structfields.Field) error {
+		t.Fatal("callback must not run for nil pointer")
+		return nil
+	})
+	assert.True(t, errors.Is(err, structfields.ErrNotStruct))
+}
+
+func TestWalk_EmptyStructVisitsNothing(t *testing.T) {
+	type empty struct{}
+	var count int
+	err := structfields.Walk(&empty{}, "env", func(structfields.Field) error {
+		count++
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+type EmbeddedInner struct {
+	Inner string `env:"INNER"`
+}
+
+type embeddedOuter struct {
+	EmbeddedInner        // exported anonymous embedded struct
+	Outer         string `env:"OUTER"`
+}
+
+func TestWalk_ShallowEmbeddedStructNotFlattened(t *testing.T) {
+	var s embeddedOuter
+	var names []string
+	err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+		names = append(names, f.Name)
+		return nil
+	})
+	require.NoError(t, err)
+	// Shallow: the embedded struct is a single field named after its type,
+	// NOT flattened into Inner. Outer is a normal field.
+	assert.Equal(t, []string{"EmbeddedInner", "Outer"}, names)
+}
+
+func TestWalk_EmbeddedFieldReWalkable(t *testing.T) {
+	// A caller needing recursion re-Walks the embedded field's value.
+	var s embeddedOuter
+	var inner []string
+	err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+		if f.Name == "EmbeddedInner" {
+			return structfields.Walk(f.Value.Addr().Interface(), "env", func(g structfields.Field) error {
+				inner = append(inner, g.Name)
+				return g.Set("nested")
+			})
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Inner"}, inner)
+	assert.Equal(t, "nested", s.Inner, "re-Walk on embedded field is settable")
+}
