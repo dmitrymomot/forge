@@ -16,6 +16,7 @@ type walkSample struct {
 	Age     int    `env:"AGE"`
 	Ignored string `env:"-"`
 	NoTag   bool
+	//nolint:unused // present so Walk's "skip unexported fields" path is exercised
 	private string // unexported: never visited
 }
 
