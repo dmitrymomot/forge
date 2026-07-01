@@ -1,6 +1,7 @@
 package slug
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -38,6 +39,11 @@ func build(s string, cfg *config) string {
 			r = unicode.ToLower(r)
 		}
 		if folded, ok := foldRune(r); ok {
+			// NFKD can emit uppercase ASCII (㏞ ⇒ "Vm", ㎅ ⇒ "KB") even when the
+			// source rune had no lowercase form, so lowercase the fold output too.
+			if cfg.lowercase {
+				folded = strings.ToLower(folded)
+			}
 			b.WriteString(folded)
 			lastWasSep = false
 			continue
@@ -81,12 +87,7 @@ func isReserved(slug string, reserved []string) bool {
 		return false
 	}
 	lower := strings.ToLower(slug)
-	for _, r := range reserved {
-		if r == lower {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(reserved, lower)
 }
 
 // withRandomSuffix appends a random suffix of suffixLen runes to base, honoring
@@ -101,10 +102,7 @@ func withRandomSuffix(base string, suffixLen int, cfg *config) string {
 		// Shrink the suffix if the whole thing would overflow.
 		if utf8.RuneCountInString(base)+sepLen+suffixLen > cfg.maxLength {
 			// First try trimming the base to make room for the full suffix.
-			maxBase := cfg.maxLength - sepLen - suffixLen
-			if maxBase < 0 {
-				maxBase = 0
-			}
+			maxBase := max(cfg.maxLength-sepLen-suffixLen, 0)
 			base = truncateRunes(base, maxBase)
 			base = strings.TrimSuffix(base, cfg.separator)
 			if base == "" {
