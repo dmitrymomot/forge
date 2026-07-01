@@ -260,6 +260,10 @@ type Violation struct {
     Message string         `json:"message,omitempty"` // literal override, already interpolated; empty ⇒ render Key+Params downstream
 }
 
+// String implements fmt.Stringer: the Message when set, else the Key as a
+// human-readable fallback (safe for logs/debug before any i18n rendering).
+func (v Violation) String() string   // Message != "" ? Message : Key
+
 // Rule evaluates a pre-bound value; returns nil when valid, else a *Violation.
 type Rule func() *Violation
 
@@ -335,6 +339,9 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   are "missing"); whitespace-only strings pass `Required` but fail `NotBlank`.
 - `Email` = `net/mail.ParseAddress` + a light structural check (no DNS). `URL` =
   `net/url.Parse` requiring an `http`/`https` scheme and a host.
+- `Violation` implements `fmt.Stringer` — `String()` returns `Message` when set,
+  otherwise `Key` — so a violation is always printable (logs, `%v`, quick debug)
+  without an i18n layer. `Errors.Error()` builds on this.
 - `Errors` marshals to JSON as `field → [{key, params?, message?}]` (API-friendly;
   `message` present only when set via `Msg`) and `Error()` renders a sorted single
   line (log-friendly). `Validator` is per-request, documented as not goroutine-safe.
