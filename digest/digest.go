@@ -1,4 +1,4 @@
-package hashx
+package digest
 
 import (
 	"crypto/hmac"
@@ -43,12 +43,12 @@ func HMACSHA256Hex(key, msg []byte) string { return hex.EncodeToString(HMACSHA25
 func FileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("hashx: open %s: %w", path, err)
+		return "", fmt.Errorf("digest: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("hashx: read %s: %w", path, err)
+		return "", fmt.Errorf("digest: read %s: %w", path, err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
