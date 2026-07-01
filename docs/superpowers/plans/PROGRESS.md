@@ -19,6 +19,13 @@ Branch: claude/musing-williams-ec21ce
   - C7 slug (med): `WithCustomReplace` non-deterministic (ranges a map).
   - C8 validate (low): numeric `Between/Min/Max` accept `NaN`.
   - C9 validate (low): `bech32` doesn't enforce BIP-173 HRP ASCII range [33,126].
+- **Phase 4 — All 9 review findings FIXED via TDD** (failing test → fix → verify → `just check` green), 5 commits:
+  - `5006004` fix(decimal): promote MinInt64 sub/mul overflow to big.Int (C3, C4)
+  - `3dd017e` fix(structfields): return error instead of panicking on slice-to-array length mismatch (C2)
+  - `e5f4c6e` fix(errorsx): resolve Code across errors.Join trees past empty-code wrappers (C1)
+  - `9b06c52` fix(slug): deterministic custom-replace and dangling multi-rune separator trimming (C5, C6, C7)
+  - `b9f0268` fix(validate): reject NaN in numeric ranges and enforce bech32 HRP charset (C8, C9)
+  - Post-fix full `just check` clean; `go mod tidy` clean. Pushing to re-run CI + review.
 
 ## Packages
 | Package | Wave | Status | Last commit | Notes |
