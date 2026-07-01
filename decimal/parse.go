@@ -142,3 +142,32 @@ func isAllZero(s string) bool {
 	}
 	return len(s) > 0
 }
+
+// Float64 returns the value of d as a float64 plus an exact flag reporting
+// whether the conversion is lossless. It is best-effort for display/interop only;
+// never use it for money math.
+func (d Decimal) Float64() (float64, bool) {
+	// Exact rational value = coef / 10^scale.
+	num := d.bigCoef()
+	den := pow10Big(d.scale)
+	r := new(big.Rat).SetFrac(num, den)
+	f, exact := r.Float64()
+	return f, exact
+}
+
+// MarshalText implements encoding.TextMarshaler, emitting the same form as String
+// (scale-preserving). It never errors.
+func (d Decimal) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler, parsing the form produced by
+// MarshalText/String. Invalid input returns ErrSyntax.
+func (d *Decimal) UnmarshalText(p []byte) error {
+	v, err := Parse(string(p))
+	if err != nil {
+		return err
+	}
+	*d = v
+	return nil
+}
