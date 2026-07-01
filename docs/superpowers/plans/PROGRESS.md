@@ -7,7 +7,8 @@ Branch: claude/musing-williams-ec21ce
 - **Phase 0 — Preflight**: branch `claude/musing-williams-ec21ce` confirmed, working tree clean, `gh auth status` OK (dmitrymomot, repo+workflow scopes). Baseline `just check` clean (0 lint issues, all tests pass). PROGRESS.md initialized. ✅
 - **Phase 1 — Wave 1 complete**: all 5 leaf packages DONE (errorsx, sanitize, structfields, decimal, filetype), each verified by orchestrator (`just test ./<pkg>/... && just lint`). Wave 1 gate: full `just check` clean — every package green, 0 lint issues. ✅
 - **Phase 2 — Wave 2 complete**: slug, money, validate all DONE and verified. Wave 2 gate: full `just check` clean; `go mod tidy` produces no diff (only module change in the run is slug's x/text indirect→direct promotion, committed). ✅
-- **Phase 3 — Full-module gate**: (next) `just check` + `go build ./... && go vet ./...`.
+- **Phase 3 — Full-module gate**: `just check` clean, `go build ./...` OK, `go vet ./...` OK. All 8 package dirs present. **8/8 DONE, 0 BACKED OUT, 0 BLOCKED** → PR ships all 8. ✅
+- **Phase 4 — Delivery**: (in progress) open non-draft PR → drive CI + Claude review to green + all threads resolved.
 
 ## Packages
 | Package | Wave | Status | Last commit | Notes |
