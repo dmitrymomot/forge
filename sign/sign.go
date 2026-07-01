@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dmitrymomot/forge/keyset"
 	"github.com/dmitrymomot/forge/consttime"
+	"github.com/dmitrymomot/forge/keyset"
 )
 
 // Signer produces and verifies HMAC tags. Sign/Verify operate on a single key; the

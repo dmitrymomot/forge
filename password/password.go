@@ -9,9 +9,9 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/dmitrymomot/forge/consttime"
 	"github.com/dmitrymomot/forge/kdf"
 	"github.com/dmitrymomot/forge/random"
-	"github.com/dmitrymomot/forge/consttime"
 )
 
 const saltLen = 16
