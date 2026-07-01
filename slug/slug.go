@@ -27,8 +27,8 @@ func build(s string, cfg *config) string {
 	for _, ch := range cfg.stripChars {
 		s = strings.ReplaceAll(s, string(ch), "")
 	}
-	// 3. per-rune fold: ASCII [a-z0-9] passes through; everything else collapses
-	//    to a single separator (Unicode folding is added in a later task).
+	// 3. per-rune fold: ASCII [a-z0-9] passes through; letters fold via NFKD +
+	//    special-case map; every other run collapses to a single separator.
 	var b strings.Builder
 	b.Grow(len(s))
 	lastWasSep := true // true ⇒ suppress a leading separator
@@ -36,8 +36,8 @@ func build(s string, cfg *config) string {
 		if cfg.lowercase {
 			r = unicode.ToLower(r)
 		}
-		if isASCIIAlphaNum(r) {
-			b.WriteRune(r)
+		if folded, ok := foldRune(r); ok {
+			b.WriteString(folded)
 			lastWasSep = false
 			continue
 		}
