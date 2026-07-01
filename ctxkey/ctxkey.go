@@ -7,7 +7,7 @@ import "context"
 // The dummy field forces each keyID allocation to have a unique address,
 // preventing Go's optimization that would otherwise reuse the zero address.
 type keyID struct {
-	_ [1]byte // Force non-zero allocation; the slice prevents value semantics
+	_ [1]byte // Non-zero size guarantees each &keyID{} has a distinct address.
 }
 
 // Key is a typed, collision-free context key created by New. It is safe to copy;

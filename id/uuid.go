@@ -77,7 +77,9 @@ func (u *UUID) UnmarshalText(text []byte) error {
 }
 
 // Value implements driver.Valuer, returning the canonical string so the value
-// binds to a native Postgres uuid column across pgx and lib/pq.
+// binds to a native Postgres uuid column via database/sql and pgx's text path.
+// pgx's binary protocol prefers [16]byte; a future pgx type registration in the
+// data layer can provide that fast path.
 func (u UUID) Value() (driver.Value, error) { return u.String(), nil }
 
 // Scan implements sql.Scanner from a string, the canonical text as []byte, or

@@ -21,6 +21,11 @@
 //	g := id.NewGenerator(id.WithClock(clk), id.WithMonotonic())
 //	a, b := g.Short(), g.Short() // strictly increasing
 //
+// Under heavy concurrent generation, a single shared Generator created with
+// WithMonotonic can outperform the free functions: the free functions call
+// crypto/rand on every call (which serializes internally), while monotonic mode
+// draws randomness once per millisecond and increments in between.
+//
 // All generation reads crypto/rand and panics only if the OS RNG fails, an
 // unrecoverable condition. Parsing and Scan are case-insensitive; the Parse
 // functions and Scan return ErrMalformed (via errors.Is) on invalid input.

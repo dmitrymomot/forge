@@ -35,7 +35,12 @@ func TestUUID_ParseRoundTrip(t *testing.T) {
 }
 
 func TestUUID_ParseMalformed(t *testing.T) {
-	for _, s := range []string{"", "not-a-uuid", "00010203-0405-0607-0809-0a0b0c0d0e0", "zz010203-0405-0607-0809-0a0b0c0d0e0f"} {
+	for _, s := range []string{
+		"", "not-a-uuid", "00010203-0405-0607-0809-0a0b0c0d0e0", "zz010203-0405-0607-0809-0a0b0c0d0e0f",
+		// correct length (36) and otherwise-valid hex, but a dash is shifted one
+		// position to the right, so it lands on a hex digit instead of position 8.
+		"000102030-405-0607-0809-0a0b0c0d0e0f",
+	} {
 		_, err := id.ParseUUID(s)
 		assert.ErrorIs(t, err, id.ErrMalformed, "input %q", s)
 	}
@@ -71,6 +76,22 @@ func TestUUID_ValueScan(t *testing.T) {
 
 	var bad id.UUID
 	assert.True(t, errors.Is(bad.Scan(123), id.ErrMalformed))
+}
+
+func TestUUID_ScanBytesNoAlias(t *testing.T) {
+	raw := []byte{0xff, 0x00, 0xab, 0xcd, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	want := id.UUID{0xff, 0x00, 0xab, 0xcd, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+	var u id.UUID
+	require.NoError(t, u.Scan(raw))
+	assert.Equal(t, want, u)
+
+	// Mutate the original slice; the scanned UUID must not change, proving
+	// Scan copied the bytes rather than retaining the slice.
+	for i := range raw {
+		raw[i] = 0
+	}
+	assert.Equal(t, want, u)
 }
 
 func TestUUID_JSON(t *testing.T) {
