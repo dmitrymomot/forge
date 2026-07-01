@@ -12,6 +12,10 @@ type keyID struct {
 
 // Key is a typed, collision-free context key created by New. It is safe to copy;
 // copies share the same identity and read the same stored value.
+//
+// Always construct a Key with New. The zero value is not usable: it has a nil
+// identity, so unconstructed zero-value keys would silently collide with one
+// another, defeating the collision-free guarantee.
 type Key[T any] struct {
 	id   *keyID
 	name string

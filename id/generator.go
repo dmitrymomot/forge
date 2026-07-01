@@ -12,6 +12,9 @@ import (
 // functions (NewUUID, NewULID, NewShort) use a shared non-monotonic default.
 // Construct a Generator when you need a test clock or strictly-increasing
 // same-millisecond ordering (WithMonotonic).
+//
+// Always construct a Generator with NewGenerator. The zero value is not usable:
+// its clock is nil and the first generation call panics.
 type Generator struct {
 	clk       clock.Clock
 	uuidMS    uint64
