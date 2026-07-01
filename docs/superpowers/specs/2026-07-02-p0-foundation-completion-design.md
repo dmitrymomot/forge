@@ -9,7 +9,7 @@ remaining gap in the P0 layer of `docs/maximal-package-set.md`.
 
 | Package | Tier | Purpose |
 |---|---|---|
-| `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English). The no-magic alternative to go-playground/validator. |
+| `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English); rich rule set incl. string/format/network/numeric/collection + e-commerce (Luhn/EAN/ISBN/ISO codes) & crypto-address (BTC/ETH) groups. The no-magic alternative to go-playground/validator. |
 | `sanitize` | recommended | Plain-text normalization/escaping at trust boundaries + a generic `Apply`/`Compose` pipeline: whitespace/control, char-class filters, HTML escape/strip, email/username/filename/header/URL canonicalizers. |
 | `slug` | recommended | URL-safe slug generation with Unicode→ASCII folding, an options API (length/separator/case/strip/replace/suffix/reserved), and predicate-based uniqueness. |
 | `structfields` | recommended | The **one sanctioned reflection helper**: walk an exported struct's fields once (name/parsed-tag/value/Set), confining all `reflect` use to one audited primitive. |
@@ -391,6 +391,21 @@ func MaxItems[T any](items []T, n int) Rule          // validation.max_items {ma
 func UniqueItems[T comparable](items []T) Rule       // validation.unique_items
 func Each[T any](items []T, rule func(T) Rule) Rule  // first failing element's Violation + {index}
 
+// e-commerce / payments (checksum- or set-verified)
+func CreditCard(s string) Rule                       // validation.credit_card   (Luhn, 13–19 digits)
+func CVV(s string) Rule                              // validation.cvv           (3–4 digits)
+func CardExpiry(s string) Rule                       // validation.card_expiry   (MM/YY, not in the past)
+func CurrencyCode(s string) Rule                     // validation.currency_code (ISO-4217 alpha-3 set)
+func CountryCode(s string) Rule                      // validation.country_code  (ISO-3166-1 alpha-2 set)
+func EAN(s string) Rule                              // validation.ean           (EAN-8/13 check digit)
+func ISBN(s string) Rule                             // validation.isbn          (ISBN-10/13 checksum)
+
+// blockchain / crypto (checksum-verified; all stdlib — see EIP-55 note)
+func ETHAddress(s string) Rule                       // validation.eth_address   (0x + 40 hex; EIP-55 opt-in)
+func BTCAddress(s string) Rule                       // validation.btc_address   (Base58Check OR Bech32, verified)
+func Base58(s string) Rule                           // validation.base58        (alphabet check)
+func Bech32(s string) Rule                           // validation.bech32        (BIP-173 polymod checksum)
+
 // escape hatch
 func True(ok bool, key string) Rule                  // custom predicate, caller-named key
 
@@ -448,6 +463,20 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   unexported constraints mirroring `typeconv` (no `x/exp/constraints` dep). `MinItems`/
   `MaxItems`/`UniqueItems`/`Each` operate on `[]T`; `Each` runs a per-element rule and
   reports the first failing element's `Violation` with an added `{index}` param.
+- **E-commerce & crypto rules verify checksums/sets, not just shape.** `CreditCard`
+  runs the Luhn algorithm; `EAN`/`ISBN` verify the check digit; `CVV`/`CardExpiry` are
+  structural + not-expired (via `time`). `CurrencyCode`/`CountryCode` check membership
+  in compact **bundled ISO-4217 / ISO-3166-1 code sets** — `validate` embeds only the
+  *code set* while `money` holds the authoritative currency *metadata*; the small,
+  deliberate duplication keeps `validate` a dependency-free leaf. `BTCAddress` verifies
+  **Base58Check** (double-`crypto/sha256`) or **Bech32** (BIP-173 polymod), with
+  `Base58`/`Bech32` exposed as the reusable primitives under it — all stdlib.
+- **`ETHAddress` is structural by design (`0x` + 40 hex, any case).** Full **EIP-55
+  mixed-case checksum verification is deliberately NOT in `validate` core** — it needs
+  Keccak-256 (`golang.org/x/crypto/sha3`), and taking that dep would end `validate`'s
+  stdlib-only status for one rule. A caller needing EIP-55 verification does it at the
+  wallet layer (or a future `cryptoaddr` helper that owns the x/crypto edge). This is
+  the one scoping trade-off worth flagging.
 - `Violation` implements `fmt.Stringer` — `String()` returns `Message` when set,
   otherwise `Key` — so a violation is always printable (logs, `%v`, quick debug)
   without an i18n layer. `Errors.Error()` builds on this.
@@ -458,10 +487,12 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   message rendering (→ future `i18n`; `validate` only emits Key+Params) — note the
   *literal* `Msg` template is interpolated in-package, so it needs no i18n layer;
   cross-field rules beyond what `Equal`/`NotEqual`/`Before`/`After`/`Add`/`True`/
-  closures express; credit-card/phone/SSN and other locale/PII formats (domain-specific).
+  closures express; phone/SSN/VAT and locale-specific postal codes (domain/locale-
+  specific); Ethereum EIP-55 checksum (needs Keccak — kept out of the stdlib-only core).
 
-Deps: `regexp`, `net`, `net/mail`, `net/url`, `encoding/hex`, `encoding/base64`,
-`encoding/json`, `strings`, `unicode`, `unicode/utf8`, `cmp`, `time`, `sort`, `fmt`.
+Deps: `regexp`, `net`, `net/mail`, `net/url`, `crypto/sha256`, `math/big`,
+`encoding/hex`, `encoding/base64`, `encoding/json`, `strings`, `unicode`,
+`unicode/utf8`, `cmp`, `time`, `sort`, `fmt`.
 
 ---
 
@@ -687,7 +718,7 @@ Deps: `bytes`, `io`, `net/http`, `strings`, `errors`.
 | `sanitize` | — | strings, unicode, unicode/utf8, html, net/url, regexp |
 | `slug` | **golang.org/x/text/unicode/norm** | forge `random`; strings, unicode, unicode/utf8 |
 | `structfields` | — | reflect, strings, errors, fmt |
-| `validate` | — | regexp, net, net/mail, net/url, encoding/{hex,base64,json}, strings, unicode, cmp, time, sort, fmt |
+| `validate` | — | regexp, net, net/mail, net/url, crypto/sha256, math/big, encoding/{hex,base64,json}, strings, unicode, cmp, time, sort, fmt |
 | `decimal` | — | math/big, strings, strconv, errors, fmt |
 | `money` | forge `decimal` | strings, errors, fmt |
 | `filetype` | — | bytes, io, net/http, strings, errors |
