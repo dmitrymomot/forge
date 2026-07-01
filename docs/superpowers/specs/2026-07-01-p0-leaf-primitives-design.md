@@ -26,9 +26,10 @@ render layers.
 - **stdlib-only, zero forge deps.** Each is an independent leaf; build order is free.
 - **Idiom:** stateless free-funcs and/or generic value types. None of these is a
   configured service, so there is **no `New(...Option)`/`Config`** and **no builders**.
-- **Anatomy:** `doc.go` (package doc + a runnable `Example`), `errors.go`
-  (`errors.Is`-matchable single-line sentinels) where the package defines sentinels,
-  plus impl file(s). Keep files flat and single-responsibility.
+- **Anatomy:** `doc.go` (package doc; a runnable `Example` is optional and, per
+  existing P0-leaf precedent, usually omitted), `errors.go` (`errors.Is`-matchable
+  single-line sentinels) where the package defines sentinels, plus impl file(s).
+  Keep files flat and single-responsibility.
 - **Go 1.26.** Use the `new(expr)` builtin where a pointer literal is needed (no
   `ptr.To` wrapper); run `just` `modernize`/`lint` before declaring done.
 - **Public methods never return unexported types.**
