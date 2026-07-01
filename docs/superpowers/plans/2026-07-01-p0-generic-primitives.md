@@ -1429,7 +1429,7 @@ git commit -m "feat(enum): declared closed value-set Values[T ~string]"
 **Interfaces:**
 - Consumes: stdlib `strings`, `unicode`, `unicode/utf8`.
 - Produces:
-  - `func ToSnake(s string) string`, `func ToKebab(s string) string`, `func ToCamel(s string) string`
+  - `func ToSnake(s string) string`, `func ToKebab(s string) string`, `func ToCamel(s string) string`, `func ToCamelWith(s string, acronyms ...string) string`
   - `func Truncate(s string, n int) string`, `func Ellipsis(s string, n int) string`, `func TruncateWords(s string, n int) string`
   - `func Mask(s string, keep int) string`, `func Pluralize(word string, n int) string`
 
@@ -1471,7 +1471,7 @@ func TestToKebab(t *testing.T) {
 
 func TestToCamel(t *testing.T) {
 	cases := map[string]string{
-		"user_id":    "userID",
+		"user_id":    "userId", // mechanical: no acronym special-casing
 		"user-name":  "userName",
 		"HTTP server": "httpServer",
 		"Already":    "already",
@@ -1480,6 +1480,14 @@ func TestToCamel(t *testing.T) {
 	for in, want := range cases {
 		assert.Equal(t, want, stringsx.ToCamel(in), "ToCamel(%q)", in)
 	}
+}
+
+func TestToCamelWith(t *testing.T) {
+	assert.Equal(t, "userID", stringsx.ToCamelWith("user_id", "ID"))
+	assert.Equal(t, "apiURL", stringsx.ToCamelWith("api_url", "URL"))
+	assert.Equal(t, "getUserOAuthToken", stringsx.ToCamelWith("get_user_oauth_token", "OAuth"))
+	assert.Equal(t, "idToken", stringsx.ToCamelWith("id_token", "ID"), "leading word always lowercased")
+	assert.Equal(t, "userName", stringsx.ToCamelWith("user_name", "ID"), "unmatched words title-cased")
 }
 ```
 
@@ -1614,8 +1622,23 @@ func ToSnake(s string) string { return toDelimited(s, "_") }
 // ToKebab converts s to kebab-case.
 func ToKebab(s string) string { return toDelimited(s, "-") }
 
-// ToCamel converts s to lowerCamelCase.
-func ToCamel(s string) string {
+// ToCamel converts s to lowerCamelCase mechanically: each word after the first
+// is title-cased ("user_id" -> "userId"). It does not special-case acronyms —
+// use ToCamelWith to supply them.
+func ToCamel(s string) string { return ToCamelWith(s) }
+
+// ToCamelWith is ToCamel with caller-supplied acronyms. Each acronym is matched
+// case-insensitively against a word after the first and rendered with the
+// acronym's own spelling, so ToCamelWith("user_id", "ID") == "userID". The first
+// word is always lowercased (lowerCamelCase). Unmatched words are title-cased.
+func ToCamelWith(s string, acronyms ...string) string {
+	var rules map[string]string
+	if len(acronyms) > 0 {
+		rules = make(map[string]string, len(acronyms))
+		for _, a := range acronyms {
+			rules[strings.ToLower(a)] = a
+		}
+	}
 	words := splitWords(s)
 	var b strings.Builder
 	for i, w := range words {
@@ -1624,6 +1647,10 @@ func ToCamel(s string) string {
 			continue
 		}
 		lower := strings.ToLower(w)
+		if rep, ok := rules[lower]; ok {
+			b.WriteString(rep)
+			continue
+		}
 		r := []rune(lower)
 		r[0] = unicode.ToUpper(r[0])
 		b.WriteString(string(r))

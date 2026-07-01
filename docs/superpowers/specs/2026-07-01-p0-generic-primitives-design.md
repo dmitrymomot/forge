@@ -311,6 +311,13 @@ func Pluralize(word string, n int) string     // BASIC English only
 
 **Notes / scope guards:**
 
+- `ToCamel` is **mechanical** — no hardcoded acronym vocabulary (a curated initialism list is
+  an arbitrary, churn-inviting maintenance surface). `"user_id" → "userId"`. Acronyms are
+  **opt-in** via `ToCamelWith(s, acronyms...)`: each acronym is matched case-insensitively
+  against a word after the first and rendered with its own spelling
+  (`ToCamelWith("user_id", "ID") → "userID"`; `ToCamelWith(x, "OAuth")` → `OAuth`). The first
+  word is always lowercased (lowerCamel), even if it matches an acronym. `ToSnake`/`ToKebab`
+  need no such variant (they lowercase everything).
 - All length operations are **rune-safe** (count runes, never split a multi-byte rune).
 - `Ellipsis` counts the ellipsis toward nothing special — it appends `"…"` only when the
   input actually exceeded `n` runes; `n <= 0` returns empty (documented).
