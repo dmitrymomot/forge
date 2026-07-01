@@ -40,8 +40,9 @@ correspondingly heavy, oracle-backed test suite.
   `sanitize`/`structfields`/`validate`/`filetype`/`decimal`/`money` are collision-free
   and take no suffix.
 - **Idiom:** stateless free-funcs and generic value types throughout — **no instances,
-  no builders** (CLAUDE.md). Even `validate` is free functions: rules return a
-  `Violation` value and `Apply`/`Check` compose them, mirroring `sanitize`.
+  no builders** (CLAUDE.md). Even `validate` is free functions: a rule is
+  `Rule[T] = func(T) Violation` (`sanitize`'s `func(T) T` analog), composed by
+  `Apply`/`Check` and a small rule algebra.
 - **Anatomy:** `doc.go` (package doc; scope + explicit "what this is NOT" + sibling
   pointers; a runnable `Example` is optional per P0-leaf precedent), `errors.go`
   (`errors.Is`-matchable single-line `pkg: …` sentinels, wrapped with `%w`), plus
@@ -300,22 +301,22 @@ The deliberate no-magic alternative to struct-tag validators. A failed rule emit
 baked-in English sentence. `validate` has **no i18n dependency**; it only produces
 keys + params for a downstream i18n layer to render.
 
-There is **no `Validator` instance** — validation is composable free functions,
-mirroring `sanitize`: value-bound *rules* return a `Violation` (the zero value means
-"passed"), `Apply` groups a field's checks, and `Check` aggregates. This is
-allocation-light — see the allocation section below.
+There is **no `Validator` instance**. A *rule* is the exact `sanitize` analog —
+`type Rule[T any] func(T) Violation` (the zero `Violation` means "passed", so
+`func(T) Violation` ↔ `sanitize`'s `func(T) T`). **Param-less rules are used bare**
+(`validate.Email`, `validate.Required`); rules that take parameters are tiny
+constructors returning a `Rule[T]` (`validate.MinLen(2)`). `Apply` runs a field's
+rules against its value; `Check` aggregates. Allocation-light — see below.
 
 ```go
-// Param is one interpolation value. A []Param (ordered, ~1 alloc, and only on
-// failure) instead of a map keeps the failure path cheap.
+// Param is one interpolation value. []Param (ordered, ~1 alloc, only on failure).
 type Param struct {
     Key   string `json:"key"`
     Value any    `json:"value"`
 }
 
-// Violation is one failed check — a VALUE, never a *heap pointer*. The zero
-// Violation (Key == "" && Message == "") means "passed": every rule returns it on
-// success, so a passing check allocates nothing. Field is filled in by Apply/Manual.
+// Violation is one failed check — a VALUE, never a heap pointer. The zero Violation
+// (Key == "" && Message == "") means "passed". Field is filled in by Apply/Manual.
 type Violation struct {
     Field   string  `json:"field,omitempty"`
     Key     string  `json:"key,omitempty"`     // "validation.required", "validation.between", …
@@ -325,23 +326,32 @@ type Violation struct {
 func (v Violation) IsZero() bool     // true ⇒ the check passed
 func (v Violation) String() string   // fmt.Stringer: Message when set, else Key
 
-// ── Composition (the analog of sanitize.Apply/Compose) ──────────────────────────
-// Result is one field's violations; nil when the field is clean.
-type Result []Violation
+// Rule is the sanitize analog: tests a value, returns a Violation (zero = pass).
+// A param-less rule IS a Rule[T] (used bare); a parameterized rule is a constructor
+// that returns one.
+type Rule[T any] func(value T) Violation
 
-// Apply runs a field's checks: it tags every FAILING (non-zero) check with the
-// field name and drops the passing ones. Returns nil when all pass.
-func Apply(field string, checks ...Violation) Result
+// ── Composition (the analog of sanitize.Apply/Compose) ──────────────────────────
+type Result []Violation   // one field's violations; nil when the field is clean
+
+// Apply runs each rule against value, tags failures with field, drops passes.
+func Apply[T any](field string, value T, rules ...Rule[T]) Result
 // Manual injects a literal / keyed violation (e.g. after a DB "email taken" check).
 func Manual(field, message string) Result
 func ManualKey(field, key string, params ...Param) Result
-// Check flattens field results into one error; nil when everything is clean.
+// Check flattens field results into one error; untyped nil when clean.
 func Check(results ...Result) error
 
-// Conditional gates (eager — the wrapped checks still evaluate, then get suppressed
-// when cond is false; cheap for pure rules, use a plain `if` to also skip evaluation).
-func When(cond bool, v Violation) Violation          // check-level: cond ? v : passed
-func WhenField(cond bool, results ...Result) Result  // field/group-level: cond ? flatten(results) : nil
+// Rule algebra — each returns a REUSABLE Rule[T] (predefine once → zero per-request alloc):
+func And[T any](rules ...Rule[T]) Rule[T]            // all must pass; first failure wins
+func Or[T any](key string, rules ...Rule[T]) Rule[T] // ok if ANY sub-rule passes
+func Not[T any](r Rule[T], key string) Rule[T]       // invert
+func Each[T any](r Rule[T]) Rule[[]T]                // apply r to every element (+ {index})
+func Msg[T any](r Rule[T], template string) Rule[T]  // literal message, interpolating the rule's Params
+func WithKey[T any](r Rule[T], key string) Rule[T]   // swap the i18n key
+func When[T any](cond bool, r Rule[T]) Rule[T]       // conditional CHECK (passes when !cond)
+
+func WhenField(cond bool, results ...Result) Result  // conditional FIELD/group (cond ? flatten : nil)
 
 // Errors is the aggregated failure set Check returns.
 type Errors []Violation
@@ -350,112 +360,110 @@ func (e Errors) ByField() map[string][]Violation // built on demand (JSON API re
 ```
 
 ```go
-// Rules are VALUE-BOUND free functions — no instance, no per-rule closures: each
-// takes its value and returns a Violation (the zero value on success). Keys are
-// namespaced "validation.<rule>"; the {…} is its Params (i18n + Msg interpolation).
+// A Rule[T] is func(T) Violation. PARAM-LESS rules are plain functions used BARE
+// (validate.Email, validate.Required); PARAMETERIZED rules are constructors that
+// return a Rule[T] (validate.MinLen(2)). Keys are "validation.<rule>"; {…} = Params.
 
 // presence / length
-func Required[T comparable](value T) Violation       // validation.required (zero-value ⇒ fail)
-func NotBlank(s string) Violation                    // validation.not_blank (whitespace-only ⇒ fail)
-func MinLen(s string, n int) Violation               // validation.min_len   {min}
-func MaxLen(s string, n int) Violation               // validation.max_len   {max}
-func LenBetween(s string, min, max int) Violation    // validation.len_between {min,max}
+func Required[T comparable](v T) Violation    // validation.required — bare (zero-value ⇒ fail)
+func NotBlank(s string) Violation             // validation.not_blank — bare
+func MinLen(n int) Rule[string]               // validation.min_len    {min}
+func MaxLen(n int) Rule[string]               // validation.max_len    {max}
+func LenBetween(min, max int) Rule[string]    // validation.len_between {min,max}
 
 // string content
-func Alpha(s string) Violation                       // validation.alpha        (letters only)
-func Alphanumeric(s string) Violation                // validation.alphanumeric
-func Numeric(s string) Violation                     // validation.numeric      (digits only)
-func ASCII(s string) Violation                       // validation.ascii
-func Lowercase(s string) Violation                   // validation.lowercase
-func Uppercase(s string) Violation                   // validation.uppercase
-func Contains(s, sub string) Violation               // validation.contains     {sub}
-func HasPrefix(s, prefix string) Violation           // validation.has_prefix   {prefix}
-func HasSuffix(s, suffix string) Violation           // validation.has_suffix   {suffix}
-func Match(s string, re *regexp.Regexp, key string) Violation // caller-named key
+func Alpha(s string) Violation                // validation.alpha — bare
+func Alphanumeric(s string) Violation         // validation.alphanumeric — bare
+func Numeric(s string) Violation              // validation.numeric — bare
+func ASCII(s string) Violation                // validation.ascii — bare
+func Lowercase(s string) Violation            // validation.lowercase — bare
+func Uppercase(s string) Violation            // validation.uppercase — bare
+func Contains(sub string) Rule[string]        // validation.contains   {sub}
+func HasPrefix(prefix string) Rule[string]    // validation.has_prefix {prefix}
+func HasSuffix(suffix string) Rule[string]    // validation.has_suffix {suffix}
+func Match(re *regexp.Regexp, key string) Rule[string] // caller-named key
 
-// formats / encodings
-func Email(s string) Violation                       // validation.email   (net/mail, no DNS)
-func URL(s string) Violation                         // validation.url     (http/https absolute)
-func UUID(s string) Violation                        // validation.uuid
-func Slug(s string) Violation                        // validation.slug    (^[a-z0-9]+(-[a-z0-9]+)*$)
-func Hex(s string) Violation                         // validation.hex
-func Base64(s string) Violation                      // validation.base64
-func JSON(s string) Violation                        // validation.json    (json.Valid)
+// formats / encodings (all bare)
+func Email(s string) Violation                // validation.email  (net/mail, no DNS)
+func URL(s string) Violation                  // validation.url    (http/https absolute)
+func UUID(s string) Violation                 // validation.uuid
+func Slug(s string) Violation                 // validation.slug   (^[a-z0-9]+(-[a-z0-9]+)*$)
+func Hex(s string) Violation                  // validation.hex
+func Base64(s string) Violation               // validation.base64
+func JSON(s string) Violation                 // validation.json   (json.Valid)
 
-// network
-func IP(s string) Violation                          // validation.ip      (net.ParseIP)
-func IPv4(s string) Violation                        // validation.ipv4
-func IPv6(s string) Violation                        // validation.ipv6
-func MAC(s string) Violation                         // validation.mac     (net.ParseMAC)
-func Domain(s string) Violation                      // validation.domain  (hostname)
+// network (all bare)
+func IP(s string) Violation                   // validation.ip     (net.ParseIP)
+func IPv4(s string) Violation                 // validation.ipv4
+func IPv6(s string) Violation                 // validation.ipv6
+func MAC(s string) Violation                  // validation.mac    (net.ParseMAC)
+func Domain(s string) Violation               // validation.domain (hostname)
 
 // ordered / numeric (generic; local unexported constraints à la typeconv)
-func Min[T cmp.Ordered](value, min T) Violation      // validation.min      {min}
-func Max[T cmp.Ordered](value, max T) Violation      // validation.max      {max}
-func Between[T cmp.Ordered](value, min, max T) Violation // validation.between {min,max}
-func Positive[T number](value T) Violation           // validation.positive (> 0)
-func Negative[T number](value T) Violation           // validation.negative (< 0)
-func MultipleOf[T integer](value, n T) Violation     // validation.multiple_of {n}
+func Min[T cmp.Ordered](min T) Rule[T]        // validation.min      {min}
+func Max[T cmp.Ordered](max T) Rule[T]        // validation.max      {max}
+func Between[T cmp.Ordered](min, max T) Rule[T] // validation.between {min,max}
+func Positive[T number](v T) Violation        // validation.positive — bare (> 0)
+func Negative[T number](v T) Violation        // validation.negative — bare (< 0)
+func MultipleOf[T integer](n T) Rule[T]       // validation.multiple_of {n}
 
 // equality / choice (generic)
-func OneOf[T comparable](value T, allowed ...T) Violation // validation.one_of {allowed}
-func Equal[T comparable](value, other T) Violation   // validation.equal    (e.g. confirm-password)
-func NotEqual[T comparable](value, other T) Violation // validation.not_equal
+func OneOf[T comparable](allowed ...T) Rule[T] // validation.one_of {allowed}
+func Equal[T comparable](other T) Rule[T]      // validation.equal    (e.g. confirm-password)
+func NotEqual[T comparable](other T) Rule[T]   // validation.not_equal
 
 // time
-func Before(t, u time.Time) Violation                // validation.before   {other}
-func After(t, u time.Time) Violation                 // validation.after    {other}
+func Before(u time.Time) Rule[time.Time]      // validation.before {other}
+func After(u time.Time) Rule[time.Time]       // validation.after  {other}
 
 // collections (generic)
-func MinItems[T any](items []T, n int) Violation     // validation.min_items {min}
-func MaxItems[T any](items []T, n int) Violation     // validation.max_items {max}
-func UniqueItems[T comparable](items []T) Violation  // validation.unique_items
-func Each[T any](items []T, rule func(T) Violation) Violation // first failing element + {index}
+func MinItems[T any](n int) Rule[[]T]         // validation.min_items {min}
+func MaxItems[T any](n int) Rule[[]T]         // validation.max_items {max}
+func UniqueItems[T comparable](items []T) Violation // validation.unique_items — bare
+// Each (apply a rule to every element, + {index}) is a combinator, listed above.
 
-// e-commerce / payments (checksum- or set-verified)
-func CreditCard(s string) Violation                  // validation.credit_card   (Luhn, 13–19 digits)
-func CVV(s string) Violation                         // validation.cvv           (3–4 digits)
-func CardExpiry(s string) Violation                  // validation.card_expiry   (MM/YY, not in the past)
-func CurrencyCode(s string) Violation                // validation.currency_code (ISO-4217 alpha-3 set)
-func CountryCode(s string) Violation                 // validation.country_code  (ISO-3166-1 alpha-2 set)
-func EAN(s string) Violation                         // validation.ean           (EAN-8/13 check digit)
-func ISBN(s string) Violation                        // validation.isbn          (ISBN-10/13 checksum)
+// e-commerce / payments (all bare; checksum- or set-verified)
+func CreditCard(s string) Violation           // validation.credit_card   (Luhn, 13–19 digits)
+func CVV(s string) Violation                  // validation.cvv           (3–4 digits)
+func CardExpiry(s string) Violation           // validation.card_expiry   (MM/YY, not in the past)
+func CurrencyCode(s string) Violation         // validation.currency_code (ISO-4217 alpha-3 set)
+func CountryCode(s string) Violation          // validation.country_code  (ISO-3166-1 alpha-2 set)
+func EAN(s string) Violation                  // validation.ean           (EAN-8/13 check digit)
+func ISBN(s string) Violation                 // validation.isbn          (ISBN-10/13 checksum)
 
-// blockchain / crypto (checksum- or length-verified; all stdlib — see EIP-55 note)
-func ETHAddress(s string) Violation                  // validation.eth_address    (0x + 40 hex; EIP-55 opt-in)
-func BTCAddress(s string) Violation                  // validation.btc_address    (Base58Check OR Bech32, verified)
-func TronAddress(s string) Violation                 // validation.tron_address   (Base58Check, 0x41; TRC-20 contracts share this)
-func SolanaAddress(s string) Violation               // validation.solana_address (Base58 → exactly 32 bytes)
-func Base58(s string) Violation                      // validation.base58         (alphabet check)
-func Bech32(s string) Violation                      // validation.bech32         (BIP-173 polymod checksum)
+// blockchain / crypto (all bare; checksum- or length-verified; stdlib — see EIP-55 note)
+func ETHAddress(s string) Violation           // validation.eth_address    (0x + 40 hex; EIP-55 opt-in)
+func BTCAddress(s string) Violation           // validation.btc_address    (Base58Check OR Bech32, verified)
+func TronAddress(s string) Violation          // validation.tron_address   (Base58Check, 0x41; TRC-20 contracts share this)
+func SolanaAddress(s string) Violation        // validation.solana_address (Base58 → exactly 32 bytes)
+func Base58(s string) Violation               // validation.base58         (alphabet check)
+func Bech32(s string) Violation               // validation.bech32         (BIP-173 polymod checksum)
 
-// escape hatch
-func True(ok bool, key string) Violation             // custom predicate, caller-named key
-
-// Overrides — decorate a Violation VALUE; a no-op when the check passed (a zero
-// Violation in ⇒ a zero Violation out). Msg interpolates the failing check's Params
-// into {name} placeholders ("must be {min}-{max}" ⇒ "must be 18-72"; an unknown
-// placeholder is left verbatim) and stores the result in Message. WithKey swaps Key.
-func Msg(v Violation, template string) Violation
-func WithKey(v Violation, key string) Violation
+// custom escape hatch: any func(T) Violation literal IS a Rule[T]; or wrap a predicate:
+func Is[T any](pred func(T) bool, key string) Rule[T] // caller predicate + key
 ```
 
-Usage — no instance, just compose:
+Usage — no instance; value written once per field; param-less rules bare:
 
 ```go
+// A reusable rule set — built once, zero per-request allocation:
+var ageRules = []validate.Rule[int]{validate.Required[int], validate.Between(18, 72)}
+
 err := validate.Check(
-    validate.Apply("age",   validate.Required(age), validate.Between(age, 18, 72)),
-    validate.Apply("name",  validate.NotBlank(name), validate.MinLen(name, 2)),
-    validate.Apply("email", validate.Msg(validate.Email(email), "invalid {field}")),
+    validate.Apply("age",   age,   ageRules...),
+    validate.Apply("name",  name,  validate.NotBlank, validate.MinLen(2)),
+    validate.Apply("email", email, validate.Msg(validate.Email, "invalid {field}")),
     validate.Manual("email", "Email is taken"),   // literal, e.g. after a uniqueness check
 
-    // conditional:
-    validate.Apply("website", validate.When(website != "", validate.URL(website))), // optional-if-present
-    validate.Apply("state",   validate.When(country == "US", validate.Required(state))),
-    validate.WhenField(accountType == "business",                                   // whole group, only for businesses
-        validate.Apply("company", validate.NotBlank(company)),
-        validate.Apply("vat",     validate.Required(vat)),
+    // conditional / optional:
+    validate.Apply("website", website, validate.When(website != "", validate.URL)),   // optional-if-present
+    validate.Apply("state",   state,   validate.When(country == "US", validate.Required[string])),
+    validate.WhenField(accountType == "business",                       // whole group, businesses only
+        validate.Apply("company", company, validate.NotBlank),
+        validate.Apply("vat",     vat,     validate.Required[string]),
     ),
+
+    validate.Apply("tags", tags, validate.Each(validate.NotBlank)),     // a rule per element
 )
 return err   // untyped nil when clean, else Errors ([]Violation)
 ```
@@ -471,46 +479,55 @@ above; a representative slice:
 | `Between(min,max)` | `validation.between` | `{min, max}` |
 | `OneOf(a…)` | `validation.one_of` | `{allowed}` (slice) |
 | `Contains(sub)` / `MultipleOf(n)` | `validation.contains` / `validation.multiple_of` | `{sub}` / `{n}` |
-| `Each(items, rule)` | wrapped rule's key | `{index}` (of first failure) |
-| `Match(re,key)` / `True(ok,key)` | caller's `key` | — |
+| `Each(rule)` | wrapped rule's key | `{index}` (of first failure) |
+| `Match(re,key)` / `Is(pred,key)` | caller's `key` | — |
 
-So `validate.Msg(validate.Between(age, 18, 72), "Your age must be between {min} and {max}")`
-yields `Violation{Key:"validation.between", Params:[{min 18},{max 72}], Message:"Your age must be between 18 and 72"}`
-— while `validate.Between(age, 18, 72)` on a valid `age` returns the **zero `Violation`** (no allocation).
+So `validate.Msg(validate.Between(18, 72), "Your age must be between {min} and {max}")` is a
+`Rule[int]` that, on an out-of-range `age`, yields
+`Violation{Key:"validation.between", Params:[{min 18},{max 72}], Message:"Your age must be between 18 and 72"}`
+— and passes straight through (zero `Violation`) when `age` is in range.
 
 **Decisions**
 
 - **i18n keys are the public contract.** The `validation.<rule>` namespace and each
   rule's `Params` keys are documented and stable so i18n catalogs can target them.
-  `Match`/`True` take a caller-supplied key (there is no default sentence to emit).
-- **No instance — composable free functions.** Rules are value-bound funcs returning a
-  `Violation` **value** (zero ⇒ passed). `Apply(field, checks…)` drops the zero ones and
-  tags failures with the field; `Check(results…)` flattens to an `Errors` (untyped `nil`
-  when clean); `Manual`/`ManualKey` inject literal violations (e.g. a DB "email taken").
-  This mirrors `sanitize`'s `Apply`/`Compose` and removes the `*Validator`, the per-field
-  map, and the per-rule closures the old instance design carried.
-- **Conditional validation is two gates, not a DSL.** `When(cond, check)` suppresses a
-  single check; `WhenField(cond, results…)` includes or omits whole fields/groups —
-  together covering country/account-type-dependent fields and the *optional-if-present*
-  pattern (`When(value != "", …)`) without leaving the declarative `Check(…)` expression.
-  They are **eager**: the wrapped checks still run and are discarded when `cond` is false
-  (fine for pure rules). To *also* skip evaluation (an expensive or value-unsafe check),
-  use a plain Go `if` and build the `[]Result` imperatively — the value-based API needs no
-  extra machinery for that, which is exactly why conditionals stay this small.
-- **Allocation profile — (near) zero on the happy path.** Rules are direct calls (no
-  closures) returning a `Violation` value; a pass is the **zero value** — no pointer, no
-  map, no slice. `Apply`/`Check` take non-escaping `...Violation`/`...Result` variadics
-  that stack-allocate, and build a heap `Result`/`Errors` only when a check fails. So
-  **valid input allocates essentially nothing**; allocation is confined to the failure
-  path (the failing rule's `[]Param` plus the aggregated slices) — exactly where an error
-  response is being built anyway. `[]Param` (not a map) keeps even that path to ~1 alloc
-  per violation. A hot loop can reuse one `Errors` buffer across requests.
-- **Overrides decorate a `Violation` value.** `Msg(v, template)` and `WithKey(v, key)`
-  take the value a rule returned; when it is the zero (passed) `Violation` they pass it
-  through untouched, otherwise `Msg` interpolates the failing check's `Params` into
-  `{name}` placeholders (dependency-free scan of the `[]Param`; unknown placeholder left
-  verbatim so typos stay visible) into `Message`, and `WithKey` swaps `Key`, preserving
-  `Params`. Because they operate on the value, they wrap **every** rule uniformly.
+  `Match`/`Is` take a caller-supplied key (there is no default sentence to emit).
+- **No instance — a rule is `Rule[T] = func(T) Violation`.** Param-less rules are plain
+  functions used **bare** (`validate.Email`); parameterized rules are tiny constructors
+  returning a `Rule[T]` (`validate.MinLen(2)`). `Apply(field, value, rules…)` runs each
+  rule against the value (written once), tags failures with the field, drops passes;
+  `Check(results…)` flattens to an `Errors` (untyped `nil` when clean); `Manual`/`ManualKey`
+  inject literal violations. This is the exact `sanitize` parallel (`func(T) Violation` ↔
+  `func(T) T`); rules compose into rules via the algebra (`And`/`Or`/`Not`/`Each`/`Msg`/
+  `WithKey`), so a `[]Rule[T]` can be predefined once and reused.
+- **Generic vs bare inference.** Non-generic rules (`Email`, `NotBlank`, every string/
+  crypto rule) are used fully bare anywhere. Generic param-less rules (`Required`,
+  `Positive`, `Negative`, `UniqueItems`) are bare where `T` is inferable (e.g. inside
+  `Apply`, from the value) and carry an explicit arg otherwise (`validate.Required[string]`,
+  e.g. inside `When`). Either way there are **no call parens** on a param-less rule.
+- **Conditional validation is two gates, not a DSL.** `When(cond, rule)` is a `Rule[T]`
+  combinator — `rule` when `cond`, else a pass — so the guarded rule is only *evaluated*
+  when `cond` holds (no wasted work; deferring the rule removes the eager-evaluation caveat
+  the value form had). `WhenField(cond, results…)` includes or omits whole fields/groups.
+  Together they cover country/account-type-dependent fields and *optional-if-present*
+  (`When(value != "", rule)`) inside the declarative `Check(…)`. Anything richer is a plain
+  Go `if` building `[]Result` — no extra API — which is why conditionals stay this small.
+- **Allocation profile.** A param-less rule used bare (`validate.Email`) is a plain
+  function value — **no allocation**. A parameterized rule (`validate.MinLen(2)`) or a
+  combinator (`And`/`Msg`/`Each`/…) returns a small closure: **~1 alloc when built inline,
+  zero when the `[]Rule[T]` is predefined** (built once at init, reused per request — the
+  recommended hot-path pattern). `Apply`/`Check` take non-escaping variadics that stack-
+  allocate, and a passing rule returns the zero `Violation` value. So valid input with
+  bare/predefined rules **allocates nothing**; heap use is confined to the failure path
+  (the failing rule's `[]Param` + the aggregated slices), where an error response is being
+  built anyway. `[]Param` (not a map) keeps that path to ~1 alloc per violation; a hot loop
+  can reuse one `Errors` buffer.
+- **Overrides are `Rule[T]` combinators.** `Msg(rule, template)` and `WithKey(rule, key)`
+  wrap a rule; the returned rule runs the inner one and, **only on failure**, interpolates
+  the check's `Params` into `{name}` placeholders (dependency-free scan of `[]Param`;
+  unknown placeholder left verbatim so typos stay visible) into `Message`, or swaps `Key`.
+  Wrapping the rule (not a value) means they apply to every rule uniformly and nest inside
+  `And`/`Or`/`Each`.
 - `Required` uses zero-value comparison of a `comparable` (so `""`, `0`, zero-time
   are "missing"); whitespace-only strings pass `Required` but fail `NotBlank`.
 - `Email` = `net/mail.ParseAddress` + a light structural check (no DNS). `URL` =
