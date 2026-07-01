@@ -53,7 +53,24 @@ func build(s string, cfg *config) string {
 		result = truncateRunes(result, cfg.maxLength)
 		result = strings.TrimSuffix(result, cfg.separator)
 	}
+
+	// 5. explicit random suffix (WithSuffix).
+	if cfg.suffixLength > 0 {
+		result = appendSuffix(result, randomSuffix(cfg.suffixLength, cfg.lowercase), cfg.separator)
+	}
 	return result
+}
+
+// appendSuffix joins base and suffix with sep, or returns suffix alone when base
+// is empty (no leading separator).
+func appendSuffix(base, suffix, sep string) string {
+	if suffix == "" {
+		return base
+	}
+	if base == "" {
+		return suffix
+	}
+	return base + sep + suffix
 }
 
 // isASCIIAlphaNum reports whether r is a-z, A-Z, or 0-9.
