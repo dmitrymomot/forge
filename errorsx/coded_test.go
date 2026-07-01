@@ -106,3 +106,16 @@ func TestCode_NoCode(t *testing.T) {
 	assert.False(t, ok)
 	assert.Equal(t, "", code)
 }
+
+func TestEndToEnd_CodePlusPermanent(t *testing.T) {
+	base := errors.New("duplicate key")
+	err := errorsx.MarkPermanent(errorsx.WithCode(base, "conflict"))
+
+	code, ok := errorsx.Code(err)
+	assert.True(t, ok)
+	assert.Equal(t, "conflict", code)
+	assert.True(t, errorsx.IsPermanent(err))
+	assert.False(t, errorsx.IsRetryable(err))
+	assert.True(t, errors.Is(err, base))
+	assert.Equal(t, "conflict: duplicate key", err.Error())
+}

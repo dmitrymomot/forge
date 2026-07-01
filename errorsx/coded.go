@@ -8,9 +8,9 @@ import (
 // codedError is an unexported error carrying a string code. When it wraps
 // another error, Unwrap returns it so errors.Is/As traverse the chain.
 type codedError struct {
+	err  error // wrapped error (nil for a leaf)
 	code string
 	msg  string // used when err == nil (leaf, from New/Errorf)
-	err  error  // wrapped error (nil for a leaf)
 }
 
 func (e *codedError) Error() string {
