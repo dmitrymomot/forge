@@ -19,9 +19,9 @@ func TestBase58Bech32(t *testing.T) {
 }
 
 func TestBTCAddress(t *testing.T) {
-	assert.True(t, validate.BTCAddress("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").IsZero())         // P2PKH (genesis)
-	assert.True(t, validate.BTCAddress("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy").IsZero())         // P2SH
-	assert.True(t, validate.BTCAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").IsZero()) // bech32 segwit v0
+	assert.True(t, validate.BTCAddress("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").IsZero())                       // P2PKH (genesis)
+	assert.True(t, validate.BTCAddress("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy").IsZero())                       // P2SH
+	assert.True(t, validate.BTCAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").IsZero())               // bech32 segwit v0
 	assert.Equal(t, "validation.btc_address", validate.BTCAddress("1A1zP1eP5QGefi2DMPTfTL5SLmv7Divfna").Key) // bad checksum
 }
 
@@ -29,7 +29,7 @@ func TestTronSolanaEth(t *testing.T) {
 	assert.True(t, validate.TronAddress("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").IsZero()) // public TRON address
 	assert.Equal(t, "validation.tron_address", validate.TronAddress("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj60").Key)
 
-	assert.True(t, validate.SolanaAddress("11111111111111111111111111111111").IsZero())             // System Program (32 bytes)
+	assert.True(t, validate.SolanaAddress("11111111111111111111111111111111").IsZero())            // System Program (32 bytes)
 	assert.True(t, validate.SolanaAddress("So11111111111111111111111111111111111111112").IsZero()) // Wrapped SOL mint
 	assert.Equal(t, "validation.solana_address", validate.SolanaAddress("tooShort").Key)
 

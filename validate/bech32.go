@@ -10,7 +10,7 @@ func bech32Polymod(values []int) int {
 	for _, v := range values {
 		b := chk >> 25
 		chk = (chk&0x1ffffff)<<5 ^ v
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			if (b>>i)&1 == 1 {
 				chk ^= gen[i]
 			}

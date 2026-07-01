@@ -3,8 +3,8 @@ package validate
 // Param is one interpolation value for a Violation's message. A []Param (ordered,
 // ~1 alloc, and only on failure) is used instead of a map to keep the failure path cheap.
 type Param struct {
-	Key   string `json:"key"`
 	Value any    `json:"value"`
+	Key   string `json:"key"`
 }
 
 // Violation is one failed check — a value, never a heap pointer. The zero Violation
@@ -13,8 +13,8 @@ type Param struct {
 type Violation struct {
 	Field   string  `json:"field,omitempty"`
 	Key     string  `json:"key,omitempty"`
-	Params  []Param `json:"params,omitempty"`
 	Message string  `json:"message,omitempty"`
+	Params  []Param `json:"params,omitempty"`
 }
 
 // IsZero reports whether the check passed (no key and no message).

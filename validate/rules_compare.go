@@ -1,14 +1,15 @@
 package validate
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // OneOf requires value to be one of the allowed values.
 func OneOf[T comparable](allowed ...T) Rule[T] {
 	return func(v T) Violation {
-		for _, a := range allowed {
-			if v == a {
-				return Violation{}
-			}
+		if slices.Contains(allowed, v) {
+			return Violation{}
 		}
 		return Violation{Key: "validation.one_of", Params: []Param{{Key: "allowed", Value: allowed}}}
 	}

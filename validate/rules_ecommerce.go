@@ -114,7 +114,7 @@ func ISBN(s string) Violation {
 	switch len(s) {
 	case 10:
 		sum := 0
-		for i := 0; i < 9; i++ {
+		for i := range 9 {
 			if s[i] < '0' || s[i] > '9' {
 				return Violation{Key: "validation.isbn"}
 			}
