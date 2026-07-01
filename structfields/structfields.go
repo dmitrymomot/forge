@@ -72,9 +72,10 @@ func makeSetter(name string, target reflect.Value) func(v any) error {
 			target.Set(in)
 		case in.Type().ConvertibleTo(tt):
 			// reflect reports slice->array (and slice->*array) as convertible,
-			// but Convert PANICS when the slice length differs from the array
-			// length. Guard that case so Set returns an error instead.
-			if arr := arrayLen(tt); arr >= 0 && in.Kind() == reflect.Slice && in.Len() != arr {
+			// but Convert PANICS only when the slice is SHORTER than the array.
+			// A slice equal to or longer than the array is a valid conversion
+			// (Go takes the first N elements), so guard just the shorter case.
+			if arr := arrayLen(tt); arr >= 0 && in.Kind() == reflect.Slice && in.Len() < arr {
 				return fmt.Errorf("structfields: field %q: cannot set %s from %s: length mismatch", name, tt, in.Type())
 			}
 			target.Set(in.Convert(tt))
@@ -86,8 +87,8 @@ func makeSetter(name string, target reflect.Value) func(v any) error {
 }
 
 // arrayLen returns the length of t if t is an array or a pointer to an array,
-// or -1 otherwise. Used to reject slice->array conversions whose lengths
-// differ before reflect.Value.Convert panics on them.
+// or -1 otherwise. Used to reject slice->array conversions from a slice
+// shorter than the array before reflect.Value.Convert panics on them.
 func arrayLen(t reflect.Type) int {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()

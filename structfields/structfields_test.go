@@ -194,14 +194,16 @@ func TestWalk_ShallowEmbeddedStructNotFlattened(t *testing.T) {
 	assert.Equal(t, []string{"EmbeddedInner", "Outer"}, names)
 }
 
-func TestWalk_SetSliceToArrayLengthMismatchReturnsError(t *testing.T) {
-	// reflect reports []int convertible to [4]int, but Convert PANICS on a
-	// length mismatch. Set must translate that into an error, never panic.
+func TestWalk_SetSliceToArrayShorterSliceReturnsError(t *testing.T) {
+	// reflect reports []int convertible to [4]int, but Convert PANICS when the
+	// slice is SHORTER than the array. Set must translate that into an error,
+	// never panic.
 	t.Run("array", func(t *testing.T) {
 		type T struct{ Arr [4]int }
+		var s T
 		var setErr error
 		require.NotPanics(t, func() {
-			err := structfields.Walk(&T{}, "env", func(f structfields.Field) error {
+			err := structfields.Walk(&s, "env", func(f structfields.Field) error {
 				setErr = f.Set([]int{1, 2})
 				return setErr
 			})
@@ -210,6 +212,7 @@ func TestWalk_SetSliceToArrayLengthMismatchReturnsError(t *testing.T) {
 		require.Error(t, setErr)
 		assert.Contains(t, setErr.Error(), "structfields:")
 		assert.Contains(t, setErr.Error(), "Arr")
+		assert.Equal(t, [4]int{}, s.Arr, "array left unset on error")
 	})
 
 	t.Run("pointer to array", func(t *testing.T) {
@@ -225,6 +228,60 @@ func TestWalk_SetSliceToArrayLengthMismatchReturnsError(t *testing.T) {
 		require.Error(t, setErr)
 		assert.Contains(t, setErr.Error(), "structfields:")
 		assert.Contains(t, setErr.Error(), "P")
+	})
+}
+
+func TestWalk_SetSliceToArrayExactAndLongerSliceSucceeds(t *testing.T) {
+	// A slice equal to or LONGER than the array is a VALID slice->array
+	// conversion (Go takes the first N elements). Set must succeed, not reject.
+	t.Run("array exact length", func(t *testing.T) {
+		type T struct{ Arr [4]int }
+		var s T
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+				return f.Set([]int{1, 2, 3, 4})
+			})
+			require.NoError(t, err)
+		})
+		assert.Equal(t, [4]int{1, 2, 3, 4}, s.Arr)
+	})
+
+	t.Run("array longer slice", func(t *testing.T) {
+		type T struct{ Arr [4]int }
+		var s T
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+				return f.Set([]int{1, 2, 3, 4, 5})
+			})
+			require.NoError(t, err)
+		})
+		assert.Equal(t, [4]int{1, 2, 3, 4}, s.Arr, "takes first N elements")
+	})
+
+	t.Run("pointer to array exact length", func(t *testing.T) {
+		type T struct{ P *[3]byte }
+		var s T
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+				return f.Set([]byte{1, 2, 3})
+			})
+			require.NoError(t, err)
+		})
+		require.NotNil(t, s.P)
+		assert.Equal(t, [3]byte{1, 2, 3}, *s.P)
+	})
+
+	t.Run("pointer to array longer slice", func(t *testing.T) {
+		type T struct{ P *[3]byte }
+		var s T
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+				return f.Set([]byte{1, 2, 3, 4})
+			})
+			require.NoError(t, err)
+		})
+		require.NotNil(t, s.P)
+		assert.Equal(t, [3]byte{1, 2, 3}, *s.P, "takes first N bytes")
 	})
 }
 
