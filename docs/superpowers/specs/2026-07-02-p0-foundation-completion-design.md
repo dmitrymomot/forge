@@ -1,17 +1,17 @@
-# Design: P0 foundation completion — `errorsx`, `sanitize`, `slugx`, `structfields`, `validate`, `filetype`, `decimal`, `money` (8 packages)
+# Design: P0 foundation completion — `errorsx`, `sanitize`, `slug`, `structfields`, `validate`, `filetype`, `decimal`, `money` (8 packages)
 
 ## Overview
 
 Final batch of P0 foundation packages. With P1 crypto complete and the prior
 leaf batches shipped (`slicex`/`ptr`/`mapx`/`set`/`encoding`/`enum`/`stringsx`,
-then `typeconv`/`iox`/`bufpool`/`nullx`/`bytesize`), these eight close every
+then `typeconv`/`iox`/`bufpool`/`null`/`bytesize`), these eight close every
 remaining gap in the P0 layer of `docs/maximal-package-set.md`.
 
 | Package | Tier | Purpose |
 |---|---|---|
 | `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English). The no-magic alternative to go-playground/validator. |
 | `sanitize` | recommended | Plain-text normalization/escaping at trust boundaries (trim/collapse/strip-control, email/username canonicalization, filename + header-value + HTML escaping). |
-| `slugx` | recommended | URL-safe slug generation with Unicode→ASCII folding and uniqueness suffixing. |
+| `slug` | recommended | URL-safe slug generation with Unicode→ASCII folding, an options API (length/separator/case/strip/replace/suffix/reserved), and predicate-based uniqueness. |
 | `structfields` | recommended | The **one sanctioned reflection helper**: walk an exported struct's fields once (name/parsed-tag/value/Set), confining all `reflect` use to one audited primitive. |
 | `filetype` | recommended | Detect a file's real MIME type from magic-byte signatures (not the client-supplied extension), closing the renamed-`.exe`-as-`.png` upload hole. |
 | `money` | recommended | Money value with currency + exact arithmetic over `decimal`, penny-perfect `Allocate`. |
@@ -25,9 +25,17 @@ correspondingly heavy, oracle-backed test suite.
 ## Design DNA (applies to every package)
 
 - **Minimal deps, not zero.** Seven packages are stdlib-only. The single non-stdlib
-  dependency is `golang.org/x/text/unicode/norm` in `slugx` (Go-team quasi-stdlib,
+  dependency is `golang.org/x/text/unicode/norm` in `slug` (Go-team quasi-stdlib,
   already in the module graph as indirect — promoted to direct). No external
   `validator`, `decimal`, `money`, or `filetype` library is taken.
+- **Naming — the `x` suffix is a stdlib-collision escape, not decoration.** A package
+  keeps an `x` suffix only when its natural name would collide with a stdlib package
+  or a Go keyword: `errorsx` (stdlib `errors`), like the already-shipped `iox`/`hashx`/
+  `randx`/`stringsx`/`subtlex`/`slicex`/`mapx`. A package with no such collision drops
+  the `x`: hence **`slug`** (no stdlib `slug`) — and the previously-shipped `nullx` is
+  **renamed to `null`** as part of this work (it has no stdlib counterpart; consistent
+  with `set.Set`, which this repo already accepts). `sanitize`/`structfields`/`validate`/
+  `filetype`/`decimal`/`money` are collision-free and take no suffix.
 - **Idiom:** stateless free-funcs and generic value types; `validate` adds a small
   per-request collector (`*Validator`). **No builders** (CLAUDE.md). `validate`'s
   `Field(...).Field(...)` chaining is collector aggregation, not object construction.
@@ -45,12 +53,13 @@ correspondingly heavy, oracle-backed test suite.
 
 ```
 Wave 1 (pure leaves, parallelizable):  errorsx · sanitize · structfields · decimal · filetype
-Wave 2 (depend on Wave 1):             slugx (norm only) · money (←decimal) · validate
+Wave 2 (depend on Wave 1):             slug (norm + randx) · money (←decimal) · validate
 ```
 
-`slugx` is self-contained apart from `x/text/norm` (it does its own normalization;
-it does **not** import `sanitize`). `money` imports `decimal`. `validate` is
-standalone but sequenced last (largest surface; benefits from settled conventions).
+`slug` folds via `x/text/norm` and draws random suffixes from the shipped `randx`;
+it does its own normalization and does **not** import `sanitize`. `money` imports
+`decimal`. `validate` is standalone but sequenced last (largest surface; benefits
+from settled conventions).
 
 ---
 
@@ -128,33 +137,63 @@ Deps: `strings`, `unicode`, `unicode/utf8`, `html`.
 
 ---
 
-## 3. `slugx` — URL-safe slugs (recommended)
+## 3. `slug` — URL-safe slugs with options (recommended)
+
+Ports the prior `pkg/slug` options API (the reference implementation at commit
+`0b68f05`) onto forge conventions: NFKD folding via `x/text`, and random suffixes
+drawn from the shipped `randx` (not a private `crypto/rand`).
 
 ```go
-// Make folds arbitrary text to a lowercase [a-z0-9-] slug. Returns "" for input
-// with no sluggable characters.
-func Make(s string) string
+type Option func(*config)   // config is unexported; options are the only knob (no builder)
 
-// Unique returns Make(s), or the first of "<slug>-2", "<slug>-3", … for which
-// exists(candidate) reports false. Storage-agnostic via the predicate.
-func Unique(s string, exists func(candidate string) bool) string
+// Make folds arbitrary text to a URL-safe slug (default: lowercase, "-" separated,
+// [a-z0-9] with single "-" between word runs). Returns "" for input with no
+// sluggable characters (unless a suffix/min-length option forces a random slug).
+func Make(s string, opts ...Option) string
+
+// Unique returns Make(s, opts…), or the first of "<slug>-2", "<slug>-3", … for which
+// exists(candidate) reports false. Human-friendly incrementing suffix, storage-
+// agnostic via the predicate — distinct from the RANDOM suffix of WithSuffix /
+// WithReservedSlugs.
+func Unique(s string, exists func(candidate string) bool, opts ...Option) string
+
+// Options (ported from the reference impl)
+func WithSeparator(sep string) Option                  // default "-"
+func WithLowercase(enabled bool) Option                // default true
+func WithMaxLength(n int) Option                       // truncate to n runes (0 = unlimited)
+func WithMinLength(n int) Option                       // pad with a random suffix up to n runes
+func WithStripChars(chars string) Option               // delete these runes before folding
+func WithCustomReplace(repl map[string]string) Option  // {"&":"and","@":"at"} applied FIRST
+func WithSuffix(length int) Option                     // append a random [a-z0-9] suffix of length
+func WithReservedSlugs(slugs ...string) Option         // if result is reserved (case-insensitive), append a random suffix
 ```
 
 **Decisions**
 
-- `Make`: NFKD-normalize (`x/text/unicode/norm`), drop combining marks (`é`→`e`,
-  `Ölçek`→`olcek`), lowercase, replace every run of non-`[a-z0-9]` with a single
-  `-`, trim leading/trailing `-`. Non-Latin scripts with no ASCII fold collapse to
-  `""` (documented; callers can fall back to an id).
-- **`x/text/norm` promoted to a direct dependency.** It is already in the module
-  graph (indirect) and is Go-team maintained — cheaper and more correct than a
-  hand-rolled transliteration table. This is the batch's only non-stdlib import.
-- `slugx` does **not** import `sanitize` (its transform is distinct; no reuse
-  benefit — a deliberate simplification vs. the roadmap sketch).
-- **`MakeLang` dropped for v1** (YAGNI — per-language transliteration). Can be added
-  later without breaking `Make`/`Unique`.
+- **Pipeline order (documented, from the reference impl):** `WithCustomReplace` →
+  `WithStripChars` → per-rune fold → trim separator → `WithMaxLength` truncation →
+  reserved/`WithSuffix`/`WithMinLength` suffixing. Per-rune fold: ASCII `[a-z0-9]`
+  passes through; letters decompose via **NFKD** (`x/text/unicode/norm`) with
+  combining marks dropped (`é`→`e`, `ü`→`u`); a small **special-case map** covers
+  non-decomposing Latin runes NFKD leaves intact (`ß`→`ss`, `ø`→`o`, `ł`→`l`,
+  `đ`→`d`, `æ`→`ae`, `œ`→`oe`); every other run collapses to a single separator.
+- **NFKD + special-case map, not the old hand-rolled `diacriticMap`.** `norm` handles
+  the whole `à/á/â/ä/ā/ă/ą…` space automatically (far broader than the reference
+  table) while the tiny special-case map covers what NFKD cannot decompose. This
+  keeps the approved `x/text/norm` decision and drops ~60 lines of hand-maintained data.
+- **Random suffixes use `randx`.** `WithSuffix`, `WithMinLength`, and the reserved-hit
+  path draw a bias-free `[a-z0-9]` string from `randx` (per-char `randx.Int`), not a
+  local `crypto/rand` with modulo bias as in the reference impl. Uppercase is added to
+  the alphabet only when `WithLowercase(false)`.
+- **`Unique` vs random suffixes.** `Unique(s, exists, …)` appends a human-friendly
+  incrementing `-2`/`-3`/… (blog-post style) until the predicate clears — a different
+  collision strategy from the random `WithSuffix`/`WithReservedSlugs`. Both ship.
+- `slug` does **not** import `sanitize` (its transform is distinct). **`MakeLang`
+  dropped for v1** (YAGNI); addable later without an API break.
+- Non-Latin scripts with no ASCII fold collapse to `""` (callers fall back to an id);
+  `WithMinLength`/`WithSuffix` still yield a random-only slug from an empty base.
 
-Deps: `golang.org/x/text/unicode/norm`, `strings`, `strconv`, `unicode`, `unicode/utf8`.
+Deps: `golang.org/x/text/unicode/norm`, forge `randx`, `strings`, `unicode`, `unicode/utf8`.
 
 ---
 
@@ -528,15 +567,15 @@ Deps: `bytes`, `io`, `net/http`, `strings`, `errors`.
 |---|---|---|
 | `errorsx` | — | errors, fmt |
 | `sanitize` | — | strings, unicode, unicode/utf8, html |
-| `slugx` | **golang.org/x/text/unicode/norm** | strings, strconv, unicode, unicode/utf8 |
+| `slug` | **golang.org/x/text/unicode/norm** | forge `randx`; strings, unicode, unicode/utf8 |
 | `structfields` | — | reflect, strings, errors, fmt |
 | `validate` | — | regexp, net/mail, net/url, strings, unicode/utf8, cmp, sort, fmt |
 | `decimal` | — | math/big, strings, strconv, errors, fmt |
 | `money` | forge `decimal` | strings, errors, fmt |
 | `filetype` | — | bytes, io, net/http, strings, errors |
 
-Only forge edge inside the batch: `money → decimal`. Only external addition:
-`x/text/norm` becomes a direct dep (already indirect). `go mod tidy` after `slugx`.
+Forge edges inside the batch: `money → decimal`, `slug → randx`. Only external
+addition: `x/text/norm` becomes a direct dep (already indirect). `go mod tidy` after `slug`.
 
 ### Build approach
 
@@ -554,8 +593,10 @@ declaring any package done.
 2. **`money.Allocate` penny-perfection** — `sum(parts) == total` must hold for every
    ratio set and both directions of remainder; assert the invariant over randomized
    ratios/amounts.
-3. **`slugx` Unicode folding** — verify NFKD + combining-mark stripping across Latin
-   diacritics, ligatures, and full-collapse (CJK ⇒ `""`) cases.
+3. **`slug` Unicode folding + option interactions** — verify NFKD + combining-mark
+   stripping and the special-case map (ß/ø/ł/…) across Latin diacritics and
+   full-collapse (CJK ⇒ `""`); and that `WithMaxLength` truncation composes correctly
+   with a random/reserved suffix (total length never exceeds the cap).
 4. **`structfields` settability** — confirm `Set` works only through a non-nil
    `*struct` and that a value-struct walk is read-only (`ErrNotSettable`).
 5. **`filetype` re-readability** — `DetectReader` must replay the full stream for a
@@ -565,7 +606,7 @@ declaring any package done.
 
 - `errorsx`: stack traces; HTTP-status mapping (→ `problem`).
 - `sanitize`: rich-HTML sanitization (bluemonday); `Truncate` (→ `stringsx`).
-- `slugx`: per-language transliteration (`MakeLang`).
+- `slug`: per-language transliteration (`MakeLang`).
 - `structfields`: embedded-struct flattening; struct-tag *binding* (→ consumers).
 - `validate`: message rendering (→ `i18n`); struct-tag DSL.
 - `decimal`: scientific-notation parsing; arbitrary-precision "exact" division.
