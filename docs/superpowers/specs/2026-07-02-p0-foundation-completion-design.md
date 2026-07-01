@@ -212,10 +212,13 @@ baked-in English sentence. `validate` has **no i18n dependency**; it only produc
 keys + params for a downstream i18n layer to render.
 
 ```go
-// Violation is one failed rule: a stable i18n key + interpolation params.
+// Violation is one failed rule. Every rule populates a stable i18n Key plus the
+// structured Params that both the default i18n message and any custom Message
+// template interpolate. Message, when set (via Msg), is the final rendered text.
 type Violation struct {
-    Key    string         `json:"key"`              // "validation.required", "validation.min_len", …
-    Params map[string]any `json:"params,omitempty"` // {"min": 3}; nil when the rule has none
+    Key     string         `json:"key"`               // "validation.required", "validation.between", …
+    Params  map[string]any `json:"params,omitempty"`  // {"min":18,"max":72}; nil when the rule has none
+    Message string         `json:"message,omitempty"` // literal override, already interpolated; empty ⇒ render Key+Params downstream
 }
 
 // Rule evaluates a pre-bound value; returns nil when valid, else a *Violation.
@@ -248,13 +251,44 @@ func Min[T cmp.Ordered](value, min T) Rule           // validation.min     {min}
 func Max[T cmp.Ordered](value, max T) Rule           // validation.max     {max}
 func Between[T cmp.Ordered](value, min, max T) Rule  // validation.between {min,max}
 func True(ok bool, key string) Rule                  // escape hatch for a custom predicate
+
+// Overrides — decorate ANY rule; take effect only when the wrapped rule fails.
+// Msg sets a literal message, interpolating the failing rule's Params into
+// {name} placeholders ("must be {min}-{max}" ⇒ "must be 18-72"); unknown
+// placeholders are left verbatim. WithKey swaps the i18n Key, preserving Params.
+func Msg(r Rule, template string) Rule
+func WithKey(r Rule, key string) Rule
 ```
+
+**Per-rule error structure (the Key + Params contract — stable public API):**
+
+| Rule | `Key` | `Params` |
+|---|---|---|
+| `Required` / `NotBlank` | `validation.required` / `validation.not_blank` | — |
+| `MinLen(n)` / `MaxLen(n)` | `validation.min_len` / `validation.max_len` | `{min}` / `{max}` |
+| `LenBetween(min,max)` | `validation.len_between` | `{min, max}` |
+| `Email` / `URL` | `validation.email` / `validation.url` | — |
+| `OneOf(a…)` | `validation.one_of` | `{allowed}` (slice) |
+| `Min(m)` / `Max(m)` | `validation.min` / `validation.max` | `{min}` / `{max}` |
+| `Between(min,max)` | `validation.between` | `{min, max}` |
+| `Match(re,key)` / `True(ok,key)` | caller's `key` | — |
+
+So `validate.Msg(validate.Between(age, 18, 72), "Your age must be between {min} and {max}")`
+yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"Your age must be between 18 and 72"}`.
 
 **Decisions**
 
 - **i18n keys are the public contract.** The `validation.<rule>` namespace and each
   rule's `Params` keys are documented and stable so i18n catalogs can target them.
   `Match`/`True` take a caller-supplied key (there is no default sentence to emit).
+- **Overrides are decorator combinators**, chosen so they wrap *any* rule uniformly —
+  built-ins, `Match`/`True`, and arbitrary `func() *Violation` closures — without
+  growing 12 rule signatures. `Msg(rule, template)` interpolates the failing rule's
+  `Params` into `{name}` placeholders and stores the result in `Violation.Message`
+  (a literal, display-ready string that bypasses i18n). `WithKey(rule, key)` swaps the
+  key while keeping `Params`. Both are no-ops when the wrapped rule passes.
+  Interpolation is a dependency-free `{name}`→`fmt.Sprint(Params[name])` replace; a
+  placeholder with no matching param is left verbatim (so typos stay visible).
 - `Field` **collects all** failing rules for a field (does not stop at the first),
   appending each `*Violation` under the field name. It returns `*Validator` for
   `v.Field(...).Field(...)` chaining — aggregation, **not** a builder.
@@ -262,12 +296,13 @@ func True(ok bool, key string) Rule                  // escape hatch for a custo
   are "missing"); whitespace-only strings pass `Required` but fail `NotBlank`.
 - `Email` = `net/mail.ParseAddress` + a light structural check (no DNS). `URL` =
   `net/url.Parse` requiring an `http`/`https` scheme and a host.
-- `Errors` marshals to JSON as `field → [{key, params}]` (API-friendly) and
-  `Error()` renders a sorted single line (log-friendly). `Validator` is per-request,
-  documented as not goroutine-safe.
-- **Out of scope:** struct-tag binding (→ `structfields` + these rules), the actual
-  message rendering (→ future `i18n`), cross-field rules beyond what `Add`/`True`
-  express.
+- `Errors` marshals to JSON as `field → [{key, params?, message?}]` (API-friendly;
+  `message` present only when set via `Msg`) and `Error()` renders a sorted single
+  line (log-friendly). `Validator` is per-request, documented as not goroutine-safe.
+- **Out of scope:** struct-tag binding (→ `structfields` + these rules); *key-based*
+  message rendering (→ future `i18n`; `validate` only emits Key+Params) — note the
+  *literal* `Msg` template is interpolated in-package, so it needs no i18n layer;
+  cross-field rules beyond what `Add`/`True`/closures express.
 
 Deps: `regexp`, `net/mail`, `net/url`, `strings`, `unicode/utf8`, `cmp`, `sort`, `fmt`.
 
