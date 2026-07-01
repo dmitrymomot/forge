@@ -123,3 +123,44 @@ func TestSplit_SumInvariant(t *testing.T) {
 		assert.Equalf(t, units, got, "sum(parts) must equal total; units=%d n=%d", units, n)
 	}
 }
+
+func FuzzAllocate_SumInvariant(f *testing.F) {
+	f.Add(int64(5), uint8(3), uint64(0x0102030405060708))
+	f.Add(int64(-100), uint8(7), uint64(0xdeadbeefcafef00d))
+	f.Add(int64(0), uint8(1), uint64(1))
+
+	f.Fuzz(func(t *testing.T, units int64, nRaw uint8, seed uint64) {
+		// Clamp units to a sane monetary range to keep multiplication in range.
+		if units > 1_000_000_000 {
+			units = 1_000_000_000
+		}
+		if units < -1_000_000_000 {
+			units = -1_000_000_000
+		}
+		n := int(nRaw%12) + 1 // 1..12 parts
+
+		// Derive positive ratios deterministically from seed.
+		ratios := make([]int, n)
+		s := seed
+		for i := range ratios {
+			s = s*6364136223846793005 + 1442695040888963407 // LCG
+			ratios[i] = int(s%10) + 1                        // 1..10
+		}
+
+		m := money.FromMinor(units, money.USD)
+		parts, err := m.Allocate(ratios...)
+		if err != nil {
+			t.Fatalf("unexpected error for positive ratios: %v", err)
+		}
+		if len(parts) != n {
+			t.Fatalf("got %d parts, want %d", len(parts), n)
+		}
+		var got int64
+		for _, p := range parts {
+			got += p.Minor()
+		}
+		if got != units {
+			t.Fatalf("sum(parts)=%d != total=%d (ratios=%v)", got, units, ratios)
+		}
+	})
+}
