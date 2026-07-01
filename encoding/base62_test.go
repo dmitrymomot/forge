@@ -25,6 +25,9 @@ func TestDecodeInt_Invalid(t *testing.T) {
 	assert.ErrorIs(t, err, encoding.ErrInvalidEncoding)
 	_, err = encoding.DecodeInt("!!")
 	assert.ErrorIs(t, err, encoding.ErrInvalidEncoding)
+	// Overflow: one digit past EncodeInt(max uint64) exceeds uint64 range.
+	_, err = encoding.DecodeInt(encoding.EncodeInt(^uint64(0)) + "0")
+	assert.ErrorIs(t, err, encoding.ErrInvalidEncoding)
 }
 
 func TestEncodeDecodeBytes_RoundTripWithLeadingZeros(t *testing.T) {

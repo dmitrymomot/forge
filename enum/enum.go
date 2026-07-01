@@ -1,6 +1,9 @@
 package enum
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrInvalidValue is returned by Parse for a value outside the declared set.
 var ErrInvalidValue = errors.New("enum: invalid value")
@@ -44,7 +47,7 @@ func (e Values[T]) Parse(s string) (T, error) {
 		return v, nil
 	}
 	var zero T
-	return zero, ErrInvalidValue
+	return zero, fmt.Errorf("enum: invalid value %q: %w", s, ErrInvalidValue)
 }
 
 // Values returns a copy of the declared values in declaration order.

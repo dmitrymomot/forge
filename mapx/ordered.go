@@ -12,6 +12,11 @@ import (
 // Ordered is a map that remembers insertion order and marshals to JSON in that
 // order. Updating an existing key keeps its position; deleting removes it from
 // the order; re-adding appends at the end.
+//
+// Always hold and pass *Ordered[K, V] (NewOrdered returns one), never a value.
+// MarshalJSON/UnmarshalJSON have pointer receivers, so a value embedded in a
+// struct and marshaled non-pointer would NOT call them — encoding/json would
+// reflect over the unexported fields and silently emit {} instead.
 type Ordered[K comparable, V any] struct {
 	m    map[K]V
 	keys []K

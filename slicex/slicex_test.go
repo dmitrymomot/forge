@@ -67,6 +67,6 @@ func TestChunk_PanicsOnNonPositiveN(t *testing.T) {
 func TestChunk_NoAliasingAppend(t *testing.T) {
 	src := []int{1, 2, 3, 4}
 	chunks := slicex.Chunk(src, 2)
-	chunks[0] = append(chunks[0], 99) // must not overwrite src[2]
+	chunks[0] = append(chunks[0], 99) //nolint:nilaway // src is a non-nil literal, so Chunk never returns nil here
 	assert.Equal(t, 3, src[2], "chunk append must not spill into the source slice")
 }
