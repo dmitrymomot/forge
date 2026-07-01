@@ -46,17 +46,17 @@ func Between[T cmp.Ordered](min, max T) Rule[T] {
 	}
 }
 
-// Positive requires value > 0.
+// Positive requires value > 0. NaN is rejected.
 func Positive[T number](v T) Violation {
-	if v <= 0 {
+	if isNaN(v) || v <= 0 {
 		return Violation{Key: "validation.positive"}
 	}
 	return Violation{}
 }
 
-// Negative requires value < 0.
+// Negative requires value < 0. NaN is rejected.
 func Negative[T number](v T) Violation {
-	if v >= 0 {
+	if isNaN(v) || v >= 0 {
 		return Violation{Key: "validation.negative"}
 	}
 	return Violation{}

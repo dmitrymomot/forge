@@ -47,13 +47,29 @@ func TestNumericNaN(t *testing.T) {
 	assert.Equal(t, "validation.min", validate.Min[float32](0)(float32(math.NaN())).Key)
 	assert.Equal(t, "validation.max", validate.Max[float32](10)(float32(math.NaN())).Key)
 
+	// Sign rules must reject NaN too (v <= 0 / v >= 0 are both false for NaN).
+	assert.False(t, validate.Positive(nan).IsZero())
+	assert.Equal(t, "validation.positive", validate.Positive(nan).Key)
+	assert.False(t, validate.Negative(nan).IsZero())
+	assert.Equal(t, "validation.negative", validate.Negative(nan).Key)
+
+	// float32 NaN for sign rules too.
+	assert.Equal(t, "validation.positive", validate.Positive(float32(math.NaN())).Key)
+	assert.Equal(t, "validation.negative", validate.Negative(float32(math.NaN())).Key)
+
 	// Normal in-range floats still pass.
 	assert.True(t, validate.Between(0.0, 120.0)(42.0).IsZero())
 	assert.True(t, validate.Min(0.0)(42.0).IsZero())
 	assert.True(t, validate.Max(10.0)(5.0).IsZero())
 
+	// Normal signed floats are unaffected.
+	assert.True(t, validate.Positive(1.5).IsZero())
+	assert.True(t, validate.Negative(-1.5).IsZero())
+
 	// Integers are unaffected.
 	assert.True(t, validate.Between(0, 120)(42).IsZero())
 	assert.True(t, validate.Min(0)(42).IsZero())
 	assert.True(t, validate.Max(10)(5).IsZero())
+	assert.True(t, validate.Positive(1).IsZero())
+	assert.True(t, validate.Negative(-1).IsZero())
 }
