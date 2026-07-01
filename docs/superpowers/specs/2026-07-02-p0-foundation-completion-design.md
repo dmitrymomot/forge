@@ -9,7 +9,7 @@ remaining gap in the P0 layer of `docs/maximal-package-set.md`.
 
 | Package | Tier | Purpose |
 |---|---|---|
-| `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English); rich rule set incl. string/format/network/numeric/collection + e-commerce (Luhn/EAN/ISBN/ISO codes) & crypto-address (BTC/ETH) groups. The no-magic alternative to go-playground/validator. |
+| `validate` | **core** | Reflection-free, composable value/field validation emitting **i18n keys** (not English); rich rule set incl. string/format/network/numeric/collection + e-commerce (Luhn/EAN/ISBN/ISO codes) & crypto-address (BTC/ETH/TRON/SOL) groups. The no-magic alternative to go-playground/validator. |
 | `sanitize` | recommended | Plain-text normalization/escaping at trust boundaries + a generic `Apply`/`Compose` pipeline: whitespace/control, char-class filters, HTML escape/strip, email/username/filename/header/URL canonicalizers. |
 | `slug` | recommended | URL-safe slug generation with Unicode→ASCII folding, an options API (length/separator/case/strip/replace/suffix/reserved), and predicate-based uniqueness. |
 | `structfields` | recommended | The **one sanctioned reflection helper**: walk an exported struct's fields once (name/parsed-tag/value/Set), confining all `reflect` use to one audited primitive. |
@@ -400,11 +400,13 @@ func CountryCode(s string) Rule                      // validation.country_code 
 func EAN(s string) Rule                              // validation.ean           (EAN-8/13 check digit)
 func ISBN(s string) Rule                             // validation.isbn          (ISBN-10/13 checksum)
 
-// blockchain / crypto (checksum-verified; all stdlib — see EIP-55 note)
-func ETHAddress(s string) Rule                       // validation.eth_address   (0x + 40 hex; EIP-55 opt-in)
-func BTCAddress(s string) Rule                       // validation.btc_address   (Base58Check OR Bech32, verified)
-func Base58(s string) Rule                           // validation.base58        (alphabet check)
-func Bech32(s string) Rule                           // validation.bech32        (BIP-173 polymod checksum)
+// blockchain / crypto (checksum- or length-verified; all stdlib — see EIP-55 note)
+func ETHAddress(s string) Rule                       // validation.eth_address    (0x + 40 hex; EIP-55 opt-in)
+func BTCAddress(s string) Rule                       // validation.btc_address    (Base58Check OR Bech32, verified)
+func TronAddress(s string) Rule                      // validation.tron_address   (Base58Check, 0x41 prefix; TRC-20 contracts share this)
+func SolanaAddress(s string) Rule                    // validation.solana_address (Base58 → exactly 32 bytes)
+func Base58(s string) Rule                           // validation.base58         (alphabet check)
+func Bech32(s string) Rule                           // validation.bech32         (BIP-173 polymod checksum)
 
 // escape hatch
 func True(ok bool, key string) Rule                  // custom predicate, caller-named key
@@ -471,6 +473,12 @@ yields `Violation{Key:"validation.between", Params:{min:18,max:72}, Message:"You
   deliberate duplication keeps `validate` a dependency-free leaf. `BTCAddress` verifies
   **Base58Check** (double-`crypto/sha256`) or **Bech32** (BIP-173 polymod), with
   `Base58`/`Bech32` exposed as the reusable primitives under it — all stdlib.
+  `TronAddress` is Base58Check with a `0x41` version byte (34-char `T…`; **TRC-20 token
+  contracts share the TRON account address format**, so this covers both). `SolanaAddress`
+  is plain Base58 that must decode to **exactly 32 bytes** (an Ed25519 public key) — Solana
+  has no address checksum, so decoded length is the check; an on-curve test is deliberately
+  skipped since valid program-derived addresses (PDAs) are off-curve. Both reuse the
+  `Base58` primitive — no new deps.
 - **`ETHAddress` is structural by design (`0x` + 40 hex, any case).** Full **EIP-55
   mixed-case checksum verification is deliberately NOT in `validate` core** — it needs
   Keccak-256 (`golang.org/x/crypto/sha3`), and taking that dep would end `validate`'s
