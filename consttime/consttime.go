@@ -1,4 +1,4 @@
-package subtlex
+package consttime
 
 import (
 	"crypto/hmac"

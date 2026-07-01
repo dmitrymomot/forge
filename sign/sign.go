@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/dmitrymomot/forge/keyset"
-	"github.com/dmitrymomot/forge/subtlex"
+	"github.com/dmitrymomot/forge/consttime"
 )
 
 // Signer produces and verifies HMAC tags. Sign/Verify operate on a single key; the
@@ -59,7 +59,7 @@ func (s *Signer) Sign(msg []byte) []byte { return s.mac(s.key, msg) }
 
 // Verify reports whether mac is a valid MAC for msg, in constant time.
 func (s *Signer) Verify(msg, mac []byte) bool {
-	return subtlex.BytesEqual(s.mac(s.key, msg), mac)
+	return consttime.BytesEqual(s.mac(s.key, msg), mac)
 }
 
 // SignString returns "<version>.<base64url-mac>" for msg.
@@ -94,5 +94,5 @@ func (s *Signer) VerifyString(msg, signed string) bool {
 	case ver != s.ver:
 		return false
 	}
-	return subtlex.BytesEqual(s.mac(key, []byte(msg)), mac)
+	return consttime.BytesEqual(s.mac(key, []byte(msg)), mac)
 }

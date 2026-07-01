@@ -11,7 +11,7 @@ import (
 
 	"github.com/dmitrymomot/forge/kdf"
 	"github.com/dmitrymomot/forge/random"
-	"github.com/dmitrymomot/forge/subtlex"
+	"github.com/dmitrymomot/forge/consttime"
 )
 
 const saltLen = 16
@@ -98,7 +98,7 @@ func verifyArgon(password, encoded string) (bool, bool, error) {
 	}
 	p.KeyLen = uint32(len(want))
 	got := argon2.IDKey([]byte(password), salt, p.Time, p.Memory, p.Threads, p.KeyLen)
-	if !subtlex.BytesEqual(got, want) {
+	if !consttime.BytesEqual(got, want) {
 		return false, false, nil
 	}
 	def := kdf.DefaultParams()
