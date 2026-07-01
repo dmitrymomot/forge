@@ -194,6 +194,40 @@ func TestWalk_ShallowEmbeddedStructNotFlattened(t *testing.T) {
 	assert.Equal(t, []string{"EmbeddedInner", "Outer"}, names)
 }
 
+func TestWalk_SetSliceToArrayLengthMismatchReturnsError(t *testing.T) {
+	// reflect reports []int convertible to [4]int, but Convert PANICS on a
+	// length mismatch. Set must translate that into an error, never panic.
+	t.Run("array", func(t *testing.T) {
+		type T struct{ Arr [4]int }
+		var setErr error
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&T{}, "env", func(f structfields.Field) error {
+				setErr = f.Set([]int{1, 2})
+				return setErr
+			})
+			require.Error(t, err)
+		})
+		require.Error(t, setErr)
+		assert.Contains(t, setErr.Error(), "structfields:")
+		assert.Contains(t, setErr.Error(), "Arr")
+	})
+
+	t.Run("pointer to array", func(t *testing.T) {
+		type T struct{ P *[3]byte }
+		var setErr error
+		require.NotPanics(t, func() {
+			err := structfields.Walk(&T{}, "env", func(f structfields.Field) error {
+				setErr = f.Set([]byte{1, 2})
+				return setErr
+			})
+			require.Error(t, err)
+		})
+		require.Error(t, setErr)
+		assert.Contains(t, setErr.Error(), "structfields:")
+		assert.Contains(t, setErr.Error(), "P")
+	})
+}
+
 func TestWalk_EmbeddedFieldReWalkable(t *testing.T) {
 	// A caller needing recursion re-Walks the embedded field's value.
 	var s embeddedOuter
