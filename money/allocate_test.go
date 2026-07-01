@@ -144,7 +144,7 @@ func FuzzAllocate_SumInvariant(f *testing.F) {
 		s := seed
 		for i := range ratios {
 			s = s*6364136223846793005 + 1442695040888963407 // LCG
-			ratios[i] = int(s%10) + 1                        // 1..10
+			ratios[i] = int(s%10) + 1                       // 1..10
 		}
 
 		m := money.FromMinor(units, money.USD)
