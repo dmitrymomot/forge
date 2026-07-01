@@ -53,7 +53,12 @@ func Decode32(s string) ([]byte, error) {
 			p := pos
 			pos++
 			if p < pad {
-				continue // drop MSB padding bit
+				// Leading pad bits must be zero; a non-zero pad bit means the value
+				// overflows the target byte length (non-canonical input).
+				if (v>>uint(k))&1 != 0 {
+					return nil, ErrInvalidEncoding
+				}
+				continue
 			}
 			if (v>>uint(k))&1 == 1 {
 				dpos := p - pad

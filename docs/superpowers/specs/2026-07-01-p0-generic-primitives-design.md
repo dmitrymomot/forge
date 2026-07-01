@@ -235,7 +235,12 @@ var ErrInvalidEncoding = errors.New("encoding: invalid input")
   For a 16-byte input it produces a 26-character string; for a 10-byte input, 16 characters —
   the exact widths `id`'s ULID and Short types already use.
 - `Decode32` is case-insensitive and applies Crockford's decode aliases (`I`,`i`,`L`,`l` → 1;
-  `O`,`o` → 0). Invalid characters return `ErrInvalidEncoding`.
+  `O`,`o` → 0). Invalid characters return `ErrInvalidEncoding`. It also **rejects
+  non-canonical / overflow input**: the leading MSB pad bits must be zero (e.g. a 26-char
+  string's top 2 bits), so a first character above the canonical maximum (`'7'` for the
+  16-byte/ULID width) returns `ErrInvalidEncoding` rather than silently truncating. This
+  matches `id`'s own decoder and prevents string malleability. (Surfaced by Task 8's `id`
+  cross-check.)
 - **Deps:** `math/big` (Base62 arbitrary-byte path), `strings`, `errors`. All stdlib.
 
 ### The `id → encoding` gate

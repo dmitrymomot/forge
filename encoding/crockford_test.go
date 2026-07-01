@@ -52,3 +52,16 @@ func TestDecode32_InvalidChar(t *testing.T) {
 	_, err = encoding.Decode32("!")
 	assert.ErrorIs(t, err, encoding.ErrInvalidEncoding)
 }
+
+func TestDecode32_RejectsNonCanonicalOverflow(t *testing.T) {
+	// A 26-char string encodes 130 bits into 16 bytes; the top 2 bits are pad
+	// and must be zero. First char '8' sets a pad bit => overflow, must reject.
+	_, err := encoding.Decode32("81ARZ3NDEK0000000000000000")
+	assert.ErrorIs(t, err, encoding.ErrInvalidEncoding)
+	// The canonical max (first char '7') is still accepted and round-trips.
+	max := bytes.Repeat([]byte{0xff}, 16)
+	s := encoding.Encode32(max)
+	got, err := encoding.Decode32(s)
+	require.NoError(t, err)
+	assert.Equal(t, max, got)
+}
