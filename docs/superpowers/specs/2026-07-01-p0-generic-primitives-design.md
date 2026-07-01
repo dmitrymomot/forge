@@ -299,7 +299,8 @@ job (a later package, not in this batch).
 
 ```go
 func ToSnake(s string) string   // "UserID" -> "user_id"
-func ToCamel(s string) string   // "user_id" -> "userID" (lowerCamel)
+func ToCamel(s string) string   // mechanical lowerCamel: "user_id" -> "userId"
+func ToCamelWith(s string, acronyms ...string) string // "user_id","ID" -> "userID"
 func ToKebab(s string) string   // "UserID" -> "user-id"
 func Truncate(s string, n int) string        // hard cut to n runes (rune-safe)
 func Ellipsis(s string, n int) string         // cut to n runes, append "…" if truncated
