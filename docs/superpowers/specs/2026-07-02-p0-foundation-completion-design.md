@@ -512,16 +512,19 @@ So `validate.Msg(validate.Between(18, 72), "Your age must be between {min} and {
   Together they cover country/account-type-dependent fields and *optional-if-present*
   (`When(value != "", rule)`) inside the declarative `Check(…)`. Anything richer is a plain
   Go `if` building `[]Result` — no extra API — which is why conditionals stay this small.
-- **Allocation profile.** A param-less rule used bare (`validate.Email`) is a plain
-  function value — **no allocation**. A parameterized rule (`validate.MinLen(2)`) or a
-  combinator (`And`/`Msg`/`Each`/…) returns a small closure: **~1 alloc when built inline,
-  zero when the `[]Rule[T]` is predefined** (built once at init, reused per request — the
-  recommended hot-path pattern). `Apply`/`Check` take non-escaping variadics that stack-
-  allocate, and a passing rule returns the zero `Violation` value. So valid input with
-  bare/predefined rules **allocates nothing**; heap use is confined to the failure path
-  (the failing rule's `[]Param` + the aggregated slices), where an error response is being
-  built anyway. `[]Param` (not a map) keeps that path to ~1 alloc per violation; a hot loop
-  can reuse one `Errors` buffer.
+- **Allocation profile — measured 0 allocs/op on the happy path (Go 1.26).** A param-less
+  rule used bare (`validate.Email`) is a plain function value — no allocation. A
+  parameterized rule (`validate.MinLen(2)`) or combinator (`And`/`Msg`/`Each`/…) is a
+  closure, but because `Apply` iterates and calls rules **without retaining them**, Go's
+  escape analysis stack-allocates *both* the closure and the `...Rule[T]` variadic. A
+  micro-benchmark (`testing.AllocsPerRun`, opaque `//go:noinline` apply that appends
+  failures) reports **0 allocs/op for every happy-path form** — inline closure, predefined
+  closure, method value, and bare func alike; a failing check is the positive control at
+  ~2 allocs. So even *inline* parameterized rules cost nothing on valid input; predefining
+  a `[]Rule[T]` merely *guarantees* it independent of compiler escape decisions rather than
+  being required for it. Allocation is confined to the **failure path** — ~2 per violation
+  (the failing rule's `[]Param`, kept a slice not a map, and the aggregated result slice) —
+  exactly where an error response is being built; a hot loop can reuse one `Errors` buffer.
 - **Overrides are `Rule[T]` combinators.** `Msg(rule, template)` and `WithKey(rule, key)`
   wrap a rule; the returned rule runs the inner one and, **only on failure**, interpolates
   the check's `Params` into `{name}` placeholders (dependency-free scan of `[]Param`;
