@@ -46,6 +46,12 @@ func bech32Decode(s string) (string, bool) {
 		return "", false
 	}
 	hrp := s[:pos]
+	// BIP-173: every HRP character must be ASCII in the range [33,126] (0x21..0x7e).
+	for i := range len(hrp) {
+		if hrp[i] < 33 || hrp[i] > 126 {
+			return "", false
+		}
+	}
 	data := make([]int, 0, len(s)-pos-1)
 	for _, c := range s[pos+1:] {
 		idx := strings.IndexRune(bech32Charset, c)

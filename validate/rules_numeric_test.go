@@ -1,6 +1,7 @@
 package validate_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,4 +32,28 @@ func TestNumeric(t *testing.T) {
 
 	assert.True(t, validate.MultipleOf(5)(15).IsZero())
 	assert.Equal(t, "validation.multiple_of", validate.MultipleOf(5)(16).Key)
+}
+
+func TestNumericNaN(t *testing.T) {
+	nan := math.NaN()
+
+	// NaN must be rejected by range rules (comparisons against NaN are all false).
+	assert.Equal(t, "validation.between", validate.Between(0.0, 120.0)(nan).Key)
+	assert.Equal(t, "validation.min", validate.Min(0.0)(nan).Key)
+	assert.Equal(t, "validation.max", validate.Max(10.0)(nan).Key)
+
+	// float32 NaN too.
+	assert.Equal(t, "validation.between", validate.Between[float32](0, 120)(float32(math.NaN())).Key)
+	assert.Equal(t, "validation.min", validate.Min[float32](0)(float32(math.NaN())).Key)
+	assert.Equal(t, "validation.max", validate.Max[float32](10)(float32(math.NaN())).Key)
+
+	// Normal in-range floats still pass.
+	assert.True(t, validate.Between(0.0, 120.0)(42.0).IsZero())
+	assert.True(t, validate.Min(0.0)(42.0).IsZero())
+	assert.True(t, validate.Max(10.0)(5.0).IsZero())
+
+	// Integers are unaffected.
+	assert.True(t, validate.Between(0, 120)(42).IsZero())
+	assert.True(t, validate.Min(0)(42).IsZero())
+	assert.True(t, validate.Max(10)(5).IsZero())
 }

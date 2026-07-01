@@ -16,6 +16,10 @@ func TestBase58Bech32(t *testing.T) {
 	// BIP-173 canonical example address (valid bech32).
 	assert.True(t, validate.Bech32("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").IsZero())
 	assert.Equal(t, "validation.bech32", validate.Bech32("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5").Key) // bad checksum
+
+	// BIP-173 invalid vectors: HRP characters must be ASCII in [33,126].
+	assert.Equal(t, "validation.bech32", validate.Bech32(" 1nwldj5").Key)    // HRP char 0x20 (space) < 0x21
+	assert.Equal(t, "validation.bech32", validate.Bech32("\x7f1axkwrx").Key) // HRP char 0x7f > 0x7e
 }
 
 func TestBTCAddress(t *testing.T) {
