@@ -97,6 +97,42 @@ func TestCode_SkipsEmptyCodedFindsDeeper(t *testing.T) {
 	assert.Equal(t, "deep_code", code, "empty-code wrapper is skipped, deeper code found")
 }
 
+func TestCode_JoinSkipsEmptyCodedFindsSibling(t *testing.T) {
+	// Empty-code coded wrapper in one Join branch must not terminate the walk:
+	// the real code lives in a sibling branch of the errors.Join tree.
+	joined := errors.Join(errorsx.WithCode(errors.New("x"), ""), errorsx.New("real_code", "y"))
+
+	code, ok := errorsx.Code(joined)
+	assert.True(t, ok, "code in a sibling Join branch is found past an empty-code wrapper")
+	assert.Equal(t, "real_code", code)
+}
+
+func TestCode_JoinFindsCodedWithoutEmptyWrapper(t *testing.T) {
+	// Sanity companion: a plain errors.Join carrying a coded error resolves too.
+	joined := errors.Join(errors.New("x"), errorsx.New("real_code", "y"))
+
+	code, ok := errorsx.Code(joined)
+	assert.True(t, ok)
+	assert.Equal(t, "real_code", code)
+}
+
+func TestCode_JoinNearestPreOrderWins(t *testing.T) {
+	// Nearest/pre-order semantics across a Join: the first branch's code wins.
+	joined := errors.Join(errorsx.New("first_code", "a"), errorsx.New("second_code", "b"))
+
+	code, ok := errorsx.Code(joined)
+	assert.True(t, ok)
+	assert.Equal(t, "first_code", code, "first (pre-order) non-empty code in the Join tree wins")
+}
+
+func TestCode_JoinNoCode(t *testing.T) {
+	joined := errors.Join(errors.New("x"), errors.New("y"))
+
+	code, ok := errorsx.Code(joined)
+	assert.False(t, ok)
+	assert.Equal(t, "", code)
+}
+
 func TestCode_NoCode(t *testing.T) {
 	code, ok := errorsx.Code(errors.New("plain"))
 	assert.False(t, ok)
