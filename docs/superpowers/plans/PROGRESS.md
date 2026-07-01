@@ -25,10 +25,10 @@ Branch: claude/musing-williams-ec21ce
 Status ∈ {PENDING, DONE, BACKED OUT, BLOCKED}.
 
 ## Delivery
-- PR: <pending>
-- CI: <pending>
-- Review threads: <pending>
-- Deferred (not in this PR): <pending>
+- PR: #24 — https://github.com/dmitrymomot/forge/pull/24 (non-draft, base main)
+- CI: <awaiting first run>
+- Review threads: <awaiting Claude review>
+- Deferred (not in this PR): none — all 8 packages green
 - Loop iterations used: 0/10
 
 ## Deferred / follow-ups for the human
