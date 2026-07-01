@@ -1,4 +1,4 @@
-package nullx
+package null
 
 import (
 	"bytes"

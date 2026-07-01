@@ -1,14 +1,14 @@
-package nullx_test
+package null_test
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dmitrymomot/forge/nullx"
+	"github.com/dmitrymomot/forge/null"
 )
 
 func BenchmarkMarshalJSON(b *testing.B) {
-	n := nullx.Of("hello")
+	n := null.Of("hello")
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = json.Marshal(n)
@@ -16,7 +16,7 @@ func BenchmarkMarshalJSON(b *testing.B) {
 }
 
 func BenchmarkGet(b *testing.B) {
-	n := nullx.Of(42)
+	n := null.Of(42)
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = n.Get()
