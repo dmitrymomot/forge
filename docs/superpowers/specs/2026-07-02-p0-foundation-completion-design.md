@@ -30,12 +30,15 @@ correspondingly heavy, oracle-backed test suite.
   `validator`, `decimal`, `money`, or `filetype` library is taken.
 - **Naming — the `x` suffix is a stdlib-collision escape, not decoration.** A package
   keeps an `x` suffix only when its natural name would collide with a stdlib package
-  or a Go keyword: `errorsx` (stdlib `errors`), like the already-shipped `iox`/`hashx`/
-  `randx`/`stringsx`/`subtlex`/`slicex`/`mapx`. A package with no such collision drops
-  the `x`: hence **`slug`** (no stdlib `slug`) — and the previously-shipped `nullx` is
-  **renamed to `null`** as part of this work (it has no stdlib counterpart; consistent
-  with `set.Set`, which this repo already accepts). `sanitize`/`structfields`/`validate`/
-  `filetype`/`decimal`/`money` are collision-free and take no suffix.
+  or a Go keyword *and* has no better domain noun: `errorsx` (stdlib `errors`), like
+  the shipped grab-bags `iox`/`stringsx`/`slicex`/`mapx` (whose honest names —
+  `io`/`strings`/`slices`/`maps` — all collide, and whose only non-`x` alternative is
+  a discouraged `*util` name). A collision-free package drops the `x` (**`slug`**), and
+  a package with a real domain noun takes that noun instead of `x`. Applied alongside
+  this work as separate refactors: `nullx`→`null`, `hashx`→`digest`, `randx`→`random`,
+  `subtlex`→`consttime`. (`htmx` stays — it is the HTMX library, not `html`+x.)
+  `sanitize`/`structfields`/`validate`/`filetype`/`decimal`/`money` are collision-free
+  and take no suffix.
 - **Idiom:** stateless free-funcs and generic value types; `validate` adds a small
   per-request collector (`*Validator`). **No builders** (CLAUDE.md). `validate`'s
   `Field(...).Field(...)` chaining is collector aggregation, not object construction.
@@ -53,10 +56,10 @@ correspondingly heavy, oracle-backed test suite.
 
 ```
 Wave 1 (pure leaves, parallelizable):  errorsx · sanitize · structfields · decimal · filetype
-Wave 2 (depend on Wave 1):             slug (norm + randx) · money (←decimal) · validate
+Wave 2 (depend on Wave 1):             slug (norm + random) · money (←decimal) · validate
 ```
 
-`slug` folds via `x/text/norm` and draws random suffixes from the shipped `randx`;
+`slug` folds via `x/text/norm` and draws random suffixes from the shipped `random`;
 it does its own normalization and does **not** import `sanitize`. `money` imports
 `decimal`. `validate` is standalone but sequenced last (largest surface; benefits
 from settled conventions).
@@ -141,7 +144,7 @@ Deps: `strings`, `unicode`, `unicode/utf8`, `html`.
 
 Ports the prior `pkg/slug` options API (the reference implementation at commit
 `0b68f05`) onto forge conventions: NFKD folding via `x/text`, and random suffixes
-drawn from the shipped `randx` (not a private `crypto/rand`).
+drawn from the shipped `random` (not a private `crypto/rand`).
 
 ```go
 type Option func(*config)   // config is unexported; options are the only knob (no builder)
@@ -181,8 +184,8 @@ func WithReservedSlugs(slugs ...string) Option         // if result is reserved 
   the whole `à/á/â/ä/ā/ă/ą…` space automatically (far broader than the reference
   table) while the tiny special-case map covers what NFKD cannot decompose. This
   keeps the approved `x/text/norm` decision and drops ~60 lines of hand-maintained data.
-- **Random suffixes use `randx`.** `WithSuffix`, `WithMinLength`, and the reserved-hit
-  path draw a bias-free `[a-z0-9]` string from `randx` (per-char `randx.Int`), not a
+- **Random suffixes use `random`.** `WithSuffix`, `WithMinLength`, and the reserved-hit
+  path draw a bias-free `[a-z0-9]` string from `random` (per-char `random.Int`), not a
   local `crypto/rand` with modulo bias as in the reference impl. Uppercase is added to
   the alphabet only when `WithLowercase(false)`.
 - **`Unique` vs random suffixes.** `Unique(s, exists, …)` appends a human-friendly
@@ -193,7 +196,7 @@ func WithReservedSlugs(slugs ...string) Option         // if result is reserved 
 - Non-Latin scripts with no ASCII fold collapse to `""` (callers fall back to an id);
   `WithMinLength`/`WithSuffix` still yield a random-only slug from an empty base.
 
-Deps: `golang.org/x/text/unicode/norm`, forge `randx`, `strings`, `unicode`, `unicode/utf8`.
+Deps: `golang.org/x/text/unicode/norm`, forge `random`, `strings`, `unicode`, `unicode/utf8`.
 
 ---
 
@@ -574,14 +577,14 @@ Deps: `bytes`, `io`, `net/http`, `strings`, `errors`.
 |---|---|---|
 | `errorsx` | — | errors, fmt |
 | `sanitize` | — | strings, unicode, unicode/utf8, html |
-| `slug` | **golang.org/x/text/unicode/norm** | forge `randx`; strings, unicode, unicode/utf8 |
+| `slug` | **golang.org/x/text/unicode/norm** | forge `random`; strings, unicode, unicode/utf8 |
 | `structfields` | — | reflect, strings, errors, fmt |
 | `validate` | — | regexp, net/mail, net/url, strings, unicode/utf8, cmp, sort, fmt |
 | `decimal` | — | math/big, strings, strconv, errors, fmt |
 | `money` | forge `decimal` | strings, errors, fmt |
 | `filetype` | — | bytes, io, net/http, strings, errors |
 
-Forge edges inside the batch: `money → decimal`, `slug → randx`. Only external
+Forge edges inside the batch: `money → decimal`, `slug → random`. Only external
 addition: `x/text/norm` becomes a direct dep (already indirect). `go mod tidy` after `slug`.
 
 ### Build approach
