@@ -28,9 +28,9 @@ func Parse(s string) (Decimal, error) {
 	}
 
 	intPart, fracPart := body, ""
-	if dot := strings.IndexByte(body, '.'); dot >= 0 {
-		intPart = body[:dot]
-		fracPart = body[dot+1:]
+	if before, after, hasDot := strings.Cut(body, "."); hasDot {
+		intPart = before
+		fracPart = after
 		if strings.IndexByte(fracPart, '.') >= 0 {
 			return Decimal{}, fmt.Errorf("decimal: parse %q: %w", s, ErrSyntax)
 		}

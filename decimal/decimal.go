@@ -57,9 +57,6 @@ func (d Decimal) Sign() int {
 // IsZero reports whether d is exactly zero (any scale).
 func (d Decimal) IsZero() bool { return d.Sign() == 0 }
 
-// isBig reports whether d uses the big.Int coefficient path.
-func (d Decimal) isBig() bool { return d.big != nil }
-
 // bigCoef returns the coefficient as a *big.Int (a fresh copy; never aliases d).
 func (d Decimal) bigCoef() *big.Int {
 	if d.big != nil {
