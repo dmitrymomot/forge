@@ -25,7 +25,12 @@ Branch: claude/musing-williams-ec21ce
   - `e5f4c6e` fix(errorsx): resolve Code across errors.Join trees past empty-code wrappers (C1)
   - `9b06c52` fix(slug): deterministic custom-replace and dangling multi-rune separator trimming (C5, C6, C7)
   - `b9f0268` fix(validate): reject NaN in numeric ranges and enforce bech32 HRP charset (C8, C9)
-  - Post-fix full `just check` clean; `go mod tidy` clean. Pushing to re-run CI + review.
+  - Post-fix full `just check` clean; `go mod tidy` clean. Pushed (head b2bfb7e); CI re-ran green (test/lint pass); automated review timed out again (no threads).
+- **Phase 4 — Second-pass adversarial review of the 5 fix commits** found 3 real issues (2 regressions my own fixes introduced + 1 incomplete), all fixed via TDD:
+  - R1 structfields (regression, med): `Set` guard `in.Len() != arr` over-rejected valid longer slices (reflect only panics on *shorter*). Fixed `!=`→`<`. `9c315f3` fix(structfields): only reject slice-to-array when slice is shorter than array.
+  - R2 slug (regression, HIGH): `trimDanglingSeparator` stripped legitimate content when the separator overlapped `[a-z0-9]` (e.g. "banana"+sep"a-" → "banan"). Redesigned truncation to be separator-boundary-aware (foldWords/joinWords, no content-blind trim). `2447722` fix(slug): separator-boundary-aware max-length truncation (no content loss).
+  - R3 validate (incomplete, med): `Positive`/`Negative` still accepted `NaN`. Added `isNaN` gate. `9b6ddce` fix(validate): reject NaN in Positive and Negative sign rules.
+  - Post-fix full `just check` clean; `go mod tidy` clean. Running one final focused adversarial pass over the 3 regression fixes before finalizing.
 
 ## Packages
 | Package | Wave | Status | Last commit | Notes |
