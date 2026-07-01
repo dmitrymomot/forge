@@ -60,6 +60,15 @@ Each package follows the conventions established by the shipped packages:
 Generic helpers that stdlib `slices` does not provide. Fills gaps **only** — does not
 re-implement Sort/SortFunc/Contains/Index/Equal/Reverse/Compact, which are stdlib.
 
+**No aliasing of stdlib (framework-wide rule, stated in `doc.go`).** `slicex` neither
+re-implements nor re-exports stdlib `slices` functions — consumers import `slices` directly
+alongside `slicex`. Reasons: generic functions can't be cheaply aliased (`var Sort = slices.Sort`
+is illegal; each "alias" would be a hand-written generic wrapper with copied constraints), such
+wrappers drift as stdlib grows new helpers/variants, and two names for one function (`slices.Sort`
+vs `slicex.Sort`) is a two-sources-of-truth footgun. stdlib is the most stable dependency possible
+and needs no wrapper; the one-extra-import cost is idiomatic Go and free. The same
+**gap-fill-only, never-re-export-stdlib** rule applies to `mapx` (vs `maps`) and `set`.
+
 ```go
 func Map[T, U any](s []T, fn func(T) U) []U
 func Filter[T any](s []T, pred func(T) bool) []T
@@ -87,8 +96,12 @@ func Chunk[T any](s []T, n int) [][]T                           // materialized;
 Trivial pointer helpers for optional struct fields / JSON `omitempty` / SQL nullables, plus a
 small `Optional[T]` type for "was this field provided?" semantics.
 
+**No `To` helper.** Go 1.26's built-in `new(expr)` returns a pointer to a copy of an
+expression (`new(42)` → `*int`), so a pointer-to-literal helper would just wrap a language
+builtin — and the repo's `modernize` lint rejects it. `ptr` therefore does **not** ship `To`;
+callers use `new(v)`.
+
 ```go
-func To[T any](v T) *T
 func From[T any](p *T) T                 // zero value if p == nil
 func FromOr[T any](p *T, def T) T        // def if p == nil
 func Equal[T comparable](a, b *T) bool   // both nil => true; one nil => false; else *a == *b
@@ -222,7 +235,12 @@ var ErrInvalidEncoding = errors.New("encoding: invalid input")
   For a 16-byte input it produces a 26-character string; for a 10-byte input, 16 characters —
   the exact widths `id`'s ULID and Short types already use.
 - `Decode32` is case-insensitive and applies Crockford's decode aliases (`I`,`i`,`L`,`l` → 1;
-  `O`,`o` → 0). Invalid characters return `ErrInvalidEncoding`.
+  `O`,`o` → 0). Invalid characters return `ErrInvalidEncoding`. It also **rejects
+  non-canonical / overflow input**: the leading MSB pad bits must be zero (e.g. a 26-char
+  string's top 2 bits), so a first character above the canonical maximum (`'7'` for the
+  16-byte/ULID width) returns `ErrInvalidEncoding` rather than silently truncating. This
+  matches `id`'s own decoder and prevents string malleability. (Surfaced by Task 8's `id`
+  cross-check.)
 - **Deps:** `math/big` (Base62 arbitrary-byte path), `strings`, `errors`. All stdlib.
 
 ### The `id → encoding` gate
@@ -286,7 +304,8 @@ job (a later package, not in this batch).
 
 ```go
 func ToSnake(s string) string   // "UserID" -> "user_id"
-func ToCamel(s string) string   // "user_id" -> "userID" (lowerCamel)
+func ToCamel(s string) string   // mechanical lowerCamel: "user_id" -> "userId"
+func ToCamelWith(s string, acronyms ...string) string // "user_id","ID" -> "userID"
 func ToKebab(s string) string   // "UserID" -> "user-id"
 func Truncate(s string, n int) string        // hard cut to n runes (rune-safe)
 func Ellipsis(s string, n int) string         // cut to n runes, append "…" if truncated
@@ -297,6 +316,13 @@ func Pluralize(word string, n int) string     // BASIC English only
 
 **Notes / scope guards:**
 
+- `ToCamel` is **mechanical** — no hardcoded acronym vocabulary (a curated initialism list is
+  an arbitrary, churn-inviting maintenance surface). `"user_id" → "userId"`. Acronyms are
+  **opt-in** via `ToCamelWith(s, acronyms...)`: each acronym is matched case-insensitively
+  against a word after the first and rendered with its own spelling
+  (`ToCamelWith("user_id", "ID") → "userID"`; `ToCamelWith(x, "OAuth")` → `OAuth`). The first
+  word is always lowercased (lowerCamel), even if it matches an acronym. `ToSnake`/`ToKebab`
+  need no such variant (they lowercase everything).
 - All length operations are **rune-safe** (count runes, never split a multi-byte rune).
 - `Ellipsis` counts the ellipsis toward nothing special — it appends `"…"` only when the
   input actually exceeded `n` runes; `n <= 0` returns empty (documented).
@@ -305,6 +331,10 @@ func Pluralize(word string, n int) string     // BASIC English only
 - `Pluralize` is deliberately **naive**: append `s`; `es` for words ending in s/x/z/ch/sh;
   `y → ies` (consonant + y). It is documented as a best-effort helper, **not** a linguistics
   engine (no irregular plurals). Returns the singular unchanged when `n == 1`.
+  **Locale-aware / rule-based pluralization is out of scope here** — that will be owned by the
+  future `i18n` package (multi-language + custom CLDR-style plural rules). `stringsx.Pluralize`
+  is only the naive English helper for trusted, developer-facing strings; `doc.go` cross-references
+  `i18n` so consumers don't reach for it when they need real localization.
 - **Deps:** `strings`, `unicode`, `unicode/utf8`.
 
 ---
