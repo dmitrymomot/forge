@@ -142,16 +142,31 @@ func joinWords(words []string, sep string, maxLen int) string {
 // reserved for the separator + suffix, the base is truncated by whole words (or the
 // first word mid-word) to fit, then base+sep+suffix are joined. This keeps the
 // result free of partial/whole dangling separators and preserves base content.
+//
+// cfg.maxLength has two distinct meanings that must not be conflated. maxLength<=0
+// is UNLIMITED: emit the full base + separator + full suffix with no cap. maxLength>0
+// is a hard CAP on the final result. In the capped case, when sep+suffix consume the
+// whole budget there is no room for the base, so the base is dropped entirely (an
+// explicit "" — NOT joinWords with baseMax 0, whose 0-means-unlimited sentinel would
+// wrongly emit the full base). If even sep+suffix cannot fit, the suffix is clamped
+// so the whole result still fits within maxLength.
 func withRandomSuffix(words []string, suffixLen int, cfg *config) string {
-	baseMax := cfg.maxLength
-	if cfg.maxLength > 0 {
-		sepLen := utf8.RuneCountInString(cfg.separator)
-		// Reserve room for sep+suffix; clamp the suffix if it cannot fit at all.
-		if suffixLen+sepLen > cfg.maxLength {
-			suffixLen = max(cfg.maxLength-sepLen, 0)
-		}
-		baseMax = max(cfg.maxLength-sepLen-suffixLen, 0)
+	if cfg.maxLength <= 0 {
+		// UNLIMITED: full base + full suffix, no cap.
+		base := joinWords(words, cfg.separator, 0)
+		return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
 	}
+
+	// CAPPED: guarantee len([]rune(result)) <= cfg.maxLength.
+	sepLen := utf8.RuneCountInString(cfg.separator)
+	// Room for the base only exists once sep+suffix are accounted for. When they do
+	// not both fit, there is no room for the base at all: drop it and spend the whole
+	// budget on the (clamped) suffix, emitted alone with no leading separator.
+	if suffixLen+sepLen >= cfg.maxLength {
+		suffix := randomSuffix(min(suffixLen, cfg.maxLength), cfg.lowercase)
+		return appendSuffix("", suffix, cfg.separator)
+	}
+	baseMax := cfg.maxLength - sepLen - suffixLen // > 0 here, so no 0-sentinel collision
 	base := joinWords(words, cfg.separator, baseMax)
 	return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
 }

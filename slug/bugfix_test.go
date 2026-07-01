@@ -1,9 +1,11 @@
 package slug_test
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 
@@ -32,6 +34,23 @@ func noDanglingSeparator(t *testing.T, got, sep string) {
 		assert.False(t, strings.HasPrefix(got, frag),
 			"slug %q starts with separator fragment %q", got, frag)
 	}
+}
+
+// noWholeDanglingSeparator asserts the content-agnostic separator invariants that
+// hold for ANY input (including content that legitimately begins or ends with a
+// rune that is also a separator prefix): the slug never starts or ends with a WHOLE
+// separator and never contains a doubled separator run. Unlike noDanglingSeparator
+// it does not check partial separator fragments, because a single leading/trailing
+// rune of a multi-rune separator can be legitimate folded content (e.g. sep "oo"
+// with input "one", or sep "a-" with input "banana").
+func noWholeDanglingSeparator(t *testing.T, got, sep, ctx string) {
+	t.Helper()
+	if got == "" {
+		return
+	}
+	assert.NotContainsf(t, got, sep+sep, "%s: slug %q contains a doubled separator run", ctx, got)
+	assert.Falsef(t, strings.HasPrefix(got, sep), "%s: slug %q starts with separator %q", ctx, got, sep)
+	assert.Falsef(t, strings.HasSuffix(got, sep), "%s: slug %q ends with separator %q", ctx, got, sep)
 }
 
 // REGRESSION (9b06c52): separator-boundary-aware truncation must never delete
@@ -103,6 +122,117 @@ func TestMake_MultiRuneSeparator_SuffixTruncation(t *testing.T) {
 		noDanglingSeparator(t, got, "--")
 		assert.Regexp(t, re, got, "slug %q has a malformed separator run", got)
 	}
+}
+
+// BUG R4: when the separator + random suffix consume the entire maxLength budget,
+// baseMax computes to 0. joinWords reads maxLen<=0 as "unlimited", so the FULL base
+// was emitted and the result grossly overflowed maxLength. The final result (base +
+// sep + suffix) MUST satisfy len([]rune(result)) <= maxLength; the base is dropped
+// when there is no room for it.
+func TestMake_MaxLength_SuffixConsumesBudget_R4(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		opts []slug.Option
+		max  int
+	}{
+		// sep "-" (1) + suffix 4 already exceeds maxLength 3: no room for the base at
+		// all. Was "hello-world-foobar-XX" (21 runes).
+		{"explicit-suffix", "hello world foobar", []slug.Option{slug.WithMaxLength(3), slug.WithSuffix(4)}, 3},
+		// reserved hit forces the default 6-rune suffix; maxLength 3 leaves no room
+		// for the "api" base. Was "api-XX" (6 runes).
+		{"reserved-suffix", "api", []slug.Option{slug.WithMaxLength(3), slug.WithReservedSlugs("api")}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Random tail: assert the structural invariants over many draws.
+			for range 50 {
+				got := slug.Make(tt.in, tt.opts...)
+				assert.LessOrEqual(t, utf8.RuneCountInString(got), tt.max,
+					"Make(%q) = %q must be <= %d runes", tt.in, got, tt.max)
+				noDanglingSeparator(t, got, "-")
+			}
+		})
+	}
+}
+
+// TestMake_MaxLength_LengthCap_Property is the decisive property test guarding the
+// maxLength contract across the full option grid that produced R4. It would have
+// caught R4: the length-cap assertion runs over EVERY combination (all separators,
+// including ones whose runes appear in content like "oo"/"a-") and fails the moment
+// a base overflows its cap — which is exactly the 0==unlimited collision R4 was.
+//
+// The whole-separator structural invariants (no leading/trailing separator, no
+// doubled run) are asserted only for separators whose runes can never be folded
+// content ("-", "--", "~~~"). For a separator like "oo" or "a-", a base legitimately
+// truncated to a fragment ending in "o"/"a" abuts the joiner and coincides with a
+// separator prefix — that content/separator ambiguity is a deliberate non-goal of
+// separator-boundary-aware truncation and is out of scope for the length-cap fix.
+//
+// Iteration is deterministic; the random suffix only affects tail content, never the
+// structural invariants, so a single pass per combination is representative.
+func TestMake_MaxLength_LengthCap_Property(t *testing.T) {
+	inputs := []string{
+		"hello world foobar",
+		"api",
+		"a",
+		"aa bb cc dd",
+		"administrator",
+		"The Quick Brown Fox",
+		"你好 world",
+		"one",
+	}
+	// separatorSafe reports whether none of sep's runes can appear in folded content
+	// ([a-z0-9]); only for such separators are the whole-separator boundary checks
+	// unambiguous (a leading/trailing separator prefix cannot be real content).
+	separatorSafe := func(sep string) bool {
+		for _, r := range sep {
+			if isSlugContentRune(r) {
+				return false
+			}
+		}
+		return true
+	}
+	seps := []string{"-", "--", "~~~", "a-", "oo"}
+	maxLengths := []int{1, 2, 3, 4, 5, 8, 12, 50}
+	suffixLens := []int{0, 2, 4}
+	for _, in := range inputs {
+		for _, sep := range seps {
+			for _, maxLen := range maxLengths {
+				for _, suffixLen := range suffixLens {
+					for _, reserved := range []bool{false, true} {
+						opts := []slug.Option{
+							slug.WithSeparator(sep),
+							slug.WithMaxLength(maxLen),
+						}
+						if suffixLen > 0 {
+							opts = append(opts, slug.WithSuffix(suffixLen))
+						}
+						if reserved {
+							// Reserve the plain-folded form so the reserved path is
+							// exercised even when it is not otherwise a suffix case.
+							opts = append(opts, slug.WithReservedSlugs(slug.Make(in)))
+						}
+						name := fmt.Sprintf("in=%q/sep=%q/max=%d/suf=%d/res=%v",
+							in, sep, maxLen, suffixLen, reserved)
+						got := slug.Make(in, opts...)
+						// Length cap: asserted over the WHOLE grid. This is the R4 guard.
+						assert.LessOrEqualf(t, utf8.RuneCountInString(got), maxLen,
+							"%s => %q exceeds maxLength", name, got)
+						if separatorSafe(sep) {
+							noWholeDanglingSeparator(t, got, sep, name)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// isSlugContentRune reports whether r is a rune that folded slug content can contain
+// ([a-z0-9]); used to tell separator runes apart from possible content.
+func isSlugContentRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 // BUG C6: plain max-length truncation with a multi-rune separator must not leave a
