@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"strconv"
 )
@@ -144,6 +145,9 @@ func (o *Ordered[K, V]) UnmarshalJSON(b []byte) error {
 	}
 	if _, err := dec.Token(); err != nil { // consume closing '}'
 		return err
+	}
+	if _, err := dec.Token(); err != io.EOF { // reject trailing data after the object
+		return fmt.Errorf("mapx: unexpected trailing data after JSON object")
 	}
 	return nil
 }

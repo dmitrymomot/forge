@@ -66,3 +66,13 @@ func TestOrdered_UnmarshalNull(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`null`), &o))
 	assert.Equal(t, 0, o.Len())
 }
+
+func TestOrdered_UnmarshalRejectsTrailingData(t *testing.T) {
+	var o mapx.Ordered[string, int]
+	// A direct UnmarshalJSON call with trailing content after the object must
+	// error rather than silently ignore it. (json.Unmarshal already guards this
+	// at the top level; this makes the method self-validating for direct and
+	// streaming callers.)
+	err := o.UnmarshalJSON([]byte(`{"a":1} garbage`))
+	assert.Error(t, err)
+}
