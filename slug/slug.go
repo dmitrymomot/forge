@@ -21,9 +21,12 @@ func Make(s string, opts ...Option) string {
 
 // build runs the folding pipeline for the resolved config.
 func build(s string, cfg *config) string {
-	// 1. custom replacements (literal, applied first).
-	for old, repl := range cfg.customReplace {
-		s = strings.ReplaceAll(s, old, repl)
+	// 1. custom replacements (literal, applied first). Go randomizes map
+	//    iteration order, so apply keys in a deterministic order: longest key
+	//    first (so a longer key wins over its prefixes), ties broken
+	//    lexicographically. This keeps the output stable across runs.
+	for _, old := range sortedReplaceKeys(cfg.customReplace) {
+		s = strings.ReplaceAll(s, old, cfg.customReplace[old])
 	}
 	// 2. strip requested characters.
 	for _, ch := range cfg.stripChars {
@@ -58,7 +61,7 @@ func build(s string, cfg *config) string {
 	// 4. max-length truncation (rune-safe), trimming a dangling separator.
 	if cfg.maxLength > 0 {
 		result = truncateRunes(result, cfg.maxLength)
-		result = strings.TrimSuffix(result, cfg.separator)
+		result = trimDanglingSeparator(result, cfg.separator)
 	}
 
 	// 5. determine whether a RANDOM suffix is required, and its length.
@@ -104,7 +107,7 @@ func withRandomSuffix(base string, suffixLen int, cfg *config) string {
 			// First try trimming the base to make room for the full suffix.
 			maxBase := max(cfg.maxLength-sepLen-suffixLen, 0)
 			base = truncateRunes(base, maxBase)
-			base = strings.TrimSuffix(base, cfg.separator)
+			base = trimDanglingSeparator(base, cfg.separator)
 			if base == "" {
 				sepLen = 0
 			}
@@ -130,6 +133,57 @@ func appendSuffix(base, suffix, sep string) string {
 		return suffix
 	}
 	return base + sep + suffix
+}
+
+// sortedReplaceKeys returns the keys of repl in a deterministic order: longest
+// first so a longer key is applied before (and thus wins over) any of its
+// prefixes, with equal-length keys ordered lexicographically for a stable result.
+func sortedReplaceKeys(repl map[string]string) []string {
+	keys := make([]string, 0, len(repl))
+	for k := range repl {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b string) int {
+		if d := len(b) - len(a); d != 0 { // longer key first
+			return d
+		}
+		return strings.Compare(a, b) // stable lexicographic tie-break
+	})
+	return keys
+}
+
+// trimDanglingSeparator removes a trailing and leading run of separator
+// characters left behind after truncation. Because a multi-rune separator can be
+// cut mid-separator, a plain TrimSuffix would leave a partial fragment; this
+// trims any trailing bytes that form a (non-empty) prefix of the separator, then
+// removes any remaining whole separators from both ends.
+func trimDanglingSeparator(s, sep string) string {
+	if sep == "" || s == "" {
+		return s
+	}
+	sepRunes := []rune(sep)
+	// Trim a trailing partial-or-whole separator: try the longest separator
+	// prefix that s ends with and strip it, repeating until none remains.
+	for {
+		trimmed := false
+		for n := len(sepRunes); n >= 1; n-- {
+			frag := string(sepRunes[:n])
+			if strings.HasSuffix(s, frag) {
+				s = s[:len(s)-len(frag)]
+				trimmed = true
+				break
+			}
+		}
+		if !trimmed {
+			break
+		}
+	}
+	// Trim any leading whole separators (a leading fragment cannot occur because
+	// folding never emits a leading separator, but be defensive and symmetric).
+	for sep != "" && strings.HasPrefix(s, sep) {
+		s = s[len(sep):]
+	}
+	return s
 }
 
 // isASCIIAlphaNum reports whether r is a-z, A-Z, or 0-9.
