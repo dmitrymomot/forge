@@ -60,6 +60,54 @@ func TestParse(t *testing.T) {
 			t.Fatalf("want ErrUnsupportedType, got %v", err)
 		}
 	})
+	t.Run("int16", func(t *testing.T) {
+		v, err := typeconv.Parse[int16]("100")
+		if err != nil || v != 100 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("int32", func(t *testing.T) {
+		v, err := typeconv.Parse[int32]("100")
+		if err != nil || v != 100 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("uint", func(t *testing.T) {
+		v, err := typeconv.Parse[uint]("7")
+		if err != nil || v != 7 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("uint8", func(t *testing.T) {
+		v, err := typeconv.Parse[uint8]("8")
+		if err != nil || v != 8 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("uint16", func(t *testing.T) {
+		v, err := typeconv.Parse[uint16]("9")
+		if err != nil || v != 9 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("uint32", func(t *testing.T) {
+		v, err := typeconv.Parse[uint32]("10")
+		if err != nil || v != 10 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("uint64", func(t *testing.T) {
+		v, err := typeconv.Parse[uint64]("11")
+		if err != nil || v != 11 {
+			t.Fatalf("got %d, %v", v, err)
+		}
+	})
+	t.Run("float32", func(t *testing.T) {
+		v, err := typeconv.Parse[float32]("1.5")
+		if err != nil || v != 1.5 {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
 }
 
 func TestParseIntHelperOverflow(t *testing.T) {
@@ -88,8 +136,15 @@ func TestFormat(t *testing.T) {
 		{true, "true"},
 		{42, "42"},
 		{int64(-7), "-7"},
+		{int16(-3), "-3"},
+		{int32(5), "5"},
 		{uint(8), "8"},
+		{uint8(9), "9"},
+		{uint16(10), "10"},
+		{uint32(11), "11"},
+		{uint64(12), "12"},
 		{3.5, "3.5"},
+		{float32(1.5), "1.5"},
 		{90 * time.Minute, "1h30m0s"},
 		{time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC), "2026-07-01T12:00:00Z"},
 	}
@@ -98,6 +153,74 @@ func TestFormat(t *testing.T) {
 			t.Errorf("Format(%v) = %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+func TestParseBool(t *testing.T) {
+	t.Run("true", func(t *testing.T) {
+		v, err := typeconv.ParseBool("true")
+		if err != nil || !v {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("0 is false", func(t *testing.T) {
+		v, err := typeconv.ParseBool("0")
+		if err != nil || v {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("invalid syntax", func(t *testing.T) {
+		if _, err := typeconv.ParseBool("notbool"); !errors.Is(err, typeconv.ErrSyntax) {
+			t.Fatalf("want ErrSyntax, got %v", err)
+		}
+	})
+}
+
+func TestParseFloat(t *testing.T) {
+	t.Run("float64", func(t *testing.T) {
+		v, err := typeconv.ParseFloat[float64]("2.5")
+		if err != nil || v != 2.5 {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("float32", func(t *testing.T) {
+		v, err := typeconv.ParseFloat[float32]("1.5")
+		if err != nil || v != 1.5 {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("invalid syntax", func(t *testing.T) {
+		if _, err := typeconv.ParseFloat[float64]("x"); !errors.Is(err, typeconv.ErrSyntax) {
+			t.Fatalf("want ErrSyntax, got %v", err)
+		}
+	})
+}
+
+func TestParseDuration(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		v, err := typeconv.ParseDuration("500ms")
+		if err != nil || v != 500*time.Millisecond {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("invalid syntax", func(t *testing.T) {
+		if _, err := typeconv.ParseDuration("abc"); !errors.Is(err, typeconv.ErrSyntax) {
+			t.Fatalf("want ErrSyntax, got %v", err)
+		}
+	})
+}
+
+func TestParseTime(t *testing.T) {
+	t.Run("valid RFC3339", func(t *testing.T) {
+		v, err := typeconv.ParseTime("2026-07-02T00:00:00Z")
+		if err != nil || !v.Equal(time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)) {
+			t.Fatalf("got %v, %v", v, err)
+		}
+	})
+	t.Run("date-only is not RFC3339", func(t *testing.T) {
+		if _, err := typeconv.ParseTime("2026-07-02"); !errors.Is(err, typeconv.ErrSyntax) {
+			t.Fatalf("want ErrSyntax, got %v", err)
+		}
+	})
 }
 
 func TestParseSlice(t *testing.T) {
