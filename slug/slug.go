@@ -3,6 +3,7 @@ package slug
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Make folds arbitrary text to a URL-safe slug. By default the result is
@@ -54,11 +55,71 @@ func build(s string, cfg *config) string {
 		result = strings.TrimSuffix(result, cfg.separator)
 	}
 
-	// 5. explicit random suffix (WithSuffix).
-	if cfg.suffixLength > 0 {
-		result = appendSuffix(result, randomSuffix(cfg.suffixLength, cfg.lowercase), cfg.separator)
+	// 5. determine whether a RANDOM suffix is required, and its length.
+	suffixLen := cfg.suffixLength
+	if suffixLen == 0 && isReserved(result, cfg.reservedSlugs) {
+		suffixLen = defaultSuffixLength
+	}
+	if suffixLen > 0 {
+		result = withRandomSuffix(result, suffixLen, cfg)
+	}
+
+	// 6. min-length padding (after any random suffix already applied).
+	if cfg.minLength > 0 && utf8.RuneCountInString(result) < cfg.minLength {
+		pad := cfg.minLength - utf8.RuneCountInString(result)
+		if result != "" {
+			pad += len([]rune(cfg.separator)) // account for the joining separator
+		}
+		result = withRandomSuffix(result, pad, cfg)
 	}
 	return result
+}
+
+// isReserved reports whether slug (lowercased) is in the reserved set.
+func isReserved(slug string, reserved []string) bool {
+	if len(reserved) == 0 {
+		return false
+	}
+	lower := strings.ToLower(slug)
+	for _, r := range reserved {
+		if r == lower {
+			return true
+		}
+	}
+	return false
+}
+
+// withRandomSuffix appends a random suffix of suffixLen runes to base, honoring
+// cfg.maxLength by shrinking the suffix and, if needed, truncating the base so the
+// total rune count never exceeds the cap.
+func withRandomSuffix(base string, suffixLen int, cfg *config) string {
+	sepLen := 0
+	if base != "" {
+		sepLen = utf8.RuneCountInString(cfg.separator)
+	}
+	if cfg.maxLength > 0 {
+		// Shrink the suffix if the whole thing would overflow.
+		if utf8.RuneCountInString(base)+sepLen+suffixLen > cfg.maxLength {
+			// First try trimming the base to make room for the full suffix.
+			maxBase := cfg.maxLength - sepLen - suffixLen
+			if maxBase < 0 {
+				maxBase = 0
+			}
+			base = truncateRunes(base, maxBase)
+			base = strings.TrimSuffix(base, cfg.separator)
+			if base == "" {
+				sepLen = 0
+			}
+			// If even a zero-length base cannot fit the suffix, clamp the suffix.
+			if suffixLen > cfg.maxLength-sepLen {
+				suffixLen = cfg.maxLength - sepLen
+			}
+			if suffixLen < 0 {
+				suffixLen = 0
+			}
+		}
+	}
+	return appendSuffix(base, randomSuffix(suffixLen, cfg.lowercase), cfg.separator)
 }
 
 // appendSuffix joins base and suffix with sep, or returns suffix alone when base
