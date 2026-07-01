@@ -4,9 +4,9 @@ import stdmaps "maps"
 
 // Merge returns a new map containing all keys from the given maps. When a key
 // appears in more than one map the value from the later map wins.
-func Merge[K comparable, V any](maps ...map[K]V) map[K]V {
+func Merge[K comparable, V any](ms ...map[K]V) map[K]V {
 	out := make(map[K]V)
-	for _, m := range maps {
+	for _, m := range ms {
 		stdmaps.Copy(out, m)
 	}
 	return out

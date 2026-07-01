@@ -66,3 +66,15 @@ func TestEncodingCompat_ShortRandom(t *testing.T) {
 		assert.Equal(t, s[:], back, "encoding.Decode32 must round-trip id's string to id's bytes")
 	}
 }
+
+// TestEncodingCompat_RejectionParity ensures encoding.Decode32 and id.ParseULID
+// reject the SAME non-canonical (overflow) 26-char strings, so the two decoders
+// can never diverge on malleability.
+func TestEncodingCompat_RejectionParity(t *testing.T) {
+	// First char '8' sets a leading pad bit => the value overflows 128 bits.
+	const overflow = "81ARZ3NDEK0000000000000000"
+	_, encErr := encoding.Decode32(overflow)
+	_, idErr := id.ParseULID(overflow)
+	assert.Error(t, encErr, "encoding.Decode32 must reject overflow input")
+	assert.Error(t, idErr, "id.ParseULID must reject overflow input")
+}
