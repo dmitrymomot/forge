@@ -338,6 +338,11 @@ func ManualKey(field, key string, params ...Param) Result
 // Check flattens field results into one error; nil when everything is clean.
 func Check(results ...Result) error
 
+// Conditional gates (eager — the wrapped checks still evaluate, then get suppressed
+// when cond is false; cheap for pure rules, use a plain `if` to also skip evaluation).
+func When(cond bool, v Violation) Violation          // check-level: cond ? v : passed
+func WhenField(cond bool, results ...Result) Result  // field/group-level: cond ? flatten(results) : nil
+
 // Errors is the aggregated failure set Check returns.
 type Errors []Violation
 func (e Errors) Error() string                   // single-line, sorted, for logs
@@ -443,6 +448,14 @@ err := validate.Check(
     validate.Apply("name",  validate.NotBlank(name), validate.MinLen(name, 2)),
     validate.Apply("email", validate.Msg(validate.Email(email), "invalid {field}")),
     validate.Manual("email", "Email is taken"),   // literal, e.g. after a uniqueness check
+
+    // conditional:
+    validate.Apply("website", validate.When(website != "", validate.URL(website))), // optional-if-present
+    validate.Apply("state",   validate.When(country == "US", validate.Required(state))),
+    validate.WhenField(accountType == "business",                                   // whole group, only for businesses
+        validate.Apply("company", validate.NotBlank(company)),
+        validate.Apply("vat",     validate.Required(vat)),
+    ),
 )
 return err   // untyped nil when clean, else Errors ([]Violation)
 ```
@@ -476,6 +489,14 @@ yields `Violation{Key:"validation.between", Params:[{min 18},{max 72}], Message:
   when clean); `Manual`/`ManualKey` inject literal violations (e.g. a DB "email taken").
   This mirrors `sanitize`'s `Apply`/`Compose` and removes the `*Validator`, the per-field
   map, and the per-rule closures the old instance design carried.
+- **Conditional validation is two gates, not a DSL.** `When(cond, check)` suppresses a
+  single check; `WhenField(cond, results…)` includes or omits whole fields/groups —
+  together covering country/account-type-dependent fields and the *optional-if-present*
+  pattern (`When(value != "", …)`) without leaving the declarative `Check(…)` expression.
+  They are **eager**: the wrapped checks still run and are discarded when `cond` is false
+  (fine for pure rules). To *also* skip evaluation (an expensive or value-unsafe check),
+  use a plain Go `if` and build the `[]Result` imperatively — the value-based API needs no
+  extra machinery for that, which is exactly why conditionals stay this small.
 - **Allocation profile — (near) zero on the happy path.** Rules are direct calls (no
   closures) returning a `Violation` value; a pass is the **zero value** — no pointer, no
   map, no slice. `Apply`/`Check` take non-escaping `...Violation`/`...Result` variadics
