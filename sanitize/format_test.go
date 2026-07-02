@@ -77,9 +77,31 @@ func TestSanitizeURL(t *testing.T) {
 		{"JavaScript:alert(1)", ""}, // scheme match is case-insensitive
 		{"data:text/html,<script>", ""},
 		{"vbscript:msgbox(1)", ""},
+		{"file:///etc/passwd", ""},           // file scheme is not on the allowlist
+		{"ftp://host/x", ""},                 // any other scheme is rejected
+		{"   ", ""},                          // whitespace-only trims to empty
+		{"MAILTO:a@b.com", "MAILTO:a@b.com"}, // allowlisted scheme, case-insensitive
+		{"relative/path", "relative/path"},   // schemeless relative URL passes
+		{"#fragment", "#fragment"},           // fragment-only is schemeless
 		{"", ""},
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.want, sanitize.SanitizeURL(c.in), "SanitizeURL(%q)", c.in)
+	}
+}
+
+// TestSanitizeURLParseError drives the url.Parse error branch: inputs that
+// survive Trim (no surrounding whitespace to strip) yet fail to parse are
+// rejected with "".
+func TestSanitizeURLParseError(t *testing.T) {
+	cases := []string{
+		"http://foo.com/%zz",     // invalid percent-encoding in path
+		"http://[::1]:namedport", // invalid port after host
+		"foo\x7f.com",            // invalid control character in URL
+		"%",                      // bare invalid percent-escape
+		"://noscheme",            // missing protocol scheme
+	}
+	for _, in := range cases {
+		assert.Empty(t, sanitize.SanitizeURL(in), "SanitizeURL(%q)", in)
 	}
 }
