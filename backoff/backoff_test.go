@@ -38,3 +38,24 @@ func TestExponentialJitterWithinBounds(t *testing.T) {
 		assert.LessOrEqual(t, d, 150*time.Millisecond)
 	}
 }
+
+func TestExponentialJitterRespectsMaxCeiling(t *testing.T) {
+	b := backoff.Exponential(time.Second, time.Second, backoff.WithJitter(0.5))
+	for range 200 {
+		d := b.Next(1) // already at cap; jitter must not push it past max
+		assert.GreaterOrEqual(t, d, time.Duration(0))
+		assert.LessOrEqual(t, d, time.Second)
+	}
+}
+
+func TestConstantClampsNegative(t *testing.T) {
+	assert.Equal(t, time.Duration(0), backoff.Constant(-5*time.Second).Next(1))
+}
+
+func TestExponentialClampsDegenerateInputs(t *testing.T) {
+	assert.Equal(t, time.Duration(1), backoff.Exponential(0, time.Second).Next(1))
+
+	b := backoff.Exponential(5*time.Second, time.Second)
+	assert.Equal(t, 5*time.Second, b.Next(1))
+	assert.Equal(t, 5*time.Second, b.Next(10))
+}

@@ -61,7 +61,10 @@ func (e exponential) Next(attempt int) time.Duration {
 	}
 	if e.jitter > 0 {
 		delta := d * e.jitter
-		d = d - delta + rand.Float64()*(2*delta) //nolint:gosec // non-crypto jitter
+		d = d - delta + rand.Float64()*(2*delta)
+	}
+	if d > float64(e.max) { // re-clamp: jitter must not exceed the ceiling
+		d = float64(e.max)
 	}
 	if d < 0 {
 		d = 0
