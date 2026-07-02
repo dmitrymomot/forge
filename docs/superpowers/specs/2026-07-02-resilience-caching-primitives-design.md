@@ -12,83 +12,84 @@ tier sits on — the substrate under the not-yet-built `httpclient`, `jobqueue`,
 
 Five of them (`backoff`, `retry`, `singleflight`, `parallel`, `circuitbreaker`) are
 near-zero-dependency leaves: stdlib, or stdlib + the shipped `clock`. The sixth, `cache`,
-is a **provider-backed package** — a generic `Cache[V]` interface with built-in **memory**
-and **Redis** adapters — whose core adds only `clock` + `singleflight`, and whose Redis
-adapter is isolated in a `cache/redis` subpackage. **No new `go.mod` dependencies:**
-go-redis is already present via the shipped `redis` package.
+is a **provider-backed package**: a pluggable byte-level `Store` (with built-in **memory**
+and **Redis** providers) and a typed `Cache[V]` facade over it. Its core adds only
+`singleflight` (plus `clock` for the built-in in-memory store); the Redis provider is
+isolated in a `cache/redis` subpackage. **No new `go.mod` dependencies:** go-redis is
+already present via the shipped `redis` package.
 
 Two of these (`backoff`, `retry`) are **core-tier** in the roadmap; they are folded into
 this bundle because they complete the resilience family.
 
 The `cache` design is informed by the prior forge `pkg/cache` implementation
-(commit `0b68f05`): the `Cache[V]` interface, memory + Redis adapters, standalone
-`GetOrSet` stampede protection, `Marshaler` seam, key-prefix isolation, and eviction
-callbacks all carry forward, re-expressed in v2 conventions.
+(commit `0b68f05`) — `Cache[V]`, memory + Redis providers, `GetOrSet` stampede protection,
+`Marshaler` seam, key-prefix isolation — re-expressed in v2 conventions and re-layered so
+the cache facade **does not own the backend lifecycle**.
 
 ## Design principles (all six packages)
 
-1. **Instances over globals.** Every constructor returns an isolated instance that owns
-   its own state. **Zero package-level mutable state, no singletons.**
-2. **Isolation.** Two instances never interfere. In-memory caches hold **separate maps**
-   (never shared buckets); Redis caches isolate via a **required key `Prefix`**. Two
-   `cache.NewMemory` calls in the same process are fully independent stores.
-3. **Usability first.** Sane defaults, one-line read-through (`GetOrSet`), JSON marshaling
-   by default for Redis, minimal construction boilerplate. Efficiency is necessary but not
-   sufficient — the API must be pleasant to use without a wrapper.
+1. **Instances over globals.** Every constructor returns an isolated instance that owns its
+   own state. **Zero package-level mutable state, no singletons.**
+2. **The cache facade owns no backend lifecycle.** A `Store` (in-memory or Redis) is a
+   standalone instance you construct and `Close` yourself — exactly like a `redis` client.
+   `Cache[V]` is a thin typed facade injected with a `Store`; it has **no `Close`** and
+   never starts or stops a backend. The in-memory engine (map, LRU, janitor goroutine) is a
+   first-class separate instance, not something hidden inside a cache constructor.
+3. **Isolation.** Two instances never interfere. Over a shared `Store`, each `Cache[V]`
+   isolates via a key `Prefix`; for physical isolation, construct separate `Store`s. Two
+   caches never share buckets.
+4. **Usability first.** Sane defaults, one-line read-through (`GetOrSet`), JSON marshaling
+   by default, minimal construction boilerplate. Efficiency is necessary but not sufficient
+   — the API must be pleasant without a wrapper.
 
 ## Conventions applied (existing forge DNA — not re-litigated)
 
 - `type Option func(*config)` with an **unexported** `config`; **no builders**.
-- **Options-only** configuration. These are code-configured library primitives, not
-  deploy-time services — no exported `Config`/env tags. (The `cache/redis` adapter may
-  grow an env-loadable `Config` later following the `redis` package pattern; not in v1.)
-- `errors.go` with `errors.Is`-matchable single-line sentinels.
-- `doc.go` with a runnable example.
+- **Options-only** configuration (no exported `Config`/env tags in v1). A `cache/redis` env
+  `Config` may follow the `redis` package pattern later.
+- `errors.go` with `errors.Is`-matchable single-line sentinels; `doc.go` runnable example.
 - `clock.Clock` injection via `WithClock` on packages that read the current time
-  (`circuitbreaker`, `cache` memory adapter) → deterministic tests with `clock.NewMock`.
-  The shipped `clock.Clock` is `Now()`-only (no `Sleep`/`After`), so `retry` — which must
-  *wait* — sleeps via a real ctx-aware timer instead (see Deviation #3).
-- **Black-box tests only** (`package <name>_test`). Flat top-level packages; Go 1.26
-  idioms (`new(expr)`; run `modernize` + `just fmt`/`just lint` before done).
+  (`circuitbreaker`, the memory `Store`) → deterministic tests with `clock.NewMock`. The
+  shipped `clock.Clock` is `Now()`-only (no `Sleep`/`After`), so `retry` sleeps via a real
+  ctx-aware timer instead (Deviation #3).
+- **Black-box tests only** (`package <name>_test`). Flat top-level packages; Go 1.26 idioms
+  (`new(expr)`; run `modernize` + `just fmt`/`just lint` before done).
 
 ## Scope decisions (agreed)
 
 In scope for v1:
 
-- `parallel` **functional `Map`/`ForEach`** helpers and an opt-in **`WithCollectAll()`**
-  aggregation mode.
-- `circuitbreaker` **`OnStateChange`** callback.
-- `cache` **memory + Redis adapters**, **`GetOrSet`** stampede protection, **LRU eviction**
-  (`WithMaxEntries`), **optional background janitor** (`WithCleanupInterval` + `Close`),
-  **eviction callback** (`WithOnEvict`), **`Marshaler`** seam (JSON default), **prefix
-  isolation** for Redis.
+- `parallel` functional `Map`/`ForEach` + opt-in `WithCollectAll()` aggregation.
+- `circuitbreaker` `OnStateChange` callback.
+- `cache`: pluggable `Store` with **memory + Redis** providers (each a standalone,
+  caller-closed instance), typed `Cache[V]` facade, `GetOrSet` stampede protection,
+  `Marshaler` seam (JSON default), LRU (`WithMaxEntries`), optional memory janitor
+  (`WithCleanupInterval` + the store's `Close`), key-prefix isolation.
 
 Out of scope for v1 (YAGNI, addable later):
 
-- `backoff` decorrelated-jitter / pluggable RNG seam (jitter uses `math/rand/v2`).
-- A byte-level `kv` Store seam for other stateful packages (`lock`/`otp`/…). Distinct from
-  `cache`; built when those packages are.
-- Env-loadable `Config` for the cache adapters.
+- `backoff` decorrelated-jitter / pluggable RNG seam.
+- Typed eviction callbacks (`WithOnEvict`) — the byte-level `Store` cannot surface a typed
+  `V` at eviction time; revisit if a concrete need appears.
+- A separate byte-level `kv` seam for `lock`/`otp`/`sessionstore`. (Those may reuse
+  `cache.Store` or get their own; decided when built.)
+- Env-loadable `Config` for the cache providers.
 
 ## Deviations from the roadmap sketch (deliberate)
 
-1. **`Backoff` is stateless.** The roadmap interface had both `Next(attempt int)` and
-   `Reset()`, which contradict. The interface is `Next(attempt int) time.Duration` only
-   (goroutine-safe); `retry` owns the attempt counter.
-2. **`parallel` is fail-fast by default, aggregation opt-in.** `Wait` returns the *first*
-   error and the derived context cancels the siblings (errgroup semantics);
-   `WithCollectAll()` switches to run-all-then-`errors.Join`.
-3. **`retry` takes no clock and is instance-based.** The shipped `clock.Clock` is
-   `Now()`-only, so a mock clock cannot drive retry's waits; it sleeps via a context-aware
-   real `time.Timer`. Shaped as `New(...Option) *Retrier` (configure once, reuse) plus a
-   convenience `retry.Do(...)`. Drops the roadmap's `clock` dependency — depends only on
-   `backoff`.
-4. **`cache` is a provider-backed package, not an in-memory-only `ttlcache`.** Renamed from
-   the roadmap's `ttlcache`; expanded to a generic `Cache[V]` interface with memory +
-   `cache/redis` adapters, **string keys** (Redis-native), and `GetOrSet` stampede
-   protection — per the prior `pkg/cache` implementation and the requirement to support
-   store providers. Consequently `singleflight` stays **string-keyed** (roadmap original);
-   the earlier "generalize to `Group[K,V]`" idea is dropped since `cache` keys by string.
+1. **`Backoff` is stateless.** Interface is `Next(attempt int) time.Duration` only
+   (goroutine-safe); `retry` owns the attempt counter. (Roadmap had a contradictory
+   `Reset()`.)
+2. **`parallel` is fail-fast by default, aggregation opt-in** (`WithCollectAll()` →
+   run-all-then-`errors.Join`).
+3. **`retry` takes no clock and is instance-based.** Shipped `clock` is `Now()`-only, so it
+   sleeps via a ctx-aware real `time.Timer`. Shaped as `New(...Option) *Retrier` + a
+   convenience `retry.Do(...)`. Depends only on `backoff`.
+4. **`cache` is a two-layer provider-backed package**, not the roadmap's in-memory-only
+   `ttlcache`. Byte-level `Store` (memory + `cache/redis` providers) + typed `Cache[V]`
+   facade; **string keys**; facade owns no backend lifecycle. `singleflight` stays
+   **string-keyed** (the earlier "generalize to `Group[K,V]`" idea is dropped — `cache`
+   keys by string).
 
 ---
 
@@ -99,225 +100,209 @@ Out of scope for v1 (YAGNI, addable later):
 Pure, stateless delay strategies. Deps: `time`, `math`, `math/rand/v2`.
 
 ```go
-type Backoff interface {
-    Next(attempt int) time.Duration // attempt ≥ 1
-}
+type Backoff interface { Next(attempt int) time.Duration } // attempt ≥ 1
 
 func Constant(d time.Duration) Backoff
 func Exponential(base, max time.Duration, opts ...Option) Backoff
-//   WithMultiplier(f float64)     // growth factor, default 2.0
-//   WithJitter(fraction float64)  // 0..1; randomizes the delay by ±fraction
+//   WithMultiplier(f float64)     // default 2.0
+//   WithJitter(fraction float64)  // 0..1; ±fraction randomization
 ```
 
-- `Exponential` computes `base * multiplier^(attempt-1)`, capped at `max`.
-- Constructors clamp degenerate input (`base` ≥ 1ns, `max` ≥ `base`); no error returns.
-- Jitter uses `math/rand/v2` (auto-seeded, concurrency-safe).
-- **Errors:** none. **Tests:** exact for `Constant`/un-jittered; jittered within bounds.
+- `base * multiplier^(attempt-1)`, capped at `max`. Constructors clamp degenerate input;
+  no error returns. Jitter uses `math/rand/v2`.
+- **Errors:** none. **Tests:** exact un-jittered; jittered within bounds.
 
 ### `retry`
 
-Execute a function with retries. Instance-based. Deps: `backoff`; `context`, `time`,
-`errors`.
+Instance-based retry. Deps: `backoff`; `context`, `time`, `errors`.
 
 ```go
 type Retrier struct { ... }
-
 func New(opts ...Option) *Retrier
 func (r *Retrier) Do(ctx context.Context, fn func(ctx context.Context) error) error
+func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error // one-shot
+func Permanent(err error) error
 
-// Convenience one-shot (= New(opts...).Do(ctx, fn)); no global state:
-func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error
-
-func Permanent(err error) error // wrap to stop retrying immediately
-
-// Options:
 //   WithMaxAttempts(n int)          // default 3
 //   WithBackoff(b backoff.Backoff)  // default Exponential(100ms, 10s, WithJitter(0.5))
-//   WithRetryIf(func(error) bool)   // default: retry all non-Permanent errors
+//   WithRetryIf(func(error) bool)   // default: retry all non-Permanent
 ```
 
-- Loops up to `maxAttempts`. `Permanent`-wrapped → return unwrapped immediately;
-  `RetryIf==false` → return; else sleep `backoff.Next(attempt)` and retry.
-- Sleeps use a context-aware real `time.Timer`; on cancellation returns `ctx.Err()`.
-- `Permanent` detected via `errors.As` on an internal `permanentError` (not a package var).
-- **Tests:** tiny backoff durations (`backoff.Constant(time.Millisecond)`); assert attempt
-  counts, `Permanent` short-circuit, `RetryIf` gating, ctx cancellation. Delay math is
-  covered by `backoff`'s exact tests, so no fake clock needed.
+- `Permanent`-wrapped → return unwrapped immediately; `RetryIf==false` → return; else sleep
+  `backoff.Next(attempt)` via a ctx-aware `time.Timer` and retry; cancellation → `ctx.Err()`.
+- `Permanent` detected via `errors.As` on an internal type. **Tests:** tiny backoff
+  durations; assert attempts, short-circuit, gating, cancellation.
 
 ### `singleflight`
 
-Generic request coalescing (cache-stampede protection). String-keyed. Deps: `context`,
-`sync`.
+String-keyed request coalescing. Deps: `context`, `sync`.
 
 ```go
-type Group[V any] struct { /* zero-value usable; no New() */ }
-
-func (g *Group[V]) Do(ctx context.Context, key string,
-    fn func(ctx context.Context) (V, error)) (v V, shared bool, err error)
+type Group[V any] struct { /* zero-value usable */ }
+func (g *Group[V]) Do(ctx context.Context, key string, fn func(ctx context.Context) (V, error)) (v V, shared bool, err error)
 func (g *Group[V]) Forget(key string)
 ```
 
-- Zero-value usable (lazy map init under mutex), like `sync.Once`. Each `Group` is
-  independent — no shared state across instances.
-- The in-flight `fn` runs under a **cancellation-detached context**
-  (`context.WithoutCancel` of the leader's ctx) so one caller cancelling does not poison
-  the shared execution; each caller's own `ctx` still bounds *its* wait.
-- `shared` reports whether the result was shared with concurrent callers.
-- Consumed internally by `cache.GetOrSet` (as `Group[any]`). **Errors:** none.
-- **Tests:** N goroutines on one key behind a sync barrier → `fn` ran once, all got the
-  same value with `shared==true`; `Forget` re-arms.
+- Zero-value usable; each `Group` independent. In-flight `fn` runs under
+  `context.WithoutCancel` of the leader ctx so one caller cancelling doesn't poison the
+  shared execution; each caller's ctx still bounds its wait. Used by `cache.GetOrSet`.
+- **Errors:** none. **Tests:** N goroutines/one key → `fn` runs once, `shared==true`.
 
 ### `parallel`
 
-Bounded concurrent execution. Fail-fast by default, opt-in aggregation. Deps: `context`,
-`sync`, `errors`.
+Bounded concurrency; fail-fast default, opt-in aggregation. Deps: `context`, `sync`, `errors`.
 
 ```go
 type Group struct { ... }
-
 func New(ctx context.Context, opts ...Option) (*Group, context.Context)
 func (g *Group) Go(fn func(ctx context.Context) error)
 func (g *Group) Wait() error
+//   WithLimit(n int)   // ≤0 = unbounded
+//   WithCollectAll()   // no cancel-on-error; Wait returns errors.Join(...)
 
-// Options:
-//   WithLimit(n int)    // max concurrent; n ≤ 0 = unbounded
-//   WithCollectAll()    // run all, no sibling cancellation; Wait returns errors.Join(...)
-
-// Functional helpers (fail-fast, order-preserving results):
-func ForEach[T any](ctx context.Context, items []T, limit int,
-    fn func(ctx context.Context, item T) error) error
-func Map[T, U any](ctx context.Context, items []T, limit int,
-    fn func(ctx context.Context, item T) (U, error)) ([]U, error)
+func ForEach[T any](ctx context.Context, items []T, limit int, fn func(ctx context.Context, T) error) error
+func Map[T, U any](ctx context.Context, items []T, limit int, fn func(ctx context.Context, T) (U, error)) ([]U, error)
 ```
 
-- Default: `New`'s derived context cancels on the **first** error; `Wait` returns it.
-- `WithCollectAll()`: no cancellation on error; every func runs to completion; `Wait`
-  returns `errors.Join` of all non-nil errors (nil if all succeed).
-- `Map` preserves order (`result[i]` ↔ `items[i]`); fail-fast; on error returns the first
-  error and a nil slice. `limit ≤ 0` = unbounded.
-- **Errors:** none exported. **Tests:** bounded concurrency (peak in-flight ≤ limit via
-  atomic counter), first-error cancellation, `WithCollectAll` joins all, `Map` ordering.
+- Default: derived ctx cancels on first error; `Wait` returns it. `WithCollectAll`: run all,
+  join errors. `Map` preserves order, fail-fast, nil slice on error.
+- **Tests:** bounded concurrency (atomic peak ≤ limit), first-error cancel, collect-all
+  join, `Map` ordering.
 
 ### `circuitbreaker`
 
-Closed/open/half-open breaker. Instance-based. Deps: `clock`; `sync`, `time`, `errors`.
+Closed/open/half-open breaker. Deps: `clock`; `sync`, `time`, `errors`.
 
 ```go
-type State int // Closed, Open, HalfOpen; fmt.Stringer
+type State int // Closed, Open, HalfOpen; Stringer
 var ErrOpen = errors.New("circuitbreaker: circuit open")
-
 type Breaker struct { ... }
 func New(opts ...Option) *Breaker
 func (b *Breaker) Do(ctx context.Context, fn func(ctx context.Context) error) error
 func (b *Breaker) State() State
-
-// Options:
-//   WithFailureThreshold(n int)              // consecutive failures to open; default 5
-//   WithOpenTimeout(d time.Duration)         // before half-open probe; default 30s
-//   WithHalfOpenMax(n int)                   // concurrent probes; default 1
-//   WithOnStateChange(func(from, to State))  // transition hook
+//   WithFailureThreshold(n)  // default 5    WithOpenTimeout(d)   // default 30s
+//   WithHalfOpenMax(n)       // default 1    WithOnStateChange(func(from, to State))
 //   WithClock(c clock.Clock)
 ```
 
-- Closed → counts consecutive failures, `≥ threshold` opens. Open → `Do` returns `ErrOpen`
-  without calling `fn`; after `openTimeout` → half-open. Half-open → up to `halfOpenMax`
-  probes; success closes (resets), failure re-opens.
-- **Errors:** `ErrOpen`. **Tests:** `clock.NewMock` + `Advance` drive the open→half-open
-  timeout; assert threshold tripping, fast-fail, probe gating, `OnStateChange`.
+- Closed→(≥threshold failures)→Open→(after timeout)→HalfOpen→(success)→Closed / (fail)→Open.
+- **Errors:** `ErrOpen`. **Tests:** `clock.NewMock` + `Advance` drive timeouts; assert
+  tripping, fast-fail, probe gating, `OnStateChange`.
 
 ### `cache` (+ `cache/redis`)
 
-Generic cache with pluggable providers. Core deps: `clock`, `singleflight`; `context`,
-`sync`, `time`, `container/list`, `encoding/json`. Subpackage `cache/redis` deps: forge
-`redis` + go-redis (isolated).
+Two layers: a byte-level **`Store`** provider (you construct and own it, like a redis
+client) and a typed **`Cache[V]`** facade over it (no lifecycle ownership).
 
 ```go
-// package cache
-type Cache[V any] interface {
-    Get(ctx context.Context, key string) (V, error)               // ErrNotFound on miss
-    Set(ctx context.Context, key string, value V, ttl time.Duration) error
+// package cache — abstraction + facade + memory store (deps: singleflight, clock; stdlib)
+
+type Store interface {                                    // the pluggable backend
+    Get(ctx context.Context, key string) ([]byte, error)             // ErrNotFound on miss
+    Set(ctx context.Context, key string, val []byte, ttl time.Duration) error
     Delete(ctx context.Context, key string) error
     Has(ctx context.Context, key string) (bool, error)
-    Clear(ctx context.Context) error                               // scoped to this instance
-    Close() error
+    DeletePrefix(ctx context.Context, prefix string) error           // scoped clear
+    Close() error                                                    // lifecycle: caller-owned
 }
 
-// TTL semantics for Set: positive = expire after d; zero = configured DefaultTTL;
-// negative = never expires.
-
-type Marshaler[V any] interface {          // storage backends needing bytes (Redis)
+type Marshaler[V any] interface {                         // JSON default; WithMarshaler overrides
     Marshal(v V) ([]byte, error)
     Unmarshal(data []byte) (V, error)
-}                                          // JSON default; override via WithMarshaler
+}
 
-// Memory adapter — zero-marshal, own map per instance (isolation)
-func NewMemory[V any](opts ...Option) Cache[V]
-//   WithDefaultTTL(d)         // default 5m
-//   WithMaxEntries(n)         // 0 = unbounded; >0 = LRU via container/list
-//   WithCleanupInterval(d)    // >0 starts a janitor goroutine; Close() stops it; 0 = lazy only
-//   WithOnEvict(func(key string, v V))  // fired on LRU evict / TTL cleanup / Delete / Clear
+// Built-in in-memory Store — a standalone instance (own map/LRU/janitor/Close):
+func NewMemoryStore(opts ...MemoryOption) Store
+//   WithMaxEntries(n)         // 0 = unbounded; >0 = LRU (container/list)
+//   WithCleanupInterval(d)    // >0 starts a janitor goroutine; Close() stops it; 0 = lazy
 //   WithClock(c clock.Clock)
 
-// Read-through with singleflight stampede protection (standalone: Go methods can't add
-// a type param; takes the instance, no globals):
-func GetOrSet[V any](ctx context.Context, c Cache[V], key string,
+// Typed facade over ANY Store — has NO Close():
+type Cache[V any] struct { ... }
+func New[V any](store Store, opts ...Option) *Cache[V]
+//   WithPrefix(p string)            // namespaces keys over a shared store (isolation)
+//   WithDefaultTTL(d)               // applied when Set ttl == 0; default 5m
+//   WithMarshaler(m Marshaler[V])   // default JSON
+
+func (c *Cache[V]) Get(ctx context.Context, key string) (V, error)   // ErrNotFound on miss
+func (c *Cache[V]) Set(ctx context.Context, key string, v V, ttl time.Duration) error
+func (c *Cache[V]) Delete(ctx context.Context, key string) error
+func (c *Cache[V]) Has(ctx context.Context, key string) (bool, error)
+func (c *Cache[V]) Clear(ctx context.Context) error                  // deletes only c's prefix
+func (c *Cache[V]) GetOrSet(ctx context.Context, key string,
     fn func(ctx context.Context) (V, time.Duration, error)) (V, error)
 ```
 
 ```go
-// package cache/redis — isolated adapter; not pulled in by memory-only users
-func New[V any](client goredis.UniversalClient, opts ...Option) cache.Cache[V]
-//   WithPrefix(p string)      // REQUIRED — namespaces keys; Clear() only deletes this prefix
-//   WithDefaultTTL(d)
-//   WithMarshaler(m cache.Marshaler[V])  // default JSON
+// package cache/redis — isolated Redis Store provider (deps: forge redis + go-redis)
+func NewStore(client goredis.UniversalClient, opts ...Option) cache.Store
 ```
 
-- **Isolation:** each `NewMemory` owns its map; each `cache/redis` instance requires a
-  `Prefix`. `Clear()` on Redis uses `SCAN`+`DEL` over the prefix — **never `FLUSHDB`**.
-- **`GetOrSet`:** fast-path `Get`; on miss, dedups concurrent loads via a per-instance
-  `singleflight.Group[any]` (through a small non-generic `deduper` interface the adapters
-  implement); best-effort `Set` with the returned TTL; load errors are **not** cached.
-- **Memory expiry:** lazy on `Get` (checks `clock.Now()`), plus the optional janitor
-  goroutine. Without `WithMaxEntries` or `WithCleanupInterval`, expired-but-unread entries
-  linger until the process exits — documented; set one of them for long-lived caches.
-- **Errors:** `ErrNotFound`, `ErrClosed`, `ErrMarshal`, `ErrUnmarshal`.
-- **Tests:** memory — `clock.NewMock` drives lazy expiry, LRU order, `GetOrSet`
-  single-flight, `WithOnEvict`, idempotent `Close`, and **cross-instance isolation** (two
-  caches don't see each other's keys). `cache/redis` — key-prefixing and marshaling logic
-  unit-tested without a server; integration tests hit a real Redis via `TEST_REDIS_URL`
-  and skip when unset (matching the shipped `redis` package; no miniredis dependency):
-  marshal round-trip, prefix isolation, `Clear` deletes only the prefix.
+TTL semantics: positive = expire; zero = facade `DefaultTTL`; negative = never.
+
+Usage — memory and Redis are **symmetric injected backends the caller owns**:
+
+```go
+// in-memory: engine is a separate instance with its own lifecycle
+store := cache.NewMemoryStore(cache.WithMaxEntries(10_000), cache.WithCleanupInterval(30*time.Second))
+defer store.Close()                                   // caller owns the backend
+users  := cache.New[User](store, cache.WithPrefix("users:"), cache.WithDefaultTTL(30*time.Minute))
+orders := cache.New[Order](store, cache.WithPrefix("orders:"))   // same engine, isolated buckets
+
+// Redis: identical shape — construct the client, own its Close
+client := redis.Open(ctx, redis.WithConfig(cfg)); defer client.Close()
+rstore := cacheredis.NewStore(client)
+sess   := cache.New[Session](rstore, cache.WithPrefix("sess:"))
+```
+
+- **Lifecycle:** `Store.Close()` is owned by the constructing code; `Cache[V]` has **no
+  `Close`** and never starts/stops a backend. This is the "backend is a separate instance,
+  like redis" requirement.
+- **Isolation:** `WithPrefix` namespaces a cache's keys over a shared store; construct
+  separate stores for physical isolation. `Clear()` deletes only the prefix (memory: prefix
+  match; redis: `SCAN`+`DEL`, **never `FLUSHDB`**). `Clear` with an empty prefix clears the
+  whole store — documented.
+- **GetOrSet:** method on the typed facade; dedups concurrent misses via a per-instance
+  `singleflight.Group[V]`; best-effort `Set`; load errors are not cached.
+- **Memory expiry:** lazy on access (`clock.Now()`) + optional janitor. Without
+  `WithMaxEntries`/`WithCleanupInterval`, expired-unread entries persist until the store is
+  closed/GC'd — documented; set one for long-lived stores.
+- **Errors:** `ErrNotFound/ErrClosed/ErrMarshal/ErrUnmarshal`.
+- **Tests:** memory store — `clock.NewMock` drives expiry, LRU order, `DeletePrefix`
+  isolation, idempotent `Close`. facade — marshal round-trip, prefix scoping, `GetOrSet`
+  single-flight (over a fake in-memory store). redis store — key/marshal logic unit-tested;
+  integration via `TEST_REDIS_URL`, skip when unset (matching the shipped `redis` package;
+  no miniredis dep): round-trip, prefix isolation, scoped `Clear`.
 
 ---
 
 ## Cross-cutting
 
 - **Error surface:** `cache.{ErrNotFound,ErrClosed,ErrMarshal,ErrUnmarshal}`,
-  `circuitbreaker.ErrOpen`, `retry.Permanent()`. Each package still gets an `errors.go`.
-- **Determinism:** `clock.NewMock` + `Mock.Advance` make circuitbreaker timeouts and cache
-  lazy-expiry deterministic. `retry` uses tiny real backoff durations. `singleflight` and
-  `parallel` use sync barriers + atomic counters; `backoff` jitter is tested by bounds.
-  The cache janitor goroutine is integration-tested (time-based).
-- **Dependencies:** `backoff`/`retry`/`singleflight`/`parallel` are pure stdlib;
-  `circuitbreaker` adds `clock`; `cache` core adds `clock` + `singleflight`; `cache/redis`
-  adds the shipped `redis` (go-redis) — isolated in the subpackage. **No new `go.mod`
-  entries** (go-redis already present).
+  `circuitbreaker.ErrOpen`, `retry.Permanent()`. Each package gets an `errors.go`.
+- **Determinism:** `clock.NewMock` + `Advance` for circuitbreaker timeouts and memory
+  expiry; `retry` uses tiny real backoff; `singleflight`/`parallel` use barriers + atomic
+  counters; `backoff` jitter by bounds; the memory janitor goroutine is integration-tested.
+- **Dependencies:** `backoff`/`retry`/`singleflight`/`parallel` pure stdlib;
+  `circuitbreaker` adds `clock`; `cache` core adds `singleflight` (+ `clock` for the memory
+  store); `cache/redis` adds the shipped `redis` (go-redis), isolated. **No new `go.mod`
+  entries.**
 
 ## Build order (DAG)
-
-Four parallelizable tracks:
 
 1. `backoff` → `retry`
 2. `singleflight` → `cache` → `cache/redis`
 3. `parallel` (independent)
 4. `circuitbreaker` (independent)
 
+(`clock` — already shipped — is a dep of `circuitbreaker` and the memory store.)
+
 ## Non-goals
 
-- No env-loadable configuration in v1 (code-configured primitives; a `cache/redis` env
-  `Config` can follow the `redis` pattern later).
-- No byte-level `kv` Store seam here (distinct from the typed `cache`; built with the
-  `lock`/`otp`/`sessionstore` packages that need it).
-- No supervised background services — the only goroutine is the opt-in cache janitor,
-  stopped by `Close()`; long-running services (`jobqueue`/`lock`) build on these later.
+- **The cache facade never owns backend lifecycle** — no implicit engine creation/teardown
+  inside `Cache[V]`; the `Store` is injected and caller-closed.
+- No env-loadable configuration in v1.
+- No supervised background services — the only goroutine is the opt-in memory janitor,
+  stopped by the store's `Close()`.
 - No `errors.Join` aggregation in `parallel`'s default mode (opt-in via `WithCollectAll`).
+- No typed eviction callbacks in v1 (byte-level `Store` can't surface `V` at eviction).
