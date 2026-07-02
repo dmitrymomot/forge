@@ -65,6 +65,30 @@ func TestMsg_UnknownPlaceholderVerbatim(t *testing.T) {
 	assert.Equal(t, "min {nope}", v.Message)
 }
 
+func TestMsg_NoParamsTemplateVerbatim(t *testing.T) {
+	// nonEmpty fails without any params → interpolate returns the template as-is.
+	v := validate.Msg(nonEmpty, "this field is required")("")
+	assert.Equal(t, "this field is required", v.Message)
+}
+
+func TestMsg_MultiplePlaceholders(t *testing.T) {
+	// A rule carrying two params exercises the multi-placeholder replace loop.
+	r := func(string) validate.Violation {
+		return validate.Violation{
+			Key:    "validation.len_between",
+			Params: []validate.Param{{Key: "min", Value: 3}, {Key: "max", Value: 8}},
+		}
+	}
+	v := validate.Msg(r, "length must be between {min} and {max}")("x")
+	assert.Equal(t, "length must be between 3 and 8", v.Message)
+}
+
+func TestMsg_ExtraParamNoPlaceholder(t *testing.T) {
+	// A param whose {key} never appears in the template is a harmless no-op replace.
+	v := validate.Msg(min2, "at least {min} (extra ignored)")("a")
+	assert.Equal(t, "at least 2 (extra ignored)", v.Message)
+}
+
 func TestWithKey_SwapsKey(t *testing.T) {
 	v := validate.WithKey(nonEmpty, "signup.name_required")("")
 	assert.Equal(t, "signup.name_required", v.Key)
