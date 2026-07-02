@@ -97,11 +97,33 @@ func TestSanitizeURLParseError(t *testing.T) {
 	cases := []string{
 		"http://foo.com/%zz",     // invalid percent-encoding in path
 		"http://[::1]:namedport", // invalid port after host
-		"foo\x7f.com",            // invalid control character in URL
 		"%",                      // bare invalid percent-escape
 		"://noscheme",            // missing protocol scheme
 	}
 	for _, in := range cases {
 		assert.Empty(t, sanitize.SanitizeURL(in), "SanitizeURL(%q)", in)
 	}
+}
+
+// TestSanitizeURL_ControlAndProtocolRelative covers two filter-evasion classes:
+// control characters splitting a dangerous scheme (browsers strip tab/CR/LF, so
+// "java\tscript:" executes), and protocol-relative URLs that look relative but
+// resolve cross-origin.
+func TestSanitizeURL_ControlAndProtocolRelative(t *testing.T) {
+	rejected := []string{
+		"java\tscript:alert(1)", // tab-split scheme, unmasked then rejected
+		"java\nscript:alert(1)",
+		"java\rscript:alert(1)",
+		"jav\x00ascript:alert(1)", // NUL-split scheme
+		"//evil.com/path",         // protocol-relative
+		"/\\evil.com",             // backslash variant browsers normalize
+		"\\\\evil.com",
+	}
+	for _, in := range rejected {
+		assert.Empty(t, sanitize.SanitizeURL(in), "SanitizeURL(%q) must be rejected", in)
+	}
+
+	// Control characters in an otherwise-valid URL are stripped, not rejected.
+	assert.Equal(t, "https://example.com", sanitize.SanitizeURL("https://exa\tmple.com"))
+	assert.Equal(t, "foo.com", sanitize.SanitizeURL("foo\x7f.com")) // cleaned relative URL
 }

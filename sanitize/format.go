@@ -64,10 +64,21 @@ var allowedURLSchemes = map[string]bool{
 }
 
 // SanitizeURL neutralizes dangerous schemes (javascript:, data:, vbscript:, and
-// anything else outside the allowlist) by returning "". Otherwise it returns the
-// trimmed URL. http/https/mailto and relative URLs pass.
+// anything else outside the allowlist) by returning "". http/https/mailto and
+// genuine relative URLs pass, returning the trimmed, control-stripped URL.
+//
+// ASCII control bytes are removed before the scheme is inspected: a browser
+// strips tab/CR/LF from a URL per the WHATWG URL spec, so "java\tscript:…" would
+// otherwise be misread here as a scheme-less (relative) URL yet execute as
+// javascript: in the browser. Protocol-relative URLs (//host, and the backslash
+// variants browsers normalize) are also rejected — they are scheme-less but
+// resolve to an absolute cross-origin URL.
 func SanitizeURL(s string) string {
 	s = Trim(s)
+	if s == "" {
+		return ""
+	}
+	s = stripURLControls(s)
 	if s == "" {
 		return ""
 	}
@@ -76,10 +87,36 @@ func SanitizeURL(s string) string {
 		return ""
 	}
 	if u.Scheme == "" {
-		return s // relative URL
+		if isProtocolRelative(s) {
+			return ""
+		}
+		return s // genuine relative URL
 	}
 	if allowedURLSchemes[strings.ToLower(u.Scheme)] {
 		return s
 	}
 	return ""
+}
+
+// stripURLControls removes ASCII C0 control bytes (0x00–0x1F) and DEL (0x7F).
+// Browsers strip tab/CR/LF from URLs (WHATWG URL spec), which otherwise lets a
+// control character split a dangerous scheme past the check in SanitizeURL.
+func stripURLControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r <= 0x1f || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// isProtocolRelative reports whether s begins with two slash-or-backslash bytes
+// (//, /\, \/, \\), which a browser resolves as an absolute cross-origin URL
+// rather than a same-origin relative path.
+func isProtocolRelative(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	slash := func(b byte) bool { return b == '/' || b == '\\' }
+	return slash(s[0]) && slash(s[1])
 }
