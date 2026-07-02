@@ -70,3 +70,85 @@ func TestMustParse(t *testing.T) {
 	assert.Equal(t, "3.14", decimal.MustParse("3.14").String())
 	assert.Panics(t, func() { decimal.MustParse("nope") })
 }
+
+func TestParse_ErrorPaths(t *testing.T) {
+	bad := []string{
+		"",         // empty
+		"+",        // lone plus
+		"-",        // lone minus
+		".",        // lone dot, no digits
+		"+.",       // sign + lone dot
+		"-.",       // sign + lone dot
+		"1.2.3",    // multiple dots
+		"12..3",    // adjacent dots
+		"abc",      // invalid chars
+		"1a2",      // invalid char in int part
+		"1.2b",     // invalid char in frac part
+		"1 2",      // space
+		"0x10",     // hex-like
+		"1e5",      // scientific notation not supported
+		"1.5e3",    // scientific notation not supported
+		"++1",      // double sign
+		"--1",      // double sign
+		"1,000.00", // thousands separator
+	}
+	for _, s := range bad {
+		t.Run(s, func(t *testing.T) {
+			_, err := decimal.Parse(s)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, decimal.ErrSyntax), "want ErrSyntax for %q", s)
+		})
+	}
+}
+
+func TestParse_ZeroForms(t *testing.T) {
+	tests := []struct {
+		in        string
+		wantStr   string
+		wantScale int32
+	}{
+		{"0", "0", 0},
+		{"000", "0", 0},
+		{"+0", "0", 0},
+		{"-0", "0", 0},
+		{"0.000", "0.000", 3},
+		{"-0.000", "0.000", 3}, // negative-zero renders without sign
+		{"+0.00", "0.00", 2},
+		{"00.00", "0.00", 2},
+		{".0", "0.0", 1},
+		{"-.00", "0.00", 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			d, err := decimal.Parse(tc.in)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStr, d.String())
+			assert.Equal(t, tc.wantScale, d.Scale())
+			assert.True(t, d.IsZero())
+		})
+	}
+}
+
+func TestParse_LeadingTrailingZeros(t *testing.T) {
+	d, err := decimal.Parse("007.500")
+	require.NoError(t, err)
+	assert.Equal(t, "7.500", d.String())
+	assert.Equal(t, int32(3), d.Scale())
+}
+
+// TestParse_OversizedPromotesToBig confirms Parse handles coefficients far past
+// int64 range (fromBig big path).
+func TestParse_OversizedPromotesToBig(t *testing.T) {
+	huge := bigVal + bigVal // ~60 digits
+	d, err := decimal.Parse(huge + ".123")
+	require.NoError(t, err)
+	assert.Equal(t, huge+".123", d.String())
+	assert.Equal(t, int32(3), d.Scale())
+}
+
+// TestString_NegativeNonZeroBig confirms the neg && !isAllZero branch renders a
+// leading minus for a genuinely negative big value.
+func TestString_NegativeNonZeroBig(t *testing.T) {
+	d := decimal.MustParse("-" + bigVal + ".01")
+	assert.Equal(t, "-"+bigVal+".01", d.String())
+}

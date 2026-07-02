@@ -85,3 +85,70 @@ func TestRound_BigCoefficient(t *testing.T) {
 	d := decimal.MustParse("92233720368547758.085")
 	assert.Equal(t, "92233720368547758.09", d.Round(2, decimal.HalfUp).String())
 }
+
+// TestRescale_NegativeScaleClamped drives Rescale's scale<0 clamp.
+func TestRescale_NegativeScaleClamped(t *testing.T) {
+	d := decimal.MustParse("123.456")
+	got := d.Rescale(-3, decimal.HalfEven)
+	// clamps to scale 0: 123.456 -> 123 (HalfEven, .456 < .5).
+	assert.Equal(t, "123", got.String())
+	assert.Equal(t, int32(0), got.Scale())
+}
+
+// TestRescale_SameScale drives Rescale's early return when scale == d.scale.
+func TestRescale_SameScale(t *testing.T) {
+	d := decimal.MustParse("2.50")
+	got := d.Rescale(2, decimal.HalfEven)
+	assert.Equal(t, "2.50", got.String())
+	assert.Equal(t, int32(2), got.Scale())
+	assert.True(t, d.Equal(got))
+}
+
+// TestRescale_UpLargeScale pads a big-backed value to a much larger scale.
+func TestRescale_UpLargeScale(t *testing.T) {
+	d := decimal.MustParse(bigVal + ".5") // big-backed, scale 1
+	got := d.Rescale(40, decimal.HalfEven)
+	assert.Equal(t, int32(40), got.Scale())
+	assert.Equal(t, bigVal+".5"+repeatZero(39), got.String())
+}
+
+// TestRescale_DownBigWithRounding drives roundBig on a big-int-backed value
+// (drop > 0) for several modes.
+func TestRescale_DownBigWithRounding(t *testing.T) {
+	// A big-backed value with fractional digits to be dropped.
+	d := decimal.MustParse(bigVal + ".55") // scale 2
+	tests := []struct {
+		mode decimal.RoundingMode
+		want string
+	}{
+		{decimal.HalfEven, bigVal + ".6"},
+		{decimal.HalfUp, bigVal + ".6"},
+		{decimal.HalfDown, bigVal + ".5"},
+		{decimal.Down, bigVal + ".5"},
+		{decimal.Up, bigVal + ".6"},
+		{decimal.Ceil, bigVal + ".6"},
+		{decimal.Floor, bigVal + ".5"},
+	}
+	for _, tc := range tests {
+		got := d.Rescale(1, tc.mode)
+		assert.Equal(t, tc.want, got.String(), "mode=%v", tc.mode)
+	}
+}
+
+// TestRescale_DownBigNegative exercises roundBig sign handling on big negatives.
+func TestRescale_DownBigNegative(t *testing.T) {
+	d := decimal.MustParse("-" + bigVal + ".55")
+	assert.Equal(t, "-"+bigVal+".6", d.Rescale(1, decimal.Up).String())
+	assert.Equal(t, "-"+bigVal+".6", d.Rescale(1, decimal.Floor).String())
+	assert.Equal(t, "-"+bigVal+".5", d.Rescale(1, decimal.Ceil).String())
+}
+
+// TestRound_BigIntBacked drives Round (alias of Rescale) reducing scale on a
+// big-int-backed value with rounding.
+func TestRound_BigIntBacked(t *testing.T) {
+	d := decimal.MustParse(bigVal + ".999")
+	got := d.Round(0, decimal.HalfUp)
+	// .999 rounds up: adds 1 to the big coefficient.
+	assert.Equal(t, int32(0), got.Scale())
+	assert.NotEqual(t, bigVal, got.String())
+}
