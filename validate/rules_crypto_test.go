@@ -23,6 +23,25 @@ func TestBase58Bech32(t *testing.T) {
 	assert.Equal(t, "validation.bech32", validate.Bech32("\x7f1axkwrx").Key) // HRP char 0x7f > 0x7e
 }
 
+func TestBech32m(t *testing.T) {
+	// BIP-350 valid bech32m vectors (checksum constant 0x2bc830a3) must PASS Bech32.
+	assert.True(t, validate.Bech32("A1LQFN3A").IsZero())
+	assert.True(t, validate.Bech32("a1lqfn3a").IsZero())
+	assert.True(t, validate.Bech32("abcdef1l7aum6echk45nj3s0wdvt2fg8x9yrzpqzd3ryx").IsZero())
+	assert.True(t, validate.Bech32("?1v759aa").IsZero())
+	// Real taproot (segwit v1) address encoded with bech32m.
+	assert.True(t, validate.Bech32("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0").IsZero())
+
+	// Valid bech32 (segwit v0, checksum constant 1) still passes alongside bech32m.
+	assert.True(t, validate.Bech32("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").IsZero())
+
+	// Corrupting a bech32m checksum still fails (last char q -> p).
+	assert.Equal(t, "validation.bech32", validate.Bech32("A1LQFN3P").Key)
+
+	// Taproot address is a valid BTC address (BIP-350: witness v1 uses bech32m).
+	assert.True(t, validate.BTCAddress("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0").IsZero())
+}
+
 func TestBech32DecodeBranches(t *testing.T) {
 	// Length guards: under 8 and over 90 characters are rejected up front.
 	assert.Equal(t, "validation.bech32", validate.Bech32("bc1qqqq").Key)                     // too short (<8)
