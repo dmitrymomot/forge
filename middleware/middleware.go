@@ -1,5 +1,3 @@
-// Package middleware defines the composition seam every forge HTTP middleware
-// implements, plus a response writer that records status and size.
 package middleware
 
 import (
