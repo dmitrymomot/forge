@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/dmitrymomot/forge/keyset"
-	"github.com/dmitrymomot/forge/randx"
+	"github.com/dmitrymomot/forge/random"
 )
 
 // Box performs authenticated symmetric encryption. Output is
@@ -54,7 +54,7 @@ func (b *Box) Encrypt(plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce := randx.Bytes(aead.NonceSize())
+	nonce := random.Bytes(aead.NonceSize())
 	out := make([]byte, 0, 1+len(nonce)+len(plaintext)+aead.Overhead())
 	out = append(out, byte(b.ver))
 	out = append(out, nonce...)

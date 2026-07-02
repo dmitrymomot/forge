@@ -8,5 +8,5 @@
 //
 // Sign/Verify are the raw single-key primitive; SignString/VerifyString carry the key
 // version, so a signer built with FromKeyset verifies tags produced under retired keys
-// during rotation. Verification always runs in constant time via subtlex.
+// during rotation. Verification always runs in constant time via consttime.
 package sign

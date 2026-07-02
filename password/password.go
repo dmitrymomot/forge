@@ -9,9 +9,9 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/dmitrymomot/forge/consttime"
 	"github.com/dmitrymomot/forge/kdf"
-	"github.com/dmitrymomot/forge/randx"
-	"github.com/dmitrymomot/forge/subtlex"
+	"github.com/dmitrymomot/forge/random"
 )
 
 const saltLen = 16
@@ -30,7 +30,7 @@ func Hash(password string, opts ...Option) (string, error) {
 	if err := c.argon.Validate(); err != nil {
 		return "", fmt.Errorf("password: invalid params: %w", err)
 	}
-	salt := randx.Bytes(saltLen)
+	salt := random.Bytes(saltLen)
 	key := argon2.IDKey([]byte(password), salt, c.argon.Time, c.argon.Memory, c.argon.Threads, c.argon.KeyLen)
 	return encodeArgon(c.argon, salt, key), nil
 }
@@ -98,7 +98,7 @@ func verifyArgon(password, encoded string) (bool, bool, error) {
 	}
 	p.KeyLen = uint32(len(want))
 	got := argon2.IDKey([]byte(password), salt, p.Time, p.Memory, p.Threads, p.KeyLen)
-	if !subtlex.BytesEqual(got, want) {
+	if !consttime.BytesEqual(got, want) {
 		return false, false, nil
 	}
 	def := kdf.DefaultParams()
