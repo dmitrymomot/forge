@@ -15,7 +15,7 @@ forge ships the HTTP *seed* — `httpserver`, `hostrouter`, `render`, `htmx`, `r
 **In (6 packages):**
 
 - `middleware` — the `Middleware` seam, `Chain`/`Wrap`, and a shared status/size-capturing `ResponseWriter`.
-- `problem` — a pluggable error-**Responder** seam with a predefined JSON (RFC 9457) responder. The seam stays open so a consumer can supply their own (e.g. HTML) responder; no HTML/negotiated responder ships in this cut.
+- `problem` — a pluggable error-**Responder** seam shipping JSON (RFC 9457) and plain-text responders plus `Negotiate` (picks by `Accept`). The plain-text responder uses `text/template`, so no HTML lives in Go code; consumers wanting real HTML pass their own `Responder`.
 - `recoverer` — panic → 500-via-responder, logged.
 - `requestid` — inbound-or-generated correlation id + `logger.ContextExtractor`.
 - `clientip` — hardened, batteries-included client-IP resolution engine + caching middleware + canonical accessor + `logger.ContextExtractor`. **Absorbs and replaces `request.ClientIP`** and the roadmap's planned `realip`.
@@ -102,15 +102,18 @@ func From(err error, opts ...Option) Problem
 
 ### Predefined responders
 
-Configurable via options (`WithLogger`, `WithStatusOf`/`WithStatus`, `WithTypeBaseURI`):
+Configurable via options (`WithLogger`, `WithStatusOf`/`WithStatus`, `WithTypeBaseURI`, `WithTemplate`):
 
 ```go
-func JSON(opts ...Option) Responder      // application/problem+json, via render.JSON + bufpool
+func JSON(opts ...Option) Responder             // application/problem+json, via render.JSON
+func Text(opts ...Option) Responder             // text/plain, via text/template + render.Text
+func Negotiate(json, text Responder) Responder  // picks Text when Accept prefers text/*, else JSON
 ```
 
-- 5xx responders **log** the underlying error (with `r.Context()`, so `request_id`/`client_ip` ride along) but never place `err.Error()` in the body.
+- **No HTML in Go code.** The second responder is **plain text** rendered with `text/template` (not `html/template`), so no markup is embedded or escaped. `WithTemplate(*text/template.Template)` overrides the default text layout; the default prints `"<status> <title>"` plus `detail`/`code`/`fields` when present (rendered through `bufpool` → `render.Text`).
+- `Negotiate` scans the `Accept` header in order: a `text/*` range (e.g. a browser's `text/html`) selects `Text`; `application/json`, `application/problem+json`, `application/*`, `*/*`, or an absent `Accept` selects `JSON`. (Q-values are not weighted — full weighting is the standalone `negotiate` package's job later; this ordered scan covers browser-vs-API.)
+- 5xx responders **log** the underlying error (with `r.Context()`, so `request_id`/`client_ip` ride along) but never place `err.Error()` in the body — `From` already omits `Detail` for 5xx, so both JSON and Text bodies show only status/title.
 - Default responder anywhere one is unset: `JSON()`.
-- **JSON is the only shipped responder in this cut.** The `Responder` seam is open: a consumer wanting an HTML error page passes their own `func(w, r, err)`. A shipped `problem.HTML` (and a `Negotiate` that picks by `Accept`) can be added later without breaking the seam.
 
 ### Sentinels
 
@@ -290,7 +293,7 @@ The recipe includes a handler that returns a domain error carrying an `errorsx` 
 Black-box (`package X_test`), `httptest` + a next-handler spy, race-green:
 
 - **middleware** — chain order (outermost-first), empty chain identity, `WrapWriter` status/bytes capture, `Unwrap` reaches `http.Flusher`/`Hijacker` via `http.ResponseController`, idempotent re-wrap.
-- **problem** — `From` status/code/field mapping for `request.Error`, `validate.Errors`, coded and plain errors; `JSON` emits `application/problem+json`; **5xx never contains `err.Error()`**; `WithStatus` override; a custom `Responder` is honored where one is passed.
+- **problem** — `From` status/code/field mapping for `request.Error`, `validate.Errors`, coded and plain errors; `JSON` emits `application/problem+json`; `Text` emits `text/plain` (default layout and `WithTemplate` override); `Negotiate` picks `Text` for `Accept: text/html`, `JSON` for `application/json`/absent; **neither body contains `err.Error()` on 5xx**; `WithStatus` override; a custom `Responder` is honored where one is passed.
 - **clientip** — every strategy and preset: remoteAddr default; single-header (present/absent → fallback); trusted-ranges rightmost-untrusted over XFF **and** Forwarded; multi-instance XFF headers flattened; trusted-hop-count bounds; leftmost-non-private; all-trusted → non-private fallback; bad CIDR string → config error; IPv6/IPv4-mapped normalization; `Middleware` caches (resolves once, `From` true-even-when-empty); `Get` fallback when uninstalled; `LogExtractor` skips empty. Port the migrated `request` cases; add `TestClientIPTrustedParsesForwarded`.
 - **recoverer** — panic → 500 problem; already-written response only logs; `http.ErrAbortHandler` re-panics; `ErrPanic` is `errors.Is`-matchable; custom responder used.
 - **requestid** — inbound trusted vs generated; guard rejects oversized/non-ASCII/empty; response header echoed; `WithGenerator`/`WithHeader`/`WithTrustInbound`; `LogExtractor` injects.
@@ -312,4 +315,4 @@ Ship as one PR (matching the resilience-bundle cadence), or split `middleware`+`
 
 ## 14. Non-goals (this bundle)
 
-`timeout`, `bodylimit`, `cors`, `compress`, `bind`, standalone `negotiate`, `static`, `upload`, `proxy`, `conditional` — the next P3 PR. Full realclientip-style pluggable Strategy *interface* — not needed; the option-based strategies + presets cover the cases, and a rarely-needed one can be added as another option later. HTML / negotiated error responders — out of this cut; only `problem.JSON` ships. The `Responder` seam stays open so a consumer supplies their own HTML responder, and a shipped `problem.HTML` / `Negotiate` can be added later without breaking the seam.
+`timeout`, `bodylimit`, `cors`, `compress`, `bind`, standalone `negotiate`, `static`, `upload`, `proxy`, `conditional` — the next P3 PR. Full realclientip-style pluggable Strategy *interface* — not needed; the option-based strategies + presets cover the cases, and a rarely-needed one can be added as another option later. Rich **HTML** error pages — out; a real HTML responder needs `html/template` (escaping) and arguably sanitization, and we deliberately keep HTML out of the framework's Go code. `problem` ships JSON + plain-text (`text/template`) + `Negotiate`; a consumer wanting HTML supplies their own `Responder`.
