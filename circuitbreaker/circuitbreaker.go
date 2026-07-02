@@ -168,12 +168,6 @@ func (b *Breaker) after(err error) {
 			b.openedAt = b.cfg.clk.Now()
 			b.transition(StateOpen)
 		}
-	case StateOpen:
-		// A sibling probe admitted in half-open can complete after another
-		// probe already reopened the breaker; keep the in-flight counter honest.
-		if b.halfOpenIn > 0 {
-			b.halfOpenIn--
-		}
 	}
 }
 
