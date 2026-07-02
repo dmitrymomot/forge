@@ -119,3 +119,54 @@ func BenchmarkCurrencyByCode(b *testing.B) {
 		_, _ = money.CurrencyByCode("usd")
 	}
 }
+
+func BenchmarkNeg(b *testing.B) {
+	m := money.FromMinor(150, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = m.Neg()
+	}
+}
+
+func BenchmarkEqual(b *testing.B) {
+	m := money.FromMinor(150, money.USD)
+	n := money.FromMinor(150, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = m.Equal(n)
+	}
+}
+
+func BenchmarkSum(b *testing.B) {
+	x := money.FromMinor(150, money.USD)
+	y := money.FromMinor(275, money.USD)
+	z := money.FromMinor(75, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = money.Sum(x, y, z)
+	}
+}
+
+func BenchmarkMoneyMarshalJSON(b *testing.B) {
+	m := money.FromMinor(150, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = m.MarshalJSON()
+	}
+}
+
+func BenchmarkMoneyValue(b *testing.B) {
+	m := money.FromMinor(150, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = m.Value()
+	}
+}
+
+func BenchmarkMoneyScan(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var m money.Money
+		_ = m.Scan("1.50 USD")
+	}
+}

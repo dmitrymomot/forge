@@ -14,3 +14,8 @@ var ErrUnknownCurrency = errors.New("money: unknown currency")
 // less (nothing to allocate proportionally), and by Split for a non-positive
 // part count.
 var ErrInvalidAllocation = errors.New("money: invalid allocation ratios")
+
+// ErrScan is returned by Money.Scan when the SQL source value cannot be parsed
+// as the "<amount> <code>" text form, and by Value and MarshalJSON when the
+// Money has no currency code to serialize.
+var ErrScan = errors.New("money: unsupported Scan source")
