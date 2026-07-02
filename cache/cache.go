@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/dmitrymomot/forge/singleflight"
@@ -25,7 +26,10 @@ func WithPrefix(p string) Option { return func(c *config) { c.prefix = p } }
 // WithDefaultTTL is applied when Set receives ttl == 0 (default 5m).
 func WithDefaultTTL(d time.Duration) Option { return func(c *config) { c.defaultTTL = d } }
 
-// WithMarshaler overrides the default JSON serialization.
+// WithMarshaler overrides the default JSON serialization. Its type parameter
+// must match the value type of the Cache it is passed to: New[V] panics if the
+// marshaler is a Marshaler[W] for some W != V (the Option type is non-generic,
+// so the mismatch cannot be caught at compile time).
 func WithMarshaler[V any](m Marshaler[V]) Option {
 	return func(c *config) {
 		if m != nil {
@@ -54,7 +58,11 @@ func New[V any](store Store, opts ...Option) *Cache[V] {
 	}
 	var m Marshaler[V]
 	if c.marshaler != nil {
-		m = c.marshaler.(Marshaler[V]) // set by WithMarshaler[V]; V matches New[V]
+		tm, ok := c.marshaler.(Marshaler[V])
+		if !ok {
+			panic(fmt.Sprintf("cache: WithMarshaler marshaler %T does not match the Cache value type", c.marshaler))
+		}
+		m = tm
 	} else {
 		m = jsonMarshaler[V]{}
 	}

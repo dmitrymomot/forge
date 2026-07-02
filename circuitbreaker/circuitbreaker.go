@@ -1,5 +1,3 @@
-// Package circuitbreaker fails fast against a failing dependency using a
-// closed/open/half-open state machine.
 package circuitbreaker
 
 import (

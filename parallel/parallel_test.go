@@ -65,3 +65,11 @@ func TestGroupCollectAll(t *testing.T) {
 	assert.Contains(t, err.Error(), "even 2")
 	assert.Contains(t, err.Error(), "even 4")
 }
+
+func TestContextCancelledAfterWait(t *testing.T) {
+	g, ctx := parallel.New(t.Context())
+	g.Go(func(context.Context) error { return nil })
+	require.NoError(t, g.Wait())
+	// The derived context is always cancelled once Wait returns, even on success.
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+}

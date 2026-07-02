@@ -1,4 +1,3 @@
-// Package backoff computes retry delays as pure, stateless strategies.
 package backoff
 
 import (

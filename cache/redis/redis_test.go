@@ -50,3 +50,26 @@ func TestRedisStoreRoundTripAndScopedClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "keep", kept)
 }
+
+func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
+	client := testClient(t) // SKIPs without TEST_REDIS_URL
+	store := cacheredis.NewStore(client)
+
+	// The prefix contains a glob metacharacter '['. DeletePrefix must match it
+	// literally (like the in-memory store's strings.HasPrefix), not as a Redis
+	// pattern — otherwise "g[x]" would also match the sibling "gx".
+	target := cache.New[string](store, cache.WithPrefix("test:cache:g[x]:"))
+	sibling := cache.New[string](store, cache.WithPrefix("test:cache:gx:"))
+
+	require.NoError(t, target.Set(t.Context(), "1", "gone", time.Minute))
+	require.NoError(t, sibling.Set(t.Context(), "1", "keep", time.Minute))
+
+	require.NoError(t, target.Clear(t.Context()))
+
+	_, err := target.Get(t.Context(), "1")
+	assert.ErrorIs(t, err, cache.ErrNotFound)
+
+	kept, err := sibling.Get(t.Context(), "1") // literal match: sibling untouched
+	require.NoError(t, err)
+	assert.Equal(t, "keep", kept)
+}

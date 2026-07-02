@@ -1,6 +1,3 @@
-// Package parallel runs work concurrently with a bounded worker count. By
-// default it is fail-fast (first error cancels the rest); WithCollectAll runs
-// everything and joins all errors.
 package parallel
 
 import (

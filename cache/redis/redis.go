@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -51,10 +52,28 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
+// escapeGlob escapes Redis glob metacharacters so a prefix is matched
+// literally by SCAN MATCH. Without this, a prefix containing * ? [ ] \ would be
+// interpreted as a pattern, diverging from the in-memory store's literal
+// strings.HasPrefix and breaking prefix isolation.
+func escapeGlob(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '*', '?', '[', ']', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func (s *store) DeletePrefix(ctx context.Context, prefix string) error {
+	pattern := escapeGlob(prefix) + "*"
 	var cursor uint64
 	for {
-		keys, next, err := s.client.Scan(ctx, cursor, prefix+"*", 100).Result()
+		keys, next, err := s.client.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
 			return err
 		}

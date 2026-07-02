@@ -120,3 +120,37 @@ func TestGetOrSetWrapsUnclassifiedStoreError(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrStore) // tagged with our sentinel
 	assert.ErrorIs(t, err, boom)           // original preserved for unwrapping
 }
+
+// rawStringMarshaler stores strings verbatim (no JSON quoting) so a test can
+// tell whether WithMarshaler actually replaced the default JSON marshaler.
+type rawStringMarshaler struct{}
+
+func (rawStringMarshaler) Marshal(v string) ([]byte, error)      { return []byte(v), nil }
+func (rawStringMarshaler) Unmarshal(data []byte) (string, error) { return string(data), nil }
+
+func TestWithMarshalerUsesCustomMarshaler(t *testing.T) {
+	store := cache.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+	c := cache.New[string](store, cache.WithMarshaler(rawStringMarshaler{}))
+
+	require.NoError(t, c.Set(t.Context(), "k", "hi", -1))
+
+	// Stored bytes are raw, not JSON-quoted (`"hi"`), so the custom marshaler ran.
+	raw, err := store.Get(t.Context(), "k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hi"), raw)
+
+	v, err := c.Get(t.Context(), "k")
+	require.NoError(t, err)
+	assert.Equal(t, "hi", v)
+}
+
+func TestWithMarshalerTypeMismatchPanics(t *testing.T) {
+	store := cache.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+	// A Marshaler[string] passed to New[int] cannot be caught at compile time
+	// (Option is non-generic); New must panic rather than silently misbehave.
+	assert.Panics(t, func() {
+		_ = cache.New[int](store, cache.WithMarshaler(rawStringMarshaler{}))
+	})
+}

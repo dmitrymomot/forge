@@ -75,3 +75,26 @@ func TestRetrierReusable(t *testing.T) {
 	assert.Error(t, r.Do(t.Context(), func(context.Context) error { return errors.New("x") }))
 	assert.NoError(t, r.Do(t.Context(), func(context.Context) error { return nil }))
 }
+
+func TestWithMaxAttemptsZeroIgnored(t *testing.T) {
+	calls := 0
+	err := retry.Do(t.Context(), func(context.Context) error {
+		calls++
+		return errors.New("boom")
+	}, retry.WithMaxAttempts(0), fast) // 0 ignored -> default of 3 attempts
+	assert.Error(t, err)
+	assert.Equal(t, 3, calls)
+}
+
+func TestWithBackoffNilIgnored(t *testing.T) {
+	// A nil backoff must be ignored (the default is kept), not stored — otherwise
+	// Next would be invoked on a nil Backoff. Permanent stops after one call, so
+	// no real backoff wait is incurred.
+	calls := 0
+	err := retry.Do(t.Context(), func(context.Context) error {
+		calls++
+		return retry.Permanent(errors.New("stop"))
+	}, retry.WithBackoff(nil))
+	assert.Error(t, err)
+	assert.Equal(t, 1, calls)
+}
