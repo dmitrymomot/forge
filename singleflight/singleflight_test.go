@@ -19,9 +19,7 @@ func TestCoalescesConcurrentCalls(t *testing.T) {
 	results := make([]int, 20)
 	var wg sync.WaitGroup
 	for i := range results {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			v, _, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
 				calls.Add(1)
@@ -30,7 +28,7 @@ func TestCoalescesConcurrentCalls(t *testing.T) {
 			})
 			assert.NoError(t, err)
 			results[i] = v
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

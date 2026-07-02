@@ -15,7 +15,7 @@ import (
 
 func TestCacheSetGetTyped(t *testing.T) {
 	store := cache.NewMemoryStore()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	c := cache.New[string](store, cache.WithPrefix("greet:"))
 
 	require.NoError(t, c.Set(t.Context(), "en", "hello", 0))
@@ -26,7 +26,7 @@ func TestCacheSetGetTyped(t *testing.T) {
 
 func TestCacheMissIsErrNotFound(t *testing.T) {
 	store := cache.NewMemoryStore()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	c := cache.New[int](store)
 	_, err := c.Get(t.Context(), "nope")
 	assert.ErrorIs(t, err, cache.ErrNotFound)
@@ -34,7 +34,7 @@ func TestCacheMissIsErrNotFound(t *testing.T) {
 
 func TestCacheIsolationByPrefixOverSharedStore(t *testing.T) {
 	store := cache.NewMemoryStore()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	a := cache.New[string](store, cache.WithPrefix("a:"))
 	b := cache.New[string](store, cache.WithPrefix("b:"))
 
@@ -57,16 +57,14 @@ func TestCacheIsolationByPrefixOverSharedStore(t *testing.T) {
 
 func TestGetOrSetStampede(t *testing.T) {
 	store := cache.NewMemoryStore()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	c := cache.New[int](store)
 
 	var calls atomic.Int32
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			v, err := c.GetOrSet(t.Context(), "k", func(context.Context) (int, time.Duration, error) {
 				calls.Add(1)
@@ -75,7 +73,7 @@ func TestGetOrSetStampede(t *testing.T) {
 			})
 			assert.NoError(t, err)
 			assert.Equal(t, 99, v)
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

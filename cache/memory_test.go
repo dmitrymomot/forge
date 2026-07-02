@@ -13,7 +13,7 @@ import (
 
 func TestMemoryStoreSetGetDelete(t *testing.T) {
 	s := cache.NewMemoryStore()
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	require.NoError(t, s.Set(t.Context(), "k", []byte("v"), 0))
 	got, err := s.Get(t.Context(), "k")
@@ -28,7 +28,7 @@ func TestMemoryStoreSetGetDelete(t *testing.T) {
 func TestMemoryStoreExpiry(t *testing.T) {
 	clk := clock.NewMock(time.Now())
 	s := cache.NewMemoryStore(cache.WithClock(clk))
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	require.NoError(t, s.Set(t.Context(), "k", []byte("v"), 30*time.Second))
 	clk.Advance(31 * time.Second)
@@ -39,7 +39,7 @@ func TestMemoryStoreExpiry(t *testing.T) {
 func TestMemoryStoreNegativeTTLNeverExpires(t *testing.T) {
 	clk := clock.NewMock(time.Now())
 	s := cache.NewMemoryStore(cache.WithClock(clk))
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	require.NoError(t, s.Set(t.Context(), "k", []byte("v"), -1))
 	clk.Advance(1000 * time.Hour)
@@ -50,7 +50,7 @@ func TestMemoryStoreNegativeTTLNeverExpires(t *testing.T) {
 
 func TestMemoryStoreLRUEviction(t *testing.T) {
 	s := cache.NewMemoryStore(cache.WithMaxEntries(2))
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	require.NoError(t, s.Set(t.Context(), "a", []byte("1"), -1))
 	require.NoError(t, s.Set(t.Context(), "b", []byte("2"), -1))
@@ -65,7 +65,7 @@ func TestMemoryStoreLRUEviction(t *testing.T) {
 
 func TestMemoryStoreDeletePrefix(t *testing.T) {
 	s := cache.NewMemoryStore()
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	require.NoError(t, s.Set(t.Context(), "a:1", []byte("x"), -1))
 	require.NoError(t, s.Set(t.Context(), "a:2", []byte("x"), -1))

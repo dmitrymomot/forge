@@ -84,8 +84,7 @@ func (r *Retrier) Do(ctx context.Context, fn func(context.Context) error) error 
 		if err == nil {
 			return nil
 		}
-		var perm *permanentError
-		if errors.As(err, &perm) {
+		if perm, ok := errors.AsType[*permanentError](err); ok {
 			return perm.err
 		}
 		lastErr = err
