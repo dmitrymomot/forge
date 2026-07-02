@@ -3,6 +3,7 @@ package circuitbreaker_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,4 +65,38 @@ func TestHalfOpenProbeFailureReopens(t *testing.T) {
 	clk.Advance(5 * time.Second)
 	_ = b.Do(t.Context(), fail) // half-open probe fails
 	assert.Equal(t, circuitbreaker.StateOpen, b.State())
+}
+
+func TestHalfOpenMaxAdmitsConcurrentProbesThenRejects(t *testing.T) {
+	clk := clock.NewMock(time.Now())
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(time.Second),
+		circuitbreaker.WithHalfOpenMax(2),
+		circuitbreaker.WithClock(clk),
+	)
+	_ = b.Do(t.Context(), fail) // trip open
+	assert.Equal(t, circuitbreaker.StateOpen, b.State())
+	clk.Advance(time.Second) // allow half-open probing
+
+	inProbe := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			_ = b.Do(t.Context(), func(context.Context) error {
+				inProbe <- struct{}{}
+				<-release
+				return nil
+			})
+		})
+	}
+	<-inProbe // both probes admitted and running in half-open
+	<-inProbe
+	// A third probe must be rejected: halfOpenIn(2) >= halfOpenMax(2).
+	assert.ErrorIs(t, b.Do(t.Context(), ok), circuitbreaker.ErrOpen)
+	close(release)
+	wg.Wait()
+	// Both probes succeeded → breaker closed.
+	assert.Equal(t, circuitbreaker.StateClosed, b.State())
 }

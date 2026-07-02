@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/dmitrymomot/forge/singleflight"
@@ -104,11 +105,24 @@ func (c *Cache[V]) Clear(ctx context.Context) error {
 // GetOrSet returns the cached value or computes it via fn on a miss,
 // deduplicating concurrent misses so fn runs once per key. The value is cached
 // best-effort with the TTL fn returns; load errors are not cached.
+//
+// Only a genuine miss (ErrNotFound) invokes fn. A Store failure or an
+// unreadable cached entry is surfaced as an error rather than masked as a
+// miss: errors already matching a cache sentinel pass through unchanged, and
+// any other Store error is wrapped with ErrStore (unwrap for the original).
 func (c *Cache[V]) GetOrSet(ctx context.Context, key string, fn func(context.Context) (V, time.Duration, error)) (V, error) {
-	if v, err := c.Get(ctx, key); err == nil {
+	v, err := c.Get(ctx, key)
+	if err == nil {
 		return v, nil
 	}
-	v, _, err := c.sf.Do(ctx, c.key(key), func(ctx context.Context) (V, error) {
+	if !errors.Is(err, ErrNotFound) {
+		var zero V
+		if errors.Is(err, ErrClosed) || errors.Is(err, ErrMarshal) || errors.Is(err, ErrUnmarshal) {
+			return zero, err
+		}
+		return zero, errors.Join(ErrStore, err)
+	}
+	v, _, err = c.sf.Do(ctx, c.key(key), func(ctx context.Context) (V, error) {
 		val, ttl, ferr := fn(ctx)
 		if ferr != nil {
 			var zero V

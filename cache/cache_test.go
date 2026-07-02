@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -86,4 +87,36 @@ func TestGetOrSetStampede(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 99, v)
+}
+
+func TestGetOrSetSurfacesClosedStore(t *testing.T) {
+	store := cache.NewMemoryStore()
+	require.NoError(t, store.Close())
+	c := cache.New[int](store)
+	_, err := c.GetOrSet(t.Context(), "k", func(context.Context) (int, time.Duration, error) {
+		t.Fatal("loader must not run when the Store errors")
+		return 0, 0, nil
+	})
+	assert.ErrorIs(t, err, cache.ErrClosed) // existing sentinel passes through
+}
+
+// errStore is a Store stub whose Get fails with a non-sentinel error.
+type errStore struct{ getErr error }
+
+func (e errStore) Get(context.Context, string) ([]byte, error)            { return nil, e.getErr }
+func (errStore) Set(context.Context, string, []byte, time.Duration) error { return nil }
+func (errStore) Delete(context.Context, string) error                     { return nil }
+func (errStore) Has(context.Context, string) (bool, error)                { return false, nil }
+func (errStore) DeletePrefix(context.Context, string) error               { return nil }
+func (errStore) Close() error                                             { return nil }
+
+func TestGetOrSetWrapsUnclassifiedStoreError(t *testing.T) {
+	boom := errors.New("connection reset")
+	c := cache.New[int](errStore{getErr: boom})
+	_, err := c.GetOrSet(t.Context(), "k", func(context.Context) (int, time.Duration, error) {
+		t.Fatal("loader must not run when the Store errors")
+		return 0, 0, nil
+	})
+	assert.ErrorIs(t, err, cache.ErrStore) // tagged with our sentinel
+	assert.ErrorIs(t, err, boom)           // original preserved for unwrapping
 }

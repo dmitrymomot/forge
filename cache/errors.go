@@ -12,4 +12,6 @@ var (
 	ErrMarshal = errors.New("cache: failed to marshal value")
 	// ErrUnmarshal is returned when value deserialization fails.
 	ErrUnmarshal = errors.New("cache: failed to unmarshal value")
+	// ErrStore wraps an unclassified error returned by the underlying Store.
+	ErrStore = errors.New("cache: store operation failed")
 )
