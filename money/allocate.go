@@ -16,13 +16,22 @@ func (m Money) Allocate(ratios ...int) ([]Money, error) {
 		if r < 0 {
 			return nil, ErrInvalidAllocation
 		}
-		sum += r
+		next := sum + r
+		if next < sum { // int overflow: ratios non-negative, so the sum only grows
+			return nil, ErrOverflow
+		}
+		sum = next
 	}
 	if sum <= 0 {
 		return nil, ErrInvalidAllocation
 	}
 
-	total := m.Minor()
+	// total must fit int64 for the largest-remainder math below; an amount whose
+	// minor-unit count overflows cannot be split without silent wraparound.
+	total, ok := m.minorChecked()
+	if !ok {
+		return nil, ErrOverflow
+	}
 
 	// Signed floor toward zero plus remainder tracking, largest-remainder
 	// distribution of the leftover units.
@@ -34,7 +43,12 @@ func (m Money) Allocate(ratios ...int) ([]Money, error) {
 	parts := make([]part, len(ratios))
 	var allocated int64
 	for i, r := range ratios {
-		prod := total * int64(r)
+		// The sibling decimal package promotes to big.Int on overflow; the int64
+		// largest-remainder math here cannot, so it refuses rather than wrap.
+		prod, ok := mulInt64(total, int64(r))
+		if !ok {
+			return nil, ErrOverflow
+		}
 		base := prod / int64(sum) // truncates toward zero in Go
 		rem := prod - base*int64(sum)
 		if rem < 0 {
@@ -86,4 +100,17 @@ func (m Money) Split(n int) ([]Money, error) {
 		ratios[i] = 1
 	}
 	return m.Allocate(ratios...)
+}
+
+// mulInt64 returns a*b, reporting ok=false on int64 overflow. b is a
+// non-negative ratio here, so the MinInt64 * -1 edge cannot arise.
+func mulInt64(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	c := a * b
+	if c/b != a {
+		return 0, false
+	}
+	return c, true
 }

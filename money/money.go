@@ -58,8 +58,25 @@ func (m Money) Amount() decimal.Decimal { return m.amount }
 func (m Money) Currency() Currency { return m.currency }
 
 // Minor returns the amount rounded to the currency's MinorUnits (banker's
-// rounding, decimal.HalfEven) expressed as an integer count of minor units.
+// rounding, decimal.HalfEven) expressed as an integer count of minor units. The
+// amount is arbitrary-precision, so for an astronomically large value whose
+// minor-unit count does not fit in int64 the result saturates to
+// math.MaxInt64/MinInt64; use MinorOK to detect that case.
 func (m Money) Minor() int64 {
+	n, _ := m.minorChecked()
+	return n
+}
+
+// MinorOK is Minor with an ok flag: ok is false when the minor-unit count
+// overflows int64 (and the returned value has saturated). Allocate and Split use
+// this to refuse amounts they cannot split exactly.
+func (m Money) MinorOK() (n int64, ok bool) {
+	return m.minorChecked()
+}
+
+// minorChecked rounds the amount to MinorUnits and returns the integer minor-unit
+// count, reporting ok=false when it overflows int64.
+func (m Money) minorChecked() (n int64, ok bool) {
 	rounded := m.amount.Round(m.currency.MinorUnits, decimal.HalfEven)
 	scaled := rounded.Rescale(m.currency.MinorUnits, decimal.HalfEven)
 	// scaled has exactly MinorUnits fractional digits; multiplying by
@@ -70,8 +87,8 @@ func (m Money) Minor() int64 {
 	if dot := strings.IndexByte(s, '.'); dot >= 0 {
 		s = s[:dot]
 	}
-	n, _ := strconv.ParseInt(s, 10, 64)
-	return n
+	v, err := strconv.ParseInt(s, 10, 64)
+	return v, err == nil
 }
 
 // minorFactor returns 10^n as a Decimal for a small non-negative n.

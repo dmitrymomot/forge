@@ -45,6 +45,14 @@ func BenchmarkMinor(b *testing.B) {
 	}
 }
 
+func BenchmarkMinorOK(b *testing.B) {
+	m := money.FromMinor(150, money.USD)
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = m.MinorOK()
+	}
+}
+
 func BenchmarkString(b *testing.B) {
 	m := money.FromMinor(150, money.USD)
 	b.ReportAllocs()
