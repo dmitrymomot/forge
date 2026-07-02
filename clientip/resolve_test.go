@@ -91,3 +91,23 @@ func TestResolveMalformedRemoteAddr(t *testing.T) {
 func TestTrustedRangesPanicsOnBadCIDR(t *testing.T) {
 	assert.Panics(t, func() { clientip.TrustedRanges("not-a-cidr") })
 }
+
+func TestCloudflarePreset(t *testing.T) {
+	r := req("10.0.0.1:1", map[string][]string{"CF-Connecting-IP": {"198.51.100.7"}})
+	assert.Equal(t, "198.51.100.7", clientip.Resolve(r, clientip.Cloudflare()))
+}
+
+func TestEnvoyPreset(t *testing.T) {
+	r := req("10.0.0.1:1", map[string][]string{"x-envoy-external-address": {"203.0.113.4"}})
+	assert.Equal(t, "203.0.113.4", clientip.Resolve(r, clientip.Envoy()))
+}
+
+func TestCloudFrontStripsPort(t *testing.T) {
+	r := req("10.0.0.1:1", map[string][]string{"CloudFront-Viewer-Address": {"203.0.113.8:52193"}})
+	assert.Equal(t, "203.0.113.8", clientip.Resolve(r, clientip.CloudFront()))
+}
+
+func TestTrustPrivateProxies(t *testing.T) {
+	r := req("10.1.1.1:80", map[string][]string{"X-Forwarded-For": {"203.0.113.5, 10.1.1.1"}})
+	assert.Equal(t, "203.0.113.5", clientip.Resolve(r, clientip.TrustPrivateProxies()))
+}
