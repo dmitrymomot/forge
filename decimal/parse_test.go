@@ -152,3 +152,32 @@ func TestString_NegativeNonZeroBig(t *testing.T) {
 	d := decimal.MustParse("-" + bigVal + ".01")
 	assert.Equal(t, "-"+bigVal+".01", d.String())
 }
+
+// TestParse_TrailingDotForms pins the grammar boundary for a trailing '.' with
+// no fractional digits: it is accepted as the integer at scale 0 (multi-digit
+// and signed forms included), while a dot with no digits on either side is a
+// syntax error. The round-trip table covers the bare "5." case; this locks the
+// signed and multi-digit variants plus the contrasting error path.
+func TestParse_TrailingDotForms(t *testing.T) {
+	ok := []struct{ in, want string }{
+		{"123.", "123"},
+		{"-7.", "-7"},
+		{"+9.", "9"},
+	}
+	for _, tc := range ok {
+		t.Run("ok_"+tc.in, func(t *testing.T) {
+			d, err := decimal.Parse(tc.in)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, d.String())
+			assert.Equal(t, int32(0), d.Scale())
+		})
+	}
+
+	for _, bad := range []string{".", "+.", "-."} {
+		t.Run("bad_"+bad, func(t *testing.T) {
+			_, err := decimal.Parse(bad)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, decimal.ErrSyntax))
+		})
+	}
+}

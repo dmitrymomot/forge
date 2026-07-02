@@ -137,3 +137,20 @@ func assertRatEq(t *testing.T, want *big.Rat, got decimal.Decimal, op string, a,
 	require.True(t, want.Cmp(toRat(got)) == 0,
 		"%s(%s, %s) = %s; oracle = %s", op, a.String(), b.String(), got.String(), want.RatString())
 }
+
+// TestMul_NegativeConstructedScale locks the interaction between New's
+// negative-scale normalization and Mul's scale-sum rule: New(coef, negScale)
+// first scales the coefficient up to scale 0, so the product's scale is the sum
+// of the ALREADY-normalized scales — a porting trap for anyone assuming the
+// negative scale survives into Mul (as it would in shopspring's exp model).
+func TestMul_NegativeConstructedScale(t *testing.T) {
+	a := decimal.New(1234, -5) // 1234 * 10^5 = 123400000 at scale 0
+	assert.Equal(t, int32(0), a.Scale())
+	assert.Equal(t, "123400000", a.String())
+
+	b := decimal.New(45, 1) // 4.5 at scale 1
+	prod := a.Mul(b)
+	// scale = 0 + 1 = 1; 123400000 * 4.5 = 555300000.0
+	assert.Equal(t, "555300000.0", prod.String())
+	assert.Equal(t, int32(1), prod.Scale())
+}

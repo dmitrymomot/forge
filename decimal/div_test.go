@@ -169,3 +169,70 @@ func TestDiv_NegativeExponentScalesDenominator(t *testing.T) {
 	// 123.456789 / 2 = 61.7283945 -> rounded to scale 0 -> 62 (HalfEven, .72.. > .5).
 	assert.Equal(t, "62", got.String())
 }
+
+// TestDiv_HalfEvenTieRoundsUpToEven complements TestDiv_KnownAnswers, which only
+// exercises HalfEven ties whose truncated quotient is already even (rounds down,
+// e.g. 10/4@0 -> 2). Here the truncated quotient is ODD, so HalfEven must round
+// UP to reach the even neighbor — the case that separates HalfEven from mere
+// truncation / HalfDown inside Div.
+func TestDiv_HalfEvenTieRoundsUpToEven(t *testing.T) {
+	tests := []struct {
+		a, b  string
+		scale int32
+		mode  decimal.RoundingMode
+		want  string
+	}{
+		{"3", "2", 0, decimal.HalfEven, "2"},   // 1.5 tie, q=1 odd -> up to even 2
+		{"1", "4", 1, decimal.HalfEven, "0.2"}, // 0.25 tie, q=2 even -> keep 0.2
+		{"3", "4", 1, decimal.HalfEven, "0.8"}, // 0.75 tie, q=7 odd -> up to even 0.8
+		{"1", "4", 1, decimal.HalfUp, "0.3"},   // same 0.25 tie, HalfUp -> away from zero
+	}
+	for _, tc := range tests {
+		t.Run(tc.a+"_div_"+tc.b, func(t *testing.T) {
+			q, err := decimal.MustParse(tc.a).Div(decimal.MustParse(tc.b), tc.scale, tc.mode)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, q.String())
+		})
+	}
+}
+
+// TestDiv_DirectedModesCeilUp covers the Ceil and Up branches of Div on a
+// non-terminating quotient. TestDiv_KnownAnswers exercises Floor and Down but
+// never Ceil or Up, so divRound's toward-+inf / away-from-zero paths are
+// otherwise untested via Div (including the sign-aware Ceil on a negative).
+func TestDiv_DirectedModesCeilUp(t *testing.T) {
+	tests := []struct {
+		a, b  string
+		scale int32
+		mode  decimal.RoundingMode
+		want  string
+	}{
+		{"100", "3", 2, decimal.Ceil, "33.34"},   // 33.333... toward +inf
+		{"1", "3", 4, decimal.Up, "0.3334"},      // 0.3333... away from zero
+		{"-100", "3", 2, decimal.Ceil, "-33.33"}, // Ceil on negative moves toward zero
+	}
+	for _, tc := range tests {
+		t.Run(tc.a+"_div_"+tc.b, func(t *testing.T) {
+			q, err := decimal.MustParse(tc.a).Div(decimal.MustParse(tc.b), tc.scale, tc.mode)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, q.String())
+		})
+	}
+}
+
+// TestDiv_LargeNegativeExponent drives the exp<0 branch of Div (denominator
+// scaled by 10^-exp) with a divisor whose scale is large, producing a
+// big-magnitude quotient. TestDiv_NegativeExponentScalesDenominator only takes
+// this branch with a small result; these push it to int64-boundary magnitudes
+// and force a HalfEven round on the resulting large remainder.
+func TestDiv_LargeNegativeExponent(t *testing.T) {
+	// 1 / 1e-14 = 1e14 exact; denominator multiplied by 10^14.
+	got, err := decimal.MustParse("1").Div(decimal.MustParse("0.00000000000001"), 0, decimal.HalfEven)
+	require.NoError(t, err)
+	assert.Equal(t, "100000000000000", got.String())
+
+	// 2 / 3e-19 = 6.666...e18; HalfEven rounds the last digit up to 7.
+	got2, err := decimal.FromInt(2).Div(decimal.MustParse("0.0000000000000000003"), 0, decimal.HalfEven)
+	require.NoError(t, err)
+	assert.Equal(t, "6666666666666666667", got2.String())
+}
