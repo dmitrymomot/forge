@@ -130,8 +130,7 @@ func From(err error, opts ...Option) Problem {
 
 // extractFields pulls per-field messages from a validate.Errors or *request.Error.
 func extractFields(err error) map[string]string {
-	var ve validate.Errors
-	if errors.As(err, &ve) {
+	if ve, ok := errors.AsType[validate.Errors](err); ok {
 		out := make(map[string]string, len(ve))
 		for field, vs := range ve.ByField() {
 			parts := make([]string, len(vs))
@@ -142,8 +141,7 @@ func extractFields(err error) map[string]string {
 		}
 		return out
 	}
-	var re *request.Error
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*request.Error](err); ok {
 		key := string(re.Source)
 		if re.Key != "" {
 			key = re.Key
