@@ -164,3 +164,42 @@ func FuzzAllocate_SumInvariant(f *testing.F) {
 		}
 	})
 }
+
+// TestAllocate_ZeroRatioReceivesZero covers the valid case where a ZERO ratio
+// (allowed because the ratio sum is > 0) yields a zero part while the weighted
+// buckets absorb the whole amount. TestAllocate_InvalidRatios only covers the
+// all-zero (sum == 0) rejection, never a zero-among-positives split.
+func TestAllocate_ZeroRatioReceivesZero(t *testing.T) {
+	parts, err := money.FromMinor(100, money.USD).Allocate(0, 0, 5)
+	require.NoError(t, err)
+	require.Len(t, parts, 3)
+	assert.Equal(t, int64(0), parts[0].Minor())
+	assert.Equal(t, int64(0), parts[1].Minor())
+	assert.Equal(t, int64(100), parts[2].Minor())
+
+	m, err := money.Parse("0.05", money.USD) // 5 cents
+	require.NoError(t, err)
+	p2, err := m.Allocate(3, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), p2[0].Minor())
+	assert.Equal(t, int64(0), p2[1].Minor())
+}
+
+// TestAllocate_NegativeAmount pins the signed-leftover path (step = -1) with a
+// concrete known vector. The sum-invariant tests randomize negative amounts but
+// assert only the total; here we lock the exact largest-remainder distribution
+// for a negative amount, and the negative Split that delegates to it.
+func TestAllocate_NegativeAmount(t *testing.T) {
+	parts, err := money.FromMinor(-100, money.USD).Allocate(1, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, parts, 3)
+	// base -33 each (sum -99); the -1 leftover unit goes to the first bucket.
+	assert.Equal(t, int64(-34), parts[0].Minor())
+	assert.Equal(t, int64(-33), parts[1].Minor())
+	assert.Equal(t, int64(-33), parts[2].Minor())
+
+	sp, err := money.FromMinor(-5, money.USD).Split(2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(-3), sp[0].Minor())
+	assert.Equal(t, int64(-2), sp[1].Minor())
+}
