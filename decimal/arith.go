@@ -92,6 +92,29 @@ func (d Decimal) Div(e Decimal, scale int32, mode RoundingMode) (Decimal, error)
 	return fromBig(q, scale), nil
 }
 
+// QuoRem returns the integer quotient q and remainder r of d divided by e such
+// that d == e*q + r exactly, where q is truncated toward zero (scale 0) and r
+// carries the same sign as d (truncated division). It returns ErrDivByZero when
+// e is zero. Unlike Div, the result is exact and needs no scale or mode.
+func (d Decimal) QuoRem(e Decimal) (q Decimal, r Decimal, err error) {
+	// q = trunc(d/e): Down rounding at scale 0 truncates toward zero.
+	q, err = d.Div(e, 0, Down)
+	if err != nil {
+		return Decimal{}, Decimal{}, err
+	}
+	// r = d − e*q, computed exactly (Sub/Mul never round).
+	r = d.Sub(e.Mul(q))
+	return q, r, nil
+}
+
+// Mod returns the remainder of d divided by e — the r of QuoRem, equal to
+// d − e*trunc(d/e). The result has the same sign as d and satisfies |Mod| < |e|.
+// It returns ErrDivByZero when e is zero.
+func (d Decimal) Mod(e Decimal) (Decimal, error) {
+	_, r, err := d.QuoRem(e)
+	return r, err
+}
+
 // scaleInt64 returns c * 10^n staying in int64, reporting ok=false on overflow.
 func scaleInt64(c int64, n int32) (int64, bool) {
 	for range int(n) {

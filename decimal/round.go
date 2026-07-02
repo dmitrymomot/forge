@@ -51,6 +51,37 @@ func (d Decimal) Rescale(scale int32, mode RoundingMode) Decimal {
 	return fromBig(rounded, scale)
 }
 
+// RescaleExact is like Rescale but also reports whether the operation was
+// lossless. exact is false only when reducing the scale discarded one or more
+// nonzero digits (rounding changed the numeric value); increasing or preserving
+// the scale is always exact. It lets a caller assert, e.g., that an amount fits
+// in a currency's minor units without silent rounding.
+func (d Decimal) RescaleExact(scale int32, mode RoundingMode) (result Decimal, exact bool) {
+	out := d.Rescale(scale, mode)
+	return out, out.Cmp(d) == 0
+}
+
+// Truncate returns d with the fractional digits beyond places removed, rounding
+// toward zero. It never increases the scale: Truncate(2) leaves 1.5 as 1.5 and
+// reduces 1.789 to 1.78. A negative places is treated as 0.
+func (d Decimal) Truncate(places int32) Decimal {
+	if places < 0 {
+		places = 0
+	}
+	if places >= d.scale {
+		return d
+	}
+	return d.Rescale(places, Down)
+}
+
+// Floor returns the greatest integer value less than or equal to d (rounding
+// toward −∞), at scale 0.
+func (d Decimal) Floor() Decimal { return d.Rescale(0, Floor) }
+
+// Ceil returns the least integer value greater than or equal to d (rounding
+// toward +∞), at scale 0.
+func (d Decimal) Ceil() Decimal { return d.Rescale(0, Ceil) }
+
 // roundBig divides coef by 10^drop (drop ≥ 0), applying mode to the remainder,
 // and returns the rounded quotient. Sign handling is exact for every mode.
 func roundBig(coef *big.Int, drop int32, mode RoundingMode) *big.Int {

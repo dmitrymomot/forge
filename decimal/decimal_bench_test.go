@@ -164,3 +164,61 @@ func BenchmarkCmpBig(b *testing.B) {
 		_ = x.Cmp(y)
 	}
 }
+
+func BenchmarkQuoRem(b *testing.B) {
+	x := decimal.MustParse("100.5")
+	y := decimal.MustParse("7")
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _, _ = x.QuoRem(y)
+	}
+}
+
+func BenchmarkTruncate(b *testing.B) {
+	d := decimal.MustParse("1234.56789")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = d.Truncate(2)
+	}
+}
+
+func BenchmarkIsInteger(b *testing.B) {
+	d := decimal.MustParse("1234.56789")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = d.IsInteger()
+	}
+}
+
+func BenchmarkMarshalJSON(b *testing.B) {
+	d := decimal.MustParse("1234.56")
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = d.MarshalJSON()
+	}
+}
+
+func BenchmarkUnmarshalJSON(b *testing.B) {
+	p := []byte(`"1234.56"`)
+	b.ReportAllocs()
+	for b.Loop() {
+		var d decimal.Decimal
+		_ = d.UnmarshalJSON(p)
+	}
+}
+
+func BenchmarkValue(b *testing.B) {
+	d := decimal.MustParse("1234.56")
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = d.Value()
+	}
+}
+
+func BenchmarkScan(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var d decimal.Decimal
+		_ = d.Scan("1234.56")
+	}
+}

@@ -152,3 +152,89 @@ func TestRound_BigIntBacked(t *testing.T) {
 	assert.Equal(t, int32(0), got.Scale())
 	assert.NotEqual(t, bigVal, got.String())
 }
+
+// TestRound_BigCoefficientHalfEvenTieAtInteger pins HalfEven tie resolution at
+// the integer boundary on a coefficient far past int64, where the whole big
+// integer's parity (via q.Bit(0)) decides keep-vs-increment. TestRescale_
+// DownBigWithRounding covers a big tie that rounds UP to even; this pair covers
+// both parities at the .5 integer tie, including the round-DOWN-to-even case.
+func TestRound_BigCoefficientHalfEvenTieAtInteger(t *testing.T) {
+	// Even last integer digit (0): .5 tie stays put (round down to even).
+	even := decimal.MustParse("123456789012345678901234567890.5")
+	assert.Equal(t, "123456789012345678901234567890", even.Round(0, decimal.HalfEven).String())
+
+	// Odd last integer digit (1): .5 tie rounds up to the even neighbor.
+	odd := decimal.MustParse("123456789012345678901234567891.5")
+	assert.Equal(t, "123456789012345678901234567892", odd.Round(0, decimal.HalfEven).String())
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		in     string
+		places int32
+		want   string
+	}{
+		{"1.789", 2, "1.78"},   // drops toward zero
+		{"1.5", 2, "1.5"},      // fewer digits than places: unchanged, no padding
+		{"1.999", 0, "1"},      // to integer
+		{"-1.789", 2, "-1.78"}, // toward zero (magnitude decreases)
+		{"-1.999", 0, "-1"},
+		{"123.456", -1, "123"}, // negative places clamps to 0
+		{"2", 5, "2"},          // already fewer digits: unchanged, no padding
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, decimal.MustParse(tc.in).Truncate(tc.places).String())
+		})
+	}
+}
+
+func TestFloor_Ceil(t *testing.T) {
+	tests := []struct {
+		in        string
+		wantFloor string
+		wantCeil  string
+	}{
+		{"1.1", "1", "2"},
+		{"1.9", "1", "2"},
+		{"2.0", "2", "2"},
+		{"-1.1", "-2", "-1"},
+		{"-1.9", "-2", "-1"},
+		{"0", "0", "0"},
+		{"5", "5", "5"},
+		{"123456789012345678901234567890.5", "123456789012345678901234567890", "123456789012345678901234567891"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			d := decimal.MustParse(tc.in)
+			assert.Equal(t, tc.wantFloor, d.Floor().String(), "floor")
+			assert.Equal(t, tc.wantCeil, d.Ceil().String(), "ceil")
+			assert.Equal(t, int32(0), d.Floor().Scale())
+			assert.Equal(t, int32(0), d.Ceil().Scale())
+		})
+	}
+}
+
+func TestRescaleExact(t *testing.T) {
+	tests := []struct {
+		in        string
+		scale     int32
+		mode      decimal.RoundingMode
+		wantStr   string
+		wantExact bool
+	}{
+		{"2.5", 4, decimal.HalfEven, "2.5000", true},  // padding is lossless
+		{"2.50", 1, decimal.HalfEven, "2.5", true},    // dropped digit was zero
+		{"2.00", 0, decimal.HalfEven, "2", true},      // dropped zeros
+		{"100", 0, decimal.HalfEven, "100", true},     // same scale
+		{"2.567", 2, decimal.HalfEven, "2.57", false}, // dropped nonzero digit
+		{"2.500", 0, decimal.Down, "2", false},        // dropped .500 (nonzero fraction)
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got, exact := decimal.MustParse(tc.in).RescaleExact(tc.scale, tc.mode)
+			assert.Equal(t, tc.wantStr, got.String())
+			assert.Equal(t, tc.wantExact, exact)
+		})
+	}
+}
