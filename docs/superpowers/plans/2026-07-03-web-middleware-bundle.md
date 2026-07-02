@@ -37,13 +37,17 @@ middleware/
   middleware_test.go
   writer_test.go
 problem/
-  problem.go      Problem struct, config, Option set (incl. WithTemplate), From, field/status mapping
+  problem.go      Problem struct, config, Option set (incl. WithTemplate), From, log5xx, field/status mapping
   json.go         JSON responder
-  text.go         Text (text/template) responder, Negotiate, Accept scan
+  text.go         Text (text/template) responder
+  html.go         HTML (html/template) + Component (render.Templ) responders
+  negotiate.go    Negotiate(fallback, byType) + Accept scan
   doc.go
   problem_test.go
   json_test.go
   text_test.go
+  html_test.go
+  negotiate_test.go
 clientip/
   clientip.go     resolution engine, Resolve, chain/parse helpers
   options.go      strategy options + config
@@ -373,7 +377,7 @@ git commit -m "feat(middleware): status/size-capturing ResponseWriter via Unwrap
 
 **Interfaces:**
 - Consumes: `request.StatusCode(error) int`, `*request.Error` (`.Source`, `.Key string`, `.Kind` with `.String()`); `errorsx.Code(error) (string, bool)`; `validate.Errors` (`.ByField() map[string][]validate.Violation`), `validate.Violation.String()`.
-- Produces: `type Problem struct{...}`; `type Responder func(w http.ResponseWriter, r *http.Request, err error)`; `type Option func(*config)`; `func WithLogger(*slog.Logger) Option`; `func WithStatusOf(func(error) int) Option`; `func WithStatus(int) Option`; `func WithTypeBaseURI(string) Option`; `func WithTemplate(*template.Template) Option`; `func From(err error, opts ...Option) Problem`. Internal: `type config` (with a `template *template.Template` field), `newConfig(...Option) config`, `(config).build(err error, r *http.Request) Problem`.
+- Produces: `type Problem struct{...}`; `type Responder func(w http.ResponseWriter, r *http.Request, err error)`; `type Option func(*config)`; `func WithLogger(*slog.Logger) Option`; `func WithStatusOf(func(error) int) Option`; `func WithStatus(int) Option`; `func WithTypeBaseURI(string) Option`; `func WithTemplate(*template.Template) Option`; `func From(err error, opts ...Option) Problem`. Internal: `type config` (with a `template *template.Template` field), `newConfig(...Option) config`, `(config).build(err error, r *http.Request) Problem`, `(config).log5xx(r, p, err)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -558,6 +562,19 @@ func (c config) build(err error, r *http.Request) Problem {
 	return p
 }
 
+// log5xx logs a 5xx error (with the request context, so request_id/client_ip ride
+// along) when a logger is configured. The error text never enters the response.
+// All responders call it so the "log but never leak on 5xx" rule stays DRY.
+func (c config) log5xx(r *http.Request, p Problem, err error) {
+	if p.Status < 500 || c.logger == nil {
+		return
+	}
+	c.logger.LogAttrs(r.Context(), slog.LevelError, "request error",
+		slog.Int("status", p.Status),
+		slog.String("error", err.Error()),
+	)
+}
+
 // From maps err to a Problem document without writing a response.
 func From(err error, opts ...Option) Problem {
 	return newConfig(opts...).build(err, nil)
@@ -603,15 +620,15 @@ git commit -m "feat(problem): RFC 9457 Problem document with error/status/field 
 
 ---
 
-### Task 4: `problem` — JSON, Text & Negotiate responders
+### Task 4: `problem` — JSON, Text, HTML, Component & Negotiate responders
 
 **Files:**
-- Create: `problem/json.go`, `problem/text.go`, `problem/doc.go`
-- Test: `problem/json_test.go`, `problem/text_test.go`
+- Create: `problem/json.go`, `problem/text.go`, `problem/html.go`, `problem/negotiate.go`, `problem/doc.go`
+- Test: `problem/json_test.go`, `problem/text_test.go`, `problem/html_test.go`, `problem/negotiate_test.go`
 
 **Interfaces:**
-- Consumes: `(config).build`, `render.JSON(w, status, v) error`, `render.Text(w, status, s) error`, `bufpool.Do(func(*bytes.Buffer) error) error`.
-- Produces: `func JSON(opts ...Option) Responder`; `func Text(opts ...Option) Responder`; `func Negotiate(json, text Responder) Responder`.
+- Consumes: `(config).build`, `(config).log5xx`, `render.JSON(w, status, v) error`, `render.Text(w, status, s) error`, `render.HTML(w, status, t *html/template.Template, name string, data any) error`, `render.Templ(ctx, w, status, c render.Component) error`, `render.Component`, `bufpool.Do(func(*bytes.Buffer) error) error`.
+- Produces: `func JSON(opts ...Option) Responder`; `func Text(opts ...Option) Responder`; `func HTML(t *template.Template, name string, opts ...Option) Responder` (html/template); `func Component(build func(Problem) render.Component, opts ...Option) Responder`; `func Negotiate(fallback Responder, byType map[string]Responder) Responder`.
 
 - [ ] **Step 1: Write the failing JSON test**
 
@@ -671,7 +688,6 @@ Expected: FAIL — `undefined: problem.JSON`.
 package problem
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/forge/render"
@@ -683,12 +699,7 @@ func JSON(opts ...Option) Responder {
 	c := newConfig(opts...)
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		p := c.build(err, r)
-		if p.Status >= 500 && c.logger != nil {
-			c.logger.LogAttrs(r.Context(), slog.LevelError, "request error",
-				slog.Int("status", p.Status),
-				slog.String("error", err.Error()),
-			)
-		}
+		c.log5xx(r, p, err)
 		// Set the content type first; render.JSON preserves a preset content type.
 		w.Header().Set("Content-Type", "application/problem+json")
 		_ = render.JSON(w, p.Status, p)
@@ -701,7 +712,7 @@ func JSON(opts ...Option) Responder {
 Run: `just fmt ./problem/ && just test ./problem/`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing Text & Negotiate test**
+- [ ] **Step 5: Write the failing Text test**
 
 `problem/text_test.go`:
 ```go
@@ -746,37 +757,14 @@ func TestTextWithTemplate(t *testing.T) {
 	problem.Text(problem.WithTemplate(tmpl))(rec, req, errors.New("x"))
 	assert.Equal(t, "ERR 400", rec.Body.String())
 }
-
-func TestNegotiatePicksTextForBrowser(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*")
-	problem.Negotiate(problem.JSON(), problem.Text())(rec, req, errors.New("nope"))
-	assert.Contains(t, rec.Header().Get("Content-Type"), "text/plain")
-}
-
-func TestNegotiatePicksJSONForAPI(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept", "application/json")
-	problem.Negotiate(problem.JSON(), problem.Text())(rec, req, errors.New("nope"))
-	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-}
-
-func TestNegotiateDefaultsToJSONWhenNoAccept(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil) // no Accept header
-	problem.Negotiate(problem.JSON(), problem.Text())(rec, req, errors.New("nope"))
-	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-}
 ```
 
 - [ ] **Step 6: Run the test — verify it fails**
 
 Run: `just test ./problem/`
-Expected: FAIL — `undefined: problem.Text` / `problem.Negotiate`.
+Expected: FAIL — `undefined: problem.Text`.
 
-- [ ] **Step 7: Write the Text/Negotiate implementation and package doc**
+- [ ] **Step 7: Write the Text implementation**
 
 `problem/text.go`:
 ```go
@@ -784,9 +772,7 @@ package problem
 
 import (
 	"bytes"
-	"log/slog"
 	"net/http"
-	"strings"
 	"text/template"
 
 	"github.com/dmitrymomot/forge/bufpool"
@@ -812,12 +798,7 @@ func Text(opts ...Option) Responder {
 	}
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		p := c.build(err, r)
-		if p.Status >= 500 && c.logger != nil {
-			c.logger.LogAttrs(r.Context(), slog.LevelError, "request error",
-				slog.Int("status", p.Status),
-				slog.String("error", err.Error()),
-			)
-		}
+		c.log5xx(r, p, err)
 		var body string
 		_ = bufpool.Do(func(buf *bytes.Buffer) error {
 			if e := tmpl.Execute(buf, p); e != nil {
@@ -829,37 +810,211 @@ func Text(opts ...Option) Responder {
 		_ = render.Text(w, p.Status, body)
 	}
 }
+```
 
-// Negotiate returns a Responder that delegates to text when the Accept header
-// prefers a text/* type (e.g. a browser's text/html), else to json.
-func Negotiate(json, text Responder) Responder {
+- [ ] **Step 8: Run the tests — verify they pass**
+
+Run: `just fmt ./problem/ && just test ./problem/`
+Expected: PASS.
+
+- [ ] **Step 9: Write the failing HTML & Component test**
+
+`problem/html_test.go`:
+```go
+package problem_test
+
+import (
+	"context"
+	"errors"
+	"html/template"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/forge/problem"
+	"github.com/dmitrymomot/forge/render"
+)
+
+func TestHTMLResponder(t *testing.T) {
+	tmpl := template.Must(template.New("err").Parse(`<h1>{{.Status}} {{.Title}}</h1>`))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.HTML(tmpl, "")(rec, req, errors.New("bad"))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+	assert.Contains(t, rec.Body.String(), "<h1>400 Bad Request</h1>")
+}
+
+// comp is a minimal render.Component built from a Problem.
+type comp struct{ p problem.Problem }
+
+func (c comp) Render(_ context.Context, w io.Writer) error {
+	_, err := io.WriteString(w, "component:"+http.StatusText(c.p.Status))
+	return err
+}
+
+func TestComponentResponder(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.Component(func(p problem.Problem) render.Component { return comp{p} })(rec, req, errors.New("bad"))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+	assert.Contains(t, rec.Body.String(), "component:Bad Request")
+}
+```
+
+- [ ] **Step 10: Run the test — verify it fails**
+
+Run: `just test ./problem/`
+Expected: FAIL — `undefined: problem.HTML` / `problem.Component`.
+
+- [ ] **Step 11: Write the HTML & Component implementation**
+
+`problem/html.go`:
+```go
+package problem
+
+import (
+	"html/template"
+	"net/http"
+
+	"github.com/dmitrymomot/forge/render"
+)
+
+// HTML returns a Responder that renders the Problem with a caller-supplied
+// html/template. name selects a {{define}} block ("" runs t.Execute). The markup
+// lives entirely in the consumer's template — forge ships none. WithLogger logs 5xx.
+func HTML(t *template.Template, name string, opts ...Option) Responder {
+	c := newConfig(opts...)
 	return func(w http.ResponseWriter, r *http.Request, err error) {
-		if prefersText(r.Header.Get("Accept")) {
-			text(w, r, err)
-			return
-		}
-		json(w, r, err)
+		p := c.build(err, r)
+		c.log5xx(r, p, err)
+		_ = render.HTML(w, p.Status, t, name, p)
 	}
 }
 
-// prefersText reports whether the first concrete media range in accept is a
-// text/* type. application/json, application/*, */*, or an absent header select
-// JSON. Q-values are not weighted (the standalone negotiate package handles that).
-func prefersText(accept string) bool {
+// Component returns a Responder that renders the Problem as a render.Component
+// (e.g. a templ component) built by build. render.Templ sets text/html.
+func Component(build func(Problem) render.Component, opts ...Option) Responder {
+	c := newConfig(opts...)
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		p := c.build(err, r)
+		c.log5xx(r, p, err)
+		_ = render.Templ(r.Context(), w, p.Status, build(p))
+	}
+}
+```
+
+- [ ] **Step 12: Run the tests — verify they pass**
+
+Run: `just fmt ./problem/ && just test ./problem/`
+Expected: PASS.
+
+- [ ] **Step 13: Write the failing Negotiate test**
+
+`problem/negotiate_test.go`:
+```go
+package problem_test
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/forge/problem"
+)
+
+func mark(name string, out *string) problem.Responder {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		*out = name
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func negotiator(out *string) problem.Responder {
+	return problem.Negotiate(mark("json", out), map[string]problem.Responder{
+		"text/html": mark("html", out),
+	})
+}
+
+func TestNegotiatePicksMappedType(t *testing.T) {
+	var called string
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*")
+	negotiator(&called)(httptest.NewRecorder(), req, errors.New("x"))
+	assert.Equal(t, "html", called)
+}
+
+func TestNegotiateFallbackOnNoMatch(t *testing.T) {
+	var called string
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "application/json")
+	negotiator(&called)(httptest.NewRecorder(), req, errors.New("x"))
+	assert.Equal(t, "json", called)
+}
+
+func TestNegotiateFallbackOnNoAccept(t *testing.T) {
+	var called string
+	negotiator(&called)(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), errors.New("x"))
+	assert.Equal(t, "json", called)
+}
+```
+
+- [ ] **Step 14: Run the test — verify it fails**
+
+Run: `just test ./problem/`
+Expected: FAIL — `undefined: problem.Negotiate`.
+
+- [ ] **Step 15: Write the Negotiate implementation and package doc**
+
+`problem/negotiate.go`:
+```go
+package problem
+
+import (
+	"net/http"
+	"strings"
+)
+
+// Negotiate returns a Responder that dispatches on the request Accept header: the
+// first media range that exactly matches a key in byType uses that responder; a
+// wildcard, an unmatched, or an absent Accept uses fallback. Q-values are not
+// weighted — the standalone negotiate package handles full weighting.
+//
+//	problem.Negotiate(problem.JSON(), map[string]problem.Responder{
+//		"text/html": problem.Component(errorPage),
+//	})
+func Negotiate(fallback Responder, byType map[string]Responder) Responder {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if resp := pick(r.Header.Get("Accept"), byType); resp != nil {
+			resp(w, r, err)
+			return
+		}
+		fallback(w, r, err)
+	}
+}
+
+// pick returns the responder for the first Accept media range that exactly
+// matches a key in byType, or nil when none match (the caller uses the fallback).
+func pick(accept string, byType map[string]Responder) Responder {
 	for part := range strings.SplitSeq(accept, ",") {
 		mr := strings.TrimSpace(part)
 		if i := strings.IndexByte(mr, ';'); i >= 0 {
 			mr = strings.TrimSpace(mr[:i])
 		}
-		switch {
-		case strings.HasPrefix(mr, "text/"):
-			return true
-		case mr == "application/json", mr == "application/problem+json",
-			mr == "application/*", mr == "*/*":
-			return false
+		if resp, ok := byType[mr]; ok {
+			return resp
 		}
 	}
-	return false
+	return nil
 }
 ```
 
@@ -871,27 +1026,35 @@ func prefersText(accept string) bool {
 //
 //	type Responder func(w http.ResponseWriter, r *http.Request, err error)
 //
-// Shipped responders: JSON (RFC 9457 application/problem+json) and Text
-// (text/plain via text/template — no HTML in Go code). Negotiate picks Text for a
-// browser Accept (text/*) and JSON otherwise. Neither leaks the error text on
-// 5xx. From maps an error to a Problem document without writing.
+// Shipped responders — none ships markup or leaks the error text on 5xx:
+//   - JSON: application/problem+json (RFC 9457)
+//   - Text: text/plain via text/template
+//   - HTML: text/html via a caller-supplied html/template
+//   - Component: text/html via a render.Component (templ)
+//
+// Negotiate dispatches responders by the Accept header with a fallback:
 //
 //	recoverer.New(recoverer.WithResponder(
-//		problem.Negotiate(problem.JSON(), problem.Text())))
+//		problem.Negotiate(problem.JSON(), map[string]problem.Responder{
+//			"text/html": problem.Component(errorPage),
+//		})))
+//
+// From maps an error to a Problem document without writing.
 package problem
 ```
 
-- [ ] **Step 8: Run the tests — verify they pass**
+- [ ] **Step 16: Run the tests — verify they pass**
 
 Run: `just fmt ./problem/ && just test ./problem/`
 Expected: PASS.
 
-- [ ] **Step 9: Lint & commit**
+- [ ] **Step 17: Lint & commit**
 
 ```bash
 just lint
-git add problem/json.go problem/text.go problem/doc.go problem/json_test.go problem/text_test.go
-git commit -m "feat(problem): JSON, plain-text, and negotiated responders"
+git add problem/json.go problem/text.go problem/html.go problem/negotiate.go problem/doc.go \
+	problem/json_test.go problem/text_test.go problem/html_test.go problem/negotiate_test.go
+git commit -m "feat(problem): JSON, text, HTML, component & accept-negotiated responders"
 ```
 
 ---
@@ -2259,6 +2422,7 @@ package main
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"os"
 	"os/signal"
@@ -2274,6 +2438,10 @@ import (
 	"github.com/dmitrymomot/forge/recoverer"
 	"github.com/dmitrymomot/forge/render"
 )
+
+// errPage is the browser-facing error template (markup lives here, not in forge).
+var errPage = template.Must(template.New("err").Parse(
+	`<!doctype html><title>{{.Status}}</title><h1>{{.Status}} {{.Title}}</h1>`))
 
 func main() {
 	log, err := logger.New(logger.WithContextExtractors(requestid.LogExtractor, clientip.LogExtractor))
@@ -2295,7 +2463,9 @@ func main() {
 	h := middleware.Wrap(mux,
 		recoverer.New(
 			recoverer.WithLogger(log),
-			recoverer.WithResponder(problem.Negotiate(problem.JSON(), problem.Text())),
+			recoverer.WithResponder(problem.Negotiate(problem.JSON(), map[string]problem.Responder{
+				"text/html": problem.HTML(errPage, ""),
+			})),
 		),
 		requestid.New(),
 		clientip.Middleware(clientip.TrustPrivateProxies()),
@@ -2337,7 +2507,7 @@ git commit -m "docs(examples): end-to-end web-middleware chain recipe"
 
 **1. Spec coverage:**
 - `middleware` seam + `WrapWriter` → Tasks 1–2. ✓
-- `problem` Responder/Problem/From/JSON + Text (text/template) + Negotiate + WithTemplate, 5xx no-leak, field/code mapping → Tasks 3–4. ✓
+- `problem` Responder/Problem/From + JSON + Text (text/template) + HTML (html/template) + Component (render.Templ) + Negotiate(fallback, byType) + WithTemplate, shared log5xx (5xx no-leak), field/code mapping → Tasks 3–4. ✓
 - `clientip` engine (multi-header, Forwarded-in-trusted, safe default), strategies, presets, Middleware/Get/From/LogExtractor, request.ClientIP migration → Tasks 5–7. ✓
 - `requestid` (inbound guard, generator, extractor) → Task 8. ✓
 - `reqlog` (level-by-status, skip, context logging) → Task 9. ✓
