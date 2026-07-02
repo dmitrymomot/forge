@@ -2,13 +2,15 @@ package singleflight
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
 type call[V any] struct {
-	val V
-	err error
-	wg  sync.WaitGroup
+	val      V
+	err      error
+	panicVal any
+	wg       sync.WaitGroup
 }
 
 // Group deduplicates concurrent Do calls by key. The zero value is ready to
@@ -38,14 +40,24 @@ func (g *Group[V]) Do(ctx context.Context, key string, fn func(context.Context) 
 	g.m[key] = c
 	g.mu.Unlock()
 
-	c.val, c.err = fn(context.WithoutCancel(ctx))
-	c.wg.Done()
-
-	g.mu.Lock()
-	if g.m[key] == c {
-		delete(g.m, key)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.panicVal = r
+				c.err = fmt.Errorf("singleflight: panic in fn: %v", r)
+			}
+			c.wg.Done()
+			g.mu.Lock()
+			if g.m[key] == c {
+				delete(g.m, key)
+			}
+			g.mu.Unlock()
+		}()
+		c.val, c.err = fn(context.WithoutCancel(ctx))
+	}()
+	if c.panicVal != nil {
+		panic(c.panicVal) // leader re-panics; waiters already observed c.err
 	}
-	g.mu.Unlock()
 	return c.val, false, c.err
 }
 

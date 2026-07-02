@@ -49,3 +49,19 @@ func TestForgetAllowsReexecution(t *testing.T) {
 	_, _, _ = g.Do(t.Context(), "k", load)
 	assert.Equal(t, int32(2), calls.Load())
 }
+
+func TestPanicInFnRePanicsAndDoesNotPoisonKey(t *testing.T) {
+	var g singleflight.Group[int]
+	assert.Panics(t, func() {
+		_, _, _ = g.Do(t.Context(), "k", func(context.Context) (int, error) {
+			panic("boom")
+		})
+	})
+	// Key must not be poisoned: a subsequent call re-executes and succeeds.
+	v, shared, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
+		return 7, nil
+	})
+	assert.NoError(t, err)
+	assert.False(t, shared)
+	assert.Equal(t, 7, v)
+}
