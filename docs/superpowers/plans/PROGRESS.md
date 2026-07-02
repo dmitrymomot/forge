@@ -59,5 +59,16 @@ Status ∈ {PENDING, DONE, BACKED OUT, BLOCKED}.
 - Loop iterations used: 4/10 (initial PR + fix push + regression-fix push + final).
 - Not merged (per instructions — human merges).
 
+## Follow-up: benchmarks + coverage (post-review request)
+- **Benchmarks added for all 8 P0 packages** (78 total), each in `<pkg>/<pkg>_bench_test.go` (repo convention), black-box, `b.ReportAllocs()` + `for b.Loop()`, public API only. `go test -bench=. -benchmem ./...` runs clean.
+- **Coverage raised** (black-box only; new tests live in the per-source `_test.go` matching each source file — no catch-all `coverage_test.go`):
+  - validate: 98.0% → **100.0%**
+  - sanitize: 98.9% → **100.0%**
+  - decimal: 94.6% → **98.1%** — remaining ~1.9% is 5 provably-dead defensive guards unreachable via the public API (mulPow10 `n==0`; Parse `digits==""` & post-validation `SetString` failure; isAllZero all-zero return short-circuited by sign; roundBig `drop<=0`).
+  - money: 98.8% → **98.8%** — the one gap (`Minor` `.`-strip at money.go:71) is dead: `Round(0).String()` never yields a `.`.
+  - decimal/money defensive dead branches were left in place (not deleted to chase 100%); revisit only if you prefer removing the guards for literal 100%.
+- Full `just check` clean; `go mod tidy` clean.
+
 ## Deferred / follow-ups for the human
+- **validate.Bech32 accepts only bech32, not bech32m/taproot (low priority):** `bech32Decode` checks the bech32 polymod constant (1) only, so BIP-350 bech32m addresses (native segwit v1+/taproot, `bc1p...`) are rejected. Consistent with the validator's name/BIP-173 scope; add a `Bech32m`/segwit-aware validator only if taproot support is needed.
 - **slug, minor/degenerate (out of scope, not a regression):** with a separator whose runes can be legitimate folded content (e.g. `WithSeparator("oo")`) and a tiny `WithMaxLength`, mid-word truncation can leave a fragment coinciding with a separator prefix (e.g. `Make("one", WithSeparator("oo"), WithMaxLength(1))` == "o"). This is a pre-existing artifact of allowing arbitrary content-colliding separators (present independent of the fixes), not introduced by this run. The length-cap and no-leading/trailing/over-length-separator invariants all still hold. Left as-is; revisit only if content-colliding separators become a real use case.
