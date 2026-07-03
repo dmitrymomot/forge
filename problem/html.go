@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/dmitrymomot/forge/middleware"
 	"github.com/dmitrymomot/forge/render"
 )
 
@@ -15,7 +16,13 @@ func HTML(t *template.Template, name string, opts ...Option) Responder {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		p := c.build(err, r)
 		c.log5xx(r, p, err)
-		_ = render.HTML(w, p.Status, t, name, p)
+		rw := middleware.WrapWriter(w)
+		if render.HTML(rw, p.Status, t, name, p) != nil && !rw.Wrote() {
+			// render.HTML is transactional: on a nil/broken template it returns before
+			// committing the header. Guarantee the status still goes out so a template
+			// misconfiguration can't silently degrade a 500 into an empty 200.
+			rw.WriteHeader(p.Status)
+		}
 	}
 }
 
@@ -26,6 +33,9 @@ func Component(build func(Problem) render.Component, opts ...Option) Responder {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		p := c.build(err, r)
 		c.log5xx(r, p, err)
-		_ = render.Templ(r.Context(), w, p.Status, build(p))
+		rw := middleware.WrapWriter(w)
+		if render.Templ(r.Context(), rw, p.Status, build(p)) != nil && !rw.Wrote() {
+			rw.WriteHeader(p.Status)
+		}
 	}
 }
