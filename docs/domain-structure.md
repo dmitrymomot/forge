@@ -2,7 +2,10 @@
 
 > Target repository layout that replaces the flat top-level package list with
 > purpose-named domain folders, plus the migration plan to get there.
-> **Status: proposal — not yet implemented.**
+> **Status: implemented** — the 57 shipped packages now live in six of the
+> domain folders below (`core/ crypto/ resilience/ web/ data/ ops/`); the
+> remaining folders hold only planned packages. The migration plan is retained
+> as the record of how the move was performed.
 
 ## Why
 

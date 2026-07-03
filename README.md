@@ -35,7 +35,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - Packages receive values via parameters, not context
 - Public methods must not return unexported types
 - Framework provides utility packages; business logic belongs in consumer repos
-- All IDs generated using `pkg/id/` package exclusively
+- All IDs generated using `core/id` package exclusively
 
 ## License
 

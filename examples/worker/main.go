@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dmitrymomot/forge/supervisor"
+	"github.com/dmitrymomot/forge/ops/supervisor"
 )
 
 // heartbeat is a long-running service that logs once per interval. It

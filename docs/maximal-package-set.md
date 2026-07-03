@@ -4,6 +4,8 @@
 
 _Produced by a 19-agent research workflow (rubric extraction → 12 parallel domain researchers → synthesis → 4 adversarial completeness critics → reconciliation). This is a catalog/roadmap, not a commitment — tiers and APIs are starting points._
 
+> **Physical layout:** the P0–P7 phases below remain the build/dependency plan, but packages no longer live at the repository root. They are grouped into purpose-named domain folders (`core/`, `crypto/`, `web/`, …) — see [domain-structure.md](domain-structure.md) for the folder layout. Build order ≠ folder layout: the tiers and phases here stay valid regardless of where files live.
+
 ## Design DNA every package follows
 
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no service containers; values via params, not context (context only for request-scoped reads). Public methods never return unexported types.

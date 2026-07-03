@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dmitrymomot/forge/httpserver"
-	"github.com/dmitrymomot/forge/supervisor"
+	"github.com/dmitrymomot/forge/ops/supervisor"
+	"github.com/dmitrymomot/forge/web/httpserver"
 )
 
 func main() {
