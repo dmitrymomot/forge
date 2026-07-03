@@ -1,10 +1,12 @@
 package problem_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"html/template"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -56,4 +58,17 @@ func TestComponentNilStillWritesStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	problem.Component(func(problem.Problem) render.Component { return nil }, problem.WithStatus(http.StatusInternalServerError))(rec, req, errors.New("boom"))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestHTMLBrokenTemplateLogsAndWritesBody(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	tmpl := template.Must(template.New("err").Parse(`{{.Titel}}`)) // typo -> execution error at render
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.HTML(tmpl, "", problem.WithLogger(log), problem.WithStatus(http.StatusInternalServerError))(rec, req, errors.New("boom"))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotEmpty(t, rec.Body.String())                          // not a silent empty body
+	assert.Contains(t, rec.Body.String(), "Internal Server Error") // p.Title fallback
+	assert.Contains(t, buf.String(), "render failed")              // render error logged
 }

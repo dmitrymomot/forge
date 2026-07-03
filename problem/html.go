@@ -2,6 +2,8 @@ package problem
 
 import (
 	"html/template"
+	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/forge/middleware"
@@ -17,11 +19,8 @@ func HTML(t *template.Template, name string, opts ...Option) Responder {
 		p := c.build(err, r)
 		c.log5xx(r, p, err)
 		rw := middleware.WrapWriter(w)
-		if render.HTML(rw, p.Status, t, name, p) != nil && !rw.Wrote() {
-			// render.HTML is transactional: on a nil/broken template it returns before
-			// committing the header. Guarantee the status still goes out so a template
-			// misconfiguration can't silently degrade a 500 into an empty 200.
-			rw.WriteHeader(p.Status)
+		if rerr := render.HTML(rw, p.Status, t, name, p); rerr != nil {
+			c.renderFallback(r, rw, p, rerr)
 		}
 	}
 }
@@ -34,8 +33,29 @@ func Component(build func(Problem) render.Component, opts ...Option) Responder {
 		p := c.build(err, r)
 		c.log5xx(r, p, err)
 		rw := middleware.WrapWriter(w)
-		if render.Templ(r.Context(), rw, p.Status, build(p)) != nil && !rw.Wrote() {
-			rw.WriteHeader(p.Status)
+		if rerr := render.Templ(r.Context(), rw, p.Status, build(p)); rerr != nil {
+			c.renderFallback(r, rw, p, rerr)
 		}
 	}
+}
+
+// renderFallback handles a failed error-page render. render.HTML and render.Templ
+// are transactional — on a nil/broken template or an execution error they return
+// before committing the header — so when nothing was written we still emit the
+// status and a minimal text/plain body (forge ships no markup, so there is no
+// default HTML page to fall back to). The render error is logged when a logger is
+// configured, so a broken template is diagnosable rather than a silent empty body.
+func (c config) renderFallback(r *http.Request, rw middleware.ResponseWriter, p Problem, rerr error) {
+	if c.logger != nil {
+		c.logger.LogAttrs(r.Context(), slog.LevelError, "problem: error page render failed",
+			slog.Int("status", p.Status),
+			slog.String("error", rerr.Error()),
+		)
+	}
+	if rw.Wrote() {
+		return
+	}
+	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	rw.WriteHeader(p.Status)
+	_, _ = io.WriteString(rw, p.Title)
 }
