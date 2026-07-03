@@ -11,16 +11,16 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/dmitrymomot/forge/clientip"
-	"github.com/dmitrymomot/forge/errorsx"
-	"github.com/dmitrymomot/forge/httpserver"
-	"github.com/dmitrymomot/forge/logger"
-	"github.com/dmitrymomot/forge/middleware"
-	"github.com/dmitrymomot/forge/problem"
-	"github.com/dmitrymomot/forge/recoverer"
-	"github.com/dmitrymomot/forge/render"
-	"github.com/dmitrymomot/forge/reqlog"
-	"github.com/dmitrymomot/forge/requestid"
+	"github.com/dmitrymomot/forge/core/errorsx"
+	"github.com/dmitrymomot/forge/ops/logger"
+	"github.com/dmitrymomot/forge/ui/render"
+	"github.com/dmitrymomot/forge/web/clientip"
+	"github.com/dmitrymomot/forge/web/httpserver"
+	"github.com/dmitrymomot/forge/web/middleware"
+	"github.com/dmitrymomot/forge/web/problem"
+	"github.com/dmitrymomot/forge/web/recoverer"
+	"github.com/dmitrymomot/forge/web/reqlog"
+	"github.com/dmitrymomot/forge/web/requestid"
 )
 
 // errPage is the browser-facing error template (markup lives here, not in forge).
