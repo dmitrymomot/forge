@@ -45,3 +45,11 @@ func TestNegotiateFallbackOnNoAccept(t *testing.T) {
 	negotiator(&called)(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), errors.New("x"))
 	assert.Equal(t, "json", called)
 }
+
+func TestNegotiateMatchIsCaseInsensitive(t *testing.T) {
+	var called string
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "Text/HTML") // mixed case must still match the "text/html" key
+	negotiator(&called)(httptest.NewRecorder(), req, errors.New("x"))
+	assert.Equal(t, "html", called)
+}
