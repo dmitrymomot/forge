@@ -2,7 +2,7 @@
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
 - Run `just lint` after task finished.
-- Packages live in purpose-named domain folders (see docs/domain-structure.md): max two levels, three only for driver isolators (`data/kv/redis` pattern). No packages at the repo root. Leaf directory = package name; leaf names unique across domains. New packages must name their domain before implementation.
+- Packages live in purpose-named domain folders (see docs/packages.md): max two levels, three only for driver isolators (`resilience/cache/redis` pattern). No packages at the repo root. Leaf directory = package name; leaf names unique across domains. New packages must name their domain before implementation.
 - DON'T use builder pattern, USE options instead.
 - Minimal dependencies, NOT zero. Depend on hardened protocol clients & crypto (pgx, S3 SDK, x/crypto) — don't reinvent wire protocols. Build/copy small utilities that shape our own API (id, validate, request, the job engine). Never wrap large/leaky frameworks (watermill, stripe-go) — expose an interface, let the consumer take the dep. Isolate every real dep behind a subpackage. Postgres is the database; data + messaging layers target pgx.
 - black-box testing ONLY!

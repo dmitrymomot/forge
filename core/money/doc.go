@@ -23,5 +23,5 @@
 //
 // Siblings: decimal (the exact fixed-point substrate this builds on); enum
 // (closed string value-domains); validate (CurrencyCode/CountryCode shape
-// checks). See docs/maximal-package-set.md for the P0 layer overview.
+// checks). See docs/packages.md for the package catalog.
 package money
