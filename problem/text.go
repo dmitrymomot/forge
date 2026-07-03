@@ -32,7 +32,12 @@ func Text(opts ...Option) Responder {
 		var body string
 		_ = bufpool.Do(func(buf *bytes.Buffer) error {
 			if e := tmpl.Execute(buf, p); e != nil {
-				return e
+				// A broken custom template must not yield an empty body: fall back to
+				// the default layout so the status still ships with a readable message.
+				buf.Reset()
+				if e2 := defaultTextTemplate.Execute(buf, p); e2 != nil {
+					return e2
+				}
 			}
 			body = buf.String()
 			return nil

@@ -39,3 +39,12 @@ func TestTextWithTemplate(t *testing.T) {
 	problem.Text(problem.WithTemplate(tmpl))(rec, req, errors.New("x"))
 	assert.Equal(t, "ERR 400", rec.Body.String())
 }
+
+func TestTextBrokenTemplateFallsBackToDefault(t *testing.T) {
+	tmpl := template.Must(template.New("p").Parse(`{{.NoSuchField}}`)) // execution error at render time
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.Text(problem.WithTemplate(tmpl))(rec, req, errors.New("boom"))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "400 Bad Request") // default layout used, not an empty body
+}
