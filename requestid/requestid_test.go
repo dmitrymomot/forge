@@ -42,12 +42,22 @@ func TestRejectsOversizedInbound(t *testing.T) {
 	assert.NotEmpty(t, seen) // generated instead
 }
 
-func TestRejectsNonASCIIInbound(t *testing.T) {
+func TestRejectsControlCharsInbound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Request-ID", "id\nwith\rnewline")
 	var seen string
 	serve(requestid.New(), req, func(w http.ResponseWriter, r *http.Request) { seen, _ = requestid.From(r.Context()) })
-	assert.NotContains(t, seen, "\n")
+	assert.NotEqual(t, "id\nwith\rnewline", seen) // control chars rejected -> a fresh ID is generated
+	assert.NotEmpty(t, seen)
+}
+
+func TestRejectsHighBytesInbound(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Request-ID", "id\x80\xff") // bytes >= 0x80 are non-printable-ASCII
+	var seen string
+	serve(requestid.New(), req, func(w http.ResponseWriter, r *http.Request) { seen, _ = requestid.From(r.Context()) })
+	assert.NotEqual(t, "id\x80\xff", seen)
+	assert.NotEmpty(t, seen)
 }
 
 func TestTrustInboundDisabled(t *testing.T) {
