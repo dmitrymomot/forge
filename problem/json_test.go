@@ -1,8 +1,10 @@
 package problem_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,4 +39,23 @@ func TestJSONResponder5xxOmitsErrorText(t *testing.T) {
 
 	assert.NotContains(t, rec.Body.String(), "secret db dsn")
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestJSONResponderLogs5xxNotBody(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.JSON(problem.WithLogger(log), problem.WithStatus(http.StatusInternalServerError))(rec, req, errors.New("db dsn secret"))
+	assert.Contains(t, buf.String(), "db dsn secret")         // logged for ops
+	assert.NotContains(t, rec.Body.String(), "db dsn secret") // never leaked in body
+}
+
+func TestJSONResponderDoesNotLog4xx(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	problem.JSON(problem.WithLogger(log))(rec, req, errors.New("bad input")) // resolves to 400
+	assert.Empty(t, buf.String())                                            // 4xx is not logged
 }
