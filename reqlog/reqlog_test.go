@@ -52,6 +52,24 @@ func TestLevelByStatus(t *testing.T) {
 	assert.Equal(t, "ERROR", lastLine(t, buf)["level"])
 }
 
+func TestLevelByStatus4xxIsWarn(t *testing.T) {
+	log, buf := newLogger()
+	h := reqlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
+	assert.Equal(t, "WARN", lastLine(t, buf)["level"])
+}
+
+func TestWithLevelFuncOverride(t *testing.T) {
+	log, buf := newLogger()
+	h := reqlog.New(log, reqlog.WithLevelFunc(func(int) slog.Level { return slog.LevelDebug }))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }),
+	)
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, "DEBUG", lastLine(t, buf)["level"]) // custom func overrides the default 500->Error
+}
+
 func TestSkip(t *testing.T) {
 	log, buf := newLogger()
 	skip := func(r *http.Request) bool { return r.URL.Path == "/healthz" }
