@@ -62,6 +62,8 @@ func New(opts ...Option) middleware.Middleware {
 					panic(v)
 				}
 				c.logger.LogAttrs(r.Context(), slog.LevelError, "panic recovered",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
 					slog.Any("panic", v),
 					slog.String("stack", string(debug.Stack())),
 				)

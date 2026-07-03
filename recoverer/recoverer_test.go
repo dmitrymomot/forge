@@ -1,6 +1,7 @@
 package recoverer_test
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
@@ -78,6 +79,18 @@ func TestCustomResponderStatusHonored(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusTeapot, rec.Code)
+}
+
+func TestPanicLogIncludesMethodAndPath(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	h := recoverer.New(recoverer.WithLogger(log))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }),
+	)
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/things", nil))
+	out := buf.String()
+	assert.Contains(t, out, "POST")
+	assert.Contains(t, out, "/things")
 }
 
 var _ = errors.Is // keep errors imported if unused above
