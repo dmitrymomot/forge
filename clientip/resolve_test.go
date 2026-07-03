@@ -47,13 +47,28 @@ func TestResolveTrustedRangesRightmostUntrusted(t *testing.T) {
 	assert.Equal(t, "203.0.113.5", got)
 }
 
-func TestResolveTrustedRangesParsesForwarded(t *testing.T) {
-	// The old request.ClientIP ignored Forwarded in trusted mode; now it is honored.
-	r := req("10.0.0.2:80", map[string][]string{
-		"Forwarded": {`for=203.0.113.9;proto=https`},
-	})
-	got := clientip.Resolve(r, clientip.TrustedRanges("10.0.0.0/8"))
+func TestResolveTrustedRangesIgnoresForwardedByDefault(t *testing.T) {
+	// Forwarded is NOT trusted by default: with only a Forwarded header, resolution
+	// falls back to RemoteAddr rather than the (potentially forged) Forwarded value.
+	r := req("10.0.0.2:80", map[string][]string{"Forwarded": {`for=203.0.113.9`}})
+	assert.Equal(t, "10.0.0.2", clientip.Resolve(r, clientip.TrustedRanges("10.0.0.0/8")))
+}
+
+func TestResolveTrustForwardedHeaderOptIn(t *testing.T) {
+	// With TrustForwardedHeader, Forwarded for= entries join the chain and are honored.
+	r := req("10.0.0.2:80", map[string][]string{"Forwarded": {`for=203.0.113.9`}})
+	got := clientip.Resolve(r, clientip.TrustedRanges("10.0.0.0/8"), clientip.TrustForwardedHeader())
 	assert.Equal(t, "203.0.113.9", got)
+}
+
+func TestResolveTrustedRangesForgedForwardedIgnored(t *testing.T) {
+	// Edge manages only XFF; attacker forges Forwarded. Default (XFF-only) returns the
+	// real XFF client, never the forged Forwarded value.
+	r := req("10.0.0.2:80", map[string][]string{
+		"X-Forwarded-For": {"203.0.113.99"},
+		"Forwarded":       {"for=6.6.6.6"},
+	})
+	assert.Equal(t, "203.0.113.99", clientip.Resolve(r, clientip.TrustedRanges("10.0.0.0/8")))
 }
 
 func TestResolveMultipleXFFHeaderLinesFlattened(t *testing.T) {

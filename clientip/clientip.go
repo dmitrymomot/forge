@@ -27,28 +27,33 @@ func (c config) resolve(r *http.Request) string {
 		}
 		return remoteHost(r.RemoteAddr)
 	case modeTrustedRanges:
-		return rightmostUntrusted(buildChain(r), c.trusted)
+		return rightmostUntrusted(c.buildChain(r), c.trusted)
 	case modeTrustedHopCount:
-		return nthFromRight(buildChain(r), c.hopCount, r)
+		return nthFromRight(c.buildChain(r), c.hopCount, r)
 	case modeLeftmostNonPrivate:
-		return leftmostNonPrivate(buildChain(r), r)
+		return leftmostNonPrivate(c.buildChain(r), r)
 	default: // modeRemoteAddr
 		return remoteHost(r.RemoteAddr)
 	}
 }
 
 // buildChain returns the ordered forwarding chain: every X-Forwarded-For entry
-// (across repeated header lines), then every RFC 7239 Forwarded "for=" entry,
-// then RemoteAddr. Left is closest to the client; right is the nearest proxy.
-func buildChain(r *http.Request) []string {
+// (across repeated header lines), then — only when TrustForwardedHeader is set —
+// every RFC 7239 Forwarded "for=" entry, then RemoteAddr. Left is closest to the
+// client; right is the nearest proxy. Forwarded is opt-in because most edges manage
+// only XFF, and mixing an unmanaged (client-forgeable) header into the trust chain
+// would defeat the spoof-resistance of the trusted modes.
+func (c config) buildChain(r *http.Request) []string {
 	var chain []string
 	for _, line := range r.Header.Values("X-Forwarded-For") {
 		for part := range strings.SplitSeq(line, ",") {
 			chain = append(chain, part)
 		}
 	}
-	for _, line := range r.Header.Values("Forwarded") {
-		chain = append(chain, forwardedFors(line)...)
+	if c.trustForwarded {
+		for _, line := range r.Header.Values("Forwarded") {
+			chain = append(chain, forwardedFors(line)...)
+		}
 	}
 	return append(chain, r.RemoteAddr)
 }
