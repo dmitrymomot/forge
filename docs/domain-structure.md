@@ -58,18 +58,22 @@ forge/                              # single go.mod at the root
 │   # planned: drain lock (lock/pglock, lock/redislock) loadshed ratelimit
 │   #          (ratelimit/redisstore) quota
 │
-├── web/           # HTTP in and out: transport, boundary security, client
+├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
-│   #          recoverer reqlog requestid
+│   #          recoverer reqlog requestid render htmx
 │   # planned: timeout bodylimit compress cors negotiate conditional static
 │   #          assets upload proxy idempotency maintenance secheaders cookie
 │   #          csrf iplist captcha (captcha/turnstile ...) webhookverify
 │   #          httpclient autocert geoip (geoip/maxmind)
 │
-├── ui/            # server-rendered UI & i18n
-│   # shipped: render htmx
-│   # planned: flash form formui i18n i18nload i18nctx i18nplural localematch
-│   #          numfmt datefmt pageview breadcrumb viewhelper cspnonce
+├── view/          # view-model glue for server-rendered pages
+│   # planned: flash form formui pageview breadcrumb viewhelper cspnonce
+│
+├── i18n/          # localization (consumed by views, emails, SMS, API errors)
+│   # planned: i18n i18nload i18nctx i18nplural localematch numfmt datefmt
+│   # note: the i18n* prefixes become redundant inside this folder — renaming
+│   #       (catalog, load, ctx, plural, locale) is a separate decision from
+│   #       placement; decide it during migration or leave as-is
 │
 ├── data/          # persistence
 │   # shipped: postgres migration mongo redis opensearch
@@ -106,7 +110,10 @@ forge/                              # single go.mod at the root
     # planned: httptest golden fixtures fake dbtest factory seed
 ```
 
-Domain sizes land at 7–26 packages — every folder fits on one screen.
+Domain sizes land at 4–32 packages. `web/` is deliberately the biggest — it
+owns the entire HTTP boundary. If it ever stops fitting on a screen there is
+a natural split line (inbound middleware vs response/outbound), but don't
+pre-split.
 
 ### Placement rationale (judgment calls)
 
@@ -115,7 +122,11 @@ Domain sizes land at 7–26 packages — every folder fits on one screen.
 | `httpclient` | `web/` | Purpose is HTTP; consumed by `auth/oauthclient`, `web/captcha`, `comms/*` alike. Keeps `comms/` pure. |
 | `ratelimit`, `quota` | `resilience/` | Core is a keyed limiter/counter; the HTTP middleware is a thin adapter. Load-control purpose beats delivery mechanism. |
 | `cookie` | `web/` | Composes crypto, but its purpose is the HTTP boundary (`csrf`/`flash`/`session` consumers are web-side). |
-| `sse` | `realtime/` | Push transport; `ui/` stays "producing HTML". |
+| `render`, `htmx` | `web/` | Response-side transport, symmetric to `request` (inbound). `render.JSON` serves pure APIs with zero UI; `htmx` is HX-* header protocol glue. A JSON-only API importing from `view/` would read wrong. |
+| `session` | `auth/` | Uses cookies, but its purpose is identity lifecycle over a Store; `web/cookie` is just the codec it composes. |
+| `i18n*`, `numfmt`, `datefmt` | `i18n/` | Localization is consumed by emails, SMS, API error messages, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`. |
+| `form` | `view/` | Decodes inbound `url.Values`, which smells like `web/request` — but it exists for server-rendered CRUD (sticky values, render-friendly `Errors`, pairs with `formui`). Weakest placement in the tree; kept deliberately. |
+| `sse` | `realtime/` | Push transport; `view/` stays view-model glue. |
 | `autocert` | `web/` | Exists to wire `httpserver` TLS (the roadmap doc filed it under ops). |
 | `geoip` | `web/` | A lookup, not communication — "clientip gives the address, geoip gives its meaning". Moving it keeps `comms/` = channels only. |
 | `msg/` naming | — | Rejected `jobs/` (undersells eventbus/commandbus), `async/` (collides conceptually with `resilience/`), `outbound/`-style direction names (direction doesn't discriminate — half the framework makes outbound calls). |
