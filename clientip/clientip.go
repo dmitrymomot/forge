@@ -87,14 +87,21 @@ func rightmostUntrusted(chain []string, trusted []netip.Prefix) string {
 		}
 		return addr.String()
 	}
-	// Every hop trusted/unparsable: leftmost non-private, else RemoteAddr (last hop).
-	for _, hop := range chain {
-		if addr, ok := parseAddr(hop); ok && !isPrivate(addr) {
-			return addr.String()
-		}
+	// Every hop trusted/unparsable: leftmost non-private, else the last hop (RemoteAddr).
+	if ip := firstNonPrivate(chain); ip != "" {
+		return ip
 	}
 	if len(chain) > 0 {
-		if addr, ok := parseAddr(chain[len(chain)-1]); ok {
+		return remoteHost(chain[len(chain)-1])
+	}
+	return ""
+}
+
+// firstNonPrivate returns the first (leftmost) parseable non-private address in
+// chain, or "" when none exists.
+func firstNonPrivate(chain []string) string {
+	for _, hop := range chain {
+		if addr, ok := parseAddr(hop); ok && !isPrivate(addr) {
 			return addr.String()
 		}
 	}
@@ -116,10 +123,8 @@ func nthFromRight(chain []string, n int, r *http.Request) string {
 }
 
 func leftmostNonPrivate(chain []string, r *http.Request) string {
-	for _, hop := range chain {
-		if addr, ok := parseAddr(hop); ok && !isPrivate(addr) {
-			return addr.String()
-		}
+	if ip := firstNonPrivate(chain); ip != "" {
+		return ip
 	}
 	return remoteHost(r.RemoteAddr)
 }

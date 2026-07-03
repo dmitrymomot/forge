@@ -111,3 +111,15 @@ func TestTrustPrivateProxies(t *testing.T) {
 	r := req("10.1.1.1:80", map[string][]string{"X-Forwarded-For": {"203.0.113.5, 10.1.1.1"}})
 	assert.Equal(t, "203.0.113.5", clientip.Resolve(r, clientip.TrustPrivateProxies()))
 }
+
+func TestResolveTrustedRangesAllTrustedFallsBackToLeftmostNonPrivate(t *testing.T) {
+	// All hops inside a trusted PUBLIC range -> no untrusted hop -> leftmost non-private wins.
+	r := req("8.8.8.9:80", map[string][]string{"X-Forwarded-For": {"8.8.8.8, 8.8.8.9"}})
+	assert.Equal(t, "8.8.8.8", clientip.Resolve(r, clientip.TrustedRanges("8.8.8.0/24")))
+}
+
+func TestResolveTrustedRangesAllTrustedPrivateFallsBackToRemoteAddr(t *testing.T) {
+	// All hops trusted AND private -> no non-private hop -> fall back to RemoteAddr (last hop).
+	r := req("10.0.0.2:80", map[string][]string{"X-Forwarded-For": {"10.9.9.9"}})
+	assert.Equal(t, "10.0.0.2", clientip.Resolve(r, clientip.TrustedRanges("10.0.0.0/8")))
+}
