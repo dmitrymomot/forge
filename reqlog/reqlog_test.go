@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/forge/logger"
 	"github.com/dmitrymomot/forge/reqlog"
 	"github.com/dmitrymomot/forge/requestid"
 )
@@ -74,4 +75,25 @@ func TestInjectsRequestIDViaExtractor(t *testing.T) {
 	// r.Context() (no panic) and emits a line. Extractor wiring is covered E2E
 	// in the examples build. Assert a line was written:
 	assert.Contains(t, buf.String(), `"msg":"http request"`)
+}
+
+func TestReqlogSurfacesWiredContextExtractor(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := logger.New(
+		logger.WithOutput(&buf),
+		logger.WithLevel(slog.LevelDebug),
+		logger.WithContextExtractors(requestid.LogExtractor),
+	)
+	require.NoError(t, err)
+
+	// requestid (outermost) puts the ID in the context; reqlog logs via r.Context(),
+	// so the logger's extractor must surface it in the emitted line.
+	h := requestid.New(requestid.WithGenerator(func() string { return "rid-e2e" }))(
+		reqlog.New(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
+	)
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	out := buf.String()
+	assert.Contains(t, out, "request_id")
+	assert.Contains(t, out, "rid-e2e")
 }
