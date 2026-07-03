@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/dmitrymomot/forge/ui/htmx"
+	"github.com/dmitrymomot/forge/web/htmx"
 )
 
 func ExampleIsRequest() {

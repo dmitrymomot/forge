@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/forge/ui/htmx"
+	"github.com/dmitrymomot/forge/web/htmx"
 )
 
 func TestRequestBooleans(t *testing.T) {

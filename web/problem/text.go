@@ -6,7 +6,7 @@ import (
 	"text/template"
 
 	"github.com/dmitrymomot/forge/core/bufpool"
-	"github.com/dmitrymomot/forge/ui/render"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 // defaultTextBody renders a Problem as plain text (no HTML). Trailing newlines

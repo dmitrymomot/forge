@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/dmitrymomot/forge/ui/render"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 func ExampleJSON() {

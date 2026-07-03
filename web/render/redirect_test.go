@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/forge/ui/render"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 func TestRedirect(t *testing.T) {

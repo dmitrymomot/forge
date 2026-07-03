@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/forge/ui/render"
 	"github.com/dmitrymomot/forge/web/problem"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 func TestHTMLResponder(t *testing.T) {

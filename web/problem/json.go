@@ -3,7 +3,7 @@ package problem
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/forge/ui/render"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 // JSON returns a Responder that writes err as application/problem+json (RFC 9457).

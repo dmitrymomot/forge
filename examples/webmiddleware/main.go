@@ -13,12 +13,12 @@ import (
 
 	"github.com/dmitrymomot/forge/core/errorsx"
 	"github.com/dmitrymomot/forge/ops/logger"
-	"github.com/dmitrymomot/forge/ui/render"
 	"github.com/dmitrymomot/forge/web/clientip"
 	"github.com/dmitrymomot/forge/web/httpserver"
 	"github.com/dmitrymomot/forge/web/middleware"
 	"github.com/dmitrymomot/forge/web/problem"
 	"github.com/dmitrymomot/forge/web/recoverer"
+	"github.com/dmitrymomot/forge/web/render"
 	"github.com/dmitrymomot/forge/web/reqlog"
 	"github.com/dmitrymomot/forge/web/requestid"
 )

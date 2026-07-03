@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dmitrymomot/forge/ui/render"
 	"github.com/dmitrymomot/forge/web/middleware"
+	"github.com/dmitrymomot/forge/web/render"
 )
 
 // HTML returns a Responder that renders the Problem with a caller-supplied
