@@ -2,7 +2,7 @@
 // data off an *http.Request into Go values: typed accessors for query, path,
 // header, cookie, and form values (Query, Path, Header, Cookie, FormValue and
 // their Func/Slice/Split variants), strict body decoding (DecodeJSON, RawBody,
-// multipart File/Files), and focused readers (BearerToken, ClientIP, presence
+// multipart File/Files), and focused readers (BearerToken, presence
 // predicates, QueryPage/QueryCursor).
 //
 // The helpers are free functions — no constructor, no binder, no struct tags, no
