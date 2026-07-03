@@ -38,6 +38,17 @@ func TestFromValidateErrorsPopulatesFields(t *testing.T) {
 	assert.Equal(t, "is required", p.Fields["email"])
 }
 
+func TestFromValidateErrorsJoinsMultipleViolations(t *testing.T) {
+	verr := validate.Check(validate.Result{
+		{Field: "password", Key: "min", Message: "too short"},
+		{Field: "password", Key: "complexity", Message: "needs a digit"},
+	})
+	p := problem.From(verr)
+	assert.Contains(t, p.Fields["password"], "too short")
+	assert.Contains(t, p.Fields["password"], "needs a digit")
+	assert.Contains(t, p.Fields["password"], "; ")
+}
+
 func TestForceStatusAndTypeBaseURI(t *testing.T) {
 	err := errorsx.New("rate_limited", "slow down")
 	p := problem.From(err,
