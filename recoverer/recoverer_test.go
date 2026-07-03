@@ -69,4 +69,15 @@ func TestNoPanicPassesThrough(t *testing.T) {
 	assert.Equal(t, http.StatusTeapot, rec.Code)
 }
 
+func TestCustomResponderStatusHonored(t *testing.T) {
+	// recoverer does NOT force 500 on a custom responder; its status is used verbatim.
+	responder := func(w http.ResponseWriter, r *http.Request, err error) { w.WriteHeader(http.StatusTeapot) }
+	h := recoverer.New(recoverer.WithLogger(discard()), recoverer.WithResponder(responder))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("x") }),
+	)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+}
+
 var _ = errors.Is // keep errors imported if unused above

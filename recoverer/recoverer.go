@@ -19,7 +19,12 @@ type config struct {
 // Option configures the recoverer middleware.
 type Option func(*config)
 
-// WithResponder sets the error responder used to write the 500 (default problem.JSON() forced to HTTP 500).
+// WithResponder sets the error responder used to write the 500 (default:
+// problem.JSON() forced to HTTP 500). NOTE: recoverer forces 500 only on the
+// DEFAULT responder. A custom responder is used as-is, so you MUST force HTTP 500
+// on it yourself (e.g. problem.WithStatus(http.StatusInternalServerError)) — a
+// panic reaches the responder as an ErrPanic-wrapped plain error, which otherwise
+// resolves to 400 and leaks the panic text in the body.
 func WithResponder(r problem.Responder) Option {
 	return func(c *config) {
 		if r != nil {
