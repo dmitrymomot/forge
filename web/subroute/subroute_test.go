@@ -1,6 +1,7 @@
 package subroute_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/dmitrymomot/forge/web/request"
 	"github.com/dmitrymomot/forge/web/subroute"
 )
 
@@ -116,4 +118,110 @@ func TestMount_CallerRequestNotMutated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/admin/users/42", nil)
 	mux.ServeHTTP(httptest.NewRecorder(), req)
 	assert.Equal(t, "/admin/users/42", req.URL.Path)
+}
+
+func TestMount_WildcardPrefix(t *testing.T) {
+	dashboardMux := http.NewServeMux()
+	dashboardMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		tenant, _ := request.Path[string](r, "tenant")
+		_, _ = fmt.Fprintf(w, "home tenant=%s", tenant)
+	})
+	dashboardMux.HandleFunc("GET /reports/{id}", func(w http.ResponseWriter, r *http.Request) {
+		tenant, _ := request.Path[string](r, "tenant")
+		id, _ := request.Path[int](r, "id")
+		_, _ = fmt.Fprintf(w, "report tenant=%s id=%d own=%s", tenant, id, r.PathValue("id"))
+	})
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/app/{tenant}/dashboard", dashboardMux)
+
+	tests := []struct{ name, target, wantBody string }{
+		{"bare wildcard prefix", "/app/acme/dashboard", "home tenant=acme"},
+		{"subtree with own wildcard", "/app/acme/dashboard/reports/7", "report tenant=acme id=7 own=7"},
+		{"tenant varies per request", "/app/globex/dashboard", "home tenant=globex"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := get(t, mux, tt.target)
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, tt.wantBody, rec.Body.String())
+		})
+	}
+}
+
+func TestMount_Nested(t *testing.T) {
+	projMux := http.NewServeMux()
+	projMux.HandleFunc("GET /info", func(w http.ResponseWriter, r *http.Request) {
+		tenant, _ := request.Path[string](r, "tenant")
+		proj, _ := request.Path[string](r, "proj")
+		_, _ = fmt.Fprintf(w, "path=%s tenant=%s proj=%s", r.URL.Path, tenant, proj)
+	})
+
+	appMux := http.NewServeMux()
+	subroute.Mount(appMux, "/proj/{proj}", projMux)
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/app/{tenant}", appMux)
+
+	rec := get(t, mux, "/app/acme/proj/x/info")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "path=/info tenant=acme proj=x", rec.Body.String())
+}
+
+func TestMount_NestedShadowing(t *testing.T) {
+	leaf := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := request.Path[string](r, "id")
+		_, _ = fmt.Fprintf(w, "id=%s", id)
+	})
+
+	innerMux := http.NewServeMux()
+	subroute.Mount(innerMux, "/dup/{id}", leaf) // same name as outer prefix
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/m/{id}", innerMux)
+
+	rec := get(t, mux, "/m/OUTER/dup/INNER/x")
+	assert.Equal(t, "id=INNER", rec.Body.String()) // innermost mount wins
+}
+
+func TestMount_NestedStaticInsideWildcard(t *testing.T) {
+	leaf := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenant, _ := request.Path[string](r, "tenant")
+		_, _ = fmt.Fprintf(w, "path=%s tenant=%s", r.URL.Path, tenant)
+	})
+
+	appMux := http.NewServeMux()
+	subroute.Mount(appMux, "/settings", leaf) // static mount below a wildcard mount
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/app/{tenant}", appMux)
+
+	rec := get(t, mux, "/app/acme/settings/profile")
+	assert.Equal(t, "path=/profile tenant=acme", rec.Body.String())
+}
+
+func TestMount_PrecedenceCurrentMuxWins(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("GET /sub/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, _ := request.Path[string](r, "id")
+		_, _ = fmt.Fprintf(w, "id=%s", id)
+	})
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/m/{id}", inner)
+
+	rec := get(t, mux, "/m/OUTER/sub/INNER")
+	assert.Equal(t, "id=INNER", rec.Body.String())
+}
+
+func TestMount_StaticMountCapturesNothing(t *testing.T) {
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/admin", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "has=%t ctxsame=%t", request.HasPath(r, "tenant"), r.Context() == context.Background())
+	}))
+
+	// httptest requests use context.Background; a static mount must not have
+	// wrapped it (no capture context for static prefixes).
+	rec := get(t, mux, "/admin/x")
+	assert.Equal(t, "has=false ctxsame=true", rec.Body.String())
 }

@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/dmitrymomot/forge/web/request"
 )
 
 // Mount registers h on mux at prefix, both as the exact path and as a
@@ -69,8 +71,8 @@ func parsePrefix(prefix string) (segments int, names []string) {
 }
 
 // stripHandler dispatches to h with the mount prefix removed from the URL of
-// a cloned request. names is non-nil only for wildcard prefixes; capture is
-// added in a later task.
+// a cloned request. For wildcard prefixes (names non-nil) it first captures
+// the prefix path values via request.WithPathValues.
 type stripHandler struct {
 	h        http.Handler
 	names    []string
@@ -78,8 +80,20 @@ type stripHandler struct {
 }
 
 func (s *stripHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	r2 := new(http.Request)
-	*r2 = *r
+	var r2 *http.Request
+	if len(s.names) > 0 {
+		vals := make(map[string]string, len(s.names))
+		for _, n := range s.names {
+			vals[n] = r.PathValue(n)
+		}
+		// WithPathValues merges over enclosing captures (later wins), so
+		// nested mounts accumulate params with the innermost mount winning.
+		r2 = r.WithContext(request.WithPathValues(r.Context(), vals))
+	} else {
+		// Static prefix: no capture, no context allocation.
+		r2 = new(http.Request)
+		*r2 = *r
+	}
 	r2.URL = new(url.URL)
 	*r2.URL = *r.URL
 
