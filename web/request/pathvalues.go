@@ -45,7 +45,9 @@ func WithPathValues(ctx context.Context, vals map[string]string) context.Context
 }
 
 // pathValue resolves a path wildcard: the current mux's own match first,
-// then WithPathValues fallback, then "".
+// then WithPathValues fallback, then "". Treating an empty r.PathValue
+// result as absent is safe: a ServeMux single-segment wildcard never
+// matches an empty segment, so "" can only mean the key was not matched.
 func pathValue(r *http.Request, key string) string {
 	if v := r.PathValue(key); v != "" {
 		return v
