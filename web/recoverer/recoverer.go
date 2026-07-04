@@ -1,4 +1,3 @@
-// Package recoverer converts handler panics into a 500 response and a log line.
 package recoverer
 
 import (

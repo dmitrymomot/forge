@@ -11,8 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-// maxRetryBackoff caps the exponential wait between connect attempts so a large
-// RetryInterval or attempt count cannot push a single wait past ~30s.
+// maxRetryBackoff caps the exponential wait between retry attempts (both Open's
+// connect loop and WithTxRetry's transaction retries) so a large interval or
+// attempt count cannot push a single wait past ~30s.
 const maxRetryBackoff = 30 * time.Second
 
 // Open builds a connection pool from the resolved options, connects with bounded

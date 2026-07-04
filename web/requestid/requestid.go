@@ -1,5 +1,3 @@
-// Package requestid attaches a correlation ID to each request: an accepted
-// inbound header value or a freshly generated ULID.
 package requestid
 
 import (

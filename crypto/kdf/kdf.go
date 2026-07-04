@@ -21,7 +21,7 @@ func DefaultParams() Params {
 	return Params{Time: 3, Memory: 64 * 1024, KeyLen: 32, Threads: 4}
 }
 
-// Validate reports whether every Params field is non-zero.
+// Validate returns ErrInvalidParams if any Params field is zero, nil otherwise.
 func (p Params) Validate() error {
 	if p.Time == 0 || p.Memory == 0 || p.Threads == 0 || p.KeyLen == 0 {
 		return fmt.Errorf("%w: all fields must be > 0", ErrInvalidParams)

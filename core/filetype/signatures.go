@@ -5,8 +5,7 @@ import "bytes"
 // signature is one entry in the curated magic-byte table. It matches when the
 // input starts with prefix (or, when offset > 0, contains prefix at offset),
 // and — for RIFF/ftyp containers that share a leading tag — when the optional
-// sub tag is present at subAt. A nil match func on a signature is not used;
-// container disambiguation is handled by the fields below.
+// sub tag is present at subAt.
 type signature struct {
 	typ    Type
 	prefix []byte // required leading (or offset) bytes

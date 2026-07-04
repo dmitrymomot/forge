@@ -10,6 +10,8 @@
 // the framework's declared database. Migrations live at the root of fsys; embed a
 // subdirectory with fs.Sub if needed.
 //
+// # Usage
+//
 //	//go:embed migrations/*.sql
 //	var migrationsFS embed.FS
 //

@@ -22,7 +22,7 @@
 //	RetryAttempts       RETRY_ATTEMPTS          3         Open's bounded connect-retry attempts
 //	RetryInterval       RETRY_INTERVAL          1s        base connect backoff (interval * 2^attempt, capped 30s)
 //
-// # Lifecycle
+// # Usage
 //
 //	func main() {
 //		ctx, stop := supervisor.NewContext()

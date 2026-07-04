@@ -1,9 +1,14 @@
 // Package redis provides a Redis-backed cache.Store.
 //
-//	client := redis.Open(ctx, redis.WithConfig(cfg)) // forge/data/redis; caller closes it
+// # Usage
+//
+//	client, err := forgeredis.Open(ctx, forgeredis.WithConfig(cfg)) // caller closes it
+//	if err != nil {
+//		// handle err
+//	}
 //	defer client.Close()
 //
-//	store := cacheredis.NewStore(client)
+//	store := redis.NewStore(client)
 //	sessions := cache.New[Session](store, cache.WithPrefix("sess:"))
 //
 // Store.Close is a no-op — close the underlying client yourself. Clear on a

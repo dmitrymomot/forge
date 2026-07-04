@@ -20,9 +20,9 @@ type config struct {
 type Option func(*config)
 
 // WithConfig sets the whole serializable data block at once. Build the argument
-// from DefaultConfig() (or an env-parsed copy); a bare Config{} fails Validate.
-// Options apply in order — place WithConfig before any code options it should not
-// clobber.
+// from DefaultConfig() (or an env-parsed copy); a bare Config{} fails Validate. It
+// only replaces the embedded Config; WithLogger and WithClientConfig are unaffected
+// regardless of ordering. If WithConfig is passed more than once, the last call wins.
 func WithConfig(cfg Config) Option {
 	return func(c *config) { c.Config = cfg }
 }

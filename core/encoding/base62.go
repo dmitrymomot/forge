@@ -9,7 +9,8 @@ import (
 // EncodeInt, Encode, and the big.Int byte path share one alphabet.
 const base62Alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-// EncodeInt encodes n in base62.
+// EncodeInt encodes n in base62 using the digit order 0-9, a-z, A-Z. It never
+// errors; n == 0 encodes to "0".
 func EncodeInt(n uint64) string {
 	if n == 0 {
 		return "0"
@@ -60,7 +61,8 @@ func Encode(b []byte) string {
 	return strings.Repeat("0", z) + digits
 }
 
-// Decode reverses Encode.
+// Decode reverses Encode, returning ErrInvalidEncoding if s contains a
+// character outside the base62 alphabet.
 func Decode(s string) ([]byte, error) {
 	z := 0
 	for z < len(s) && s[z] == '0' {

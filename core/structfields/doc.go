@@ -16,4 +16,19 @@
 // not bind or populate structs from external data, does not validate, and does
 // not parse scalar values — struct-tag binding lives in the consumers, scalar
 // conversion in typeconv, and value validation in validate.
+//
+// # Usage
+//
+//	type Config struct {
+//		Name string `env:"NAME,required"`
+//	}
+//
+//	var cfg Config
+//	err := structfields.Walk(&cfg, "env", func(f structfields.Field) error {
+//		if f.Tag.Ignored() {
+//			return nil
+//		}
+//		return f.Set("value from " + f.Tag.Name)
+//	})
+//	// err == nil, cfg.Name == "value from NAME"
 package structfields

@@ -61,7 +61,8 @@ func (g *Group[V]) Do(ctx context.Context, key string, fn func(context.Context) 
 	return c.val, false, c.err
 }
 
-// Forget drops any in-flight/last record for key so the next Do re-executes.
+// Forget drops the in-flight call for key, if any, so the next Do for that
+// key starts a fresh execution instead of joining a stale one.
 func (g *Group[V]) Forget(key string) {
 	g.mu.Lock()
 	delete(g.m, key)

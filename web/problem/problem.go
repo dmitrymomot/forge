@@ -1,5 +1,3 @@
-// Package problem maps Go errors to HTTP error responses via a pluggable
-// Responder seam, and to RFC 9457 problem documents.
 package problem
 
 import (

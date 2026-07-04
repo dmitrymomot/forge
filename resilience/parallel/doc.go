@@ -1,5 +1,7 @@
 // Package parallel runs work concurrently with a bounded worker count.
 //
+// # Usage
+//
 //	squares, err := parallel.Map(ctx, ids, 8, func(ctx context.Context, id int) (int, error) {
 //	    return id * id, nil
 //	})

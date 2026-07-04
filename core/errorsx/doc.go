@@ -10,4 +10,13 @@
 // statuses itself — that belongs to the future problem/render layer, which reads
 // Code. For plain wrapping use fmt.Errorf with %w; reach for errorsx only when
 // you need a code or a retry tag.
+//
+// # Usage
+//
+//	err := errorsx.New("not_found", "user missing")
+//	code, ok := errorsx.Code(err) // "not_found", true
+//
+//	wrapped := errorsx.MarkPermanent(errorsx.WithCode(errors.New("duplicate key"), "conflict"))
+//	errorsx.IsPermanent(wrapped) // true
+//	errorsx.IsRetryable(wrapped) // false
 package errorsx

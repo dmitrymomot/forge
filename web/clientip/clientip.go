@@ -1,7 +1,3 @@
-// Package clientip resolves the originating client IP from an HTTP request,
-// caches it per request, and exposes it to handlers, other middleware, and the
-// logger. It replaces the former request.ClientIP with a safe-by-default,
-// batteries-included resolver.
 package clientip
 
 import (

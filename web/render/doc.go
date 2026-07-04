@@ -4,13 +4,7 @@
 // Text, Blob, CSV, Stream, Attachment, File/FileFS, Redirect, and NoContent.
 //
 // The helpers are free functions — there is no constructor, options, or global state.
-// The caller owns its *template.Template and handles the returned error:
-//
-//	func handle(w http.ResponseWriter, r *http.Request) {
-//		if err := render.JSON(w, http.StatusOK, user); err != nil {
-//			// log err; the response may be incomplete
-//		}
-//	}
+// The caller owns its *template.Template and handles the returned error.
 //
 // JSON, HTML, and Templ are transactional: they encode into a pooled buffer first, so
 // an encode/template error returns with nothing written and the caller can still send
@@ -22,4 +16,12 @@
 // render does not negotiate content (the handler picks the function) and never fetches
 // remote URLs: serve an S3 object with Redirect, or fetch it in the handler and pass
 // the body to Stream/Attachment.
+//
+// # Usage
+//
+//	func handle(w http.ResponseWriter, r *http.Request) {
+//		if err := render.JSON(w, http.StatusOK, user); err != nil {
+//			// log err; the response may be incomplete
+//		}
+//	}
 package render

@@ -63,7 +63,8 @@ func TestUnique(t *testing.T) {
 	})
 
 	t.Run("max length with custom separator", func(t *testing.T) {
-		// separator "__" (2 runes) plus "-2"... use "_" here; budget accounts for it.
+		// Same maxLength shrink as above, but with a custom "_" separator, to
+		// confirm the budget calculation isn't hardcoded to "-".
 		base := slug.Make("abcdefgh", slug.WithMaxLength(8), slug.WithSeparator("_"))
 		taken := map[string]bool{base: true}
 		got := slug.Unique("abcdefgh", func(c string) bool { return taken[c] },
