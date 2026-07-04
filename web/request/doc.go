@@ -20,6 +20,10 @@
 // encoding.TextUnmarshaler (uuid.UUID, netip.Addr, time.Time, custom enums) works
 // through the generic engine; anything else can use the Func variants.
 //
+// Path accessors resolve the current mux match (r.PathValue) first, then
+// values stored with WithPathValues — the seam web/subroute uses so mount-
+// prefix params stay readable inside mounted handlers.
+//
 // request reads; the render package writes; the htmx package handles HX-* headers.
 // None imports another. Stdlib only.
 package request
