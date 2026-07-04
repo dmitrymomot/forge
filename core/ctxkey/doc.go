@@ -5,11 +5,13 @@
 // Each key has its own identity, so keys never collide across packages even when
 // they share a name.
 //
-//	var userKey = ctxkey.New[User]("user")
-//
-//	ctx = userKey.With(ctx, currentUser)
-//	u, ok := userKey.From(ctx) // (User, bool) — no assertion at the call site
-//
 // ctxkey deliberately does not import logger: adapting Key[T].From into a
 // logger.ContextExtractor is a one-liner that belongs in application wiring.
+//
+// # Usage
+//
+//	var userIDKey = ctxkey.New[string]("userID")
+//
+//	ctx = userIDKey.With(ctx, "u_123")
+//	id, ok := userIDKey.From(ctx) // (string, bool) — no assertion at the call site
 package ctxkey

@@ -5,7 +5,8 @@ import "errors"
 // ErrNilTemplate is returned by HTML when the provided template is nil.
 var ErrNilTemplate = errors.New("render: nil template")
 
-// ErrNilComponent is returned by Templ when the provided component is nil.
+// ErrNilComponent is returned by Templ when the provided component is nil, and by
+// Components when any element of the input is nil.
 var ErrNilComponent = errors.New("render: nil component")
 
 // ErrNoComponents is returned by Components when no components are provided.

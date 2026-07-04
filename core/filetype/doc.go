@@ -14,6 +14,13 @@
 // For hashing uploaded bytes see digest; for size-limited stream reads see
 // iox; for filename canonicalization see sanitize.
 //
-//	t, ok := filetype.Detect(head)          // ok=false ⇒ genuinely unknown
-//	t, r, err := filetype.DetectReader(src) // r replays the full stream
+// # Usage
+//
+//	t, ok := filetype.Detect(head) // ok=false means genuinely unknown
+//	if ok && t.MIME == "image/png" {
+//		// ...
+//	}
+//
+//	// For an io.Reader whose bytes must stay intact for a later stage:
+//	typ, stream, err := filetype.DetectReader(src) // stream replays src in full
 package filetype

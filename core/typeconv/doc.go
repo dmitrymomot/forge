@@ -9,4 +9,12 @@
 // string) will not match generic Parse — numeric defined types are served by
 // the constraint helpers (ParseInt[MyInt]) and string-defined types by a
 // trivial conversion. Time is RFC3339 both ways.
+//
+// # Usage
+//
+//	n, err := typeconv.Parse[int]("42")
+//	// n == 42, err == nil
+//
+//	s := typeconv.Format(n)
+//	// s == "42"
 package typeconv

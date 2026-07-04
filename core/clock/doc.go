@@ -2,6 +2,11 @@
 // Clock and calls Now instead of time.Now, so expiry and scheduling logic can be
 // driven deterministically in tests via Mock.
 //
+// Only Now is provided today. Timer/ticker helpers are deferred until the async
+// layer needs them; adding them later is additive.
+//
+// # Usage
+//
 //	type svc struct{ clk clock.Clock }
 //	func newSvc() *svc { return &svc{clk: clock.System()} }
 //
@@ -9,7 +14,4 @@
 //	m := clock.NewMock(time.Unix(0, 0))
 //	s := &svc{clk: m}
 //	m.Advance(time.Hour) // s now sees time one hour later
-//
-// Only Now is provided today. Timer/ticker helpers are deferred until the async
-// layer needs them; adding them later is additive.
 package clock

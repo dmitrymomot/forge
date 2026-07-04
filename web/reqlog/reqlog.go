@@ -1,4 +1,3 @@
-// Package reqlog logs one structured line per HTTP request.
 package reqlog
 
 import (

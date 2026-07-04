@@ -24,4 +24,14 @@
 // Siblings: decimal (the exact fixed-point substrate this builds on); enum
 // (closed string value-domains); validate (CurrencyCode/CountryCode shape
 // checks). See docs/packages.md for the package catalog.
+//
+// # Usage
+//
+//	price := money.FromMinor(1999, money.USD) // 19.99 USD
+//	shipping := money.FromMinor(500, money.USD)
+//	total, err := price.Add(shipping)
+//	if err != nil {
+//		// price and shipping share a currency here, so this is unreachable
+//	}
+//	total.String() // "24.99 USD"
 package money

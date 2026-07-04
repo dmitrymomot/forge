@@ -2,6 +2,8 @@
 // Store (in-memory or, via cache/redis, Redis) and wrap it with a typed facade.
 // The facade never owns the Store's lifecycle.
 //
+// # Usage
+//
 //	store := cache.NewMemoryStore(cache.WithMaxEntries(10_000))
 //	defer store.Close()
 //

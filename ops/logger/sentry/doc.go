@@ -2,6 +2,8 @@
 // parallel, at its own MinLevel, while keeping the Sentry SDK out of the core logger's
 // import graph.
 //
+// # Usage
+//
 //	log, flush, err := sentry.New(
 //		sentry.WithConfig(sentry.Config{
 //			Config:   logger.Config{Level: "info", Format: "json"},

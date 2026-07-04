@@ -133,7 +133,7 @@ func formatUint(u uint64) string {
 	return string(buf[i:])
 }
 
-// isAllZero reports whether s is non-empty and every rune is '0'.
+// isAllZero reports whether s is non-empty and every byte is '0'.
 func isAllZero(s string) bool {
 	for i := range len(s) {
 		if s[i] != '0' {

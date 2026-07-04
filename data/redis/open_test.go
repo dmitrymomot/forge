@@ -22,8 +22,7 @@ func validConfig() forgeredis.Config {
 	return cfg
 }
 
-// slogDiscard is the shared test logger. Defined here for reuse by later task tests
-// (RD-3, RD-4); suppress unused until those files are added.
+// slogDiscard is the shared test logger, reused across this package's test files.
 //
 //nolint:unused
 func slogDiscard() *slog.Logger {

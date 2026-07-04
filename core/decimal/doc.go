@@ -13,4 +13,16 @@
 // scientific notation in v1 (rejected as ErrSyntax); Float64 is best-effort and
 // lossy — never use it for money math. For currency-aware money with a currency
 // tag and penny-perfect allocation, see the money package, which builds on this.
+//
+// # Usage
+//
+//	price := decimal.MustParse("19.99")
+//	qty := decimal.FromInt(3)
+//	subtotal := price.Mul(qty) // exact: "59.97"
+//
+//	share, err := subtotal.Div(decimal.FromInt(2), 2, decimal.HalfEven)
+//	if err != nil {
+//		// e.g. divisor is zero
+//	}
+//	_ = share.String() // "29.98" (59.97 / 2 = 29.985, half-to-even rounds down)
 package decimal

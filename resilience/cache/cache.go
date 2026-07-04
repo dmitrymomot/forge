@@ -94,7 +94,7 @@ func (c *Cache[V]) Set(ctx context.Context, key string, v V, ttl time.Duration) 
 	return c.store.Set(ctx, c.key(key), data, ttl)
 }
 
-// Delete removes key.
+// Delete removes key. Deleting a key that does not exist is not an error.
 func (c *Cache[V]) Delete(ctx context.Context, key string) error {
 	return c.store.Delete(ctx, c.key(key))
 }

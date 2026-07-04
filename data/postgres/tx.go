@@ -34,7 +34,8 @@ func WithRetryAttempts(n int) RetryOption {
 }
 
 // WithRetryInterval sets the base backoff between retries (interval · 2^attempt,
-// capped at maxRetryBackoff). Default 50ms.
+// capped at maxRetryBackoff). Values <= 0 are ignored and leave the default in
+// place. Default 50ms.
 func WithRetryInterval(d time.Duration) RetryOption {
 	return func(c *retryConfig) {
 		if d > 0 {

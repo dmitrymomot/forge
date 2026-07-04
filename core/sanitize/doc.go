@@ -21,4 +21,12 @@
 //     parameterized queries); NOT PII/locale formatting; NOT path
 //     normalization (path/filepath); NOT numeric/slice/map helpers
 //     (slicex/set).
+//
+// # Usage
+//
+//	clean := sanitize.Compose(sanitize.Trim, strings.ToLower, sanitize.Collapse)
+//	clean("  Ann   Lee ") // == "ann lee"
+//
+//	sanitize.Email("  Ann.Lee@Example.COM  ") // == "ann.lee@example.com"
+//	sanitize.EscapeHTML("<b>hi</b>")          // == "&lt;b&gt;hi&lt;/b&gt;"
 package sanitize

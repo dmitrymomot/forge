@@ -4,13 +4,15 @@
 // random-nonce use. It underpins cookie/session encryption, encrypted tokens, and field
 // crypto.
 //
-//	box, _ := secret.New(key)            // 32-byte key
-//	ct, _  := box.EncryptString(pii)
-//	pt, _  := box.DecryptString(ct)
-//
-//	// rotation:
-//	box, _ := secret.FromKeyset(ks)      // encrypt under primary, decrypt under any version
-//
 // Ciphertext is version-byte || nonce || ciphertext+tag. Any decryption failure returns
 // ErrDecryptFailed without revealing the cause (no padding/key oracle).
+//
+// # Usage
+//
+//	box, _ := secret.New(key) // 32-byte key
+//	ct, _ := box.EncryptString(pii)
+//	pt, _ := box.DecryptString(ct)
+//
+//	// rotation: encrypt under the keyset's primary, decrypt under any version
+//	box, _ = secret.FromKeyset(ks)
 package secret

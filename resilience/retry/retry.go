@@ -66,7 +66,8 @@ type permanentError struct{ err error }
 func (e *permanentError) Error() string { return e.err.Error() }
 func (e *permanentError) Unwrap() error { return e.err }
 
-// Permanent wraps err so retry stops immediately and returns the wrapped error.
+// Permanent wraps err so Do stops retrying immediately and returns the
+// wrapped error. Permanent(nil) returns nil.
 func Permanent(err error) error {
 	if err == nil {
 		return nil

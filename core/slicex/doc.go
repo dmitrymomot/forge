@@ -9,4 +9,15 @@
 // cannot be cheaply aliased (var Sort = slices.Sort is illegal; each alias
 // would be a hand-written generic wrapper), such wrappers drift as stdlib grows
 // new helpers, and two names for one function is a two-sources-of-truth footgun.
+//
+// # Usage
+//
+//	doubled := slicex.Map([]int{1, 2, 3}, func(v int) int { return v * 2 })
+//	// doubled == []int{2, 4, 6}
+//
+//	evens := slicex.Filter(doubled, func(v int) bool { return v%4 == 0 })
+//	// evens == []int{4}
+//
+//	groups := slicex.GroupBy([]int{1, 2, 3, 4}, func(v int) int { return v % 2 })
+//	// groups == map[int][]int{0: {2, 4}, 1: {1, 3}}
 package slicex

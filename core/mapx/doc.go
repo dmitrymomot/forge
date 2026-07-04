@@ -5,4 +5,15 @@
 // Like slicex, mapx is a gap-filler and does NOT re-implement or re-export
 // stdlib maps functions (Clone, Keys, Values, Equal, Copy, DeleteFunc). Import
 // "maps" directly alongside mapx.
+//
+// # Usage
+//
+//	merged := mapx.Merge(map[string]int{"a": 1}, map[string]int{"b": 2})
+//	// merged == map[string]int{"a": 1, "b": 2}
+//
+//	o := mapx.NewOrdered[string, int]()
+//	o.Set("z", 26)
+//	o.Set("a", 1)
+//	b, _ := json.Marshal(o)
+//	// b == `{"z":26,"a":1}` (insertion order, not key order)
 package mapx
