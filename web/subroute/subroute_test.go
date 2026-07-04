@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/dmitrymomot/forge/web/middleware"
 	"github.com/dmitrymomot/forge/web/request"
 	"github.com/dmitrymomot/forge/web/subroute"
 )
@@ -224,4 +225,30 @@ func TestMount_StaticMountCapturesNothing(t *testing.T) {
 	// wrapped it (no capture context for static prefixes).
 	rec := get(t, mux, "/admin/x")
 	assert.Equal(t, "has=false ctxsame=true", rec.Body.String())
+}
+
+func TestMount_MiddlewareBoundary(t *testing.T) {
+	var outerSaw, innerSaw string
+	record := func(dst *string) middleware.Middleware {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				*dst = r.URL.Path
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	adminMux := http.NewServeMux()
+	adminMux.Handle("GET /users", echo())
+
+	mux := http.NewServeMux()
+	subroute.Mount(mux, "/admin", middleware.Wrap(adminMux, record(&innerSaw)))
+	root := middleware.Wrap(mux, record(&outerSaw))
+
+	rec := httptest.NewRecorder()
+	root.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/users", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/admin/users", outerSaw, "outer middleware sees the full path")
+	assert.Equal(t, "/users", innerSaw, "mounted middleware sees the stripped path")
 }

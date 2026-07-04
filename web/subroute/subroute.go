@@ -1,5 +1,3 @@
-// Package subroute mounts http.Handlers under path prefixes on a standard
-// *http.ServeMux, chi.Mount-style. See doc.go for the full package comment.
 package subroute
 
 import (
