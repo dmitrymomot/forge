@@ -121,7 +121,7 @@ forge/                              # single go.mod at the root
 │
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
-│   #          recoverer reqlog requestid render htmx
+│   #          recoverer reqlog requestid render htmx subroute
 │   # planned: httpclient cookie csrf secheaders cors timeout compress
 │   #          assets idempotency iplist captcha (captcha/turnstile ...)
 │   #          webhookverify autocert
@@ -258,7 +258,7 @@ Shipped: `backoff retry singleflight parallel circuitbreaker cache (cache/redis)
 ### web/
 
 Shipped: `httpserver hostrouter middleware request clientip problem recoverer
-reqlog requestid render htmx`.
+reqlog requestid render htmx subroute`.
 
 - **`httpclient`** — core, build early. Resilient outbound `*http.Client`
   via a RoundTripper stack: per-attempt timeout, jittered retry, circuit
