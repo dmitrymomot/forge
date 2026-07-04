@@ -1,7 +1,7 @@
 # web/subroute — design
 
 Date: 2026-07-04
-Status: approved for planning
+Status: approved for planning (rev 2: param accessor moved to web/request)
 
 ## Purpose
 
@@ -9,8 +9,13 @@ Status: approved for planning
 `http.Handler` (typically another `ServeMux`) under a path prefix — including
 prefixes with `{name}` wildcards — with the prefix stripped so the mounted
 handler sees root-relative paths, and prefix path values still readable from
-handlers inside the mount. Standalone package in the `web/` domain,
-stdlib-only, in the same spirit as `web/hostrouter`.
+handlers inside the mount. Standalone package in the `web/` domain, in the
+same spirit as `web/hostrouter`.
+
+Prefix path values are read through the existing `web/request` accessors
+(`request.Path`, `request.PathFunc`, `request.HasPath`), which gain a
+context-based fallback. `web/request` owns that seam; `subroute` writes
+through it.
 
 ## Background: why not exactly chi's mechanism
 
@@ -22,12 +27,13 @@ parent params remain readable in mounted subrouters.
 `http.ServeMux` has no such seam: it routes on `r.URL.Path` only, and its
 match state (what `r.PathValue` reads) is unexported and overwritten whenever
 a nested mux matches. Therefore a std-mux mount must (a) rewrite the path on
-a cloned request, and (b) carry prefix params through its own request-context
-value — the explicit-accessor equivalent of chi's `RouteContext`.
+a cloned request, and (b) carry prefix params through a request-context
+value — the equivalent of chi's `RouteContext`, owned here by `web/request`
+so that its typed accessors keep working across mount boundaries.
 
 ## API
 
-Two exported functions:
+### web/subroute — one exported function
 
 ```go
 package subroute
@@ -36,14 +42,25 @@ package subroute
 // subtree. prefix may contain single-segment {name} wildcards. Requests are
 // dispatched to h with the prefix segments stripped from the URL path; a
 // request for the bare prefix reaches h with path "/". Path values matched
-// by the prefix are captured and readable inside h via PathValue.
+// by the prefix are captured and readable inside h via request.Path.
 func Mount(mux *http.ServeMux, prefix string, h http.Handler)
-
-// PathValue returns the named path value: r.PathValue first (the current
-// mux's own match), then values captured by enclosing Mount prefixes,
-// innermost mount first. Returns "" if the name is not present.
-func PathValue(r *http.Request, name string) string
 ```
+
+### web/request — one new function, three extended
+
+```go
+package request
+
+// WithPathValues returns a context carrying vals as fallback path values for
+// Path, PathFunc, and HasPath. Values merge over any previously stored ones
+// (later wins). Routers that dispatch across ServeMux boundaries (subroute)
+// use this to keep path params readable in nested handlers.
+func WithPathValues(ctx context.Context, vals map[string]string) context.Context
+```
+
+`Path`, `PathFunc`, and `HasPath` change lookup from `r.PathValue(key)` to:
+`r.PathValue(key)` first (the current mux's own match wins), then the
+context-stored fallback, then absent.
 
 Usage:
 
@@ -57,8 +74,8 @@ dashboardMux.HandleFunc("GET /{$}", home)             // GET /app/acme/dashboard
 dashboardMux.HandleFunc("GET /reports/{id}", report)  // GET /app/acme/dashboard/reports/7
 
 func report(w http.ResponseWriter, r *http.Request) {
-    tenant := subroute.PathValue(r, "tenant") // "acme" — from the mount prefix
-    id := r.PathValue("id")                   // "7" — current mux match, stdlib as usual
+    tenant, _ := request.Path[string](r, "tenant") // "acme" — from the mount prefix
+    id, _ := request.Path[int](r, "id")            // 7 — current mux match, typed as usual
 }
 ```
 
@@ -69,7 +86,8 @@ func report(w http.ResponseWriter, r *http.Request) {
 `Mount` registers two patterns on the given mux — the exact `prefix` and the
 subtree `prefix + "/"` — both pointing at one internal strip handler.
 Duplicate-registration conflicts are caught by `ServeMux.Handle` itself,
-which already panics; `subroute` inherits that behavior.
+which already panics; `subroute` inherits that behavior. `Mount` panics on
+nil `mux`/`h` and malformed prefixes (see Validation).
 
 ### Strip handler (hot path)
 
@@ -77,10 +95,11 @@ which already panics; `subroute` inherits that behavior.
   mutated.
 - Captures prefix path values: for each `{name}` wildcard in the prefix
   (parsed once at Mount time), reads `r.PathValue(name)` — the outer mux has
-  just matched them — and stores the set in the request context. Nested
-  mounts merge with enclosing captures; on name collision the innermost mount
-  wins (matching chi's last-added-wins scan). Static prefixes skip capture
-  entirely (no context allocation).
+  just matched them — and stores the set via `request.WithPathValues`.
+  Because `WithPathValues` merges later-over-earlier, nested mounts
+  accumulate captures and the innermost mount wins on name collision
+  (matching chi's last-added-wins scan) with no extra logic in `subroute`.
+  Static prefixes skip capture entirely (no context allocation).
 - Strips as many leading path segments as the prefix has (segment-based, not
   literal trim, because wildcard segments vary per request). Operates on the
   escaped path; `URL.Path` and `URL.RawPath` are set consistently. An empty
@@ -91,18 +110,24 @@ which already panics; `subroute` inherits that behavior.
 - Composes under `web/hostrouter`, and nests: a mounted `ServeMux` can itself
   have `Mount` applied.
 
-### PathValue accessor
+### Path-value lookup (web/request)
 
-`subroute.PathValue(r, name)`:
+`request.Path` / `PathFunc` / `HasPath` resolve the raw value as:
 
-1. `r.PathValue(name)` — non-empty means the current mux's own pattern
-   matched it; return it.
-2. Otherwise walk mount-captured values from the innermost mount outward.
-3. `""` if absent.
+1. `r.PathValue(key)` — non-empty means the current mux's own pattern
+   matched it; use it.
+2. Otherwise the `WithPathValues` fallback map from the request context
+   (already merged, innermost mount first).
+3. Otherwise absent (zero value / default, per existing request semantics).
 
-Handlers keep using plain `r.PathValue` for their own mux's wildcards;
-`subroute.PathValue` is needed only for params originating in mount prefixes
-(stdlib physically cannot propagate those across a mux boundary).
+The context key and carrier type are unexported in `request`; the carrier is
+a custom context (hostrouter-style single allocation), and `WithPathValues`
+copies its input map, so callers cannot mutate stored values.
+
+### Dependencies
+
+`subroute` imports `web/request` (internal, for `WithPathValues` only).
+`request` remains stdlib-only and imports no forge packages.
 
 ### Validation (setup-time panics)
 
@@ -140,22 +165,34 @@ Caveats to document in `doc.go` and `example_test.go`:
   (`/admin/users`). This differs from chi, where mounted middleware sees the
   full path (chi never rewrites the URL); it is unavoidable with a std mux
   as the child router.
-- Mount-prefix params are read with `subroute.PathValue`, not `r.PathValue`.
+- Mount-prefix params are read with `request.Path` (or `r.PathValue` only
+  for the current mux's own wildcards).
 
 ## Testing
 
-Black-box only (`package subroute_test`):
+Black-box only.
+
+`web/request` (`package request_test`):
+
+- `Path`/`PathFunc`/`HasPath` fall back to `WithPathValues` values
+- `r.PathValue` (current mux match) takes precedence over fallback
+- `WithPathValues` merge: later call wins per key, earlier keys retained
+- `WithPathValues` with an empty/nil map returns the context unchanged
+- stored values are immune to caller mutating the input map afterward
+- typed parsing works on fallback values (e.g. `Path[int]`)
+
+`web/subroute` (`package subroute_test`):
 
 - bare prefix `GET /admin` → mounted handler sees `GET /`
 - subtree paths stripped (`/admin/users` → `/users`)
 - wildcard prefix: `GET /app/acme/dashboard/reports/7` → handler sees
-  `/reports/7`, `subroute.PathValue(r, "tenant") == "acme"`,
+  `/reports/7`, `request.Path[string](r, "tenant") == "acme"`,
   `r.PathValue("id") == "7"`
 - bare wildcard prefix (`GET /app/acme/dashboard` → path `/`, tenant
   captured)
-- nested mounts: param merging, innermost-wins shadowing, static-inside-
+- nested mounts: param accumulation, innermost-wins shadowing, static-inside-
   wildcard and wildcard-inside-wildcard
-- PathValue precedence: current-mux match beats captured mount values
+- precedence: current-mux match beats captured mount values
 - query string preserved; escaped/encoded segments handled consistently in
   `Path`/`RawPath`
 - non-matching paths fall through to the outer mux (404 or sibling routes)
@@ -166,14 +203,17 @@ Black-box only (`package subroute_test`):
 - static-prefix mounts allocate no capture context
 - all panic cases
 
-Package layout mirrors `web/hostrouter`: `subroute.go`, `context.go`,
-`doc.go`, `example_test.go`, tests, and a small benchmark.
+Package layout mirrors `web/hostrouter`: `subroute.go`, `doc.go`,
+`example_test.go`, tests, and a small benchmark. In `web/request`, the seam
+lives in a new `pathvalues.go` with `path.go` gaining the fallback.
 
 ## Non-goals
 
-- No router type, no options, no `Use()` — two functions.
+- No router type, no options, no `Use()` — subroute exports `Mount` only.
 - No middleware parameters on `Mount` (compose via `middleware.Wrap`).
 - No method, host, `{$}`, or `{name...}` elements in the prefix.
 - No handler-returning variant (`subroute.At`) unless a real need appears.
+- No exported reader for the raw fallback map in `request` — `Path`/
+  `PathFunc`/`HasPath` are the read API.
 - No propagation of the parent mux's 404/405 handlers into the child
   (chi does this for chi-to-chi mounts; std `ServeMux` has no seam for it).
