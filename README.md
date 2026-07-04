@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/dmitrymomot/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/dmitrymomot/forge/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/dmitrymomot/forge.svg)](https://pkg.go.dev/github.com/dmitrymomot/forge)
-[![Go Report Card](https://goreportcard.com/badge/github.com/dmitrymomot/forge)](https://goreportcard.com/report/github.com/dmitrymomot/forge)
 [![License](https://img.shields.io/github/license/dmitrymomot/forge)](LICENSE)
 
 A simple, opinionated Go framework for building micro-SaaS applications.
