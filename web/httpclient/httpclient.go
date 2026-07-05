@@ -23,7 +23,7 @@ func New(opts ...Option) *http.Client {
 }
 
 type transport struct {
-	breaker breakerFunc // nil unless WithBreakerGroup set (Task 16)
+	breaker breakerFunc // nil unless WithBreakerGroup is set
 	cfg     config
 }
 

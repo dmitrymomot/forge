@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dmitrymomot/forge/resilience/circuitbreaker"
 	"github.com/dmitrymomot/forge/resilience/retry"
 )
 
@@ -17,8 +18,10 @@ type config struct {
 	before       []func(*http.Request)
 	after        []func(*http.Request, *http.Response)
 	ctxHeaders   []func(context.Context) http.Header
+	breakerOpts  []circuitbreaker.GroupOption
 	timeout      time.Duration
 	perAttempt   time.Duration
+	useBreaker   bool
 }
 
 func newConfig(opts ...Option) config {
@@ -87,3 +90,13 @@ func WithHeader(key, value string) Option { return func(c *config) { c.headers.S
 
 // WithUserAgent sets the User-Agent header on every request.
 func WithUserAgent(ua string) Option { return func(c *config) { c.userAgent = ua } }
+
+// WithBreakerGroup enables a per-host circuit breaker (off by default). Each
+// attempt runs inside a circuitbreaker.Group keyed by request host; the breaker's
+// open error carries Retry-After, so retry and breaker cooperate.
+func WithBreakerGroup(opts ...circuitbreaker.GroupOption) Option {
+	return func(c *config) {
+		c.useBreaker = true
+		c.breakerOpts = append(c.breakerOpts, opts...)
+	}
+}
