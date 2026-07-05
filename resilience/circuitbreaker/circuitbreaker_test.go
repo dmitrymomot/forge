@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/circuitbreaker"
@@ -111,8 +112,8 @@ func TestOpenErrorIsMatchableAndCarriesRetryAfter(t *testing.T) {
 
 	assert.ErrorIs(t, err, circuitbreaker.ErrOpen)
 	var ra interface{ RetryAfter() time.Duration }
-	assert.ErrorAs(t, err, &ra)
-	d := ra.RetryAfter()
+	require.ErrorAs(t, err, &ra)
+	d := ra.RetryAfter() //nolint:nilaway // ra is guaranteed non-nil by require.ErrorAs above
 	assert.Greater(t, d, time.Duration(0))
 	assert.LessOrEqual(t, d, 30*time.Second)
 }

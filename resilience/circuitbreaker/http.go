@@ -126,8 +126,7 @@ func serve(b *Breaker, cfg middlewareConfig, next http.Handler, w http.ResponseW
 	if err == nil || errors.Is(err, errDownstreamFailure) {
 		return // downstream already wrote its response (success or a matched failure)
 	}
-	var oe *openError
-	if errors.As(err, &oe) {
+	if oe, ok := errors.AsType[*openError](err); ok {
 		cfg.onOpen(w, r, oe.retryAfter)
 	}
 }
