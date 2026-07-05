@@ -4,7 +4,7 @@
 > in `docs/packages.md`. The shipped-package API additions portion of Wave 1
 > landed in PR #31; this bundle adds the four *new* packages that finish the
 > wave: `web/httpclient`, `resilience/ratelimit` (+`ratelimit/redisstore`),
-> `ops/envconfig`, `ops/health`, plus two shared unblockers
+> `ops/config`, `ops/health`, plus two shared unblockers
 > (`structfields.SetString`, `supervisor.WithPreShutdown`).
 
 ## Goal
@@ -17,8 +17,8 @@ unblocks large parts of Wave 2+:
   `comms/*`, `llm`.
 - `ratelimit` — establishes the **counter `Store` seam** shared later by
   `quota` and `lockout`.
-- `envconfig` — env→Config loading that every shipped `Config` (`logger`,
-  `httpserver`, …) is already tagged for.
+- `config` — layered config loading (YAML per-env + `${VAR}` substitution +
+  `.env` inheritance + env-tag structs), modeled on `modo::config`.
 - `health` — liveness/readiness + drain gating, needed by `appmain` and any
   real deployment.
 
@@ -54,7 +54,8 @@ because a Wave 1 package depends on it.
 
 ### 0.1 — `core/structfields.SetString`
 
-`envconfig` must turn an env *string* into a typed struct field. `typeconv` is
+`config`'s `LoadEnv`/`Populate` path must turn an env *string* into a typed
+struct field. `typeconv` is
 documented "converts strings to Go scalars **without reflection**" (generic
 `Parse[T]`), so it cannot host a `Kind`-dispatched parser. Per the design DNA
 ("no reflection except the one sanctioned helper, `structfields`"), the dispatch
@@ -75,14 +76,13 @@ func SetString(f Field, raw string) error
   already exposes.
 - New sentinel `ErrUnsupportedKind` in `structfields/errors.go`.
 - Slices use `typeconv.ParseSlice[T]` with `","` as the separator.
-- TDD'd and merged conceptually first; the other three packages depend only on
-  it (via `envconfig`).
+- TDD'd first; only `config`'s env-tag path depends on it.
 
 **Test expectations (black-box):** round-trips each supported kind; pointer
 fields are allocated and set; type mismatch and unsupported kind return the
 right sentinel; value-struct (non-pointer) `Field.Set` still returns
 `ErrNotSettable`; empty `raw` leaves defaults for optional fields (caller
-decides — `SetString` on empty string parses "" per kind, so `envconfig` skips
+decides — `SetString` on empty string parses "" per kind, so `config` skips
 calling it when the env var is absent).
 
 ### 0.2 — `ops/supervisor.WithPreShutdown`
@@ -121,77 +121,114 @@ shutdown; no hooks → identical behavior to today; a panicking hook is recovere
 
 ---
 
-## 1. `ops/envconfig`
+## 1. `ops/config`
 
-Populate `env`-tagged Config structs from the environment plus an optional
-`.env` file. Boot-time only.
+Layered application configuration, modeled on `modo::config` (single-YAML per
+env + `${VAR}` substitution) and extended with real `.env` inheritance and
+shell-style empty-or-unset defaults. Three composable capabilities over one
+"environment layer" (loaded `.env` values + process env) and one profile. Boot
+time only. First forge package to take a **YAML** dependency (`gopkg.in/yaml.v3`,
+confined here — YAML is a wire format, unsafe to hand-roll, so it fits "buy the
+wire, isolate the dep").
 
 ### Public API
 
 ```go
-func Load[T any](opts ...Option) (T, error)   // parse and return a fresh T
-func Populate(dst any, opts ...Option) error  // fill an existing non-nil *struct
+// (1) YAML per-env convention + ${VAR:default} substitution (the modo path).
+//     Reads {dir}/{Profile()}.yaml, substitutes against the environment layer,
+//     unmarshals via yaml.v3. If *T implements interface{ SetDefaults() } it is
+//     applied before decode (yaml only overwrites present keys); if it
+//     implements interface{ Validate() error } that runs after.
+func Load[T any](dir string, opts ...Option) (T, error)
+
+// (2) Struct-from-env (12-factor, no YAML file), via structfields.Walk +
+//     structfields.SetString, with `default:"…"` fallback and `env:"K,required"`.
+func LoadEnv[T any](opts ...Option) (T, error)
+func Populate(dst any, opts ...Option) error  // env-tag overlay onto an existing
+                                              // struct (e.g. logger.DefaultConfig())
+
+// (3) .env inheritance — left = base, each later file overrides it; the REAL
+//     process env is never overwritten (env wins). Applies into the process env.
+func Dotenv(paths ...string) error
+
+// Shared helpers
+func Substitute(s string) (string, error)  // public ${VAR:default} expander
+func Profile() string                      // APP_ENV → ENV → "development"
+func IsDev() bool                          // profile ∈ {"", "dev", "development"}
+func IsProd() bool                         // {"prod", "production"}
+func IsTest() bool                         // {"test", "testing"}
+func IsStaging() bool                      // {"staging", "stage"}
 
 type Option func(*config)
-func WithPrefix(prefix string) Option                       // e.g. "APP_"
-func WithDotenv(paths ...string) Option                     // load these .env files first
-func WithLookup(fn func(key string) (string, bool)) Option  // override os.LookupEnv (test seam)
-
-// Deployment profile.
-type Profile string
-const (
-    ProfileDev     Profile = "dev"
-    ProfileTest    Profile = "test"
-    ProfileStaging Profile = "staging"
-    ProfileProd    Profile = "prod"
-)
-func (p Profile) IsDev() bool
-func (p Profile) IsTest() bool
-func (p Profile) IsStaging() bool
-func (p Profile) IsProd() bool
-func ResolveProfile(opts ...Option) Profile  // reads APP_ENV then ENV; unknown/empty -> ProfileDev
+func WithDotenv(paths ...string) Option                 // Load/LoadEnv load these .env first
+func WithProfile(name string) Option                    // override APP_ENV detection
+func WithFileName(fn func(profile string) string) Option // default: profile + ".yaml"
+func WithLookup(fn func(key string) (string, bool)) Option // test seam over os.LookupEnv
 ```
 
-### Semantics
+### `${VAR:default}` substitution semantics
 
-- **Field walk:** `structfields.Walk(dst, "env", ...)`; each field's env key is
-  `prefix + tag.Name`. Missing `env` tag → field skipped.
-- **Value resolution order per key:** real environment (via the `WithLookup`
-  func, default `os.LookupEnv`) wins; `.env` values are loaded into a fallback
-  map consulted only when the env var is absent. `.env` is parsed by an internal
-  `KEY=VALUE` reader (comments `#`, blank lines, optional `export ` prefix,
-  single/double-quoted values with escape handling) — no godotenv dependency.
-- **Assignment:** present values go through `structfields.SetString`; absent
-  values fall back to the `default:"..."` struct tag (also via `SetString`);
-  fields tagged `required` (an option in the `env` tag, `env:"PORT,required"`)
-  with no value and no default cause `Load`/`Populate` to fail.
-- **Nested structs:** recurse; a nested field may carry
-  `envconfig:"prefix=DB_"` to compose an additional key prefix. Anonymous
-  embedded structs recurse with the parent prefix.
-- **Validation:** if `dst` (or `*T`) implements `interface{ Validate() error }`,
-  `envconfig` calls it after populating and joins any error. This is how it
-  cooperates with every shipped `Config.Validate`.
+- Split on the **first** `:` — the variable name is left of it, the default
+  (which may itself contain `:` or `}`) is right of it.
+- `${VAR:default}` → the default when `VAR` is **unset _or_ empty** (shell `:-`
+  semantics — your `${HOST:0.0.0.0}` requirement, a deliberate departure from
+  modo's unset-only rule).
+- `${VAR}` (no default) → error if `VAR` is unset (catches typos); a set-empty
+  `VAR` substitutes empty.
+- `$$` escapes a literal `$`. No nesting. An unterminated `${…` is
+  `ErrSubstitute`.
+
+### `.env` inheritance & precedence
+
+- `Dotenv("config/.env.local", ".env")`: parse each file (KEY=VALUE; `#`
+  comments; blank lines; optional `export ` prefix; single/double-quoted values
+  with escapes) into an accumulator where **later files override earlier**, then
+  apply to the process env **only for keys not already present in the real
+  environment** — so real env > `.env` > `.env.local`. Internal parser, no
+  godotenv.
+- `Load`/`LoadEnv` with `WithDotenv(...)` run this first, so substitution and
+  env-tag reads both see the merged layer.
+
+### Decode-path precedence
+
+- **`Load` (YAML):** the file is the config; env influences it **only through
+  `${VAR}` placeholders** written in the YAML — explicit, no hidden env-over-yaml
+  deep-merge. `SetDefaults()` (if present) seeds defaults that absent YAML keys
+  retain.
+- **`LoadEnv`/`Populate` (env tags):** process env (incl. loaded `.env`) →
+  field via `env:"KEY"` → `default:"…"` tag fallback → `required` failure if
+  neither. Uses `structfields.SetString` (unblocker §0.1). Nested structs recurse
+  with an optional `config:"prefix=DB_"` field tag.
+
+### Name-collision note (documented in `doc.go`)
+
+The package name `config` collides at compile time with the unexported
+package-level `type config struct` that forge's options idiom puts in nearly
+every package (verified: *"config already declared through import of package
+config"*, a hard error, not shadowing). Any package that both uses that idiom
+and imports this loader (notably `ops/appmain`) **must alias the import**:
+`import appconfig "github.com/dmitrymomot/forge/ops/config"`. `doc.go` leads with
+this.
 
 ### Errors
 
-`ErrNotStruct` (wrap of the structfields sentinel is fine), `ErrRequiredMissing`
-(carries the key name), `ErrParse` (carries key + kind), `ErrDotenv` (file read
-failure). All single-line, `errors.Is`-matchable. Multiple field errors are
-`errors.Join`-ed so one call reports every problem.
-
-### Config / DNA note
-
-`envconfig` is itself optionless-stateful (it *is* the loader), so it uses the
-free-func + `Option` idiom, not a `New`/`Config` struct.
+`ErrProfileFile` (yaml missing/unreadable), `ErrSubstitute` (bad placeholder or
+unset no-default var — carries the var name), `ErrYAML` (unmarshal), `ErrDotenv`
+(file read), `ErrRequiredMissing` (LoadEnv, carries the key), `ErrParse`
+(LoadEnv, carries key + kind). All single-line, `errors.Is`-matchable; field
+errors `errors.Join`-ed.
 
 ### Tests (black-box)
 
-Populate a multi-field struct from a `WithLookup` map (no real env); `.env`
-fallback and precedence; prefix and nested prefix composition; `required`
-missing → `ErrRequiredMissing`; bad value → `ErrParse`; `Validate()` hook
-invoked and its error surfaced; `ResolveProfile` mapping and predicates;
-round-trip a real shipped Config shape (e.g. a struct mirroring
-`logger.Config`) to prove tag compatibility.
+Substitute: `${VAR}`/`${VAR:default}` for unset/empty/set, first-colon split,
+`:` in default, `$$` escape, unterminated → `ErrSubstitute`. Dotenv: later file
+overrides earlier, real env overrides files, quoting/comments/`export`. Load:
+`{profile}.yaml` selection via `WithProfile`/`WithFileName`, substitution before
+unmarshal, `SetDefaults` retained for absent keys, `Validate` surfaced, missing
+file → `ErrProfileFile` (all via a `testdata/` dir + `WithLookup`, no real env).
+LoadEnv/Populate: env→struct, `default` fallback, `required` missing →
+`ErrRequiredMissing`, bad value → `ErrParse`, overlay onto a `logger.Config`-shaped
+struct to prove tag compatibility. Profile predicates over the alias sets.
 
 ---
 
@@ -502,14 +539,16 @@ maps a 422 problem+json body.
 
 ## Cross-cutting
 
-- **Idioms:** `envconfig` = free-func + Option; `health`/`ratelimit`/
-  `httpclient` = `New(...Option)`. No builders anywhere.
+- **Idioms:** `config` and `health` = free-funcs/handler factory + Option;
+  `ratelimit`/`httpclient` = `New(...Option)`. No builders anywhere.
 - **Anatomy per package:** `doc.go` (runnable example), `errors.go`
   (single-line sentinels), `options.go` (`type Option func(*config)`), impl,
   black-box `_test.go` in `package X_test`.
-- **Dependencies added:** none new — all four compose stdlib + already-isolated
-  deps (`data/redis` for `redisstore`, the shipped resilience trio for
-  `httpclient`). `x/crypto` etc. untouched.
+- **Dependencies added:** one — `gopkg.in/yaml.v3`, used **only** by `ops/config`
+  (forge's first YAML dep; a wire format, isolated to this one package). The
+  other three packages compose stdlib + already-isolated deps (`data/redis` for
+  `redisstore`, the shipped resilience trio for `httpclient`). `x/crypto` etc.
+  untouched.
 - **Test doubles live with the seam owner:** `ratelimit.NewMemoryStore` is the
   in-memory counter double; there is no central fakes package.
 - **`just fmt ./pkg/...` + `just lint`** run clean before the PR (use the
@@ -520,8 +559,9 @@ maps a 422 problem+json body.
 
 1. Unblocker leaves, in parallel: `core/structfields.SetString` and
    `ops/supervisor.WithPreShutdown`.
-2. In parallel: `ops/envconfig` (needs #1's `SetString`), `ops/health` (needs
-   `WithPreShutdown` only for its drain `doc.go` example, not to compile),
+2. In parallel: `ops/config` (its env-tag path needs #1's `SetString`; adds the
+   `gopkg.in/yaml.v3` dep), `ops/health` (needs `WithPreShutdown` only for its
+   drain `doc.go` example, not to compile),
    `resilience/ratelimit` (+`ratelimit/redisstore`), `web/httpclient`.
 3. Update `docs/packages.md`: move the four from *planned* to *shipped*, bump
    the shipped-count line, drop the Wave 1 rows from build order.
