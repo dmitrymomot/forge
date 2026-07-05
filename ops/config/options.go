@@ -9,7 +9,7 @@ type config struct {
 	dotenvPaths []string
 }
 
-func newConfig(opts ...Option) config { //nolint:unused // consumed by LoadEnv/Populate/Load added in later tasks
+func newConfig(opts ...Option) config {
 	c := config{
 		fileNameFn: func(p string) string { return p + ".yaml" },
 		lookup:     os.LookupEnv,
@@ -31,7 +31,7 @@ func (c config) fileName() string { //nolint:unused // consumed by Load added in
 	return c.fileNameFn(c.activeProfile())
 }
 
-func (c config) applyDotenv() error { //nolint:unused // consumed by LoadEnv/Populate/Load added in later tasks
+func (c config) applyDotenv() error {
 	if len(c.dotenvPaths) == 0 {
 		return nil
 	}
