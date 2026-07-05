@@ -4,8 +4,8 @@
 > in `docs/packages.md`. The shipped-package API additions portion of Wave 1
 > landed in PR #31; this bundle adds the four *new* packages that finish the
 > wave: `web/httpclient`, `resilience/ratelimit` (+`ratelimit/redisstore`),
-> `ops/envconfig`, `ops/health`, plus one shared unblocker
-> (`structfields.SetString`).
+> `ops/envconfig`, `ops/health`, plus two shared unblockers
+> (`structfields.SetString`, `supervisor.WithPreShutdown`).
 
 ## Goal
 
@@ -30,7 +30,8 @@ real deps isolated in driver subpackages, black-box tests only.
 ## Scope
 
 **In:** the four packages above, the `ratelimit/redisstore` driver subpackage,
-and one shared shipped-package addition (`core/structfields.SetString`).
+and two shared shipped-package additions (`core/structfields.SetString`,
+`ops/supervisor.WithPreShutdown`).
 
 **Out (explicit non-goals):**
 
@@ -46,7 +47,12 @@ and one shared shipped-package addition (`core/structfields.SetString`).
 
 ---
 
-## 0. Shared unblocker — `core/structfields.SetString`
+## 0. Shared unblockers
+
+Two small, backward-compatible additions to shipped packages, each TDD'd first
+because a Wave 1 package depends on it.
+
+### 0.1 — `core/structfields.SetString`
 
 `envconfig` must turn an env *string* into a typed struct field. `typeconv` is
 documented "converts strings to Go scalars **without reflection**" (generic
@@ -78,6 +84,40 @@ right sentinel; value-struct (non-pointer) `Field.Set` still returns
 `ErrNotSettable`; empty `raw` leaves defaults for optional fields (caller
 decides — `SetString` on empty string parses "" per kind, so `envconfig` skips
 calling it when the env var is absent).
+
+### 0.2 — `ops/supervisor.WithPreShutdown`
+
+`health`'s graceful drain requires flipping readiness to 503 and letting the
+load balancer deregister **before** `httpserver` stops accepting connections.
+The shipped supervisor cancels the shared `runCtx` **once** and every service
+observes `ctx.Done()` simultaneously (`supervisor.go:75`, `beginShutdown`) —
+there is no shutdown ordering, so a peer "drain service" flips readiness
+*concurrently* with the server closing its listener, which defeats the grace
+window. This adds an ordered pre-shutdown phase:
+
+```go
+// WithPreShutdown registers a hook run after the stop signal (or a service
+// exit) but BEFORE runCtx is cancelled. All hooks run concurrently; Run waits
+// for them to return, bounded by WithPreShutdownTimeout, then cancels runCtx so
+// services drain. Hooks receive a fresh context (the parent is already
+// cancelled) carrying the pre-shutdown deadline.
+func WithPreShutdown(name string, fn func(context.Context)) Option
+func WithPreShutdownTimeout(d time.Duration) Option // default 30s; must exceed the longest grace
+```
+
+**Run change:** `beginShutdown` currently calls `cancel()` immediately. It
+becomes: log shutdown → run pre-shutdown hooks to completion (or timeout) →
+`cancel()` → existing drain loop. The hook phase runs once, is skipped when
+there are no hooks (zero behavior change for current callers), and a hook panic
+is recovered and logged like a service panic. New sentinel
+`ErrPreShutdownTimeout` (joined into the returned error, non-fatal — shutdown
+still proceeds).
+
+**Test expectations (black-box):** hooks complete before any service observes
+cancellation (a hook that records order vs a service that records its
+`ctx.Done()` time); multiple hooks run concurrently; `WithPreShutdownTimeout`
+bounds a slow hook and surfaces `ErrPreShutdownTimeout` without blocking
+shutdown; no hooks → identical behavior to today; a panicking hook is recovered.
 
 ---
 
@@ -157,85 +197,132 @@ round-trip a real shipped Config shape (e.g. a struct mirroring
 
 ## 2. `ops/health`
 
-Liveness + readiness in one package, with per-check timeout/TTL, drain gating,
-and heartbeat kickers.
+A **single handler factory**. No `Health` struct, no registry, no cache, no
+background goroutine, no lifecycle. Checks are pull-evaluated on each scrape and
+added purely as options. `Handler()` with no options is an always-200 handler —
+the canonical liveness probe; the same function with checks is readiness.
 
 ### Public API
 
 ```go
-func New(opts ...Option) *Health
-
-func (h *Health) Liveness(name string, c Check, opts ...CheckOption)
-func (h *Health) Readiness(name string, c Check, opts ...CheckOption)
-
-func (h *Health) LivenessHandler() http.Handler   // GET /livez
-func (h *Health) ReadinessHandler() http.Handler  // GET /readyz
-
-func (h *Health) SetReady(ready bool)
-func (h *Health) Heartbeat(name string, maxAge time.Duration) (kick func())
-func (h *Health) DrainService(grace time.Duration) supervisor.Service
+// Handler runs every registered check on each request and reports the
+// aggregate: 200 when all pass (or only non-critical checks fail, "degraded"),
+// 503 when any critical check fails. With no checks it always returns 200.
+func Handler(opts ...Option) http.Handler
 
 type Check func(ctx context.Context) error
 
-// Built-in check adapters (driver-free — they take interfaces / stdlib types,
-// so they carry no data/* or web/httpclient imports and live in this package).
-func Ping(p interface{ Ping(ctx context.Context) error }) Check   // 2xx of a driver ping
-func HTTPGet(client *http.Client, url string) Check               // 2xx = healthy
-
 type Option func(*config)
-func WithDefaultTimeout(d time.Duration) Option   // default per-check ctx deadline
-func WithDefaultCacheTTL(d time.Duration) Option  // default result cache window
-func WithLogger(l *slog.Logger) Option
+func WithCheck(name string, check Check, opts ...CheckOption) Option
+func WithTimeout(d time.Duration) Option   // per-check ctx bound; 0 = inherit request ctx
+func WithResponder(fn func(http.ResponseWriter, *http.Request, Report)) Option // default JSON
 
 type CheckOption func(*checkConfig)
-func WithCritical() CheckOption                  // failure flips readiness to 503
-func WithTimeout(d time.Duration) CheckOption    // per-check override of default timeout
-func WithCacheTTL(d time.Duration) CheckOption   // per-check override of default cache TTL
+func NonCritical() CheckOption   // failure → 200 "degraded" instead of 503
+
+type Report struct {
+    Status string        // "ok" | "degraded" | "unavailable"
+    Checks []CheckResult
+}
+type CheckResult struct {
+    Name     string
+    OK       bool
+    Critical bool
+    Err      string
+}
+
+// Gate is a flippable readiness signal exposed as a Check — the drain primitive.
+type Gate struct{ /* atomic.Bool, starts up */ }
+func NewGate() *Gate
+func (g *Gate) Check(ctx context.Context) error // nil while up; ErrDraining once Down
+func (g *Gate) Up()
+func (g *Gate) Down()
 ```
 
 ### Semantics
 
-- **Two registries.** `/livez` reflects only liveness checks + heartbeat
-  freshness; a hung background loop that stops calling its `kick()` makes
-  `/livez` fail after `maxAge`. `/readyz` reflects readiness checks AND the
-  `SetReady` flag.
-- **Result shape.** Handlers return `200`/`503` with a JSON body:
-  `{"status":"ok|degraded|unavailable","checks":{"name":{"ok":bool,"error":"…","critical":bool}}}`.
-  Non-critical readiness failure → `status:"degraded"` but still `200`; any
-  critical failure or `SetReady(false)` → `503`.
-- **Per-check execution.** Each check runs under its timeout; results are cached
-  for the TTL so a scrape storm can't hammer the database. Checks run
-  concurrently on scrape.
-- **Drain gating.** `DrainService(grace)` returns a `supervisor.Service`
-  (`Name()="health-drain"`, blocking `Run`). On ctx cancel it calls
-  `SetReady(false)`, sleeps `grace` (so the load balancer observes `/readyz`
-  going 503 and deregisters), then returns nil. Registered **before**
-  `httpserver` in `supervisor.Run` so readiness flips before the server drains.
-  Documented ordering in `doc.go`.
+- **Pull only.** Every scrape runs the registered checks and reports the
+  aggregate — no caching, no background workers. Freshness == the scrape; the
+  operator picks a sane probe interval (a 1s probe pings the datastores once a
+  second, by design). `WithTimeout` bounds each check so one hung store can't
+  hang the probe; checks also observe the request context.
+- **Concurrency.** Checks run concurrently *within a single request* (ephemeral,
+  request-scoped — not a background worker) so N store pings don't serialize.
+  All complete before the response is written.
+- **Criticality.** Checks are **critical by default** (failure → 503);
+  `NonCritical()` makes a check degrade-not-evict — its failure yields
+  `status:"degraded"` with a still-`200` response.
+- **Result shape (default responder).** JSON:
+  `{"status":"ok|degraded|unavailable","checks":[{"name":…,"ok":…,"critical":…,"err":…}]}`.
+  Empty check set → `{"status":"ok","checks":[]}` at `200`. `WithResponder`
+  swaps the body format (e.g. a `problem`-shaped body) without touching check
+  logic.
+- **No built-in check adapters.** A `Check` is just `func(ctx) error`; forge's
+  data clients already expose exactly that (`postgres.Healthcheck(pool)`,
+  `redis.Healthcheck(c)`, `opensearch.Healthcheck(c)`, `mongo.Healthcheck(db)`),
+  so a `Ping` adapter would be dead weight. An HTTP-dependency check is a
+  documented `doc.go` recipe (GET → 2xx, drain+close body, honor ctx), not a
+  package export.
 
-### Built-in checks (in-package)
+### Drain (composed with `supervisor.WithPreShutdown`)
 
-`Ping` and `HTTPGet` live in `health` itself — they are interface/stdlib
-adapters, not driver code, so they add no imports and a separate `health/checks`
-package would be redundant. `data/postgres` and `data/redis` clients satisfy the
-`Ping` shape; `HTTPGet` takes any `*http.Client` (typically one built by the new
-`httpclient`, but only the stdlib type is referenced, so no import of
-`web/httpclient`).
+Readiness-flip-for-shutdown is **just a `Gate` check**, not special machinery.
+Register `gate.Check` in the readyz handler; flip it in a pre-shutdown hook so
+`/readyz` reports 503 while the server keeps serving, then the ordered
+pre-shutdown phase (§0.2) lets the LB deregister before `httpserver` stops:
+
+```go
+gate := health.NewGate()
+readyz := health.Handler(
+    health.WithCheck("accepting", gate.Check),
+    health.WithCheck("postgres", postgres.Healthcheck(pool)),
+    // …
+)
+supervisor.Run(ctx,
+    supervisor.WithPreShutdown("drain", func(ctx context.Context) {
+        gate.Down()                 // next /readyz scrape = 503, server still serving
+        select {                    // wait grace ≥ probeInterval × failureThreshold + margin
+        case <-time.After(5 * time.Second):
+        case <-ctx.Done():
+        }
+    }),
+    supervisor.WithService(srv),    // listener closes only AFTER the hook returns
+)
+```
+
+### `doc.go` example — liveness + readiness over the four datastores
+
+```go
+mux.Handle("GET /livez", health.Handler()) // always 200: process is up
+
+mux.Handle("GET /readyz", health.Handler(
+    health.WithCheck("postgres", postgres.Healthcheck(pool)),                 // critical
+    health.WithCheck("mongo", mongo.Healthcheck(mdb)),                        // critical
+    health.WithCheck("redis", redis.Healthcheck(rdb), health.NonCritical()),  // degrade
+    health.WithCheck("opensearch", opensearch.Healthcheck(osc), health.NonCritical()),
+    health.WithTimeout(2*time.Second),
+))
+```
+
+`/readyz` with redis down → `200 {"status":"degraded", …}`; with postgres or
+mongo down → `503 {"status":"unavailable", …}`.
 
 ### Errors
 
-`health` checks return caller errors verbatim in the JSON; the package needs no
-exported error sentinels beyond what handlers encode.
+`ErrDraining` (returned by a down `Gate.Check`), single-line and
+`errors.Is`-matchable. Checks otherwise return caller errors verbatim into the
+`Report`.
 
 ### Tests (black-box)
 
-`/livez` 200 with healthy checks, 503 when a liveness check errors; heartbeat
-staleness flips `/livez`; `/readyz` 503 on `SetReady(false)`; critical vs
-non-critical readiness distinction (503 vs degraded-200); per-check timeout
-surfaces as failure not hang; result caching (a slow check invoked once within
-TTL — assert call count); `DrainService` flips readiness on ctx cancel and
-returns after `grace` (use `clock.Mock` or a tiny real grace); `Ping` maps a
-stub pinger's error; `HTTPGet` reports a stub server's non-2xx as unhealthy.
+`Handler()` with no checks → 200 (liveness); all-pass → 200 `"ok"`; a critical
+failure → 503 `"unavailable"`; a `NonCritical` failure → 200 `"degraded"` while
+criticals pass; `WithTimeout` turns a hung check into a failure not a hang;
+checks receive and honor the request context (cancel mid-scrape); concurrent
+execution (two slow checks finish in ~max, not sum); `Gate` flips
+`Check`↔`ErrDraining` on `Down`/`Up` and the handler goes 503↔200 accordingly;
+`WithResponder` overrides the body; the four-store `doc.go` example compiles and
+degrades/evicts per criticality (stub `func(ctx) error` checks, no real DBs).
 
 ---
 
@@ -431,8 +518,10 @@ maps a 422 problem+json body.
 
 ## Build order (within the bundle)
 
-1. `core/structfields.SetString` (unblocker leaf).
-2. In parallel: `ops/envconfig` (needs #1), `ops/health`,
+1. Unblocker leaves, in parallel: `core/structfields.SetString` and
+   `ops/supervisor.WithPreShutdown`.
+2. In parallel: `ops/envconfig` (needs #1's `SetString`), `ops/health` (needs
+   `WithPreShutdown` only for its drain `doc.go` example, not to compile),
    `resilience/ratelimit` (+`ratelimit/redisstore`), `web/httpclient`.
 3. Update `docs/packages.md`: move the four from *planned* to *shipped*, bump
    the shipped-count line, drop the Wave 1 rows from build order.
@@ -441,6 +530,10 @@ One bundled PR via `subagent-driven-dev`.
 
 ## Risks / notes
 
+- **`WithPreShutdown` ordering is the crux of the drain story.** The pre-shutdown
+  phase must complete *before* `runCtx` is cancelled — the ordering test
+  (hook-finished-before-service-sees-cancel) is the guard; a regression silently
+  reverts to the broken concurrent drain.
 - **redisstore fixed-TTL-per-window** must be atomic (Lua) or a concurrent
   first-incr race re-arms the TTL and stretches a window. Called out in the plan
   as a must-test.
@@ -448,6 +541,9 @@ One bundled PR via `subagent-driven-dev`.
   boundary-crossing test with a mock clock is the guard.
 - **POST-retry default off** is a deliberate safety choice (no silent
   double-submit); `WithRetryMethods` is the documented escape hatch.
-- `health.HTTPGet` references only the stdlib `*http.Client`, so `health` has no
-  build-order dependency on `httpclient` — the four packages are fully
-  independent after the `structfields.SetString` unblocker.
+- **`health` is pull-only, no cache** — a fast probe pings datastores every
+  interval by design; the operator owns the probe cadence. `WithTimeout` is the
+  guard against a hung store hanging the probe.
+- The four packages are independent after the two unblockers; `health` needs no
+  import of `httpclient` (HTTP-dependency checks are an inline recipe, not an
+  export).
