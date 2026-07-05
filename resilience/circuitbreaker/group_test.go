@@ -1,6 +1,7 @@
 package circuitbreaker_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -58,4 +59,31 @@ func TestGroupActiveKeySurvivesSweep(t *testing.T) {
 	_ = g.Do(t.Context(), "a", fail)
 	assert.Equal(t, circuitbreaker.StateOpen, g.State("a"),
 		"active key's breaker must be preserved across the sweep")
+}
+
+func TestGroupConcurrentAccessIsRaceFree(t *testing.T) {
+	// Exercises Group's write path (lazy create + opportunistic sweep in
+	// breaker()) against its read paths (State/Len) across many goroutines
+	// sharing the same keys, so -race validates the mutex/sweep interaction.
+	g := circuitbreaker.NewGroup(
+		circuitbreaker.WithBreakerOptions(circuitbreaker.WithFailureThreshold(3)),
+		circuitbreaker.WithSweepInterval(time.Millisecond), // sweeps interleave with Do
+		circuitbreaker.WithIdleTTL(time.Hour),              // nothing idles out mid-test
+	)
+	keys := []string{"a", "b", "c", "d"}
+
+	var wg sync.WaitGroup
+	for i := range 64 {
+		key := keys[i%len(keys)]
+		wg.Go(func() {
+			for range 25 {
+				_ = g.Do(t.Context(), key, ok) // write path: breaker() + sweep
+				_ = g.State(key)               // read path
+				_ = g.Len()                    // read path
+			}
+		})
+	}
+	wg.Wait()
+
+	assert.Equal(t, len(keys), g.Len()) // every shared key created exactly once, none lost
 }
