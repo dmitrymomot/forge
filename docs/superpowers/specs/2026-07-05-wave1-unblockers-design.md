@@ -29,11 +29,15 @@ rest. One spec per wave.
 2. **Weighted random selection is dropped** — not shipped in any form. Consumers
    who need lootbox/A-B weighting write it themselves; it does not belong in a
    crypto-secure primitive.
-3. **`core/id.Prefixed`** is a **bound `Prefix` codec** (`NewPrefix("user")` →
-   `New`/`Parse`/`Is`/`Prefix`), underlying `Short`. Not a per-call helper (too
-   easy to typo the prefix), not a phantom-generic type (too much ceremony for
-   forge's "no magic" lean). Reuses the existing `id.ErrMalformed`; adds
-   `id.ErrWrongPrefix`.
+3. **`core/id.Prefixed`** is a **bound `Prefix` codec**
+   (`NewPrefix(prefix, ...opts)` → `New`/`Parse`/`Is`/`Prefix`) with a
+   **pluggable body generator** (`WithGenerator`, default `Short`; options are
+   optional) plus **package-level static aliases**
+   (`NewPrefixed`/`ParsePrefixed`/`IsPrefixed`) for the zero-config default.
+   `Parse` returns the body **string** — a pluggable generator precludes a typed
+   return; decode a default-Short body with `ParseShort`. Not a phantom-generic
+   type (too much ceremony for forge's "no magic" lean). Reuses the existing
+   `id.ErrMalformed`; adds `id.ErrWrongPrefix`.
 4. **`web/htmx.SendComponent` is deferred** to the `realtime/sse` wave so it can
    reuse that writer. It stays as a re-tagged row in the packages.md table; it
    is **not** in this bundle.
@@ -58,8 +62,8 @@ rest. One spec per wave.
 - **`errors.Is`-matchable single-line sentinels**: `id.ErrWrongPrefix`,
   `problem.ErrNotProblem`. Reuse existing sentinels where present
   (`id.ErrMalformed`, `request.Kind*`).
-- **Public methods never return unexported types**: `Prefix.Parse` returns the
-  exported `Short`; `Recorder.Records` returns `[]Record`.
+- **Public methods never return unexported types**: `Prefix.Parse` returns a
+  `string` body; `Recorder.Records` returns `[]Record`.
 - **Black-box tests only** (`package x_test`). White-box only where asserting
   unexported state is unavoidable (none expected here).
 
@@ -166,55 +170,99 @@ func String(n int, charsets ...string) string {
 
 ```go
 // Prefix is an immutable, concurrency-safe Stripe-style ID codec: a human prefix
-// joined to a Short by "_". The zero value is unusable; construct with NewPrefix.
-type Prefix struct { /* prefix string; joined string ("prefix_") */ }
+// joined to a generated body by "_". The zero value is unusable; construct with
+// NewPrefix. Options are optional; the default body generator is Short.
+type Prefix struct { /* prefix, joined ("prefix_"), gen func() string */ }
 
-// NewPrefix returns a codec emitting IDs of the form "<prefix>_<short>". prefix
-// must be non-empty and match [a-z0-9]+ (Stripe convention; no "_" — it is the
-// separator). Panics on an invalid prefix: it is a compile-time constant, so a
-// bad one is a boot-time programming error.
-func NewPrefix(prefix string) Prefix
+// PrefixOption configures NewPrefix.
+type PrefixOption func(*Prefix)
 
-// New returns a fresh ID: "<prefix>_" + NewShort().String().
+// WithGenerator sets the body generator — the part after "<prefix>_". The default
+// is Short (NewShort().String()); pass any func to mint ULID/UUID/random bodies,
+// e.g. WithGenerator(func() string { return NewULID().String() }). A nil gen
+// panics via NewPrefix.
+func WithGenerator(gen func() string) PrefixOption
+
+// NewPrefix returns a codec emitting IDs of the form "<prefix>_<body>". prefix
+// must be non-empty and match [a-z0-9]+ (Stripe convention; "_" is the
+// separator). Options are optional. Panics on an invalid prefix or a nil
+// generator — both are boot-time programming errors.
+func NewPrefix(prefix string, opts ...PrefixOption) Prefix
+
+// New returns a fresh ID: "<prefix>_" + gen().
 func (p Prefix) New() string
 
-// Parse validates that s carries p's prefix and a well-formed Short body,
-// returning the decoded Short. A wrong/absent prefix returns ErrWrongPrefix; a
-// malformed body returns ErrMalformed (both errors.Is-matchable).
-func (p Prefix) Parse(s string) (Short, error)
+// Parse validates that s carries p's prefix and a non-empty body, returning the
+// body (the part after "<prefix>_"). Because the body generator is pluggable, the
+// body is returned opaque — for the default Short generator, decode it with
+// ParseShort. A wrong/absent prefix returns ErrWrongPrefix; an empty body returns
+// ErrMalformed (both errors.Is-matchable).
+func (p Prefix) Parse(s string) (string, error)
 
-// Is reports whether s is a syntactically valid ID for this prefix.
+// Is reports whether s carries p's prefix and a non-empty body. It validates the
+// prefix and body presence only, not the body's internal format.
 func (p Prefix) Is(s string) bool
 
 // Prefix returns the bound prefix (for logging / diagnostics).
 func (p Prefix) Prefix() string
 ```
 
+### Static aliases (default Short generator, no codec to hold)
+
+```go
+// NewPrefixed returns a fresh "<prefix>_<short>" ID. Equivalent to
+// NewPrefix(prefix).New(); panics on an invalid prefix.
+func NewPrefixed(prefix string) string
+
+// ParsePrefixed validates prefix on s and returns the body. Equivalent to
+// NewPrefix(prefix).Parse(s).
+func ParsePrefixed(prefix, s string) (string, error)
+
+// IsPrefixed reports whether s carries prefix with a non-empty body. Equivalent
+// to NewPrefix(prefix).Is(s).
+func IsPrefixed(prefix, s string) bool
+```
+
 ### Semantics & rationale
 
-- **Underlying = `Short`** (10 bytes, k-sortable, crockford base32) — compact and
-  URL-safe, the Stripe-ish look. Encoding/decoding inherit `Short.String()` /
-  `ParseShort` (case handling included).
-- **Separator `_`.** `Parse` requires the exact `prefix + "_"` head, then
-  `ParseShort` on the remainder.
-- **Errors:** reuse existing `id.ErrMalformed` for a bad body; add
-  `id.ErrWrongPrefix = errors.New("id: wrong prefix")`. `Parse` wraps
-  `ParseShort`'s error so `errors.Is(err, id.ErrMalformed)` holds.
-- **No options in Wave 1.** A `WithGenerator` (deterministic `New` in tests) is a
-  plausible later addition; deferred. `Parse`/`Is` are already deterministic and
-  fully testable.
-- **Immutable value**, safe to share across goroutines; `New` uses the package
-  default generator like `NewShort()`.
+- **Pluggable body, opaque parse.** The body generator is `func() string`
+  (default `NewShort().String()`), so `New` composes `prefix + "_" + gen()`.
+  Because the generator is pluggable, `Parse` returns the body **string** rather
+  than a typed `Short` — the honest signature. Default-Short consumers recover the
+  typed value with `id.ParseShort(body)`; ULID/UUID/random-bodied codecs decode
+  with their own parser. (This supersedes the earlier "Parse returns Short"
+  decision, which pluggable generators make impossible.)
+- **Separator `_`** fixed. `Parse` requires the exact `prefix + "_"` head; the
+  remainder is the body. Empty body → `ErrMalformed`; wrong/absent prefix (no
+  matching head) → `ErrWrongPrefix`. Add
+  `id.ErrWrongPrefix = errors.New("id: wrong prefix")`; reuse `id.ErrMalformed`.
+- **Prefix validation** is a small `[a-z0-9]` byte-loop (no `regexp` dependency).
+  An invalid prefix or nil generator **panics** in `NewPrefix` (constants, caught
+  at boot). The static aliases delegate to `NewPrefix`, so they validate
+  identically.
+- **Static aliases** cover the zero-config default (Short body); reach for the
+  `Prefix` codec when you want a custom generator or a hot path that binds the
+  prefix once. Options are deliberately **not** exposed on the static aliases —
+  custom generation implies you hold a reusable codec.
+- **Immutable value**, safe to share across goroutines; the default generator uses
+  the package `defaultGen` like `NewShort()`.
 
 ### Tests (`id_test`)
 
-- Round-trip: `p := NewPrefix("user"); s := p.New(); assert strings.HasPrefix(s,
-  "user_"); parsed, err := p.Parse(s); err==nil && parsed == /* decoded */`.
-- `Is(p.New()) == true`.
-- Wrong prefix: `p.Parse("org_"+shortStr)` → `errors.Is(err, ErrWrongPrefix)`.
-- Malformed body: `p.Parse("user_@@@")` → `errors.Is(err, ErrMalformed)`.
-- No-separator / prefix-only / empty input → error (not panic).
-- `NewPrefix("")`, `NewPrefix("User")`, `NewPrefix("a_b")` panic.
+- Round-trip (default): `p := NewPrefix("user"); s := p.New()`;
+  `strings.HasPrefix(s, "user_")`; `body, err := p.Parse(s)` with `err==nil`;
+  `ParseShort(body)` succeeds.
+- Custom generator: `NewPrefix("tok", WithGenerator(func() string { return
+  NewULID().String() }))` → `New()` has a `tok_` head; `Parse` returns the ULID
+  body; `ParseULID(body)` succeeds.
+- `Is(p.New()) == true`; `Is("org_"+body) == false`.
+- Wrong prefix → `errors.Is(err, ErrWrongPrefix)`; empty body (`"user_"`) →
+  `errors.Is(err, ErrMalformed)`; no-separator / empty input → `ErrWrongPrefix`
+  (not a panic).
+- Static aliases mirror the codec on the default generator
+  (`NewPrefixed`/`ParsePrefixed`/`IsPrefixed`).
+- Panics: `NewPrefix("")`, `NewPrefix("User")`, `NewPrefix("a_b")`,
+  `NewPrefix("x", WithGenerator(nil))`, `NewPrefixed("")`.
 
 ---
 
@@ -567,7 +615,7 @@ The table should end containing only the deferred `htmx` row.
 - Weighted random selection → dropped entirely, not shipped.
 - `core/random` math/rand fast-path, silent length clamp, error-returning
   generators → rejected (crypto-secure, panic-on-misuse instead).
-- `id.Prefix` `WithGenerator` option, `problem.Decode` `WithMaxBytes` option →
-  deferred to first concrete demand.
+- `problem.Decode` `WithMaxBytes` option → deferred to first concrete demand
+  (fixed 1 MiB cap for now). (`id.Prefix.WithGenerator` is now **in** scope.)
 - The four Wave 1 **packages** (`httpclient`, `ratelimit`, `envconfig`,
   `health`) → their own specs, after these unblockers land.
