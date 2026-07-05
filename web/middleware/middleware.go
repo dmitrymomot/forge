@@ -25,3 +25,24 @@ func Chain(mws ...Middleware) Middleware {
 func Wrap(h http.Handler, mws ...Middleware) http.Handler {
 	return Chain(mws...)(h)
 }
+
+// When returns a Middleware that applies mw only to requests for which pred
+// returns true; other requests pass to the next handler untouched. mw is built
+// once per next, so a stateful middleware is constructed a single time.
+func When(pred func(*http.Request) bool, mw Middleware) Middleware {
+	return func(next http.Handler) http.Handler {
+		wrapped := mw(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if pred(r) {
+				wrapped.ServeHTTP(w, r)
+			} else {
+				next.ServeHTTP(w, r)
+			}
+		})
+	}
+}
+
+// Skip is the inverse of When: mw applies unless pred returns true.
+func Skip(pred func(*http.Request) bool, mw Middleware) Middleware {
+	return When(func(r *http.Request) bool { return !pred(r) }, mw)
+}
