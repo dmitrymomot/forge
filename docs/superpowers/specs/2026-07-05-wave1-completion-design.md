@@ -29,9 +29,8 @@ real deps isolated in driver subpackages, black-box tests only.
 
 ## Scope
 
-**In:** the four packages above, their driver subpackages
-(`ratelimit/redisstore`, `health/checks`), and one shared shipped-package
-addition (`core/structfields.SetString`).
+**In:** the four packages above, the `ratelimit/redisstore` driver subpackage,
+and one shared shipped-package addition (`core/structfields.SetString`).
 
 **Out (explicit non-goals):**
 
@@ -178,6 +177,11 @@ func (h *Health) DrainService(grace time.Duration) supervisor.Service
 
 type Check func(ctx context.Context) error
 
+// Built-in check adapters (driver-free — they take interfaces / stdlib types,
+// so they carry no data/* or web/httpclient imports and live in this package).
+func Ping(p interface{ Ping(ctx context.Context) error }) Check   // 2xx of a driver ping
+func HTTPGet(client *http.Client, url string) Check               // 2xx = healthy
+
 type Option func(*config)
 func WithDefaultTimeout(d time.Duration) Option   // default per-check ctx deadline
 func WithDefaultCacheTTL(d time.Duration) Option  // default result cache window
@@ -209,17 +213,14 @@ func WithCacheTTL(d time.Duration) CheckOption   // per-check override of defaul
   `httpserver` in `supervisor.Run` so readiness flips before the server drains.
   Documented ordering in `doc.go`.
 
-### `health/checks` subpackage
+### Built-in checks (in-package)
 
-Driver-free adapters so concrete checks don't pull deps into core `health`:
-
-```go
-func Ping(p interface{ Ping(ctx context.Context) error }) health.Check
-func HTTPGet(client *http.Client, url string) health.Check   // 2xx = healthy
-```
-
-`data/postgres` and `data/redis` clients satisfy the `Ping` shape; `HTTPGet`
-composes the new `httpclient`. No imports of `data/*` from `health`.
+`Ping` and `HTTPGet` live in `health` itself — they are interface/stdlib
+adapters, not driver code, so they add no imports and a separate `health/checks`
+package would be redundant. `data/postgres` and `data/redis` clients satisfy the
+`Ping` shape; `HTTPGet` takes any `*http.Client` (typically one built by the new
+`httpclient`, but only the stdlib type is referenced, so no import of
+`web/httpclient`).
 
 ### Errors
 
@@ -233,8 +234,8 @@ staleness flips `/livez`; `/readyz` 503 on `SetReady(false)`; critical vs
 non-critical readiness distinction (503 vs degraded-200); per-check timeout
 surfaces as failure not hang; result caching (a slow check invoked once within
 TTL — assert call count); `DrainService` flips readiness on ctx cancel and
-returns after `grace` (use `clock.Mock` or a tiny real grace); `checks.Ping`
-maps a stub pinger's error.
+returns after `grace` (use `clock.Mock` or a tiny real grace); `Ping` maps a
+stub pinger's error; `HTTPGet` reports a stub server's non-2xx as unhealthy.
 
 ---
 
@@ -431,7 +432,7 @@ maps a 422 problem+json body.
 ## Build order (within the bundle)
 
 1. `core/structfields.SetString` (unblocker leaf).
-2. In parallel: `ops/envconfig` (needs #1), `ops/health` (+`health/checks`),
+2. In parallel: `ops/envconfig` (needs #1), `ops/health`,
    `resilience/ratelimit` (+`ratelimit/redisstore`), `web/httpclient`.
 3. Update `docs/packages.md`: move the four from *planned* to *shipped*, bump
    the shipped-count line, drop the Wave 1 rows from build order.
@@ -447,5 +448,6 @@ One bundled PR via `subagent-driven-dev`.
   boundary-crossing test with a mock clock is the guard.
 - **POST-retry default off** is a deliberate safety choice (no silent
   double-submit); `WithRetryMethods` is the documented escape hatch.
-- `health/checks.HTTPGet` depends on `httpclient`, so it is authored after
-  `httpclient` even though both land in the same PR.
+- `health.HTTPGet` references only the stdlib `*http.Client`, so `health` has no
+  build-order dependency on `httpclient` — the four packages are fully
+  independent after the `structfields.SetString` unblocker.
