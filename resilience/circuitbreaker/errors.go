@@ -18,3 +18,8 @@ type openError struct{ retryAfter time.Duration }
 func (e *openError) Error() string             { return ErrOpen.Error() }
 func (e *openError) Unwrap() error             { return ErrOpen }
 func (e *openError) RetryAfter() time.Duration { return e.retryAfter }
+
+// errPanic is handed to after when the guarded call panics, so the panic counts
+// as a failure and a half-open probe releases its slot instead of wedging the
+// breaker. It never escapes Do — the original panic re-propagates unchanged.
+var errPanic = errors.New("circuitbreaker: panic in guarded call")

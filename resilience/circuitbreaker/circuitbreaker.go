@@ -132,12 +132,21 @@ func (b *Breaker) RetryAfter() time.Duration {
 }
 
 // Do runs fn unless the circuit rejects it, recording the outcome. It returns
-// ErrOpen without calling fn when the circuit is open.
+// ErrOpen without calling fn when the circuit is open. If fn panics, Do records
+// the panic as a failure — so a half-open probe releases its slot and the
+// breaker reopens instead of wedging — and then lets the panic propagate.
 func (b *Breaker) Do(ctx context.Context, fn func(context.Context) error) error {
 	if err := b.before(); err != nil {
 		return err
 	}
+	completed := false
+	defer func() {
+		if !completed {
+			b.after(errPanic) // fn panicked: record a failure, then the panic unwinds
+		}
+	}()
 	err := fn(ctx)
+	completed = true
 	b.after(err)
 	return err
 }
