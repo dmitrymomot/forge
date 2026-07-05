@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -96,7 +97,7 @@ func evaluate(ctx context.Context, c config) Report {
 				cctx, cancel = context.WithTimeout(ctx, c.timeout)
 				defer cancel()
 			}
-			err := e.check(cctx)
+			err := runCheck(cctx, e.check)
 			results[i] = CheckResult{Name: e.name, OK: err == nil, Critical: e.critical}
 			if err != nil {
 				results[i].Err = err.Error()
@@ -105,6 +106,17 @@ func evaluate(ctx context.Context, c config) Report {
 	}
 	wg.Wait()
 	return summarize(results)
+}
+
+// runCheck invokes check, converting a panic into an error so one bad check
+// degrades the report instead of crashing the process.
+func runCheck(ctx context.Context, check Check) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("panic: %v", p)
+		}
+	}()
+	return check(ctx)
 }
 
 func summarize(results []CheckResult) Report {

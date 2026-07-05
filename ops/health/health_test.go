@@ -58,3 +58,28 @@ func TestHandler_TimeoutIsFailureNotHang(t *testing.T) {
 	))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
+
+func TestHandler_PanickingCheckIsContained(t *testing.T) {
+	rec := do(health.Handler(
+		health.WithCheck("panicky", func(context.Context) error { panic("boom") }),
+	))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	var rep health.Report
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rep))
+	require.Len(t, rep.Checks, 1)
+	assert.False(t, rep.Checks[0].OK)
+	assert.Contains(t, rep.Checks[0].Err, "panic")
+}
+
+func TestHandler_MixedCriticalAndNonCriticalFailureIsUnavailable(t *testing.T) {
+	rec := do(health.Handler(
+		health.WithCheck("db", func(context.Context) error { return errors.New("down") }),
+		health.WithCheck("cache", func(context.Context) error { return errors.New("down") }, health.NonCritical()),
+	))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	var rep health.Report
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rep))
+	assert.Equal(t, "unavailable", rep.Status)
+}
