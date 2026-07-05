@@ -478,19 +478,24 @@ func (g *Group) Len() int {
 	return len(g.entries)
 }
 
-// breaker returns key's breaker, creating it on first use and refreshing its
-// last-access time. It first runs an eviction scan if the sweep interval has
-// elapsed. Shared by Do and the HTTP middleware.
+// breaker returns key's breaker, creating it on first use. It refreshes the
+// requested key's last-access time BEFORE running the eviction scan, so a key
+// touched this call is never evicted this call (an active key always survives).
+// The scan runs at most once per sweep interval. Shared by Do and the HTTP
+// middleware.
 func (g *Group) breaker(key string) *Breaker {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.clk.Now()
+	e, ok := g.entries[key]
+	if ok {
+		e.lastAccess = now // refresh before the sweep so an active key survives
+	}
 	if now.Sub(g.lastSweep) >= g.cfg.sweepInterval {
 		g.sweepLocked(now)
 		g.lastSweep = now
 	}
-	if e, ok := g.entries[key]; ok {
-		e.lastAccess = now
+	if ok {
 		return e.breaker
 	}
 	b := New(g.cfg.breakerOpts...)
@@ -540,7 +545,7 @@ type middlewareConfig struct {
 	onOpen    OpenResponder
 }
 
-// MiddlewareOption configures Middleware and GroupMiddleware.
+// MiddlewareOption configures Middleware, GroupMiddleware, and GroupKey.
 type MiddlewareOption func(*middlewareConfig)
 
 // WithFailurePredicate classifies a downstream response status as a breaker
