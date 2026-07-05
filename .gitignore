@@ -26,6 +26,8 @@ go.work.sum
 
 # env file
 .env
+# but keep committed test fixtures literally named .env
+!ops/config/testdata/.env
 
 # Editor/IDE
 # .idea/
