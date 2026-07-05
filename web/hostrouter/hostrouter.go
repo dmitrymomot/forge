@@ -23,7 +23,8 @@ type Router struct {
 
 // New builds a Router from options applied in order. With no WithHost options every
 // request is served by the fallback (HTTP 404 unless WithFallback overrides it).
-// New panics on any invalid registration. It does no I/O.
+// The default 404-for-unmatched-hosts is a deliberate default-deny that protects
+// against DNS rebinding. New panics on any invalid registration. It does no I/O.
 func New(opts ...Option) *Router {
 	r := &Router{
 		exact:     make(map[string]http.Handler),
