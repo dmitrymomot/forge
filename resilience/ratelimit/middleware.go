@@ -43,7 +43,7 @@ func (l *Limiter) Middleware(key KeyFunc, opts ...MiddlewareOption) middleware.M
 				next.ServeHTTP(w, r) // fail open
 				return
 			}
-			writeRateLimitHeaders(w, res)
+			l.writeRateLimitHeaders(w, res)
 			if !res.Allowed {
 				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(res.RetryAfter.Seconds()))))
 				cfg.responder(w, r, res)
@@ -54,13 +54,10 @@ func (l *Limiter) Middleware(key KeyFunc, opts ...MiddlewareOption) middleware.M
 	}
 }
 
-func writeRateLimitHeaders(w http.ResponseWriter, res Result) {
+func (l *Limiter) writeRateLimitHeaders(w http.ResponseWriter, res Result) {
 	w.Header().Set("RateLimit-Limit", strconv.FormatInt(res.Limit, 10))
 	w.Header().Set("RateLimit-Remaining", strconv.FormatInt(res.Remaining, 10))
-	reset := int(math.Ceil(res.RetryAfter.Seconds()))
-	if res.Allowed {
-		reset = 0
-	}
+	reset := max(int(math.Ceil(res.Reset.Sub(l.cfg.clk.Now()).Seconds())), 0)
 	w.Header().Set("RateLimit-Reset", strconv.Itoa(reset))
 }
 
