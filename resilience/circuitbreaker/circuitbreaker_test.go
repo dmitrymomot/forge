@@ -100,3 +100,35 @@ func TestHalfOpenMaxAdmitsConcurrentProbesThenRejects(t *testing.T) {
 	// Both probes succeeded → breaker closed.
 	assert.Equal(t, circuitbreaker.StateClosed, b.State())
 }
+
+func TestOpenErrorIsMatchableAndCarriesRetryAfter(t *testing.T) {
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(30*time.Second),
+	)
+	_ = b.Do(t.Context(), fail)  // trips open after one failure
+	err := b.Do(t.Context(), ok) // rejected; ok is not run
+
+	assert.ErrorIs(t, err, circuitbreaker.ErrOpen)
+	var ra interface{ RetryAfter() time.Duration }
+	assert.ErrorAs(t, err, &ra)
+	d := ra.RetryAfter()
+	assert.Greater(t, d, time.Duration(0))
+	assert.LessOrEqual(t, d, 30*time.Second)
+}
+
+func TestRetryAfterShrinksAndZeroesOut(t *testing.T) {
+	clk := clock.NewMock(time.Now())
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(30*time.Second),
+		circuitbreaker.WithClock(clk),
+	)
+	_ = b.Do(t.Context(), fail)
+
+	assert.Equal(t, 30*time.Second, b.RetryAfter())
+	clk.Advance(10 * time.Second)
+	assert.Equal(t, 20*time.Second, b.RetryAfter())
+	clk.Advance(30 * time.Second) // past the open window
+	assert.Equal(t, time.Duration(0), b.RetryAfter())
+}
