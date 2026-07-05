@@ -38,4 +38,23 @@ func TestSubstitute(t *testing.T) {
 
 	_, err = config.Substitute("x: ${UNTERMINATED")
 	assert.ErrorIs(t, err, config.ErrSubstitute)
+
+	t.Setenv("SUBHOST", "10.0.0.1")
+	got, err = config.Substitute("x: ${SUBHOST}") // set, no default -> substitutes
+	require.NoError(t, err)
+	assert.Equal(t, "x: 10.0.0.1", got)
+
+	_, err = config.Substitute("${}") // empty variable name -> error
+	assert.ErrorIs(t, err, config.ErrSubstitute)
+
+	_, err = config.Substitute("${:default}") // empty name rejected before default is considered
+	assert.ErrorIs(t, err, config.ErrSubstitute)
+
+	got, err = config.Substitute("a$") // lone trailing $ at end-of-string is a literal
+	require.NoError(t, err)
+	assert.Equal(t, "a$", got)
+
+	got, err = config.Substitute("a$$") // $$ at end-of-string collapses to one literal $
+	require.NoError(t, err)
+	assert.Equal(t, "a$", got)
 }
