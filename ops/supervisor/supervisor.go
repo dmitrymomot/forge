@@ -14,7 +14,9 @@ import (
 
 // Run starts every registered service, supervises them, and blocks until
 // shutdown completes. The first service to return (nil or error), or
-// cancellation of ctx, begins a coordinated shutdown: the shared context is
+// cancellation of ctx, begins a coordinated shutdown: any hooks registered via
+// WithPreShutdown first run to completion (bounded by WithPreShutdownTimeout,
+// default 30s, surfaced as ErrPreShutdownTimeout), then the shared context is
 // cancelled so every service drains, and Run waits for them all to return.
 // Run returns the joined non-context.Canceled service errors, or nil on a
 // clean stop.
@@ -54,7 +56,9 @@ func Run(ctx context.Context, opts ...Option) error {
 	// cancellation directly, cancelling ctx would close runCtx.Done() immediately,
 	// racing services against the pre-shutdown phase instead of waiting behind it.
 	// ctx's own cancellation is instead observed via ctx.Done() below and only
-	// *triggers* beginShutdown.
+	// *triggers* beginShutdown. context.WithoutCancel also strips ctx's deadline,
+	// so runCtx.Deadline() never propagates the parent's deadline; a service that
+	// needs one must set its own.
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 
