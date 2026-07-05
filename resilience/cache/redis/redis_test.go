@@ -35,8 +35,8 @@ func TestRedisStoreRoundTripAndScopedClear(t *testing.T) {
 	users := cache.New[string](store, cache.WithPrefix("test:cache:users:"))
 	other := cache.New[string](store, cache.WithPrefix("test:cache:other:"))
 
-	require.NoError(t, users.Set(t.Context(), "1", "alice", time.Minute))
-	require.NoError(t, other.Set(t.Context(), "1", "keep", time.Minute))
+	require.NoError(t, users.Set(t.Context(), "1", "alice", cache.WithTTL(time.Minute)))
+	require.NoError(t, other.Set(t.Context(), "1", "keep", cache.WithTTL(time.Minute)))
 
 	v, err := users.Get(t.Context(), "1")
 	require.NoError(t, err)
@@ -61,8 +61,8 @@ func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
 	target := cache.New[string](store, cache.WithPrefix("test:cache:g[x]:"))
 	sibling := cache.New[string](store, cache.WithPrefix("test:cache:gx:"))
 
-	require.NoError(t, target.Set(t.Context(), "1", "gone", time.Minute))
-	require.NoError(t, sibling.Set(t.Context(), "1", "keep", time.Minute))
+	require.NoError(t, target.Set(t.Context(), "1", "gone", cache.WithTTL(time.Minute)))
+	require.NoError(t, sibling.Set(t.Context(), "1", "keep", cache.WithTTL(time.Minute)))
 
 	require.NoError(t, target.Clear(t.Context()))
 

@@ -32,12 +32,22 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return b, nil
 }
 
-func (s *store) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
-	var exp time.Duration // ttl <= 0 -> 0 -> no expiry in Redis
-	if ttl > 0 {
-		exp = ttl
+func (s *store) Set(ctx context.Context, key string, val []byte, opts ...cache.SetOption) error {
+	o := cache.ApplySetOptions(opts...)
+	var ttl time.Duration
+	if o.TTL > 0 {
+		ttl = o.TTL // SetArgs treats TTL <= 0 as "no expiry"
 	}
-	return s.client.Set(ctx, key, val, exp).Err()
+	if o.OnlyIfNew {
+		// SET key val NX [PX ttl] — the modern replacement for SETNX. On a
+		// present key the server returns a null reply, surfaced as redis.Nil.
+		err := s.client.SetArgs(ctx, key, val, goredis.SetArgs{Mode: "NX", TTL: ttl}).Err()
+		if forgeredis.IsNil(err) {
+			return cache.ErrExists
+		}
+		return err
+	}
+	return s.client.Set(ctx, key, val, ttl).Err()
 }
 
 func (s *store) Delete(ctx context.Context, key string) error {

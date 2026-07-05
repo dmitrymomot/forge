@@ -14,4 +14,6 @@ var (
 	ErrUnmarshal = errors.New("cache: failed to unmarshal value")
 	// ErrStore wraps an unclassified error returned by the underlying Store.
 	ErrStore = errors.New("cache: store operation failed")
+	// ErrExists is returned by Set with WithSetNonExist when the key is present.
+	ErrExists = errors.New("cache: entry already exists")
 )

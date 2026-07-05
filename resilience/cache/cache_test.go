@@ -19,7 +19,7 @@ func TestCacheSetGetTyped(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	c := cache.New[string](store, cache.WithPrefix("greet:"))
 
-	require.NoError(t, c.Set(t.Context(), "en", "hello", 0))
+	require.NoError(t, c.Set(t.Context(), "en", "hello"))
 	v, err := c.Get(t.Context(), "en")
 	require.NoError(t, err)
 	assert.Equal(t, "hello", v)
@@ -39,8 +39,8 @@ func TestCacheIsolationByPrefixOverSharedStore(t *testing.T) {
 	a := cache.New[string](store, cache.WithPrefix("a:"))
 	b := cache.New[string](store, cache.WithPrefix("b:"))
 
-	require.NoError(t, a.Set(t.Context(), "k", "AAA", -1))
-	require.NoError(t, b.Set(t.Context(), "k", "BBB", -1))
+	require.NoError(t, a.Set(t.Context(), "k", "AAA", cache.WithTTL(-1)))
+	require.NoError(t, b.Set(t.Context(), "k", "BBB", cache.WithTTL(-1)))
 
 	av, _ := a.Get(t.Context(), "k")
 	bv, _ := b.Get(t.Context(), "k")
@@ -103,12 +103,12 @@ func TestGetOrSetSurfacesClosedStore(t *testing.T) {
 // errStore is a Store stub whose Get fails with a non-sentinel error.
 type errStore struct{ getErr error }
 
-func (e errStore) Get(context.Context, string) ([]byte, error)            { return nil, e.getErr }
-func (errStore) Set(context.Context, string, []byte, time.Duration) error { return nil }
-func (errStore) Delete(context.Context, string) error                     { return nil }
-func (errStore) Has(context.Context, string) (bool, error)                { return false, nil }
-func (errStore) DeletePrefix(context.Context, string) error               { return nil }
-func (errStore) Close() error                                             { return nil }
+func (e errStore) Get(context.Context, string) ([]byte, error)                 { return nil, e.getErr }
+func (errStore) Set(context.Context, string, []byte, ...cache.SetOption) error { return nil }
+func (errStore) Delete(context.Context, string) error                          { return nil }
+func (errStore) Has(context.Context, string) (bool, error)                     { return false, nil }
+func (errStore) DeletePrefix(context.Context, string) error                    { return nil }
+func (errStore) Close() error                                                  { return nil }
 
 func TestGetOrSetWrapsUnclassifiedStoreError(t *testing.T) {
 	boom := errors.New("connection reset")
@@ -133,7 +133,7 @@ func TestWithMarshalerUsesCustomMarshaler(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	c := cache.New[string](store, cache.WithMarshaler(rawStringMarshaler{}))
 
-	require.NoError(t, c.Set(t.Context(), "k", "hi", -1))
+	require.NoError(t, c.Set(t.Context(), "k", "hi", cache.WithTTL(-1)))
 
 	// Stored bytes are raw, not JSON-quoted (`"hi"`), so the custom marshaler ran.
 	raw, err := store.Get(t.Context(), "k")
@@ -153,4 +153,23 @@ func TestWithMarshalerTypeMismatchPanics(t *testing.T) {
 	assert.Panics(t, func() {
 		_ = cache.New[int](store, cache.WithMarshaler(rawStringMarshaler{}))
 	})
+}
+
+func TestFacadeSetNonExistReturnsErrExists(t *testing.T) {
+	store := cache.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+	c := cache.New[string](store)
+
+	require.NoError(t, c.Set(t.Context(), "k", "first", cache.WithSetNonExist()))
+	assert.ErrorIs(t, c.Set(t.Context(), "k", "second", cache.WithSetNonExist()), cache.ErrExists)
+}
+
+func TestApplySetOptions(t *testing.T) {
+	o := cache.ApplySetOptions(cache.WithTTL(5*time.Second), cache.WithSetNonExist())
+	assert.Equal(t, 5*time.Second, o.TTL)
+	assert.True(t, o.OnlyIfNew)
+
+	z := cache.ApplySetOptions()
+	assert.Zero(t, z.TTL)
+	assert.False(t, z.OnlyIfNew)
 }
