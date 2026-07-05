@@ -12,10 +12,11 @@
 // What this is NOT: it does not flatten anonymous embedded structs — an
 // embedded struct is yielded as one field, and a caller needing recursion
 // re-Walks that field's value (embedded flattening + name prefixing may be
-// added later without an API break). It visits only exported fields. It does
-// not bind or populate structs from external data, does not validate, and does
-// not parse scalar values — struct-tag binding lives in the consumers, scalar
-// conversion in typeconv, and value validation in validate.
+// added later without an API break). It visits only exported fields. Walk
+// itself does not bind or populate structs from external data, does not
+// validate, and does not parse scalar values; SetString bridges a single
+// field to typeconv scalar conversion — struct-tag binding lives in the
+// consumers, scalar conversion in typeconv, and value validation in validate.
 //
 // # Usage
 //

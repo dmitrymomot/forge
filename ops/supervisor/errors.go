@@ -14,4 +14,6 @@ var (
 	ErrPanic = errors.New("supervisor: service panicked")
 	// ErrInvalidConfig is returned (joined) by Run when an option or Config field has an invalid value.
 	ErrInvalidConfig = errors.New("supervisor: invalid config")
+	// ErrPreShutdownTimeout is returned (joined) by Run when pre-shutdown hooks do not finish within the pre-shutdown timeout.
+	ErrPreShutdownTimeout = errors.New("supervisor: pre-shutdown timed out")
 )

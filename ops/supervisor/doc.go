@@ -21,10 +21,12 @@
 //	}
 //
 // The first service to return (nil or error), or cancellation of ctx, begins a
-// coordinated shutdown: the shared context is cancelled so every service drains
-// itself, and Run waits up to the shutdown timeout (default 30s; 0 means wait
-// indefinitely) before abandoning any service that has not stopped. All
+// coordinated shutdown: any hooks registered via WithPreShutdown run to
+// completion first, then the shared context is cancelled so every service
+// drains itself, and Run waits up to the shutdown timeout (default 30s; 0 means
+// wait indefinitely) before abandoning any service that has not stopped. All
 // diagnostics are emitted as structured slog attributes; the values returned by
 // Run are single-line errors that can be matched with errors.Is against
-// ErrNoServices, ErrUnnamedService, ErrShutdownTimeout, and ErrPanic.
+// ErrNoServices, ErrUnnamedService, ErrShutdownTimeout, ErrPreShutdownTimeout,
+// ErrInvalidConfig, and ErrPanic.
 package supervisor
