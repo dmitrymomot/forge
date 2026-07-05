@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +76,36 @@ func TestNew_PropagatesContextHeaders(t *testing.T) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 	assert.Equal(t, "rid-1", got)
+}
+
+// TestNew_RetriesPerAttemptTimeout proves WithPerAttemptTimeout aborts a slow
+// attempt and retries the next one, rather than failing the whole request.
+// The outer request context has no deadline, so only the per-attempt
+// sub-context should expire on the first (slow) call.
+func TestNew_RetriesPerAttemptTimeout(t *testing.T) {
+	const perAttempt = 50 * time.Millisecond
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			select {
+			case <-r.Context().Done(): // client canceled the slow first attempt
+			case <-time.After(10 * perAttempt): // safety net if not canceled
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := httpclient.New(httpclient.WithPerAttemptTimeout(perAttempt))
+	resp, err := client.Get(srv.URL)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.GreaterOrEqual(t, calls.Load(), int32(2), "per-attempt timeout must be retried")
 }
 
 type ctxKey struct{}

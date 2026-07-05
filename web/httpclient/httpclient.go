@@ -75,9 +75,19 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	ctx := req.Context()
+	// The outer request context being canceled or hitting its overall deadline is
+	// terminal — never retry past it. Everything else is retryable: a retryable
+	// HTTP status (statusError), a network error, or a per-attempt timeout from
+	// WithPerAttemptTimeout — the latter surfaces as context.DeadlineExceeded but
+	// the outer ctx is still live (checked below), so the next attempt should run.
+	// The error alone can't distinguish an outer-ctx timeout from a per-attempt
+	// sub-context timeout (both wrap context.DeadlineExceeded), so this closure
+	// checks the outer ctx directly instead of inspecting err.
+	retryIf := func(err error) bool { return ctx.Err() == nil }
+
 	var err error
 	if t.cfg.retryMethods[req.Method] {
-		err = retry.Do(ctx, attempt, append([]retry.Option{retry.WithRetryIf(isRetryable)}, t.cfg.retryOpts...)...)
+		err = retry.Do(ctx, attempt, append([]retry.Option{retry.WithRetryIf(retryIf)}, t.cfg.retryOpts...)...)
 	} else {
 		err = attempt(ctx)
 	}
@@ -125,14 +135,6 @@ func (e statusError) RetryAfter() time.Duration { return e.retryAfter }
 
 func retryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests || code >= 500
-}
-
-func isRetryable(err error) bool {
-	if _, ok := errors.AsType[statusError](err); ok {
-		return true
-	}
-	// network/transport errors are retryable; context cancellation is not.
-	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func parseRetryAfter(resp *http.Response) time.Duration {
