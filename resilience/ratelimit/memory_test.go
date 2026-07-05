@@ -54,3 +54,46 @@ func TestMemoryStore_ConcurrentIncr(t *testing.T) {
 	n, _ := s.Get(ctx, "c")
 	assert.Equal(t, int64(g), n)
 }
+
+func TestMemoryStore_JanitorEvictsExpiredEntries(t *testing.T) {
+	mk := clock.NewMock(time.Unix(1000, 0))
+	s := ratelimit.NewMemoryStore(ratelimit.WithMemoryClock(mk), ratelimit.WithMemoryJanitor(5*time.Millisecond))
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+
+	lener, ok := s.(interface{ Len() int })
+	require.True(t, ok, "memoryStore must expose Len() int")
+
+	_, err := s.Incr(ctx, "a", 1, time.Minute)
+	require.NoError(t, err)
+	_, err = s.Incr(ctx, "b", 1, time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 2, lener.Len())
+
+	mk.Advance(2 * time.Minute) // both entries now expired by the clock
+
+	assert.Eventually(t, func() bool {
+		return lener.Len() == 0
+	}, time.Second, 5*time.Millisecond, "janitor should evict expired entries")
+}
+
+func TestMemoryStore_CloseStopsJanitorCleanlyAndIsIdempotent(t *testing.T) {
+	mk := clock.NewMock(time.Unix(1000, 0))
+	s := ratelimit.NewMemoryStore(ratelimit.WithMemoryClock(mk), ratelimit.WithMemoryJanitor(5*time.Millisecond))
+	ctx := context.Background()
+
+	_, err := s.Incr(ctx, "a", 1, time.Minute)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Close())
+	require.NoError(t, s.Close()) // idempotent, must not hang or panic
+
+	lener, ok := s.(interface{ Len() int })
+	require.True(t, ok)
+	before := lener.Len()
+
+	mk.Advance(2 * time.Minute)
+	time.Sleep(20 * time.Millisecond) // give a leaked goroutine a chance to misbehave
+
+	assert.Equal(t, before, lener.Len(), "janitor must not run after Close")
+}
