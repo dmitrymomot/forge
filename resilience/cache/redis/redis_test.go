@@ -73,3 +73,22 @@ func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "keep", kept)
 }
+
+func TestRedisStoreSetNonExistClaimsOnce(t *testing.T) {
+	store := cacheredis.NewStore(testClient(t)) // SKIPs without TEST_REDIS_URL
+
+	key := "test:cache:nx:claim"
+	t.Cleanup(func() { _ = store.Delete(context.Background(), key) })
+
+	// First NX claim wins and takes a lease (SET key val NX PX ttl).
+	require.NoError(t, store.Set(t.Context(), key, []byte("first"), cache.WithSetNonExist(), cache.WithTTL(time.Minute)))
+
+	// A second NX claim on the live key is rejected: the server returns a null
+	// reply (redis.Nil), which the backend maps to cache.ErrExists.
+	err := store.Set(t.Context(), key, []byte("second"), cache.WithSetNonExist(), cache.WithTTL(time.Minute))
+	assert.ErrorIs(t, err, cache.ErrExists)
+
+	got, err := store.Get(t.Context(), key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("first"), got) // NX did not overwrite the original
+}
