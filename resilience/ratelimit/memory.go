@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 type memoryConfig struct {
 	clk             clock.Clock
 	janitorInterval time.Duration
+	shards          int
 }
 
 // MemoryOption configures NewMemoryStore.
@@ -36,35 +38,75 @@ func WithMemoryJanitor(interval time.Duration) MemoryOption {
 	}
 }
 
+// WithShards splits the store into n independently-locked shards, keyed by a
+// hash of the key. This lifts the single-mutex throughput ceiling under high
+// concurrency and bounds each janitor sweep to one shard at a time, so a large
+// map no longer blocks every request for the duration of a full sweep. Default
+// 1 — a single lock, identical to the unsharded behavior; values < 1 are
+// ignored. The single-lock default already sustains well over a million
+// ops/sec, so only very high throughput or high-cardinality-with-janitor
+// workloads benefit; a small multiple of GOMAXPROCS (e.g. 16–64) is ample.
+func WithShards(n int) MemoryOption {
+	return func(c *memoryConfig) {
+		if n >= 1 {
+			c.shards = n
+		}
+	}
+}
+
 type counter struct {
 	expiresAt time.Time
 	val       int64
 }
 
+// memShard is one independently-locked partition of the store's keyspace.
+type memShard struct {
+	m  map[string]counter
+	mu sync.Mutex
+}
+
 type memoryStore struct {
-	clk  clock.Clock
-	m    map[string]counter
-	stop chan struct{}
-	wg   sync.WaitGroup
+	clk    clock.Clock
+	stop   chan struct{}
+	shards []memShard
+	wg     sync.WaitGroup
+
+	seed maphash.Seed
 
 	closeOnce sync.Once
-	mu        sync.Mutex
 }
 
 // NewMemoryStore returns an in-process counter Store. Lifecycle is the caller's
 // (Close). Suitable for single-instance use and tests; multi-instance limiting
 // needs ratelimit/redisstore.
 func NewMemoryStore(opts ...MemoryOption) Store {
-	c := memoryConfig{clk: clock.System()}
+	c := memoryConfig{clk: clock.System(), shards: 1}
 	for _, o := range opts {
 		o(&c)
 	}
-	s := &memoryStore{m: make(map[string]counter), clk: c.clk}
+	s := &memoryStore{
+		clk:    c.clk,
+		shards: make([]memShard, c.shards),
+		seed:   maphash.MakeSeed(),
+	}
+	for i := range s.shards {
+		s.shards[i].m = make(map[string]counter)
+	}
 	if c.janitorInterval > 0 {
 		s.stop = make(chan struct{})
 		s.startJanitor(c.janitorInterval)
 	}
 	return s
+}
+
+// shardFor returns the shard owning key. With a single shard the hash is
+// skipped so the common (unsharded) path stays hash-free.
+func (s *memoryStore) shardFor(key string) *memShard {
+	if len(s.shards) == 1 {
+		return &s.shards[0]
+	}
+	h := maphash.String(s.seed, key)
+	return &s.shards[h%uint64(len(s.shards))]
 }
 
 // startJanitor runs the eviction sweep every interval until stop is closed.
@@ -83,46 +125,57 @@ func (s *memoryStore) startJanitor(interval time.Duration) {
 	})
 }
 
-// sweep deletes entries expired as of the store's clock.
+// sweep deletes entries expired as of the store's clock, locking one shard at a
+// time so a large map never blocks all requests for a full O(n) scan.
 func (s *memoryStore) sweep() {
 	now := s.clk.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for key, e := range s.m {
-		if now.After(e.expiresAt) {
-			delete(s.m, key)
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		for key, e := range sh.m {
+			if now.After(e.expiresAt) {
+				delete(sh.m, key)
+			}
 		}
+		sh.mu.Unlock()
 	}
 }
 
-// Len returns the number of entries currently held, including any not yet
-// evicted by lazy expiry or the janitor. Useful for metrics/debugging and for
+// Len returns the number of entries currently held across all shards, including
+// any not yet evicted by lazy expiry or the janitor. Useful for metrics and for
 // tests asserting physical eviction.
 func (s *memoryStore) Len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.m)
+	n := 0
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		n += len(sh.m)
+		sh.mu.Unlock()
+	}
+	return n
 }
 
 func (s *memoryStore) Incr(_ context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	now := s.clk.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.m[key]
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	e, ok := sh.m[key]
 	if !ok || now.After(e.expiresAt) {
 		e = counter{val: delta, expiresAt: now.Add(ttl)}
 	} else {
 		e.val += delta
 	}
-	s.m[key] = e
+	sh.m[key] = e
 	return e.val, nil
 }
 
 func (s *memoryStore) Get(_ context.Context, key string) (int64, error) {
 	now := s.clk.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.m[key]
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	e, ok := sh.m[key]
 	if !ok || now.After(e.expiresAt) {
 		return 0, nil
 	}
@@ -130,9 +183,10 @@ func (s *memoryStore) Get(_ context.Context, key string) (int64, error) {
 }
 
 func (s *memoryStore) Reset(_ context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.m, key)
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	delete(sh.m, key)
 	return nil
 }
 

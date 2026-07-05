@@ -74,7 +74,8 @@ func BenchmarkMemoryStore_GetMostlyMiss(b *testing.B) {
 }
 
 // BenchmarkLimiter_Allow is the end-to-end request path (1 Incr + 1 Get + the
-// sliding-window math). Its ops/sec maps directly to sustainable requests/sec.
+// sliding-window math) on the default single-lock store. Its ops/sec maps
+// directly to sustainable requests/sec.
 func BenchmarkLimiter_Allow(b *testing.B) {
 	const n = 4096
 	keys := keySet("user", n)
@@ -91,13 +92,31 @@ func BenchmarkLimiter_Allow(b *testing.B) {
 	})
 }
 
+// BenchmarkLimiter_Allow_Sharded is the same end-to-end path over a 16-shard
+// store; compare its ns/op against BenchmarkLimiter_Allow to see the sharding
+// lift the single-mutex contention ceiling.
+func BenchmarkLimiter_Allow_Sharded(b *testing.B) {
+	const n = 4096
+	keys := keySet("user", n)
+	l := ratelimit.New(ratelimit.NewMemoryStore(ratelimit.WithShards(16)), ratelimit.WithLimit(1_000_000, time.Minute))
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			_, _ = l.Allow(ctx, keys[i&(n-1)])
+			i++
+		}
+	})
+}
+
 // BenchmarkLimiter_Allow_WithJanitorAndLargeMap is a pathological stress case: a
 // 200k-entry map of long-lived entries (so nothing is ever evicted) swept by an
 // aggressive 1ms janitor, so every sweep is a full O(200k) scan holding the
-// global lock while Allow runs concurrently. Real deployments use far larger
-// intervals and never sweep this hard; this bounds worst-case sweep-vs-request
-// contention. Compare its ns/op against BenchmarkLimiter_Allow to isolate the
-// sweep's impact.
+// single global lock while Allow runs concurrently. Compare against
+// BenchmarkLimiter_Allow to isolate the sweep's impact, and against the sharded
+// variant below to see the per-shard sweep flatten the cliff.
 func BenchmarkLimiter_Allow_WithJanitorAndLargeMap(b *testing.B) {
 	const n = 4096
 	keys := keySet("live", n)
@@ -105,6 +124,30 @@ func BenchmarkLimiter_Allow_WithJanitorAndLargeMap(b *testing.B) {
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	for i := range 200_000 { // 1h TTL: every sweep scans all of them and deletes none
+		_, _ = store.Incr(ctx, "stale"+strconv.Itoa(i), 1, time.Hour)
+	}
+	l := ratelimit.New(store, ratelimit.WithLimit(1_000_000, time.Minute))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			_, _ = l.Allow(ctx, keys[i&(n-1)])
+			i++
+		}
+	})
+}
+
+// BenchmarkLimiter_Allow_WithJanitorAndLargeMap_Sharded is the same pathological
+// case over 16 shards: each sweep locks one shard (~1/16 of the map) at a time,
+// so concurrent Allow no longer stalls behind a full-map scan.
+func BenchmarkLimiter_Allow_WithJanitorAndLargeMap_Sharded(b *testing.B) {
+	const n = 4096
+	keys := keySet("live", n)
+	store := ratelimit.NewMemoryStore(ratelimit.WithShards(16), ratelimit.WithMemoryJanitor(time.Millisecond))
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	for i := range 200_000 {
 		_, _ = store.Incr(ctx, "stale"+strconv.Itoa(i), 1, time.Hour)
 	}
 	l := ratelimit.New(store, ratelimit.WithLimit(1_000_000, time.Minute))
