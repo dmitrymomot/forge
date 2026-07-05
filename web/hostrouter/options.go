@@ -41,7 +41,10 @@ func WithHost(pattern string, h http.Handler) Option {
 }
 
 // WithFallback sets the handler for unmatched hosts. The default is
-// http.NotFoundHandler() (404). It panics (ErrNilHandler) if h is nil. Last wins.
+// http.NotFoundHandler() (404), a default-deny that guards against DNS rebinding;
+// overriding it to serve real content means unmatched (possibly rebound) hosts
+// reach h, so validate the Host inside h if it exposes anything sensitive. It
+// panics (ErrNilHandler) if h is nil. Last wins.
 func WithFallback(h http.Handler) Option {
 	return func(r *Router) {
 		if h == nil {

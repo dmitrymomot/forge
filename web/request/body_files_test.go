@@ -127,3 +127,53 @@ func TestFileMissingKind(t *testing.T) {
 		assert.Equal(t, request.KindMissing, re.Kind) // absent, not malformed
 	}
 }
+
+// pngBytes is a minimal PNG magic-byte header for sniff tests.
+var pngBytes = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D}
+
+func multipartFileReq(t *testing.T, field, filename string, content []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile(field, filename)
+	require.NoError(t, err)
+	_, err = fw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	r := httptest.NewRequest(http.MethodPost, "/", &buf)
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+	return r
+}
+
+func TestValidateFile_AllowsSniffedPNG(t *testing.T) {
+	r := multipartFileReq(t, "avatar", "a.png", pngBytes)
+	fhs, err := request.Files(r, "avatar")
+	require.NoError(t, err)
+	require.Len(t, fhs, 1)
+	assert.NoError(t, request.ValidateFile(fhs[0], request.WithAllowedMIME("image/png")))
+}
+
+func TestValidateFile_RejectsSpoofedType(t *testing.T) {
+	// A .png filename whose bytes are plain text must be rejected by magic-byte sniff.
+	r := multipartFileReq(t, "avatar", "evil.png", []byte("#!/bin/sh\necho hi\n"))
+	fhs, err := request.Files(r, "avatar")
+	require.NoError(t, err)
+	err = request.ValidateFile(fhs[0], request.WithAllowedMIME("image/png"))
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnsupportedMediaType, request.StatusCode(err))
+}
+
+func TestValidateFile_TooLarge(t *testing.T) {
+	r := multipartFileReq(t, "avatar", "a.png", pngBytes)
+	fhs, err := request.Files(r, "avatar")
+	require.NoError(t, err)
+	err = request.ValidateFile(fhs[0], request.WithMaxFileSize(4))
+	require.Error(t, err)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, request.StatusCode(err))
+}
+
+func TestValidateFile_NilHeader(t *testing.T) {
+	err := request.ValidateFile(nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, request.StatusCode(err))
+}

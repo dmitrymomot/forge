@@ -9,6 +9,14 @@
 // the apex "example.com". Misconfiguration (nil handler, malformed or duplicate
 // pattern) panics at construction with an errors.Is-matchable sentinel.
 //
+// # Security: default-deny is DNS-rebinding protection
+//
+// Unmatched hosts fall through to the fallback (http.NotFoundHandler(), 404, by
+// default). This default-deny is a DNS-rebinding defense: a handler is reachable
+// only for explicitly registered Host values, so an attacker who points their own
+// domain at your IP reaches the fallback, not a real handler. Do not install a
+// WithFallback that serves sensitive handlers without validating the Host itself.
+//
 // # Usage
 //
 //	router := hostrouter.New(

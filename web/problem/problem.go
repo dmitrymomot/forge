@@ -1,7 +1,10 @@
 package problem
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -147,4 +150,65 @@ func extractFields(err error) map[string]string {
 		return map[string]string{key: re.Kind.String()}
 	}
 	return nil
+}
+
+// ErrNotProblem is returned by Decode when the response body is not a problem
+// document. Match it with errors.Is.
+var ErrNotProblem = errors.New("problem: not a problem+json response")
+
+// maxProblemBytes caps the body Decode will read, guarding against a hostile or
+// runaway upstream.
+const maxProblemBytes = 1 << 20 // 1 MiB
+
+// Error implements error with a single-line summary. The response body written by
+// the responders is unaffected — this is for logs and errors.Is chains.
+func (p *Problem) Error() string {
+	if p.Code != "" {
+		return fmt.Sprintf("problem: %d %s [%s]", p.Status, p.Title, p.Code)
+	}
+	return fmt.Sprintf("problem: %d %s", p.Status, p.Title)
+}
+
+// Is matches target by its non-zero fields: a *Problem target matches when
+// (target.Status == 0 || target.Status == p.Status) &&
+// (target.Code == "" || target.Code == p.Code). So errors.Is(err,
+// &Problem{Code:"rate_limited"}) matches by code, &Problem{Status:429} by status,
+// and &Problem{} any Problem. A non-*Problem target never matches.
+func (p *Problem) Is(target error) bool {
+	t, ok := target.(*Problem)
+	if !ok {
+		return false
+	}
+	if t.Status != 0 && t.Status != p.Status {
+		return false
+	}
+	if t.Code != "" && t.Code != p.Code {
+		return false
+	}
+	return true
+}
+
+// Decode reads an RFC 9457 problem+json response body into a *Problem. It caps the
+// body at 1 MiB, fills Status from resp.StatusCode when the body omits it, and does
+// NOT close resp.Body (the caller owns it). A body that is not a problem document
+// returns ErrNotProblem.
+func Decode(resp *http.Response) (*Problem, error) {
+	if resp == nil || resp.Body == nil {
+		return nil, ErrNotProblem
+	}
+	var p Problem
+	dec := json.NewDecoder(io.LimitReader(resp.Body, maxProblemBytes))
+	if err := dec.Decode(&p); err != nil {
+		return nil, ErrNotProblem
+	}
+	ct := resp.Header.Get("Content-Type")
+	looksProblem := strings.Contains(ct, "application/problem+json") ||
+		p.Status != 0 || p.Code != "" || p.Title != "" || p.Type != ""
+	if !looksProblem {
+		return nil, ErrNotProblem
+	}
+	if p.Status == 0 {
+		p.Status = resp.StatusCode
+	}
+	return &p, nil
 }

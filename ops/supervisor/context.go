@@ -4,13 +4,52 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
-// NewContext returns a context that is cancelled on the first SIGINT or
-// SIGTERM, implemented with signal.NotifyContext. It is single-shot: after the
-// first signal the context is cancelled and further signals are not handled by
-// this helper. Call stop (typically deferred in main) to release the handler.
-func NewContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+// forceQuitCode is the process exit code used when WithForceQuit triggers on the
+// second signal (128 + SIGINT, the conventional forced-interrupt code).
+const forceQuitCode = 130
+
+// NewContext returns a context cancelled on the first SIGINT or SIGTERM. Call the
+// returned CancelFunc (typically deferred in main) to release the signal handler.
+// It is single-shot by default: after the first signal further signals are not
+// handled. With WithForceQuit, the first signal still cancels the context for a
+// graceful drain and a second signal forces os.Exit(130).
+func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
+	var cfg contextConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if !cfg.forceQuit {
+		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	stopped := make(chan struct{})
+	go func() {
+		select {
+		case <-ch:
+			cancel()
+		case <-stopped:
+			return
+		}
+		select {
+		case <-ch:
+			os.Exit(forceQuitCode)
+		case <-stopped:
+		}
+	}()
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			signal.Stop(ch)
+			close(stopped)
+		})
+		cancel()
+	}
+	return ctx, stop
 }

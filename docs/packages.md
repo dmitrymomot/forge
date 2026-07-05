@@ -589,18 +589,7 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 
 | Package | Addition |
 |---|---|
-| `core/random` | `String(n, alphabet)`, `DigitCode(n)` (bias-free; `otp` needs it) |
-| `core/id` | Stripe-style `Prefixed` IDs with prefix-validating Parse |
-| `web/request` | `ValidateFile` (MIME allowlist + `filetype` sniff over File/Files); `Accept`/`AcceptsJSON` helpers |
-| `web/middleware` | `Skip`/`When(predicate)` combinator |
-| `web/problem` | Machine-readable `Code` field; `Decode(*http.Response)`; `errors.Is` on (Status, Code) |
-| `web/htmx` | SSE `SendComponent` bridge (moved out of sse's scope) |
-| `resilience/circuitbreaker` | Keyed `Group` (lazy per-key breakers); server-side HTTP middleware adapter (503 + Retry-After) |
-| `resilience/retry` | Honor `interface{ RetryAfter() time.Duration }` errors as the delay floor |
-| `resilience/cache` | Atomic SetNX in the Store contract |
-| `ops/supervisor` | `WithForceQuit` second-signal option on `NewContext` |
-| `ops/logger` | Recording slog test handler |
-| `web/hostrouter` | Doc note: unknown hosts default-deny = DNS-rebinding protection |
+| `web/htmx` | SSE `SendComponent` bridge — deferred to the realtime/sse wave |
 
 ## Build order
 

@@ -8,7 +8,10 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strings"
+
+	"github.com/dmitrymomot/forge/core/filetype"
 )
 
 const (
@@ -191,4 +194,58 @@ func parseMultipart(r *http.Request, opts []BodyOption) error {
 		return &Error{Source: SourceBody, Kind: kind, Err: err}
 	}
 	return nil
+}
+
+// FileOption configures ValidateFile.
+type FileOption func(*fileConfig)
+
+type fileConfig struct {
+	allowedMIME []string
+	maxSize     int64
+}
+
+// WithAllowedMIME restricts uploads to these magic-byte-sniffed MIME types (e.g.
+// "image/png", "application/pdf"). With no allowlist the MIME is not checked.
+func WithAllowedMIME(mimes ...string) FileOption {
+	return func(c *fileConfig) { c.allowedMIME = mimes }
+}
+
+// WithMaxFileSize rejects uploads whose declared size exceeds n bytes. With no
+// limit the size is not checked.
+func WithMaxFileSize(n int64) FileOption {
+	return func(c *fileConfig) { c.maxSize = n }
+}
+
+// ValidateFile validates an uploaded file by its magic bytes (core/filetype),
+// deliberately ignoring the client-declared Content-Type, plus an optional size
+// cap. It returns a *Error: KindTooLarge for an oversize file,
+// KindUnsupportedMediaType for a disallowed/undetectable type, KindMissing for a
+// nil header; nil on success. Consumers with multiple files loop over Files().
+func ValidateFile(fh *multipart.FileHeader, opts ...FileOption) error {
+	if fh == nil {
+		return &Error{Source: SourceForm, Kind: KindMissing}
+	}
+	var c fileConfig
+	for _, o := range opts {
+		o(&c)
+	}
+	if c.maxSize > 0 && fh.Size > c.maxSize {
+		return &Error{Source: SourceForm, Key: fh.Filename, Kind: KindTooLarge}
+	}
+	if len(c.allowedMIME) == 0 {
+		return nil
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return &Error{Source: SourceForm, Key: fh.Filename, Kind: KindUnsupportedMediaType, Err: err}
+	}
+	defer func() { _ = f.Close() }()
+	typ, _, err := filetype.DetectReader(f)
+	if err != nil {
+		return &Error{Source: SourceForm, Key: fh.Filename, Kind: KindUnsupportedMediaType, Err: err}
+	}
+	if slices.Contains(c.allowedMIME, typ.MIME) {
+		return nil
+	}
+	return &Error{Source: SourceForm, Key: fh.Filename, Kind: KindUnsupportedMediaType}
 }
