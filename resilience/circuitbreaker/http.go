@@ -15,6 +15,12 @@ type KeyFunc func(*http.Request) string
 // KeyByHost keys a Group breaker by request Host — the common reverse-proxy
 // case, so GroupMiddleware needs no custom key code. Any func(*http.Request)
 // string works for other strategies.
+//
+// Each distinct Host creates a breaker in the Group, reclaimed only after the
+// Group's idle TTL. Behind a trusted proxy that normalizes Host to a bounded
+// set this is fine; on an untrusted edge, arbitrary Host headers grow the key
+// space until they idle out, so front it with an allowlist or a bounded key
+// func there.
 func KeyByHost(r *http.Request) string { return r.Host }
 
 // OpenResponder writes the response when the circuit is open. retryAfter is the
