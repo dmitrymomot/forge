@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -47,7 +48,14 @@ func Run(ctx context.Context, opts ...Option) error {
 		return nil
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
+	// runCtx carries ctx's values but deliberately NOT its cancellation: services
+	// must only observe cancellation through our own cancel() below, called from
+	// beginShutdown AFTER pre-shutdown hooks finish. If runCtx propagated ctx's
+	// cancellation directly, cancelling ctx would close runCtx.Done() immediately,
+	// racing services against the pre-shutdown phase instead of waiting behind it.
+	// ctx's own cancellation is instead observed via ctx.Done() below and only
+	// *triggers* beginShutdown.
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 
 	type result struct {
@@ -69,7 +77,7 @@ func Run(ctx context.Context, opts ...Option) error {
 
 	var (
 		errs         []error
-		done         = runCtx.Done()
+		done         = ctx.Done()
 		graceCh      <-chan time.Time // nil until shutdown begins; never armed when timeout == 0
 		shuttingDown bool
 	)
@@ -80,6 +88,9 @@ func Run(ctx context.Context, opts ...Option) error {
 		}
 		shuttingDown = true
 		log.Info("shutdown started", slog.String("reason", reason))
+		if err := runPreShutdown(cfg.preShutdown, cfg.preShutdownTimeout, log); err != nil {
+			errs = append(errs, err)
+		}
 		cancel()
 		done = nil
 		if cfg.ShutdownTimeout > 0 {
@@ -132,6 +143,42 @@ func runService(ctx context.Context, svc Service, log *slog.Logger, recoverPanic
 		}
 	}()
 	return svc.Run(ctx)
+}
+
+// runPreShutdown runs all hooks concurrently, returning ErrPreShutdownTimeout if
+// they do not all finish within timeout (0 = wait indefinitely). A panicking hook
+// is recovered and logged.
+func runPreShutdown(hooks []preHook, timeout time.Duration, log *slog.Logger) error {
+	if len(hooks) == 0 {
+		return nil
+	}
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	var wg sync.WaitGroup
+	for _, h := range hooks {
+		wg.Go(func() {
+			defer func() {
+				if p := recover(); p != nil {
+					log.Error("pre-shutdown hook panicked",
+						slog.String("hook", h.name), slog.Any("panic", p))
+				}
+			}()
+			log.Info("pre-shutdown hook started", slog.String("hook", h.name))
+			h.fn(ctx)
+		})
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ErrPreShutdownTimeout
+	}
 }
 
 // resolveLogger returns l, or a discard logger when l is nil.

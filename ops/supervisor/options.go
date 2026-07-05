@@ -9,17 +9,26 @@ import (
 
 // config holds resolved settings for a single Run call.
 type config struct {
-	logger   *slog.Logger
-	services []Service
-	errs     []error
+	logger             *slog.Logger
+	services           []Service
+	errs               []error
+	preShutdown        []preHook
+	preShutdownTimeout time.Duration
 	Config
 }
 
 func defaultConfig() config {
 	return config{
-		Config: DefaultConfig(),
-		logger: slog.Default(),
+		Config:             DefaultConfig(),
+		logger:             slog.Default(),
+		preShutdownTimeout: 30 * time.Second,
 	}
+}
+
+// preHook is a named pre-shutdown callback.
+type preHook struct {
+	fn   func(context.Context)
+	name string
 }
 
 // Option configures a Run call: it registers services and tunes behavior.
@@ -60,6 +69,26 @@ func WithConfig(cfg Config) Option {
 // shutdown begins. Default 30s. A value of 0 means wait indefinitely.
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(c *config) { c.ShutdownTimeout = d }
+}
+
+// WithPreShutdown registers a hook run after shutdown begins but BEFORE each
+// service's context is cancelled — so readiness can flip and load balancers can
+// deregister while services still serve. Hooks run concurrently; Run waits for
+// them, bounded by WithPreShutdownTimeout. A nil fn is rejected as ErrInvalidConfig.
+func WithPreShutdown(name string, fn func(context.Context)) Option {
+	return func(c *config) {
+		if fn == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithPreShutdown(%q) received a nil func", ErrInvalidConfig, name))
+			return
+		}
+		c.preShutdown = append(c.preShutdown, preHook{name: name, fn: fn})
+	}
+}
+
+// WithPreShutdownTimeout bounds the pre-shutdown phase. Default 30s; it must
+// exceed the longest grace a hook waits internally, or the hook is cut short.
+func WithPreShutdownTimeout(d time.Duration) Option {
+	return func(c *config) { c.preShutdownTimeout = d }
 }
 
 // WithLogger sets the slog.Logger used for lifecycle logging. Default
