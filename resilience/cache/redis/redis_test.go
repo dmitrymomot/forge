@@ -35,8 +35,8 @@ func TestRedisStoreRoundTripAndScopedClear(t *testing.T) {
 	users := cache.New[string](store, cache.WithPrefix("test:cache:users:"))
 	other := cache.New[string](store, cache.WithPrefix("test:cache:other:"))
 
-	require.NoError(t, users.Set(t.Context(), "1", "alice", time.Minute))
-	require.NoError(t, other.Set(t.Context(), "1", "keep", time.Minute))
+	require.NoError(t, users.Set(t.Context(), "1", "alice", cache.WithTTL(time.Minute)))
+	require.NoError(t, other.Set(t.Context(), "1", "keep", cache.WithTTL(time.Minute)))
 
 	v, err := users.Get(t.Context(), "1")
 	require.NoError(t, err)
@@ -61,8 +61,8 @@ func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
 	target := cache.New[string](store, cache.WithPrefix("test:cache:g[x]:"))
 	sibling := cache.New[string](store, cache.WithPrefix("test:cache:gx:"))
 
-	require.NoError(t, target.Set(t.Context(), "1", "gone", time.Minute))
-	require.NoError(t, sibling.Set(t.Context(), "1", "keep", time.Minute))
+	require.NoError(t, target.Set(t.Context(), "1", "gone", cache.WithTTL(time.Minute)))
+	require.NoError(t, sibling.Set(t.Context(), "1", "keep", cache.WithTTL(time.Minute)))
 
 	require.NoError(t, target.Clear(t.Context()))
 
@@ -72,4 +72,38 @@ func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
 	kept, err := sibling.Get(t.Context(), "1") // literal match: sibling untouched
 	require.NoError(t, err)
 	assert.Equal(t, "keep", kept)
+}
+
+func TestRedisStoreSetNonExistClaimsOnce(t *testing.T) {
+	store := cacheredis.NewStore(testClient(t)) // SKIPs without TEST_REDIS_URL
+
+	key := "test:cache:nx:claim"
+	t.Cleanup(func() { _ = store.Delete(context.Background(), key) })
+
+	// First NX claim wins and takes a lease (SET key val NX PX ttl).
+	require.NoError(t, store.Set(t.Context(), key, []byte("first"), cache.WithSetNonExist(), cache.WithTTL(time.Minute)))
+
+	// A second NX claim on the live key is rejected: the server returns a null
+	// reply (redis.Nil), which the backend maps to cache.ErrExists.
+	err := store.Set(t.Context(), key, []byte("second"), cache.WithSetNonExist(), cache.WithTTL(time.Minute))
+	assert.ErrorIs(t, err, cache.ErrExists)
+
+	got, err := store.Get(t.Context(), key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("first"), got) // NX did not overwrite the original
+}
+
+func TestRedisStoreSetNonExistWithoutTTLPersists(t *testing.T) {
+	client := testClient(t) // SKIPs without TEST_REDIS_URL
+	store := cacheredis.NewStore(client)
+
+	key := "test:cache:nx:nottl"
+	t.Cleanup(func() { _ = store.Delete(context.Background(), key) })
+
+	// NX claim with no WithTTL: SET key val NX with no PX. The claim still wins,
+	// a live-key reclaim is still rejected, and — since no PX is sent — the key
+	// has no expiry (redis reports TTL -1 for a persistent key).
+	require.NoError(t, store.Set(t.Context(), key, []byte("v"), cache.WithSetNonExist()))
+	assert.ErrorIs(t, store.Set(t.Context(), key, []byte("w"), cache.WithSetNonExist()), cache.ErrExists)
+	assert.Equal(t, time.Duration(-1), client.TTL(t.Context(), key).Val())
 }

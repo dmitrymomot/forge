@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/circuitbreaker"
@@ -98,5 +99,66 @@ func TestHalfOpenMaxAdmitsConcurrentProbesThenRejects(t *testing.T) {
 	close(release)
 	wg.Wait()
 	// Both probes succeeded → breaker closed.
+	assert.Equal(t, circuitbreaker.StateClosed, b.State())
+}
+
+func TestOpenErrorIsMatchableAndCarriesRetryAfter(t *testing.T) {
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(30*time.Second),
+	)
+	_ = b.Do(t.Context(), fail)  // trips open after one failure
+	err := b.Do(t.Context(), ok) // rejected; ok is not run
+
+	assert.ErrorIs(t, err, circuitbreaker.ErrOpen)
+	var ra interface{ RetryAfter() time.Duration }
+	require.ErrorAs(t, err, &ra)
+	d := ra.RetryAfter() //nolint:nilaway // ra is guaranteed non-nil by require.ErrorAs above
+	assert.Greater(t, d, time.Duration(0))
+	assert.LessOrEqual(t, d, 30*time.Second)
+}
+
+func TestRetryAfterShrinksAndZeroesOut(t *testing.T) {
+	clk := clock.NewMock(time.Now())
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(30*time.Second),
+		circuitbreaker.WithClock(clk),
+	)
+	_ = b.Do(t.Context(), fail)
+
+	assert.Equal(t, 30*time.Second, b.RetryAfter())
+	clk.Advance(10 * time.Second)
+	assert.Equal(t, 20*time.Second, b.RetryAfter())
+	clk.Advance(30 * time.Second) // past the open window
+	assert.Equal(t, time.Duration(0), b.RetryAfter())
+}
+
+func TestBreakerDoPanicRepanicsAndDoesNotWedge(t *testing.T) {
+	clk := clock.NewMock(time.Now())
+	b := circuitbreaker.New(
+		circuitbreaker.WithFailureThreshold(1),
+		circuitbreaker.WithOpenTimeout(30*time.Second),
+		circuitbreaker.WithClock(clk),
+	)
+	_ = b.Do(t.Context(), fail) // trip to open
+	require.Equal(t, circuitbreaker.StateOpen, b.State())
+
+	clk.Advance(30 * time.Second) // window elapsed -> next call is admitted as a half-open probe
+
+	// The half-open probe panics. Do must let the panic propagate AND record the
+	// failure so the half-open slot is released; otherwise the breaker wedges in
+	// StateHalfOpen with halfOpenIn >= halfOpenMax forever, rejecting every call.
+	assert.Panics(t, func() {
+		_ = b.Do(t.Context(), func(context.Context) error { panic("boom") })
+	})
+
+	// Not wedged: the recorded panic reopened the breaker rather than leaving it
+	// stuck half-open.
+	require.Equal(t, circuitbreaker.StateOpen, b.State())
+
+	// And it still recovers: after the window a successful probe closes it.
+	clk.Advance(30 * time.Second)
+	require.NoError(t, b.Do(t.Context(), ok))
 	assert.Equal(t, circuitbreaker.StateClosed, b.State())
 }

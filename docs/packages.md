@@ -6,7 +6,7 @@
 > against kratos, go-kit, go-micro, fiber v3, fiber-contrib, and forge v1).
 >
 > **State: 57 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
-> · **65 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
+> · **64 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -73,10 +73,10 @@ messaging engine, and the driver leaves stays stdlib.
 
 - **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete
   + atomic SetNX claim) is THE key-value seam. Backends: memory (shipped),
-  `cache/redis` (shipped), `cache/postgres` (planned — durable; the memory
-  store is LRU-evicting and unsuitable for sessions/idempotency). Consumers:
-  `session`, `idempotency`, `otp`, `lockout`, server-side `flash`. No package
-  defines a private byte-KV store.
+  `cache/redis` (shipped). The memory store is LRU-evicting and unsuitable
+  for sessions/idempotency, so those consumers need `cache/redis` (or bring a
+  durable Store of their own). Consumers: `session`, `idempotency`, `otp`,
+  `lockout`, server-side `flash`. No package defines a private byte-KV store.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.
@@ -117,7 +117,7 @@ forge/                              # single go.mod at the root
 │   # shipped: backoff retry singleflight parallel circuitbreaker
 │   #          cache (cache/redis)
 │   # planned: ratelimit (ratelimit/redisstore) quota (quota/pgstore)
-│   #          loadshed lock (lock/pglock) cache/postgres
+│   #          loadshed lock (lock/pglock)
 │
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
@@ -252,8 +252,6 @@ Shipped: `backoff retry singleflight parallel circuitbreaker cache (cache/redis)
   fencing tokens, auto-refresh; `RunAsLeader` as `supervisor.Service`.
   In-process store in core; Postgres advisory locks are the only shipped
   distributed backend (a Redis consumer implements the 3-method Store).
-- **`cache/postgres`** — recommended. Durable Postgres backend for the
-  shipped `cache.Store` seam (single table, upsert + expiry sweep).
 
 ### web/
 
@@ -609,7 +607,7 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
-1. **Unblockers** — the shipped-package work items above; `cache/postgres`;
+1. **Unblockers** — the shipped-package work items above;
    `httpclient` (transport under half the roadmap); `ratelimit` (counter
    seam); `envconfig`; `health`.
 2. **Web boundary + ops glue** — `cookie` → `csrf`, `secheaders`, `cors`,

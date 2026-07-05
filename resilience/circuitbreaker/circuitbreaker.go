@@ -96,13 +96,18 @@ type Breaker struct {
 	mu         sync.Mutex
 }
 
-// New builds a Breaker from options.
-func New(opts ...Option) *Breaker {
+// newConfig applies opts over the defaults. Shared by New and Group.
+func newConfig(opts ...Option) config {
 	c := config{threshold: 5, openTimeout: 30 * time.Second, halfOpenMax: 1, clk: clock.System()}
 	for _, o := range opts {
 		o(&c)
 	}
-	return &Breaker{cfg: c, state: StateClosed}
+	return c
+}
+
+// New builds a Breaker from options.
+func New(opts ...Option) *Breaker {
+	return &Breaker{cfg: newConfig(opts...), state: StateClosed}
 }
 
 // State reports the current state.
@@ -112,13 +117,36 @@ func (b *Breaker) State() State {
 	return b.state
 }
 
+// RetryAfter reports how long until the breaker would admit a probe call, or 0
+// when it is not open.
+func (b *Breaker) RetryAfter() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state != StateOpen {
+		return 0
+	}
+	if remaining := b.cfg.openTimeout - b.cfg.clk.Now().Sub(b.openedAt); remaining > 0 {
+		return remaining
+	}
+	return 0
+}
+
 // Do runs fn unless the circuit rejects it, recording the outcome. It returns
-// ErrOpen without calling fn when the circuit is open.
+// ErrOpen without calling fn when the circuit is open. If fn panics, Do records
+// the panic as a failure — so a half-open probe releases its slot and the
+// breaker reopens instead of wedging — and then lets the panic propagate.
 func (b *Breaker) Do(ctx context.Context, fn func(context.Context) error) error {
 	if err := b.before(); err != nil {
 		return err
 	}
+	completed := false
+	defer func() {
+		if !completed {
+			b.after(errPanic) // fn panicked: record a failure, then the panic unwinds
+		}
+	}()
 	err := fn(ctx)
+	completed = true
 	b.after(err)
 	return err
 }
@@ -128,15 +156,16 @@ func (b *Breaker) before() error {
 	defer b.mu.Unlock()
 	switch b.state {
 	case StateOpen:
-		if b.cfg.clk.Now().Sub(b.openedAt) < b.cfg.openTimeout {
-			return ErrOpen
+		elapsed := b.cfg.clk.Now().Sub(b.openedAt)
+		if elapsed < b.cfg.openTimeout {
+			return &openError{retryAfter: b.cfg.openTimeout - elapsed}
 		}
 		b.transition(StateHalfOpen)
 		b.halfOpenIn = 1
 		return nil
 	case StateHalfOpen:
 		if b.halfOpenIn >= b.cfg.halfOpenMax {
-			return ErrOpen
+			return &openError{retryAfter: 0} // a probe is in flight; retry shortly
 		}
 		b.halfOpenIn++
 		return nil

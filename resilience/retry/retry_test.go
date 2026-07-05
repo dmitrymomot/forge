@@ -3,6 +3,7 @@ package retry_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -97,4 +98,60 @@ func TestWithBackoffNilIgnored(t *testing.T) {
 	}, retry.WithBackoff(nil))
 	assert.Error(t, err)
 	assert.Equal(t, 1, calls)
+}
+
+type retryAfterErr struct{ d time.Duration }
+
+func (e retryAfterErr) Error() string             { return "slow down" }
+func (e retryAfterErr) RetryAfter() time.Duration { return e.d }
+
+func TestRetryAfterRaisesDelayToFloor(t *testing.T) {
+	var attempts int
+	start := time.Now()
+	err := retry.Do(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts < 2 {
+			return retryAfterErr{d: 120 * time.Millisecond}
+		}
+		return nil
+	},
+		retry.WithMaxAttempts(2),
+		retry.WithBackoff(backoff.Constant(1*time.Millisecond)), // far below the hint
+	)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("waited %v, want >= ~120ms (the RetryAfter floor)", elapsed)
+	}
+}
+
+func TestRetryAfterHonoredThroughWrappedError(t *testing.T) {
+	var attempts int
+	start := time.Now()
+	_ = retry.Do(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("wrapped: %w", retryAfterErr{d: 120 * time.Millisecond})
+		}
+		return nil
+	}, retry.WithMaxAttempts(2), retry.WithBackoff(backoff.Constant(1*time.Millisecond)))
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("waited %v, want >= ~120ms via wrapped hint", elapsed)
+	}
+}
+
+func TestRetryAfterBelowBackoffKeepsBackoff(t *testing.T) {
+	var attempts int
+	start := time.Now()
+	_ = retry.Do(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts < 2 {
+			return retryAfterErr{d: 1 * time.Millisecond} // below backoff
+		}
+		return nil
+	}, retry.WithMaxAttempts(2), retry.WithBackoff(backoff.Constant(80*time.Millisecond)))
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("waited %v, want >= ~80ms (backoff wins)", elapsed)
+	}
 }

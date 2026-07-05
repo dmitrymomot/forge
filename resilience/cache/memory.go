@@ -119,15 +119,22 @@ func (m *memoryStore) Get(_ context.Context, key string) ([]byte, error) {
 	return out, nil
 }
 
-func (m *memoryStore) Set(_ context.Context, key string, val []byte, ttl time.Duration) error {
+func (m *memoryStore) Set(_ context.Context, key string, val []byte, opts ...SetOption) error {
+	o := ApplySetOptions(opts...)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return ErrClosed
 	}
+	now := m.cfg.clk.Now()
+	if o.OnlyIfNew {
+		if e, ok := m.items[key]; ok && (e.expires.IsZero() || now.Before(e.expires)) {
+			return ErrExists
+		}
+	}
 	var expires time.Time
-	if ttl > 0 {
-		expires = m.cfg.clk.Now().Add(ttl)
+	if o.TTL > 0 {
+		expires = now.Add(o.TTL)
 	}
 	stored := make([]byte, len(val))
 	copy(stored, val)

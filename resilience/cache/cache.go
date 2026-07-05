@@ -23,7 +23,8 @@ type Option func(*config)
 // other caches sharing the same Store.
 func WithPrefix(p string) Option { return func(c *config) { c.prefix = p } }
 
-// WithDefaultTTL is applied when Set receives ttl == 0 (default 5m).
+// WithDefaultTTL sets the TTL applied when Set is called without a WithTTL
+// option (default 5m).
 func WithDefaultTTL(d time.Duration) Option { return func(c *config) { c.defaultTTL = d } }
 
 // WithMarshaler overrides the default JSON serialization. Its type parameter
@@ -81,17 +82,19 @@ func (c *Cache[V]) Get(ctx context.Context, key string) (V, error) {
 	return c.marshaler.Unmarshal(data)
 }
 
-// Set stores v under key. ttl == 0 uses the configured default; ttl < 0 never
-// expires.
-func (c *Cache[V]) Set(ctx context.Context, key string, v V, ttl time.Duration) error {
+// Set stores v under key. Without a WithTTL option the cache's default TTL
+// applies; WithTTL overrides it (a non-positive duration means no expiry).
+// WithSetNonExist makes the write conditional, returning ErrExists when the key
+// is already present.
+func (c *Cache[V]) Set(ctx context.Context, key string, v V, opts ...SetOption) error {
 	data, err := c.marshaler.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if ttl == 0 {
-		ttl = c.defaultTTL
-	}
-	return c.store.Set(ctx, c.key(key), data, ttl)
+	// Prepend the default TTL so any caller WithTTL (including a non-positive
+	// "never expire") overrides it; a fresh slice leaves the caller's untouched.
+	opts = append([]SetOption{WithTTL(c.defaultTTL)}, opts...)
+	return c.store.Set(ctx, c.key(key), data, opts...)
 }
 
 // Delete removes key. Deleting a key that does not exist is not an error.
@@ -136,7 +139,11 @@ func (c *Cache[V]) GetOrSet(ctx context.Context, key string, fn func(context.Con
 			var zero V
 			return zero, ferr
 		}
-		_ = c.Set(ctx, key, val, ttl)
+		var opts []SetOption
+		if ttl != 0 {
+			opts = append(opts, WithTTL(ttl))
+		}
+		_ = c.Set(ctx, key, val, opts...)
 		return val, nil
 	})
 	return v, err
