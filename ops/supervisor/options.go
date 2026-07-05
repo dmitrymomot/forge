@@ -74,3 +74,18 @@ func WithLogger(l *slog.Logger) Option {
 func WithRecover(enabled bool) Option {
 	return func(c *config) { c.Recover = enabled }
 }
+
+// ContextOption configures NewContext.
+type ContextOption func(*contextConfig)
+
+type contextConfig struct {
+	forceQuit bool
+}
+
+// WithForceQuit makes the second SIGINT/SIGTERM force an immediate os.Exit(130)
+// instead of being ignored. The first signal still cancels the returned context for
+// graceful drain; the second is the impatient-operator escape hatch. os.Exit
+// bypasses deferred cleanup by design.
+func WithForceQuit() ContextOption {
+	return func(c *contextConfig) { c.forceQuit = true }
+}
