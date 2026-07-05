@@ -1,6 +1,7 @@
 package httpclient_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -77,3 +78,54 @@ func TestNew_PropagatesContextHeaders(t *testing.T) {
 }
 
 type ctxKey struct{}
+
+// trackedBody wraps a response body and records whether Close was called, so
+// tests can prove a superseded (retried-past) response was released.
+type trackedBody struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (b *trackedBody) Close() error {
+	b.closed.Store(true)
+	return nil
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestNew_ClosesSupersededRetryResponseBody(t *testing.T) {
+	firstBody := &trackedBody{Reader: bytes.NewBufferString("first")}
+	secondBody := &trackedBody{Reader: bytes.NewBufferString("second")}
+
+	var calls atomic.Int32
+	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       firstBody,
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       secondBody,
+			Header:     make(http.Header),
+			Request:    r,
+		}, nil
+	})
+
+	client := httpclient.New(httpclient.WithBaseTransport(base))
+	resp, err := client.Get("http://example.invalid/")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(2), calls.Load())
+	assert.True(t, firstBody.closed.Load(), "superseded 503 response body must be drained and closed")
+	assert.False(t, secondBody.closed.Load(), "final 200 response body must remain open for the caller")
+}

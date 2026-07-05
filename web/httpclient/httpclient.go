@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -34,6 +35,11 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	var resp *http.Response
 	attempt := func(ctx context.Context) error {
+		if resp != nil { // a prior attempt's response is being superseded — release its connection
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			resp = nil
+		}
 		r := req.Clone(ctx)
 		if req.GetBody != nil { // replay the body on retried methods (PUT/DELETE with a body)
 			b, gErr := req.GetBody()
