@@ -23,7 +23,8 @@ type Option func(*config)
 // other caches sharing the same Store.
 func WithPrefix(p string) Option { return func(c *config) { c.prefix = p } }
 
-// WithDefaultTTL is applied when Set receives ttl == 0 (default 5m).
+// WithDefaultTTL sets the TTL applied when Set is called without a WithTTL
+// option (default 5m).
 func WithDefaultTTL(d time.Duration) Option { return func(c *config) { c.defaultTTL = d } }
 
 // WithMarshaler overrides the default JSON serialization. Its type parameter
