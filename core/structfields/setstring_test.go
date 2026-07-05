@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/core/structfields"
+	"github.com/dmitrymomot/forge/core/typeconv"
 )
 
 func TestSetString_SupportedKinds(t *testing.T) {
@@ -65,4 +66,19 @@ func TestSetString_BadSyntax(t *testing.T) {
 		return structfields.SetString(f, "not-a-number")
 	})
 	require.Error(t, err)
+}
+
+func TestSetString_OverflowRejected(t *testing.T) {
+	var s struct {
+		Small int8
+		Byte  uint8
+	}
+	err := structfields.Walk(&s, "env", func(f structfields.Field) error {
+		if f.Name == "Small" {
+			return structfields.SetString(f, "300") // overflows int8
+		}
+		return nil
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, typeconv.ErrSyntax)
 }
