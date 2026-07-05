@@ -92,3 +92,18 @@ func TestRedisStoreSetNonExistClaimsOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("first"), got) // NX did not overwrite the original
 }
+
+func TestRedisStoreSetNonExistWithoutTTLPersists(t *testing.T) {
+	client := testClient(t) // SKIPs without TEST_REDIS_URL
+	store := cacheredis.NewStore(client)
+
+	key := "test:cache:nx:nottl"
+	t.Cleanup(func() { _ = store.Delete(context.Background(), key) })
+
+	// NX claim with no WithTTL: SET key val NX with no PX. The claim still wins,
+	// a live-key reclaim is still rejected, and — since no PX is sent — the key
+	// has no expiry (redis reports TTL -1 for a persistent key).
+	require.NoError(t, store.Set(t.Context(), key, []byte("v"), cache.WithSetNonExist()))
+	assert.ErrorIs(t, store.Set(t.Context(), key, []byte("w"), cache.WithSetNonExist()), cache.ErrExists)
+	assert.Equal(t, time.Duration(-1), client.TTL(t.Context(), key).Val())
+}
