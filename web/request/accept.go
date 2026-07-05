@@ -7,8 +7,12 @@ import (
 )
 
 // Accept reports whether the request's Accept header admits mediaType, honoring
-// "*/*", "type/*", and explicit "q=0" rejections. An absent or empty Accept header
-// admits everything (returns true), per RFC 9110.
+// "*/*", "type/*", and explicit "q=0" rejections. Per RFC 9110 §12.5.1 the most
+// specific matching range decides: an exact "type/subtype" outranks "type/*",
+// which outranks "*/*", so an explicit "q=0" exclusion overrides a less-specific
+// wildcard (e.g. "*/*, application/json;q=0" rejects application/json). Among
+// ranges of equal specificity the highest q-value wins. An absent or empty Accept
+// header admits everything (returns true).
 func Accept(r *http.Request, mediaType string) bool {
 	header := r.Header.Get("Accept")
 	if strings.TrimSpace(header) == "" {
@@ -18,17 +22,24 @@ func Accept(r *http.Request, mediaType string) bool {
 	if len(want) != 2 {
 		return false
 	}
-	best := -1.0
+	bestSpec := -1
+	bestQ := 0.0
 	for part := range strings.SplitSeq(header, ",") {
 		rng, q := parseAcceptPart(part)
 		if rng == "" {
 			continue
 		}
-		if acceptMatches(rng, want) && q > best {
-			best = q
+		spec := acceptSpecificity(rng, want)
+		if spec < 0 {
+			continue // range does not match mediaType
+		}
+		// A more specific range takes precedence regardless of q; among equally
+		// specific ranges the higher q wins.
+		if spec > bestSpec || (spec == bestSpec && q > bestQ) {
+			bestSpec, bestQ = spec, q
 		}
 	}
-	return best > 0
+	return bestSpec >= 0 && bestQ > 0
 }
 
 // AcceptsJSON reports whether the request admits application/json.
@@ -50,17 +61,23 @@ func parseAcceptPart(part string) (string, float64) {
 	return rng, q
 }
 
-// acceptMatches reports whether a media range admits the wanted type/subtype.
-func acceptMatches(rng string, want []string) bool {
+// acceptSpecificity reports how specifically a media range matches the wanted
+// type/subtype, or -1 if it does not match: 2 for an exact "type/subtype", 1 for
+// "type/*", 0 for "*/*". Higher wins per RFC 9110 §12.5.1.
+func acceptSpecificity(rng string, want []string) int {
 	if rng == "*/*" {
-		return true
+		return 0
 	}
 	rp := strings.SplitN(rng, "/", 2)
-	if len(rp) != 2 {
-		return false
+	if len(rp) != 2 || rp[0] != want[0] {
+		return -1
 	}
-	if rp[0] != want[0] {
-		return false
+	switch rp[1] {
+	case want[1]:
+		return 2
+	case "*":
+		return 1
+	default:
+		return -1
 	}
-	return rp[1] == "*" || rp[1] == want[1]
 }
