@@ -95,7 +95,14 @@ func (r *Retrier) Do(ctx context.Context, fn func(context.Context) error) error 
 		if attempt == r.cfg.maxAttempts {
 			break
 		}
-		timer := time.NewTimer(r.cfg.backoff.Next(attempt))
+		// Wait per the backoff, raised to any server/breaker-stated floor.
+		wait := r.cfg.backoff.Next(attempt)
+		if ra, ok := errors.AsType[RetryAfterError](err); ok {
+			if hint := ra.RetryAfter(); hint > wait {
+				wait = hint
+			}
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
