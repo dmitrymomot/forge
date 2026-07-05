@@ -5,8 +5,8 @@
 > `package-set-v2.md` (consolidated 2026-07-04, after a cross-framework review
 > against kratos, go-kit, go-micro, fiber v3, fiber-contrib, and forge v1).
 >
-> **State: 57 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
-> · **64 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
+> **State: 61 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
+> · **60 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -44,7 +44,8 @@ Forge optimizes for a small, auditable dependency surface — not stdlib purism:
   swappable leaf.
 
 Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch
-clients, sentry. Sanctioned for the roadmap: aws-sdk-go-v2 (`objectstore/s3`),
+clients, sentry, `gopkg.in/yaml.v3` (`ops/config`'s YAML loader, its sole
+consumer). Sanctioned for the roadmap: aws-sdk-go-v2 (`objectstore/s3`),
 `coder/websocket` (`ws`), `go-webauthn` (`webauthn`), `x/crypto`
 (password/kdf/autocert), goldmark (`emailtemplate/markdown`), the official
 MCP go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
@@ -115,14 +116,13 @@ forge/                              # single go.mod at the root
 │
 ├── resilience/    # failure handling, concurrency, load control
 │   # shipped: backoff retry singleflight parallel circuitbreaker
-│   #          cache (cache/redis)
-│   # planned: ratelimit (ratelimit/redisstore) quota (quota/pgstore)
-│   #          loadshed lock (lock/pglock)
+│   #          cache (cache/redis) ratelimit (ratelimit/redisstore)
+│   # planned: quota (quota/pgstore) loadshed lock (lock/pglock)
 │
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
-│   #          recoverer reqlog requestid render htmx subroute
-│   # planned: httpclient cookie csrf secheaders cors timeout compress
+│   #          recoverer reqlog requestid render htmx subroute httpclient
+│   # planned: cookie csrf secheaders cors timeout compress
 │   #          assets idempotency iplist captcha (captcha/turnstile ...)
 │   #          webhookverify autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify maintenance
@@ -161,8 +161,8 @@ forge/                              # single go.mod at the root
 │   # icebox:  structured embeddings aiusage mcpserver
 │
 ├── ops/           # runtime, lifecycle, observability, app bootstrap
-│   # shipped: supervisor logger (logger/sentry)
-│   # planned: envconfig health buildinfo automaxprocs diag metrics
+│   # shipped: supervisor logger (logger/sentry) config health
+│   # planned: buildinfo automaxprocs diag metrics
 │   #          (metrics/prometheus) logredact auditlog (auditlog/pgsink)
 │   #          featureflag cli appmain
 │   # icebox:  tracing (tracing/otel) secretsource logsample configwatch term
@@ -234,11 +234,9 @@ doc.go example.
 
 ### resilience/
 
-Shipped: `backoff retry singleflight parallel circuitbreaker cache (cache/redis)`.
+Shipped: `backoff retry singleflight parallel circuitbreaker cache (cache/redis)
+ratelimit (ratelimit/redisstore)`.
 
-- **`ratelimit`** (+`ratelimit/redisstore`) — core. Keyed token-bucket /
-  sliding-window limiter over the counter Store contract; in-memory default;
-  HTTP middleware emits RateLimit-* headers. `ErrLimited`.
 - **`quota`** (+`quota/pgstore`) — recommended. Cumulative usage caps per
   subject over calendar/rolling windows (requests/month, seats, AI tokens) —
   the plan-entitlement counterpart to ratelimit. Subject is an opaque string;
@@ -256,14 +254,12 @@ Shipped: `backoff retry singleflight parallel circuitbreaker cache (cache/redis)
 ### web/
 
 Shipped: `httpserver hostrouter middleware request clientip problem recoverer
-reqlog requestid render htmx subroute`.
+reqlog requestid render htmx subroute httpclient`. (`httpclient` builds a
+resilient outbound `*http.Client` via a RoundTripper stack: per-attempt
+timeout, jittered retry, an OPT-IN per-host circuit breaker, before/after
+hooks, and ctx-driven header propagation — the transport under captcha,
+oauthclient, comms/*, and llm. Returns the stdlib type.)
 
-- **`httpclient`** — core, build early. Resilient outbound `*http.Client`
-  via a RoundTripper stack: per-attempt timeout, jittered retry, circuit
-  breaker, before/after hooks, and ctx-driven header propagation
-  (traceparent, request-id) so cross-service correlation actually works. The
-  transport under captcha, oauthclient, comms/*, and llm. Returns the stdlib
-  type.
 - **`cookie`** — recommended. Signed + encrypted cookie codec with secure
   defaults (HttpOnly, SameSite, `__Host-`) and keyset rotation. Foundation
   for csrf, flash, and session's cookie store.
@@ -513,18 +509,16 @@ Icebox:
 
 ### ops/
 
-Shipped: `supervisor logger (logger/sentry)`.
+Shipped: `supervisor logger (logger/sentry) config health`. (`config` —
+formerly planned as `envconfig`, shipped renamed — layers app config from
+YAML per-env files with `${VAR:default}` substitution, `.env` inheritance,
+and env-tagged structs via `structfields` + `typeconv`; exported `Profile`
+enum (dev/test/staging/prod) with predicates; boot-time only.
+`health` — a single pull-evaluated `Handler()` factory for liveness (no
+checks) and readiness (`WithCheck` checks, critical by default, `NonCritical`
+degrades instead of 503) plus a `Gate` for ordered pre-shutdown drain via
+`supervisor.WithPreShutdown`.)
 
-- **`envconfig`** — core. Populate env-tagged Config structs from environment
-  + .env (parser internal; `WithDotenv`), via `structfields` + `typeconv`;
-  exported `Profile` enum (dev/test/staging/prod) with predicates. Boot-time
-  only.
-- **`health`** — core. Liveness + readiness in one package: two registries,
-  `LivenessHandler` (/livez) and `ReadinessHandler` (/readyz), per-check
-  timeout + TTL cache, critical/non-critical flags, `SetReady`/`Shutdown()`
-  drain gating (flip not-ready *before* httpserver.Shutdown), and
-  `Heartbeat(name, maxAge)` kickers so a hung background loop fails /livez.
-  Driver-free core; concrete checks in `health/checks`.
 - **`buildinfo`** — recommended. Version/commit/build-time/dirty from ldflags
   + `ReadBuildInfo`; `slog.LogValuer` + /version handler.
 - **`automaxprocs`** — recommended. Set GOMAXPROCS/GOMEMLIMIT from cgroup
@@ -596,29 +590,26 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
-1. **Unblockers** — the shipped-package work items above;
-   `httpclient` (transport under half the roadmap); `ratelimit` (counter
-   seam); `envconfig`; `health`.
-2. **Web boundary + ops glue** — `cookie` → `csrf`, `secheaders`, `cors`,
+1. **Web boundary + ops glue** — `cookie` → `csrf`, `secheaders`, `cors`,
    `timeout`, `compress`, `assets`, `iplist`, `webhookverify`, `autocert`,
    `captcha`, `idempotency`; `buildinfo`, `automaxprocs`, `diag`, `metrics`,
    `logredact`, `featureflag`, `cli`, `appmain`; `webtest`, `htmltest`,
    `dbtest` (harnesses pay off earliest).
-3. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
+2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
-4. **Auth** — `session`, `authmw`, `lockout`, `totp`, `otp`,
+3. **Auth** — `session`, `authmw`, `lockout`, `totp`, `otp`,
    `recoverycodes`, `apikey`, `magiclink`, `oauthclient`, `rbac`.
-5. **Views + i18n + delivery** — `flash`, `form`, `pagenav`; `catalog`,
+4. **Views + i18n + delivery** — `flash`, `form`, `pagenav`; `catalog`,
    `locale`, `numfmt`, `datefmt`; `email` → `emailtemplate`, `webhook`.
-6. **Realtime + AI** — `sse`, `fanout`, `ws`, `wshub`, `ssestream`; `llm`,
+5. **Realtime + AI** — `sse`, `fanout`, `ws`, `wshub`, `ssestream`; `llm`,
    `prompt`.
 
 **Minimal-core cut-line** (enough for a real API or htmx app end-to-end):
 `clock random id ctxkey typeconv slicex ptr validate` · `postgres migration`
 · `backoff retry ratelimit` · `middleware recoverer requestid problem
 httpclient` · `session authmw` · `sse fanout` · `email` · `catalog locale` ·
-`flash form` · `envconfig health`.
+`flash form` · `config health`.
 
 ## Anti-scope — what stays in consumer repos
 
