@@ -20,14 +20,14 @@ func newConfig(opts ...Option) config {
 	return c
 }
 
-func (c config) activeProfile() string { //nolint:unused // consumed by LoadEnv/Populate/Load added in later tasks
+func (c config) activeProfile() string {
 	if c.profile != "" {
 		return c.profile
 	}
 	return Profile()
 }
 
-func (c config) fileName() string { //nolint:unused // consumed by Load added in a later task
+func (c config) fileName() string {
 	return c.fileNameFn(c.activeProfile())
 }
 
