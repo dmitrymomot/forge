@@ -17,6 +17,14 @@
 //	<meta name="csrf-token" content="{{ csrf.Token(r) }}">
 //	<body hx-headers='{"X-CSRF-Token": "{{ csrf.Token(r) }}"}'>
 //
+// # WithResponder and error detail
+//
+// A custom WithResponder receives the failure error; the problem package
+// echoes err.Error() into the response Detail field for sub-500 statuses, so
+// a responder that wraps a sensitive error should not pass it through
+// unchanged — the built-in sentinels are generic and safe ("csrf: token
+// missing", "csrf: token invalid", both 403).
+//
 // # Non-goals
 //
 //   - No per-request token rotation: the token is stable for the life of the

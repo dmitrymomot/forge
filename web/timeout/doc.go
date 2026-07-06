@@ -14,6 +14,11 @@
 // middleware.WrapWriter(w).Wrote() and never rewrites a response that has
 // already started.
 //
+// A custom WithResponder receives the failure error, and the problem package
+// echoes err.Error() into the response Detail field for sub-500 statuses, so
+// a responder that wraps a sensitive error should not pass it through
+// unchanged — the default ErrTimeout is a generic 504 and is not echoed.
+//
 // # Streaming exemption
 //
 // Do not wrap streaming routes (SSE, long-poll, chunked transfer): a fixed

@@ -32,6 +32,12 @@
 // the handler flushes, instead of sitting in the compressor's internal
 // buffer until the response closes.
 //
+// Because the default content-type allowlist includes text/*, SSE responses
+// (text/event-stream) are compressed by default; the Flush behavior above
+// still delivers each event immediately, but operators streaming SSE through
+// proxies that handle compressed streams poorly may prefer to exempt those
+// routes with middleware.Skip.
+//
 // # Ordering
 //
 // Install compress OUTSIDE the application handler but INSIDE reqlog, so
