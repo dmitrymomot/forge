@@ -5,8 +5,8 @@
 > `package-set-v2.md` (consolidated 2026-07-04, after a cross-framework review
 > against kratos, go-kit, go-micro, fiber v3, fiber-contrib, and forge v1).
 >
-> **State: 61 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
-> · **60 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
+> **State: 67 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
+> · **54 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -27,6 +27,10 @@
 - Single-responsibility packages (~250–850 LOC); black-box tests only.
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
   store, jobqueue's in-memory broker) — there is no central fakes package.
+- **Env prefixes are baked into tags:** every env-loadable `Config` carries
+  its package prefix in the tag (`COOKIE_KEYS`, `SERVER_ADDR`, `DB_URL`).
+  Nest untagged to keep default names; nest tagged (`env:"APP"`) to
+  separate instances (`APP_COOKIE_KEYS`).
 
 ## Dependency philosophy — minimal, not zero
 
@@ -122,8 +126,8 @@ forge/                              # single go.mod at the root
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
 │   #          recoverer reqlog requestid render htmx subroute httpclient
-│   # planned: cookie csrf secheaders cors timeout compress
-│   #          assets idempotency iplist captcha (captcha/turnstile ...)
+│   #          cookie csrf secheaders cors timeout compress
+│   # planned: assets idempotency iplist captcha (captcha/turnstile ...)
 │   #          webhookverify autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify maintenance
 │
@@ -254,25 +258,14 @@ ratelimit (ratelimit/redisstore)`.
 ### web/
 
 Shipped: `httpserver hostrouter middleware request clientip problem recoverer
-reqlog requestid render htmx subroute httpclient`. (`httpclient` builds a
-resilient outbound `*http.Client` via a RoundTripper stack: per-attempt
-timeout, jittered retry, an OPT-IN per-host circuit breaker, before/after
-hooks, and ctx-driven header propagation — the transport under captcha,
-oauthclient, comms/*, and llm. Returns the stdlib type.)
+reqlog requestid render htmx subroute httpclient cookie csrf secheaders cors
+timeout compress`. (`httpclient` builds a resilient outbound `*http.Client`
+via a RoundTripper stack: per-attempt timeout, jittered retry, an OPT-IN
+per-host circuit breaker, before/after hooks, and ctx-driven header
+propagation — the transport under captcha, oauthclient, comms/*, and llm.
+Returns the stdlib type.) (`cookie` is the signed + encrypted cookie codec
+`csrf`/`flash`/`session` compose.)
 
-- **`cookie`** — recommended. Signed + encrypted cookie codec with secure
-  defaults (HttpOnly, SameSite, `__Host-`) and keyset rotation. Foundation
-  for csrf, flash, and session's cookie store.
-- **`csrf`** — recommended. Stateless double-submit / signed-token CSRF
-  middleware; `Token(r)` template helper; htmx-compatible header.
-- **`secheaders`** — recommended. Security headers + typed CSP builder with
-  per-request nonce (`Nonce(ctx)` for templ); secure defaults.
-- **`cors`** — recommended. Preflight + Access-Control-* per env-loadable
-  policy; `Validate` rejects the wildcard-origin + credentials vuln.
-- **`timeout`** — recommended. Per-request deadline middleware (503/504);
-  must not wrap streaming routes.
-- **`compress`** — recommended. gzip/deflate by Accept-Encoding (parsed
-  locally); preserves Flusher so SSE survives.
 - **`assets`** — recommended. Static serving over `fs.FS` with correct
   content types, range support, ETag/304 handling, and cache headers; a
   fingerprint-manifest mode (`URL()`/`Integrity()`, immutable far-future
@@ -590,11 +583,10 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
-1. **Web boundary + ops glue** — `cookie` → `csrf`, `secheaders`, `cors`,
-   `timeout`, `compress`, `assets`, `iplist`, `webhookverify`, `autocert`,
-   `captcha`, `idempotency`; `buildinfo`, `automaxprocs`, `diag`, `metrics`,
-   `logredact`, `featureflag`, `cli`, `appmain`; `webtest`, `htmltest`,
-   `dbtest` (harnesses pay off earliest).
+1. **Web boundary + ops glue** — `assets`, `iplist`, `webhookverify`,
+   `autocert`, `captcha`, `idempotency`; `buildinfo`, `automaxprocs`, `diag`,
+   `metrics`, `logredact`, `featureflag`, `cli`, `appmain`; `webtest`,
+   `htmltest`, `dbtest` (harnesses pay off earliest).
 2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
