@@ -115,7 +115,11 @@ type Config struct {
 func DefaultConfig() Config
 func (c Config) Validate() error
 
-// Explicit per-call security level:
+// Explicit per-call security level. Plain Set/Get exist so one API covers
+// every cookie in the app (policy defaults applied even to plain writes —
+// no stdlib http.SetCookie mixing with forgotten flags):
+func (c *Codec) Set(w http.ResponseWriter, name, value string, opts ...WriteOption) error
+func (c *Codec) Get(r *http.Request, name string) (string, error)
 func (c *Codec) SetSigned(w http.ResponseWriter, name, value string, opts ...WriteOption) error
 func (c *Codec) GetSigned(r *http.Request, name string) (string, error)
 func (c *Codec) SetEncrypted(w http.ResponseWriter, name, value string, opts ...WriteOption) error
@@ -131,6 +135,10 @@ Mechanics:
 
 - One keyset feeds both `sign.FromKeyset` and `secret.FromKeyset`; their
   versioned wire formats give transparent rotation from one env var.
+- **Security levels:** plain (policy flags only) · signed (HMAC — tamper-proof,
+  client-readable) · encrypted (AEAD — tamper-proof AND opaque). The encrypted
+  path is NOT additionally signed: AEAD's auth tag already provides integrity
+  and authenticity; a second MAC would be pure overhead. doc.go states this.
 - **Name binding:** cookie name is mixed into the MAC message (signed path)
   and bound as AAD via `secret.WithAAD` (encrypted path) so a value minted
   for cookie A cannot be replayed as cookie B.
@@ -142,8 +150,9 @@ Mechanics:
 - Sentinels: `ErrInvalidCookie` (absent/tampered/undecryptable — one error,
   no oracle), `ErrTooLarge`, `ErrInvalidConfig`.
 
-Tests: round-trip both paths, rotation (retired key still reads), name-bind
-replay rejection, `__Host-` enforcement, size guard, tamper → `ErrInvalidCookie`.
+Tests: round-trip all three paths, plain writes carry policy flags, rotation
+(retired key still reads), name-bind replay rejection, `__Host-` enforcement,
+size guard, tamper → `ErrInvalidCookie`.
 
 ## web/csrf — stateless double-submit over signed cookie
 
