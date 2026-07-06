@@ -189,7 +189,7 @@ paths, tampered cookie → 403, skip predicate, constant-time compare present
 ## web/secheaders — security headers + CSP nonce
 
 ```go
-func New(opts ...Option) middleware.Middleware
+func New(opts ...Option) (middleware.Middleware, error) // Config validation can fail
 func Nonce(ctx context.Context) string // per-request CSP nonce; "" when disabled
 
 type Config struct {
