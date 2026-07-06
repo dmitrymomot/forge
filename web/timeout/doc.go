@@ -3,11 +3,13 @@
 // New puts a deadline on every request context via context.WithTimeout and
 // answers 504 (application/problem+json) when a ctx-respecting handler
 // returns without writing a response after the deadline expired.
-// Enforcement is cooperative, not preemptive: a handler that ignores its
-// context keeps running in its own goroutine after the middleware writes
-// the 504 and returns. The deadline only reaches a handler that actually
-// reads r.Context().Done() or passes the context down to context-aware
-// calls (database queries, outbound HTTP, etc.).
+// Enforcement is cooperative, not preemptive: the middleware calls the next
+// handler synchronously and cannot return early, so it can only answer once
+// that call returns. A handler that never reads r.Context().Done() (nor
+// passes the context down to context-aware calls such as database queries or
+// outbound HTTP) runs to completion — the client waits for the full handler
+// duration, not Config.Timeout, and the 504 is written only if that handler
+// eventually returns without having written a response.
 //
 // A handler that already committed a response (wrote a header or body)
 // before the deadline fired is left alone — the middleware checks
