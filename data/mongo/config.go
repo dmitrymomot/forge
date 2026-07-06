@@ -17,18 +17,18 @@ import (
 // tags. Defaults live solely in DefaultConfig (there are no envDefault tags to
 // drift from it). Field order is subject to the repo's betteralign tooling.
 type Config struct {
-	URI                    string        `env:"URI"`             // mongodb://… (required)
-	Database               string        `env:"DATABASE"`        // database Open opens and returns (required)
-	ReadPreference         string        `env:"READ_PREFERENCE"` // primary, primaryPreferred, secondary, secondaryPreferred, nearest
-	ReadConcern            string        `env:"READ_CONCERN"`    // local, majority, available, linearizable, snapshot
-	WriteConcern           string        `env:"WRITE_CONCERN"`   // majority, journaled, unacknowledged, or a w-number ("1", "2", …)
-	MaxPoolSize            uint64        `env:"MAX_POOL_SIZE"`
-	MinPoolSize            uint64        `env:"MIN_POOL_SIZE"`
-	ConnectTimeout         time.Duration `env:"CONNECT_TIMEOUT"`
-	ServerSelectionTimeout time.Duration `env:"SERVER_SELECTION_TIMEOUT"`
-	MaxConnIdleTime        time.Duration `env:"MAX_CONN_IDLE_TIME"`
-	RetryInterval          time.Duration `env:"RETRY_INTERVAL"`
-	RetryAttempts          int           `env:"RETRY_ATTEMPTS"`
+	URI                    string        `env:"MONGO_URI"`             // mongodb://… (required)
+	Database               string        `env:"MONGO_DATABASE"`        // database Open opens and returns (required)
+	ReadPreference         string        `env:"MONGO_READ_PREFERENCE"` // primary, primaryPreferred, secondary, secondaryPreferred, nearest
+	ReadConcern            string        `env:"MONGO_READ_CONCERN"`    // local, majority, available, linearizable, snapshot
+	WriteConcern           string        `env:"MONGO_WRITE_CONCERN"`   // majority, journaled, unacknowledged, or a w-number ("1", "2", …)
+	MaxPoolSize            uint64        `env:"MONGO_MAX_POOL_SIZE"`
+	MinPoolSize            uint64        `env:"MONGO_MIN_POOL_SIZE"`
+	ConnectTimeout         time.Duration `env:"MONGO_CONNECT_TIMEOUT"`
+	ServerSelectionTimeout time.Duration `env:"MONGO_SERVER_SELECTION_TIMEOUT"`
+	MaxConnIdleTime        time.Duration `env:"MONGO_MAX_CONN_IDLE_TIME"`
+	RetryInterval          time.Duration `env:"MONGO_RETRY_INTERVAL"`
+	RetryAttempts          int           `env:"MONGO_RETRY_ATTEMPTS"`
 }
 
 // DefaultConfig returns production-sane defaults and is the single source of truth

@@ -59,15 +59,15 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"URL":               "URL",
-		"MinConns":          "MIN_CONNS",
-		"MaxConns":          "MAX_CONNS",
-		"MaxConnLifetime":   "MAX_CONN_LIFETIME",
-		"MaxConnIdleTime":   "MAX_CONN_IDLE_TIME",
-		"HealthCheckPeriod": "HEALTH_CHECK_PERIOD",
-		"ConnectTimeout":    "CONNECT_TIMEOUT",
-		"RetryAttempts":     "RETRY_ATTEMPTS",
-		"RetryInterval":     "RETRY_INTERVAL",
+		"URL":               "DB_URL",
+		"MinConns":          "DB_MIN_CONNS",
+		"MaxConns":          "DB_MAX_CONNS",
+		"MaxConnLifetime":   "DB_MAX_CONN_LIFETIME",
+		"MaxConnIdleTime":   "DB_MAX_CONN_IDLE_TIME",
+		"HealthCheckPeriod": "DB_HEALTH_CHECK_PERIOD",
+		"ConnectTimeout":    "DB_CONNECT_TIMEOUT",
+		"RetryAttempts":     "DB_RETRY_ATTEMPTS",
+		"RetryInterval":     "DB_RETRY_INTERVAL",
 	}
 	typ := reflect.TypeFor[postgres.Config]()
 	for fname, tag := range want {

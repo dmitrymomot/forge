@@ -12,16 +12,16 @@ import (
 // with any loader that reads env struct tags, typically by seeding from
 // DefaultConfig and parsing the environment over it. Addresses is a []string; a
 // comma-separated env value (caarlos0/env's default) parses into it under the
-// ADDRESSES key. Field order is subject to the repo's betteralign tooling.
+// OPENSEARCH_ADDRESSES key. Field order is subject to the repo's betteralign tooling.
 type Config struct {
-	Username           string        `env:"USERNAME"`             // HTTP basic auth user
-	Password           string        `env:"PASSWORD"`             // HTTP basic auth password
-	Addresses          []string      `env:"ADDRESSES"`            // node URLs, e.g. https://os:9200 (required)
-	MaxRetries         int           `env:"MAX_RETRIES"`          // driver retry count on retriable status codes
-	RequestTimeout     time.Duration `env:"REQUEST_TIMEOUT"`      // per-request timeout applied via transport + ctx
-	RetryAttempts      int           `env:"RETRY_ATTEMPTS"`       // Open's bounded connect-retry attempts
-	RetryInterval      time.Duration `env:"RETRY_INTERVAL"`       // base backoff between connect attempts
-	InsecureSkipVerify bool          `env:"INSECURE_SKIP_VERIFY"` // skip TLS verification (dev/self-signed only)
+	Username           string        `env:"OPENSEARCH_USERNAME"`             // HTTP basic auth user
+	Password           string        `env:"OPENSEARCH_PASSWORD"`             // HTTP basic auth password
+	Addresses          []string      `env:"OPENSEARCH_ADDRESSES"`            // node URLs, e.g. https://os:9200 (required)
+	MaxRetries         int           `env:"OPENSEARCH_MAX_RETRIES"`          // driver retry count on retriable status codes
+	RequestTimeout     time.Duration `env:"OPENSEARCH_REQUEST_TIMEOUT"`      // per-request timeout applied via transport + ctx
+	RetryAttempts      int           `env:"OPENSEARCH_RETRY_ATTEMPTS"`       // Open's bounded connect-retry attempts
+	RetryInterval      time.Duration `env:"OPENSEARCH_RETRY_INTERVAL"`       // base backoff between connect attempts
+	InsecureSkipVerify bool          `env:"OPENSEARCH_INSECURE_SKIP_VERIFY"` // skip TLS verification (dev/self-signed only)
 }
 
 // DefaultConfig returns production-sane defaults and is the single source of truth

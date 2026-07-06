@@ -16,19 +16,19 @@ import (
 // cluster, and a non-empty MasterName is sentinel/failover (Addresses then lists the
 // sentinels). DB applies to standalone/sentinel only; cluster ignores it.
 type Config struct {
-	MasterName      string        `env:"MASTER_NAME"` // set -> sentinel/failover mode
-	Username        string        `env:"USERNAME"`    // ACL username (Redis 6+); empty for legacy auth
-	Password        string        `env:"PASSWORD"`    // empty when the server requires no auth
-	Addresses       []string      `env:"ADDRESSES"`   // 1 = standalone, many = cluster; sentinels when MasterName set
-	DB              int           `env:"DB"`          // standalone/sentinel only (cluster ignores it)
-	PoolSize        int           `env:"POOL_SIZE"`   // max connections per node
-	MinIdleConns    int           `env:"MIN_IDLE_CONNS"`
-	DialTimeout     time.Duration `env:"DIAL_TIMEOUT"`
-	ReadTimeout     time.Duration `env:"READ_TIMEOUT"`
-	WriteTimeout    time.Duration `env:"WRITE_TIMEOUT"`
-	ConnMaxIdleTime time.Duration `env:"CONN_MAX_IDLE_TIME"`
-	RetryAttempts   int           `env:"RETRY_ATTEMPTS"` // bounded connect-retry attempts in Open
-	RetryInterval   time.Duration `env:"RETRY_INTERVAL"` // base backoff between connect attempts
+	MasterName      string        `env:"REDIS_MASTER_NAME"` // set -> sentinel/failover mode
+	Username        string        `env:"REDIS_USERNAME"`    // ACL username (Redis 6+); empty for legacy auth
+	Password        string        `env:"REDIS_PASSWORD"`    // empty when the server requires no auth
+	Addresses       []string      `env:"REDIS_ADDRESSES"`   // 1 = standalone, many = cluster; sentinels when MasterName set
+	DB              int           `env:"REDIS_DB"`          // standalone/sentinel only (cluster ignores it)
+	PoolSize        int           `env:"REDIS_POOL_SIZE"`   // max connections per node
+	MinIdleConns    int           `env:"REDIS_MIN_IDLE_CONNS"`
+	DialTimeout     time.Duration `env:"REDIS_DIAL_TIMEOUT"`
+	ReadTimeout     time.Duration `env:"REDIS_READ_TIMEOUT"`
+	WriteTimeout    time.Duration `env:"REDIS_WRITE_TIMEOUT"`
+	ConnMaxIdleTime time.Duration `env:"REDIS_CONN_MAX_IDLE_TIME"`
+	RetryAttempts   int           `env:"REDIS_RETRY_ATTEMPTS"` // bounded connect-retry attempts in Open
+	RetryInterval   time.Duration `env:"REDIS_RETRY_INTERVAL"` // base backoff between connect attempts
 }
 
 // DefaultConfig returns production-sane defaults and is the single source of truth

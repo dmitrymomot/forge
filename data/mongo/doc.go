@@ -29,7 +29,7 @@
 //		defer stop()
 //
 //		cfg := mongo.DefaultConfig()
-//		_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "MONGO_"})
+//		_ = env.Parse(&cfg)
 //
 //		db, err := mongo.Open(ctx, mongo.WithConfig(cfg), mongo.WithLogger(logger))
 //		if err != nil {
@@ -84,22 +84,22 @@
 //
 //	Env var                            Field                   Default
 //	-----------------------------------------------------------------------------
-//	URI                                URI                     "" (required)
-//	DATABASE                           Database                "" (required; the database Open opens and returns)
-//	READ_PREFERENCE                    ReadPreference          "" (driver default)
-//	READ_CONCERN                       ReadConcern             "" (driver default)
-//	WRITE_CONCERN                      WriteConcern            "" (driver default)
-//	MAX_POOL_SIZE                      MaxPoolSize             100
-//	MIN_POOL_SIZE                      MinPoolSize             0
-//	CONNECT_TIMEOUT                    ConnectTimeout          10s
-//	SERVER_SELECTION_TIMEOUT           ServerSelectionTimeout  10s
-//	MAX_CONN_IDLE_TIME                 MaxConnIdleTime         0 (no cap)
-//	RETRY_ATTEMPTS                     RetryAttempts           3
-//	RETRY_INTERVAL                     RetryInterval           1s
+//	MONGO_URI                          URI                     "" (required)
+//	MONGO_DATABASE                     Database                "" (required; the database Open opens and returns)
+//	MONGO_READ_PREFERENCE              ReadPreference          "" (driver default)
+//	MONGO_READ_CONCERN                 ReadConcern             "" (driver default)
+//	MONGO_WRITE_CONCERN                WriteConcern            "" (driver default)
+//	MONGO_MAX_POOL_SIZE                MaxPoolSize             100
+//	MONGO_MIN_POOL_SIZE                MinPoolSize             0
+//	MONGO_CONNECT_TIMEOUT              ConnectTimeout          10s
+//	MONGO_SERVER_SELECTION_TIMEOUT     ServerSelectionTimeout  10s
+//	MONGO_MAX_CONN_IDLE_TIME           MaxConnIdleTime         0 (no cap)
+//	MONGO_RETRY_ATTEMPTS               RetryAttempts           3
+//	MONGO_RETRY_INTERVAL               RetryInterval           1s
 //
-// READ_PREFERENCE accepts: primary, primaryPreferred, secondary,
-// secondaryPreferred, nearest. READ_CONCERN accepts: local, majority, available,
-// linearizable, snapshot. WRITE_CONCERN accepts: majority, journaled,
+// MONGO_READ_PREFERENCE accepts: primary, primaryPreferred, secondary,
+// secondaryPreferred, nearest. MONGO_READ_CONCERN accepts: local, majority, available,
+// linearizable, snapshot. MONGO_WRITE_CONCERN accepts: majority, journaled,
 // unacknowledged, or a w-number ("0", "1", "2", …). An empty concern leaves the
 // driver default in place; an unknown value fails Validate.
 //

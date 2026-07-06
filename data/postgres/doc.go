@@ -14,7 +14,7 @@
 //		defer stop()
 //
 //		cfg := postgres.DefaultConfig()
-//		_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "DATABASE_"})
+//		_ = env.Parse(&cfg)
 //
 //		pool, err := postgres.Open(ctx,
 //			postgres.WithConfig(cfg),
@@ -50,14 +50,14 @@
 // Configuration is supplied through Config, whose env struct tags are inert (no
 // loader is imported). DefaultConfig is the single source of truth for defaults:
 //
-//	Field              Env var (no prefix)   Default
-//	URL                URL                    "" (required)
-//	MaxConns           MAX_CONNS              10
-//	MinConns           MIN_CONNS             2
-//	MaxConnLifetime    MAX_CONN_LIFETIME     30m
-//	MaxConnIdleTime    MAX_CONN_IDLE_TIME    10m
-//	HealthCheckPeriod  HEALTH_CHECK_PERIOD   1m
-//	ConnectTimeout     CONNECT_TIMEOUT       5s
-//	RetryAttempts      RETRY_ATTEMPTS        3
-//	RetryInterval      RETRY_INTERVAL        1s
+//	Field              Env var                  Default
+//	URL                DB_URL                   "" (required)
+//	MaxConns           DB_MAX_CONNS             10
+//	MinConns           DB_MIN_CONNS             2
+//	MaxConnLifetime    DB_MAX_CONN_LIFETIME     30m
+//	MaxConnIdleTime    DB_MAX_CONN_IDLE_TIME    10m
+//	HealthCheckPeriod  DB_HEALTH_CHECK_PERIOD   1m
+//	ConnectTimeout     DB_CONNECT_TIMEOUT       5s
+//	RetryAttempts      DB_RETRY_ATTEMPTS        3
+//	RetryInterval      DB_RETRY_INTERVAL        1s
 package postgres

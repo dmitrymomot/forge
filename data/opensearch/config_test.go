@@ -57,14 +57,14 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"Addresses":          "ADDRESSES",
-		"Username":           "USERNAME",
-		"Password":           "PASSWORD",
-		"InsecureSkipVerify": "INSECURE_SKIP_VERIFY",
-		"MaxRetries":         "MAX_RETRIES",
-		"RequestTimeout":     "REQUEST_TIMEOUT",
-		"RetryAttempts":      "RETRY_ATTEMPTS",
-		"RetryInterval":      "RETRY_INTERVAL",
+		"Addresses":          "OPENSEARCH_ADDRESSES",
+		"Username":           "OPENSEARCH_USERNAME",
+		"Password":           "OPENSEARCH_PASSWORD",
+		"InsecureSkipVerify": "OPENSEARCH_INSECURE_SKIP_VERIFY",
+		"MaxRetries":         "OPENSEARCH_MAX_RETRIES",
+		"RequestTimeout":     "OPENSEARCH_REQUEST_TIMEOUT",
+		"RetryAttempts":      "OPENSEARCH_RETRY_ATTEMPTS",
+		"RetryInterval":      "OPENSEARCH_RETRY_INTERVAL",
 	}
 	typ := reflect.TypeFor[forgeos.Config]()
 	for fname, tag := range want {

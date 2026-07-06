@@ -45,7 +45,7 @@ func TestParseFormat(t *testing.T) {
 func TestConfigEnvTags(t *testing.T) {
 	typ := reflect.TypeFor[Config]()
 	for field, tag := range map[string]string{
-		"Level": "LEVEL", "Format": "FORMAT", "File": "FILE", "AddSource": "ADD_SOURCE",
+		"Level": "LOG_LEVEL", "Format": "LOG_FORMAT", "File": "LOG_FILE", "AddSource": "LOG_ADD_SOURCE",
 	} {
 		f, ok := typ.FieldByName(field)
 		require.True(t, ok, "missing field %s", field)

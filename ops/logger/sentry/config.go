@@ -12,14 +12,14 @@ import (
 // Sentry-specific settings, so the whole thing env-loads in one shot. The env struct
 // tags are inert strings — this package imports no config loader.
 type Config struct {
-	DSN         string `env:"DSN"`
-	Environment string `env:"ENVIRONMENT"`
+	DSN         string `env:"SENTRY_DSN"`
+	Environment string `env:"SENTRY_ENVIRONMENT"`
 	// MinLevel is Sentry's OWN minimum level — the lowest level forwarded to Sentry,
 	// independent of the primary destination's level. "debug"|"info"|"warn"/"warning"|"error".
-	MinLevel string `env:"MIN_LEVEL"`
+	MinLevel string `env:"SENTRY_MIN_LEVEL"`
 	logger.Config
 
-	EnableLogs bool `env:"ENABLE_LOGS"`
+	EnableLogs bool `env:"SENTRY_ENABLE_LOGS"`
 }
 
 // DefaultConfig returns the optimal defaults, including the embedded logger defaults.
