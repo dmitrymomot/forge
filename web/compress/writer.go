@@ -118,6 +118,15 @@ func (w *writer) decide(final bool) error {
 // under MinSize), compressed streams close and return their writer to the
 // pool.
 func (w *writer) close() {
+	// A handler that wrote nothing at all (no explicit status, no body) must
+	// not cause us to commit a header. Committing here would flip an outer
+	// middleware's "response already written" flag (e.g. web/timeout's
+	// !Wrote() check), suppressing its own status such as 504. Leaving the
+	// response uncommitted lets the outer layer — or the server's implicit
+	// 200 — decide.
+	if !w.decided && w.status == 0 && len(w.buf) == 0 {
+		return
+	}
 	_ = w.decide(true)
 	if w.zw != nil {
 		_ = w.zw.Close()
