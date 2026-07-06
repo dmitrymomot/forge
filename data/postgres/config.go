@@ -12,15 +12,15 @@ import (
 // DefaultConfig and parsing the environment over it. Field order is subject to the
 // repo's betteralign tooling.
 type Config struct {
-	URL               string        `env:"URL"`                 // postgres://… connection string (required)
-	MaxConnLifetime   time.Duration `env:"MAX_CONN_LIFETIME"`   // close a conn this long after creation
-	MaxConnIdleTime   time.Duration `env:"MAX_CONN_IDLE_TIME"`  // close an idle conn after this long
-	HealthCheckPeriod time.Duration `env:"HEALTH_CHECK_PERIOD"` // pgxpool's own idle-conn check interval
-	ConnectTimeout    time.Duration `env:"CONNECT_TIMEOUT"`     // per-attempt dial+handshake bound
-	RetryInterval     time.Duration `env:"RETRY_INTERVAL"`      // base backoff between connect attempts
-	MinConns          int32         `env:"MIN_CONNS"`           // pool floor
-	MaxConns          int32         `env:"MAX_CONNS"`           // pool ceiling
-	RetryAttempts     int           `env:"RETRY_ATTEMPTS"`      // total connect attempts; <=1 means one, no wait
+	URL               string        `env:"DB_URL"`                 // postgres://… connection string (required)
+	MaxConnLifetime   time.Duration `env:"DB_MAX_CONN_LIFETIME"`   // close a conn this long after creation
+	MaxConnIdleTime   time.Duration `env:"DB_MAX_CONN_IDLE_TIME"`  // close an idle conn after this long
+	HealthCheckPeriod time.Duration `env:"DB_HEALTH_CHECK_PERIOD"` // pgxpool's own idle-conn check interval
+	ConnectTimeout    time.Duration `env:"DB_CONNECT_TIMEOUT"`     // per-attempt dial+handshake bound
+	RetryInterval     time.Duration `env:"DB_RETRY_INTERVAL"`      // base backoff between connect attempts
+	MinConns          int32         `env:"DB_MIN_CONNS"`           // pool floor
+	MaxConns          int32         `env:"DB_MAX_CONNS"`           // pool ceiling
+	RetryAttempts     int           `env:"DB_RETRY_ATTEMPTS"`      // total connect attempts; <=1 means one, no wait
 }
 
 // DefaultConfig returns production-sane pool defaults and is the single source of

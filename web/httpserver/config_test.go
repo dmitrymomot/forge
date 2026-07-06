@@ -52,16 +52,16 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"Addr":              "ADDR",
-		"Name":              "NAME",
-		"ShutdownTimeout":   "SHUTDOWN_TIMEOUT",
-		"ReadHeaderTimeout": "READ_HEADER_TIMEOUT",
-		"ReadTimeout":       "READ_TIMEOUT",
-		"WriteTimeout":      "WRITE_TIMEOUT",
-		"IdleTimeout":       "IDLE_TIMEOUT",
-		"MaxHeaderBytes":    "MAX_HEADER_BYTES",
-		"TLSCertFile":       "TLS_CERT_FILE",
-		"TLSKeyFile":        "TLS_KEY_FILE",
+		"Addr":              "SERVER_ADDR",
+		"Name":              "SERVER_NAME",
+		"ShutdownTimeout":   "SERVER_SHUTDOWN_TIMEOUT",
+		"ReadHeaderTimeout": "SERVER_READ_HEADER_TIMEOUT",
+		"ReadTimeout":       "SERVER_READ_TIMEOUT",
+		"WriteTimeout":      "SERVER_WRITE_TIMEOUT",
+		"IdleTimeout":       "SERVER_IDLE_TIMEOUT",
+		"MaxHeaderBytes":    "SERVER_MAX_HEADER_BYTES",
+		"TLSCertFile":       "SERVER_TLS_CERT_FILE",
+		"TLSKeyFile":        "SERVER_TLS_KEY_FILE",
 	}
 	typ := reflect.TypeFor[httpserver.Config]()
 	for fname, tag := range want {

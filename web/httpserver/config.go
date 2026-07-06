@@ -12,16 +12,16 @@ import (
 // parsing the environment over it. Field order is subject to the repo's betteralign
 // tooling.
 type Config struct {
-	Addr              string        `env:"ADDR"`          // listen address; ignored when WithListener is used
-	Name              string        `env:"NAME"`          // empty -> Name() derives from listener/Addr
-	TLSCertFile       string        `env:"TLS_CERT_FILE"` // both cert+key set -> serve HTTPS
-	TLSKeyFile        string        `env:"TLS_KEY_FILE"`
-	ShutdownTimeout   time.Duration `env:"SHUTDOWN_TIMEOUT"`    // drain bound; 0 = wait indefinitely
-	ReadHeaderTimeout time.Duration `env:"READ_HEADER_TIMEOUT"` // Slowloris guard
-	ReadTimeout       time.Duration `env:"READ_TIMEOUT"`        // full request read
-	WriteTimeout      time.Duration `env:"WRITE_TIMEOUT"`       // response write; set 0 for SSE/streaming
-	IdleTimeout       time.Duration `env:"IDLE_TIMEOUT"`        // keep-alive idle
-	MaxHeaderBytes    int           `env:"MAX_HEADER_BYTES"`    // 0 = net/http default
+	Addr              string        `env:"SERVER_ADDR"`          // listen address; ignored when WithListener is used
+	Name              string        `env:"SERVER_NAME"`          // empty -> Name() derives from listener/Addr
+	TLSCertFile       string        `env:"SERVER_TLS_CERT_FILE"` // both cert+key set -> serve HTTPS
+	TLSKeyFile        string        `env:"SERVER_TLS_KEY_FILE"`
+	ShutdownTimeout   time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT"`    // drain bound; 0 = wait indefinitely
+	ReadHeaderTimeout time.Duration `env:"SERVER_READ_HEADER_TIMEOUT"` // Slowloris guard
+	ReadTimeout       time.Duration `env:"SERVER_READ_TIMEOUT"`        // full request read
+	WriteTimeout      time.Duration `env:"SERVER_WRITE_TIMEOUT"`       // response write; set 0 for SSE/streaming
+	IdleTimeout       time.Duration `env:"SERVER_IDLE_TIMEOUT"`        // keep-alive idle
+	MaxHeaderBytes    int           `env:"SERVER_MAX_HEADER_BYTES"`    // 0 = net/http default
 }
 
 // DefaultConfig returns the optimal, secure-by-default settings and is the single

@@ -10,17 +10,17 @@
 // Config carries serializable settings with inert env struct tags (no envDefault;
 // DefaultConfig is the single source of truth). Seed from DefaultConfig and parse
 // the environment over it with any env loader. Addresses is a []string; a
-// comma-separated value parses into it under ADDRESSES.
+// comma-separated value parses into it under OPENSEARCH_ADDRESSES.
 //
-//	Field               Env var                 Default   Notes
-//	Addresses           ADDRESSES               (none)    node URLs; required (comma-separated in env)
-//	Username            USERNAME                ""        HTTP basic auth user
-//	Password            PASSWORD                ""        HTTP basic auth password
-//	InsecureSkipVerify  INSECURE_SKIP_VERIFY    false     skip TLS verify (dev/self-signed only)
-//	MaxRetries          MAX_RETRIES             3         driver retry on retriable status codes
-//	RequestTimeout      REQUEST_TIMEOUT         10s       per-request timeout (transport + ctx)
-//	RetryAttempts       RETRY_ATTEMPTS          3         Open's bounded connect-retry attempts
-//	RetryInterval       RETRY_INTERVAL          1s        base connect backoff (interval * 2^attempt, capped 30s)
+//	Field               Env var                           Default   Notes
+//	Addresses           OPENSEARCH_ADDRESSES              (none)    node URLs; required (comma-separated in env)
+//	Username            OPENSEARCH_USERNAME               ""        HTTP basic auth user
+//	Password            OPENSEARCH_PASSWORD               ""        HTTP basic auth password
+//	InsecureSkipVerify  OPENSEARCH_INSECURE_SKIP_VERIFY   false     skip TLS verify (dev/self-signed only)
+//	MaxRetries          OPENSEARCH_MAX_RETRIES            3         driver retry on retriable status codes
+//	RequestTimeout      OPENSEARCH_REQUEST_TIMEOUT        10s       per-request timeout (transport + ctx)
+//	RetryAttempts       OPENSEARCH_RETRY_ATTEMPTS         3         Open's bounded connect-retry attempts
+//	RetryInterval       OPENSEARCH_RETRY_INTERVAL         1s        base connect backoff (interval * 2^attempt, capped 30s)
 //
 // # Usage
 //
@@ -29,7 +29,7 @@
 //		defer stop()
 //
 //		cfg := opensearch.DefaultConfig()
-//		_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "OPENSEARCH_"})
+//		_ = env.Parse(&cfg)
 //
 //		client, err := opensearch.Open(ctx, opensearch.WithConfig(cfg), opensearch.WithLogger(logger))
 //		if err != nil {

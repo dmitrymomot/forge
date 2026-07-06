@@ -33,7 +33,7 @@
 //		defer stop()
 //
 //		cfg := redis.DefaultConfig()
-//		_ = env.ParseWithOptions(&cfg, env.Options{Prefix: "REDIS_"})
+//		_ = env.Parse(&cfg)
 //
 //		client, err := redis.Open(ctx,
 //			redis.WithConfig(cfg),
@@ -62,21 +62,21 @@
 // source of truth for defaults (there are no envDefault tags); Addresses has no
 // default and must be supplied.
 //
-//	Env var (struct tag)  Field            Default   Notes
-//	--------------------  ---------------  --------  ---------------------------------
-//	ADDRESSES             Addresses        (none)    1 = standalone, many = cluster; required
-//	MASTER_NAME           MasterName       ""        set -> sentinel/failover
-//	USERNAME              Username         ""        ACL username (Redis 6+)
-//	PASSWORD              Password         ""
-//	DB                    DB               0         standalone/sentinel only (cluster ignores)
-//	POOL_SIZE             PoolSize         10        max connections per node
-//	MIN_IDLE_CONNS        MinIdleConns     0
-//	DIAL_TIMEOUT          DialTimeout      5s
-//	READ_TIMEOUT          ReadTimeout      3s
-//	WRITE_TIMEOUT         WriteTimeout     3s
-//	CONN_MAX_IDLE_TIME    ConnMaxIdleTime  0         0 = driver default
-//	RETRY_ATTEMPTS        RetryAttempts    3         bounded connect-retry in Open
-//	RETRY_INTERVAL        RetryInterval    1s        base backoff (doubles per attempt, capped ~30s)
+//	Env var (struct tag)      Field            Default   Notes
+//	------------------------  ---------------  --------  ---------------------------------
+//	REDIS_ADDRESSES           Addresses        (none)    1 = standalone, many = cluster; required
+//	REDIS_MASTER_NAME         MasterName       ""        set -> sentinel/failover
+//	REDIS_USERNAME            Username         ""        ACL username (Redis 6+)
+//	REDIS_PASSWORD            Password         ""
+//	REDIS_DB                  DB               0         standalone/sentinel only (cluster ignores)
+//	REDIS_POOL_SIZE           PoolSize         10        max connections per node
+//	REDIS_MIN_IDLE_CONNS      MinIdleConns     0
+//	REDIS_DIAL_TIMEOUT        DialTimeout      5s
+//	REDIS_READ_TIMEOUT        ReadTimeout      3s
+//	REDIS_WRITE_TIMEOUT       WriteTimeout     3s
+//	REDIS_CONN_MAX_IDLE_TIME  ConnMaxIdleTime  0         0 = driver default
+//	REDIS_RETRY_ATTEMPTS      RetryAttempts    3         bounded connect-retry in Open
+//	REDIS_RETRY_INTERVAL      RetryInterval    1s        base backoff (doubles per attempt, capped ~30s)
 //
 // WithUniversalOptions is the escape hatch for anything Config does not cover —
 // TLSConfig, OnConnect, a custom Dialer; it runs last in Open, after the Config

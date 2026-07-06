@@ -28,8 +28,8 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"ShutdownTimeout": "SHUTDOWN_TIMEOUT",
-		"Recover":         "RECOVER",
+		"ShutdownTimeout": "SUPERVISOR_SHUTDOWN_TIMEOUT",
+		"Recover":         "SUPERVISOR_RECOVER",
 	}
 	typ := reflect.TypeFor[supervisor.Config]()
 	for name, tag := range want {

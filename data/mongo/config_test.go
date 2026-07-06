@@ -98,18 +98,18 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"URI":                    "URI",
-		"Database":               "DATABASE",
-		"MaxPoolSize":            "MAX_POOL_SIZE",
-		"MinPoolSize":            "MIN_POOL_SIZE",
-		"ConnectTimeout":         "CONNECT_TIMEOUT",
-		"ServerSelectionTimeout": "SERVER_SELECTION_TIMEOUT",
-		"MaxConnIdleTime":        "MAX_CONN_IDLE_TIME",
-		"ReadPreference":         "READ_PREFERENCE",
-		"ReadConcern":            "READ_CONCERN",
-		"WriteConcern":           "WRITE_CONCERN",
-		"RetryAttempts":          "RETRY_ATTEMPTS",
-		"RetryInterval":          "RETRY_INTERVAL",
+		"URI":                    "MONGO_URI",
+		"Database":               "MONGO_DATABASE",
+		"MaxPoolSize":            "MONGO_MAX_POOL_SIZE",
+		"MinPoolSize":            "MONGO_MIN_POOL_SIZE",
+		"ConnectTimeout":         "MONGO_CONNECT_TIMEOUT",
+		"ServerSelectionTimeout": "MONGO_SERVER_SELECTION_TIMEOUT",
+		"MaxConnIdleTime":        "MONGO_MAX_CONN_IDLE_TIME",
+		"ReadPreference":         "MONGO_READ_PREFERENCE",
+		"ReadConcern":            "MONGO_READ_CONCERN",
+		"WriteConcern":           "MONGO_WRITE_CONCERN",
+		"RetryAttempts":          "MONGO_RETRY_ATTEMPTS",
+		"RetryInterval":          "MONGO_RETRY_INTERVAL",
 	}
 	typ := reflect.TypeFor[forgemongo.Config]()
 	for fname, tag := range want {

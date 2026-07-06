@@ -56,19 +56,19 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestConfig_EnvTags(t *testing.T) {
 	want := map[string]string{
-		"Addresses":       "ADDRESSES",
-		"MasterName":      "MASTER_NAME",
-		"Username":        "USERNAME",
-		"Password":        "PASSWORD",
-		"DB":              "DB",
-		"PoolSize":        "POOL_SIZE",
-		"MinIdleConns":    "MIN_IDLE_CONNS",
-		"DialTimeout":     "DIAL_TIMEOUT",
-		"ReadTimeout":     "READ_TIMEOUT",
-		"WriteTimeout":    "WRITE_TIMEOUT",
-		"ConnMaxIdleTime": "CONN_MAX_IDLE_TIME",
-		"RetryAttempts":   "RETRY_ATTEMPTS",
-		"RetryInterval":   "RETRY_INTERVAL",
+		"Addresses":       "REDIS_ADDRESSES",
+		"MasterName":      "REDIS_MASTER_NAME",
+		"Username":        "REDIS_USERNAME",
+		"Password":        "REDIS_PASSWORD",
+		"DB":              "REDIS_DB",
+		"PoolSize":        "REDIS_POOL_SIZE",
+		"MinIdleConns":    "REDIS_MIN_IDLE_CONNS",
+		"DialTimeout":     "REDIS_DIAL_TIMEOUT",
+		"ReadTimeout":     "REDIS_READ_TIMEOUT",
+		"WriteTimeout":    "REDIS_WRITE_TIMEOUT",
+		"ConnMaxIdleTime": "REDIS_CONN_MAX_IDLE_TIME",
+		"RetryAttempts":   "REDIS_RETRY_ATTEMPTS",
+		"RetryInterval":   "REDIS_RETRY_INTERVAL",
 	}
 	typ := reflect.TypeFor[forgeredis.Config]()
 	for fname, tag := range want {

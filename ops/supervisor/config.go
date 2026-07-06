@@ -12,9 +12,9 @@ import (
 type Config struct {
 	// ShutdownTimeout bounds how long Run waits for services to drain after
 	// shutdown begins. 0 means wait indefinitely.
-	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT"`
+	ShutdownTimeout time.Duration `env:"SUPERVISOR_SHUTDOWN_TIMEOUT"`
 	// Recover toggles panic recovery in each service's Run.
-	Recover bool `env:"RECOVER"`
+	Recover bool `env:"SUPERVISOR_RECOVER"`
 }
 
 // DefaultConfig returns the optimal defaults and is the single source of truth for

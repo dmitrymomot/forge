@@ -19,14 +19,14 @@ const (
 type Config struct {
 	// Level is the minimum level for the primary destination:
 	// "debug", "info", "warn"/"warning", "error" (case-insensitive).
-	Level string `env:"LEVEL"`
+	Level string `env:"LOG_LEVEL"`
 	// Format selects the handler: "text" or "json" (case-insensitive).
-	Format string `env:"FORMAT"`
+	Format string `env:"LOG_FORMAT"`
 	// File, when non-empty, makes the primary destination this file INSTEAD of stdout.
 	// Parent directories and the file are created if absent. Empty means stdout.
-	File string `env:"FILE"`
+	File string `env:"LOG_FILE"`
 	// AddSource includes the source file:line in records (slog AddSource).
-	AddSource bool `env:"ADD_SOURCE"`
+	AddSource bool `env:"LOG_ADD_SOURCE"`
 }
 
 // DefaultConfig returns the optimal defaults and is the single source of truth for them.
