@@ -166,9 +166,9 @@ forge/                              # single go.mod at the root
 │
 ├── ops/           # runtime, lifecycle, observability, app bootstrap
 │   # shipped: supervisor logger (logger/sentry) config health
-│   # planned: buildinfo automaxprocs diag metrics
-│   #          (metrics/prometheus) logredact auditlog (auditlog/pgsink)
-│   #          featureflag cli appmain
+│   #          buildinfo automaxprocs logredact bootstrap
+│   # planned: diag metrics (metrics/prometheus)
+│   #          auditlog (auditlog/pgsink) featureflag cli
 │   # icebox:  tracing (tracing/otel) secretsource logsample configwatch term
 │
 └── testkit/       # black-box test harnesses
@@ -502,7 +502,8 @@ Icebox:
 
 ### ops/
 
-Shipped: `supervisor logger (logger/sentry) config health`. (`config` —
+Shipped: `supervisor logger (logger/sentry) config health buildinfo
+automaxprocs logredact bootstrap`. (`config` —
 formerly planned as `envconfig`, shipped renamed — layers app config from
 YAML per-env files with `${VAR:default}` substitution, `.env` inheritance,
 and env-tagged structs via `structfields` + `typeconv`; exported `Profile`
@@ -510,13 +511,25 @@ enum (dev/test/staging/prod) with predicates; boot-time only.
 `health` — a single pull-evaluated `Handler()` factory for liveness (no
 checks) and readiness (`WithCheck` checks, critical by default, `NonCritical`
 degrades instead of 503) plus a `Gate` for ordered pre-shutdown drain via
-`supervisor.WithPreShutdown`.)
+`supervisor.WithPreShutdown`.
+`buildinfo` — value type merging ldflags over `ReadBuildInfo` for
+version/commit/build-time/dirty; `fmt.Stringer` + `slog.LogValuer` +
+`/version` JSON handler.
+`automaxprocs` — sets GOMAXPROCS/GOMEMLIMIT from cgroup CPU/memory quotas at
+startup via a local stdlib parser (v2 primary, v1 fallback, no uber dep);
+fail-open logged no-op outside containers, honors explicit env vars.
+`logredact` — `slog.Handler` wrapper replacing attribute values by leaf key
+or dotted group path before they reach the next handler; unconditional at
+every level (no bypass knob), redacts `WithAttrs`-baked attrs and tracks the
+`WithGroup` prefix. `crypto/redact` covers values you wrap; this is the
+safety net for attrs you don't control.
+`bootstrap` — thin runtime integrator (replaces the planned `appmain` name):
+`Run` / generic `RunWithConfig[T]` wire logger → automaxprocs → build-info
+log → config autoload → signal context (via `supervisor.NewContext`) → exit
+code; the callback owns `supervisor.Run` and `defer` cleanup. NOT a DI
+container. This bundle also added `supervisor.WithContext(parent)` so the
+signal context can root at a caller's context.)
 
-- **`buildinfo`** — recommended. Version/commit/build-time/dirty from ldflags
-  + `ReadBuildInfo`; `slog.LogValuer` + /version handler.
-- **`automaxprocs`** — recommended. Set GOMAXPROCS/GOMEMLIMIT from cgroup
-  quotas at startup (local parser, no uber dep); logged no-op outside
-  containers.
 - **`diag`** — recommended. One internal diagnostics surface:
   `/debug/pprof/*`, `/debug/stats` (runtime/GC/goroutines JSON),
   `/debug/vars`, with an auth guard and a dedicated-port
@@ -524,10 +537,6 @@ degrades instead of 503) plus a `Gate` for ordered pre-shutdown drain via
 - **`metrics`** (+`metrics/prometheus`) — recommended. Counter/Gauge/
   Histogram `Recorder` facade with an expvar default + request middleware;
   prometheus is the only adapter.
-- **`logredact`** — recommended. `slog.Handler` wrapper redacting attribute
-  values by key/dotted path before they reach the next handler (MinLevel
-  bypass). `crypto/redact` covers values you wrap; this is the safety net for
-  attrs you don't control.
 - **`auditlog`** (+`auditlog/pgsink`) — recommended. Append-only structured
   audit events (actor/action/resource/outcome) over a `Sink` seam; slog +
   JSONL sinks in core; `pgsink` adds the pgx insert + keyset-paginated
@@ -537,9 +546,6 @@ degrades instead of 503) plus a `Gate` for ordered pre-shutdown drain via
 - **`cli`** — recommended. Struct-described command tree over stdlib
   `flag.FlagSet`, ctx-aware Run, auto help; no cobra, no global registry.
   Covers serve/migrate/worker/seed/version.
-- **`appmain`** — recommended. main() glue: signal context (via
-  `supervisor.NewContext`) + logger + supervisor + automaxprocs → exit code.
-  Explicit build callback; NOT a DI container.
 
 Icebox:
 
@@ -584,9 +590,8 @@ Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
 1. **Web boundary + ops glue** — `assets`, `iplist`, `webhookverify`,
-   `autocert`, `captcha`, `idempotency`; `buildinfo`, `automaxprocs`, `diag`,
-   `metrics`, `logredact`, `featureflag`, `cli`, `appmain`; `webtest`,
-   `htmltest`, `dbtest` (harnesses pay off earliest).
+   `autocert`, `captcha`, `idempotency`; `diag`, `metrics`, `featureflag`,
+   `cli`; `webtest`, `htmltest`, `dbtest` (harnesses pay off earliest).
 2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
