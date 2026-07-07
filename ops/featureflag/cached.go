@@ -3,7 +3,9 @@ package featureflag
 
 import (
 	"context"
+	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/clock"
@@ -52,7 +54,8 @@ func Cached(p Provider, ttl time.Duration, opts ...CacheOption) Provider {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	c := &cached{p: p, ttl: ttl, cfg: cfg, data: map[string]map[string]cacheEntry{}}
+	c := &cached{p: p, ttl: ttl, cfg: cfg}
+	c.data.Store(&cacheData{})
 	if l, ok := p.(Lister); ok {
 		return &cachedLister{cached: c, lister: l}
 	}
@@ -65,20 +68,23 @@ type cacheEntry struct {
 	ok   bool
 }
 
+// cacheData is the scope → key → entry snapshot. It is treated as immutable
+// once published: writers build a new snapshot and swap the pointer so
+// readers on the hit path never take a lock (see cached.Flag).
+type cacheData map[string]map[string]cacheEntry
+
 type cached struct {
-	p    Provider
-	cfg  cachedConfig
-	data map[string]map[string]cacheEntry // scope → key → entry
-	sf   singleflight.Group[cacheEntry]
-	mu   sync.RWMutex
-	ttl  time.Duration
+	p       Provider
+	cfg     cachedConfig
+	data    atomic.Pointer[cacheData] // copy-on-write snapshot, lock-free reads
+	sf      singleflight.Group[cacheEntry]
+	writeMu sync.Mutex // serializes snapshot construction; readers never block on this
+	ttl     time.Duration
 }
 
 func (c *cached) Flag(ctx context.Context, key string) (Flag, bool, error) {
 	scope := c.cfg.scope(ctx)
-	c.mu.RLock()
-	e, hit := c.data[scope][key]
-	c.mu.RUnlock()
+	e, hit := (*c.data.Load())[scope][key]
 	if hit && c.cfg.clk.Now().Sub(e.at) < c.ttl {
 		return e.flag, e.ok, nil
 	}
@@ -88,14 +94,7 @@ func (c *cached) Flag(ctx context.Context, key string) (Flag, bool, error) {
 			return cacheEntry{}, err
 		}
 		ne := cacheEntry{flag: f, ok: ok, at: c.cfg.clk.Now()}
-		c.mu.Lock()
-		m := c.data[scope]
-		if m == nil {
-			m = map[string]cacheEntry{}
-			c.data[scope] = m
-		}
-		m[key] = ne
-		c.mu.Unlock()
+		c.store(scope, key, ne)
 		return ne, nil
 	})
 	if err != nil {
@@ -105,6 +104,24 @@ func (c *cached) Flag(ctx context.Context, key string) (Flag, bool, error) {
 		return Flag{}, false, err
 	}
 	return fresh.flag, fresh.ok, nil
+}
+
+// store publishes ne under scope/key via copy-on-write: it copies the outer
+// snapshot and the touched scope's inner map, then atomically swaps the
+// pointer. Writers serialize on writeMu (refreshes are already singleflighted
+// per key, so this is never hot); readers are entirely lock-free.
+func (c *cached) store(scope, key string, ne cacheEntry) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	old := *c.data.Load()
+	next := make(cacheData, len(old)+1)
+	maps.Copy(next, old)
+	inner := next[scope]
+	newInner := make(map[string]cacheEntry, len(inner)+1)
+	maps.Copy(newInner, inner)
+	newInner[key] = ne
+	next[scope] = newInner
+	c.data.Store(&next)
 }
 
 type cachedLister struct {
