@@ -22,11 +22,15 @@ func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	parent := cfg.parent
+	if parent == nil {
+		parent = context.Background()
+	}
 	if !cfg.forceQuit {
-		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	stopped := make(chan struct{})
@@ -34,6 +38,10 @@ func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
 		select {
 		case <-ch:
 			cancel()
+		case <-parent.Done():
+			// Parent cancelled: the graceful drain is already underway (ctx derives
+			// from parent). Keep watching for an impatient second signal so the
+			// force-quit escape hatch stays armed for parent-initiated shutdowns.
 		case <-stopped:
 			return
 		}
