@@ -157,12 +157,22 @@ func (c *Client) warnCoerce(ctx context.Context, key, val, typ string) {
 		slog.String("flag", key), slog.String("value", val), slog.String("type", typ))
 }
 
-// value resolves the final string value; Task 4 extends this with the
-// subject/token pipeline. At this stage: lookup + kill switch only.
+// value resolves the final string value through the full pipeline:
+// lookup → enabled → deny → allow → rollout.
 func (c *Client) value(ctx context.Context, key string) (string, bool) {
+	id, _ := subjectKey.From(ctx)
+	var extra []string
+	if c.identity != nil {
+		extra = c.identity(ctx)
+	}
+	return c.valueFor(ctx, key, id, extra)
+}
+
+// valueFor is the ctx-carrier-free core shared with Evaluator.
+func (c *Client) valueFor(ctx context.Context, key, id string, extra []string) (string, bool) {
 	f, ok := c.lookup(ctx, key)
 	if !ok || !f.Enabled {
 		return "", false
 	}
-	return f.Value, true
+	return eval(f, key, id, extra)
 }
