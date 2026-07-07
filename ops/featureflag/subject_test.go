@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,5 +164,42 @@ func TestRolloutProperties(t *testing.T) {
 		}
 		// perfectly correlated would be n; independent ≈ n/2
 		assert.Less(t, same, n*3/5, "flag buckets must not be correlated")
+	})
+}
+
+func TestEvaluator(t *testing.T) {
+	t.Parallel()
+
+	c := newClient(t, featureflag.WithFlags(featureflag.Flags{
+		"rollout50": {Value: "true", Enabled: true, Rollout: 50},
+		"vip_only":  {Value: "42", Enabled: true, Rollout: 0, Allow: []string{"segment:vip"}},
+	}))
+
+	t.Run("equivalent to ctx carrier", func(t *testing.T) {
+		t.Parallel()
+		for i := range 200 {
+			id := fmt.Sprintf("usr_%d", i)
+			viaCtx := c.Bool(featureflag.WithSubject(context.Background(), id), "rollout50", false)
+			viaFor := c.For(id).Bool("rollout50", false)
+			assert.Equal(t, viaCtx, viaFor, "id %s", id)
+		}
+	})
+
+	t.Run("explicit tokens substitute for identity resolver", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 42, c.For("usr_1", "segment:vip").Int("vip_only", 0))
+		assert.Equal(t, 0, c.For("usr_1").Int("vip_only", 0))
+	})
+
+	t.Run("all typed getters", func(t *testing.T) {
+		t.Parallel()
+		e := newClient(t,
+			featureflag.WithString("s", "x"),
+			featureflag.WithFloat64("f", 2.5),
+			featureflag.WithDuration("d", time.Minute),
+		).For("usr_1")
+		assert.Equal(t, "x", e.String("s", ""))
+		assert.InDelta(t, 2.5, e.Float64("f", 0), 1e-9)
+		assert.Equal(t, time.Minute, e.Duration("d", 0))
 	})
 }
