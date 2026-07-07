@@ -151,8 +151,6 @@ func (fs *Flags) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // clone deep-copies the set so a Client stays immutable after New.
-//
-//nolint:unused // consumed by the Client constructor added in a later task
 func (fs Flags) clone() Flags {
 	out := make(Flags, len(fs))
 	for k, f := range fs {
