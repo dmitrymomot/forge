@@ -7,7 +7,7 @@
 >
 > **State: 72 shipped packages** (+3 driver subpackages) across
 > `core/ crypto/ resilience/ web/ data/ ops/`
-> · **45 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
+> · **45 roadmap** (committed) · **24 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -136,11 +136,10 @@ forge/                              # single go.mod at the root
 │   #          cookie csrf secheaders cors timeout compress
 │   # planned: assets idempotency iplist captcha (captcha/turnstile ...)
 │   #          autocert
-│   # icebox:  geoip (geoip/maxmind) dnsverify maintenance
+│   # icebox:  geoip (geoip/maxmind) dnsverify
 │
 ├── view/          # view-model glue for server-rendered pages
 │   # planned: flash form
-│   # icebox:  viewhelper
 │
 ├── i18n/          # localization (consumed by views, emails, API errors, jobs)
 │   # planned: catalog locale numfmt datefmt
@@ -169,7 +168,7 @@ forge/                              # single go.mod at the root
 │
 ├── ai/            # LLM seams
 │   # planned: llm (llm/openai, llm/anthropic) prompt
-│   # icebox:  structured embeddings aiusage mcpserver
+│   # icebox:  structured embeddings mcpserver
 │
 ├── ops/           # runtime, lifecycle, observability, app bootstrap
 │   # shipped: supervisor logger (logger/sentry) config health
@@ -296,10 +295,9 @@ Icebox:
 - `geoip` (+`geoip/maxmind`) — IP → country/region/ASN behind a `Source`
   seam; header source (CF-IPCountry) stdlib in core.
 - `dnsverify` — DNS TXT-record domain-ownership verification behind a
-  `net.Resolver` seam; the missing leg of the hostrouter + autocert
-  custom-domain onboarding story.
-- `maintenance` — 503 + Retry-After kill-switch with bypass list; the
-  featureflag + problem recipe covers most cases.
+  `net.Resolver` seam. Two consumers: the hostrouter + autocert
+  custom-domain onboarding story, and email-sending domain onboarding
+  (SPF/DKIM/return-path checks) for `comms/email`.
 
 ### view/
 
@@ -311,8 +309,9 @@ Icebox:
   `validate`'s i18n keys/params (translated by `i18n/catalog`), plus
   error-class/aria/sticky-value view helpers. Backbone of server-rendered CRUD.
 
-Icebox: `viewhelper` — dep-free templ helpers: `Classes`, `If[T]`, `Default`,
-`QuerySet` (truncate/pluralize live in shipped `stringsx`).
+(No icebox. The former `viewhelper` grab bag was redistributed: `Default` is
+stdlib `cmp.Or`, query-preserving links live in `pagination`, and a templ
+`Classes` toggle is a ~10-LOC recipe — see Recipes owed.)
 
 ### i18n/
 
@@ -434,9 +433,11 @@ over fanout + cache until demand appears.
   shaping — that's `ratelimit`; not cumulative caps — that's `quota`.)
 - **`totp`** — recommended. The complete 2FA package: RFC 6238/4226
   TOTP/HOTP secret generation, skew-window verify, otpauth:// provisioning
-  URI (~150 LOC, no pquerna/otp; QR rendering via `core/qrcode`), and
-  one-time backup codes — generate/hash/verify-and-consume, constant-time
-  matching (persistence is consumer DB).
+  URI (~150 LOC, no pquerna/otp), and one-time backup codes —
+  generate/hash/verify-and-consume, constant-time matching (persistence is
+  consumer DB). QR image rendering is optional and lights up when icebox
+  `core/qrcode` ships (the provisioning URI works without it); build them
+  together if enrollment needs images.
 - **`otp`** — recommended. Short numeric codes for email/SMS verification:
   attempt-limited, TTL'd, hashed at rest; generation via `random.DigitCode`;
   delivery is the caller's channel.
@@ -495,8 +496,11 @@ Icebox:
   including tool-calling (`ToolDef`/`ToolCall`/`ToolResult`); typed error
   contract (provider status, stable reason, `RetryAfter()`) honored by
   retry/httpclient; `llm.SSE(w, r, chunks)` response bridge and
-  `EstimateTokens`/`Fit` budget truncation. Provider subpackages are stdlib
-  JSON+SSE HTTP adapters over httpclient — never the official SDKs.
+  `EstimateTokens`/`Fit` budget truncation. Token/cost usage reporting is an
+  exported usage type inside `llm` (slog attrs; **prices are
+  consumer-supplied** — never shipped as library data), not a separate
+  package. Provider subpackages are stdlib JSON+SSE HTTP adapters over
+  httpclient — never the official SDKs.
 - **`prompt`** — recommended. Type-safe prompt templating from an fs.FS
   registry over text/template with strict missing-key errors. Mechanical
   only — no chains/agents. Not html/template (escaping corrupts prompts).
@@ -507,8 +511,6 @@ Icebox:
   strict JSON decode into T, repair-prompt on failure.
 - `embeddings` — `Embedder` seam + stdlib vector math (cosine/top-k) for
   small in-memory corpora; no ANN/persistence.
-- `aiusage` — token/cost meter emitting slog attrs; **prices are
-  consumer-supplied** — never shipped as library data.
 - `mcpserver` — expose explicitly-registered app operations as MCP tools
   (stdio + streamable-HTTP) as `supervisor.Service` / `http.Handler`;
   hand-declared schemas, no reflection; official MCP go-sdk isolated here.
@@ -577,9 +579,11 @@ Icebox:
 - **`webtest`** — recommended. Black-box HTTP harness: real `:0` server from
   an `http.Handler`, fluent request builder, `testing.TB` response asserts.
   (Named to avoid shadowing stdlib httptest in every consumer test file.)
-- **`htmltest`** — recommended. CSS-selector DOM assertions over webtest
-  responses (text/attr/count/exists, form-field values, htmx fragments);
-  goquery as a test-only dep. Without it the templ+htmx app type can only
+- **`htmltest`** — recommended. CSS-selector DOM assertions over any HTML
+  source — the API takes generic input (`io.Reader`/string), with webtest
+  responses and `email/markdown` rendered bodies as the two named consumers
+  (text/attr/count/exists, form-field values, htmx fragments); goquery as a
+  test-only dep, isolated here. Without it the templ+htmx app type can only
   string-match HTML.
 - **`dbtest`** — recommended. pgx test helpers: per-test tx-rollback
   isolation, ephemeral schema, Postgres template-DB clone. No testcontainers.
@@ -687,4 +691,4 @@ httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
 413) · maintenance 503 gate (featureflag + problem) · breadcrumb value type ·
 notification-inbox pipeline · per-tenant encryption / GDPR crypto-shred (kdf)
 · optimistic locking + audit columns (postgres docs) · Postgres tsvector
-search · usermanager flow.
+search · usermanager flow · templ `Classes` toggle helper (ex-viewhelper).
