@@ -241,6 +241,44 @@ returned `Flag` (`allow=false` → `Enabled: false`; `allow=true` → append
 subject to `Allow`). Hot path for flags without overrides never touches the
 overrides table. Single-tenant variant: drop `tenant_id`.
 
+### Tenant self-service (operator back office — consumer recipe)
+
+Operators manage their own flags through app CRUD over `feature_flags`; the
+package only ever reads. The recipe documents the pattern:
+
+- **Flag catalog gates what operators may touch.** Platform-internal flags
+  stay invisible; operator-facing features are catalog rows:
+
+  ```sql
+  CREATE TABLE feature_catalog (
+      key            text PRIMARY KEY,   -- 'new_lobby'
+      title          text NOT NULL,      -- operator-facing name
+      description    text NOT NULL,
+      tenant_managed boolean NOT NULL,   -- appears in the back office?
+      controls       text[] NOT NULL     -- allowed knobs: {toggle, rollout, segments, users}
+  );
+  ```
+
+- **The back-office save handler validates against the catalog** before the
+  UPSERT into `feature_flags`: key must be `tenant_managed`; only the listed
+  `controls` are writable; allow/deny tokens must come from the
+  platform-exposed segment vocabulary (operators must not write arbitrary
+  `role:*` tokens — that namespace is the platform's). Individual user grants
+  route to `feature_flag_overrides` once they outgrow handfuls.
+- **Segments are the platform's vocabulary, selected — not defined — by
+  operators.** Membership is computed by the platform and stamped into
+  session tokens (`WithIdentity`); operator-defined segments would be a rules
+  engine, which is out of scope at every layer.
+- **Propagation** = the `Cached` TTL: a save is live on every instance within
+  ≤ TTL, no deploys or restarts.
+- **Audit**: "who enabled what for whom" is `ops/auditlog`'s job once it
+  ships; until then an `updated_by` column on `feature_flags` suffices.
+- **Flags are not entitlements.** "Enable tournaments for VIPs" is a flag;
+  "the Silver plan has no tournaments" is a billing entitlement (plan model +
+  planned `resilience/quota`). The entitlement decides whether a feature
+  appears in the operator's catalog at all; the flag governs how the operator
+  rolls it out to players. Keep them in separate tables.
+
 ## Usage ladder (each stage adds an option; call sites never change)
 
 ```go
@@ -293,6 +331,44 @@ flags, _ = featureflag.New(
   one provider call); serve-stale-on-error; scope isolation (two tenants,
   same key, distinct values).
 - Client `All`: merge precedence across Lister providers + static set.
+
+## Benchmarks & performance acceptance
+
+Getters sit on request hot paths (several evaluations per request at tens of
+thousands of RPS), so the package ships benchmarks (`just bench
+./ops/featureflag/...`, black-box in `featureflag_test`):
+
+| Benchmark | Path exercised |
+|---|---|
+| `BenchmarkBool_StaticHit` | static-set hit, enabled, rollout 100 (the floor case) |
+| `BenchmarkBool_Rollout` | subject in ctx, FNV bucketing |
+| `BenchmarkBool_TokenMatch` | allow/deny lists + identity resolver (match set union) |
+| `BenchmarkBool_Miss` | unknown key → default fallback across a 2-provider chain |
+| `BenchmarkString_Coerce` / `BenchmarkDuration_Coerce` | typeconv coercion cost per type |
+| `BenchmarkCached_Hit` | `Cached` warm hit over a slow fake provider |
+| `BenchmarkFor_Evaluator` | ctx-free bound evaluator |
+| `Parallel` variants of StaticHit and Cached_Hit (`b.RunParallel`) | read-side lock/contention behavior |
+
+**Acceptance criteria** (Apple Silicon dev machine, order-of-magnitude
+targets, recorded in the PR):
+
+- Static/cached hit path: **0 allocs/op**, ≤ ~300 ns/op. In particular the
+  match-set union must not allocate when no identity resolver is registered
+  and no subject is set.
+- Rollout + token-match paths: ≤ 1 alloc/op, sub-microsecond.
+- Parallel variants: throughput must not collapse under 8+ goroutines
+  (no serialized hot path — `RWMutex` read path or immutable snapshots).
+
+**The implementation plan must encode this loop as an explicit task:**
+
+```
+run benchmarks → analyze → acceptable?
+    yes → stop, commit results in PR description
+    no  → improve (allocation hunting, lock granularity, snapshot reads) → repeat
+```
+
+Numbers that miss targets are not a merge blocker by themselves — the loop
+exits when remaining gaps have a written justification instead of a fix.
 
 ## Anti-scope
 
