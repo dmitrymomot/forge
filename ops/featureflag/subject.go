@@ -26,6 +26,11 @@ func SubjectFromContext(ctx context.Context) (string, bool) {
 
 // Evaluator is a subject-bound view of a Client for code without request
 // context (jobs, CLIs). Explicit tokens substitute for the identity resolver.
+//
+// Because it carries no request context, request-scoped providers (e.g. a
+// tenant-aware Cached/DB provider keyed on ctx) are not consulted with
+// tenancy through For — use it for provider-context-free evaluation
+// (static/config flags in jobs and CLIs).
 type Evaluator struct {
 	client *Client
 	id     string

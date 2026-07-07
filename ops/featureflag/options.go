@@ -25,6 +25,11 @@ type config struct {
 
 // WithProvider appends a Provider to the lookup chain; providers are
 // consulted in option order, first hit wins.
+//
+// Declare WithProvider before any typed static option (WithBool/WithString/
+// …/WithFlags) when you want the provider to override the static set: all
+// static options collapse into a single provider pinned at the position of
+// the first static option.
 func WithProvider(p Provider) Option {
 	return func(c *config) { c.chain = append(c.chain, p) }
 }
@@ -89,12 +94,12 @@ func WithRollout(key string, percent int) Option {
 
 // WithAllow appends always-on tokens to an existing static flag.
 func WithAllow(key string, tokens ...string) Option {
-	return adjustTokens(key, tokens, func(f *Flag, ts []string) { f.Allow = append(f.Allow, ts...) })
+	return adjustTokens(key, tokens, func(f *Flag, ts []string) { f.Allow = append(slices.Clone(f.Allow), ts...) })
 }
 
 // WithDeny appends always-off tokens to an existing static flag.
 func WithDeny(key string, tokens ...string) Option {
-	return adjustTokens(key, tokens, func(f *Flag, ts []string) { f.Deny = append(f.Deny, ts...) })
+	return adjustTokens(key, tokens, func(f *Flag, ts []string) { f.Deny = append(slices.Clone(f.Deny), ts...) })
 }
 
 func adjustTokens(key string, tokens []string, apply func(*Flag, []string)) Option {
