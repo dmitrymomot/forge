@@ -22,7 +22,7 @@
 //
 // Getters never error: missing key, disabled flag, provider failure, lost
 // rollout bucket, or a malformed value all return the caller's default
-// (WithLogger surfaces the latter two as WARN records).
+// (WithLogger surfaces provider failures and malformed values as WARN records).
 //
 // # Subjects, rollout, and identity tokens
 //

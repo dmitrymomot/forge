@@ -615,7 +615,7 @@ Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
 1. **Web boundary + ops glue** — `assets`, `ipfilter`, `autocert`, `captcha`,
-   `idempotency`; `debug`, `metrics`, `featureflag`, `cli`.
+   `idempotency`; `debug`, `metrics`, `cli`.
 2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
