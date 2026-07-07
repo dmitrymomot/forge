@@ -150,3 +150,37 @@ func TestTypedSourceOptions(t *testing.T) {
 	assert.InDelta(t, 1.5, c.Float64(t.Context(), "f", 0), 1e-9)
 	assert.Equal(t, 5*time.Second, c.Duration(t.Context(), "d", 0))
 }
+
+func TestClientAll(t *testing.T) {
+	t.Parallel()
+
+	t.Run("merges listers with chain precedence", func(t *testing.T) {
+		t.Parallel()
+		mem := featureflag.NewMemory(featureflag.Flags{
+			"shared":   {Value: "mem", Enabled: true, Rollout: 100},
+			"only_mem": {Value: "m", Enabled: true, Rollout: 100},
+		})
+		c, err := featureflag.New(
+			featureflag.WithProvider(mem),
+			featureflag.WithString("shared", "static"),
+			featureflag.WithString("only_static", "s"),
+		)
+		require.NoError(t, err)
+		all, err := c.All(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "mem", all["shared"].Value, "earlier provider wins")
+		assert.Equal(t, "m", all["only_mem"].Value)
+		assert.Equal(t, "s", all["only_static"].Value)
+	})
+
+	t.Run("non-lister providers are skipped", func(t *testing.T) {
+		t.Parallel()
+		plain := &fakeProvider{flags: featureflag.Flags{"invisible": {Value: "x", Enabled: true, Rollout: 100}}}
+		c, err := featureflag.New(featureflag.WithProvider(plain), featureflag.WithBool("visible", true))
+		require.NoError(t, err)
+		all, err := c.All(t.Context())
+		require.NoError(t, err)
+		assert.NotContains(t, all, "invisible")
+		assert.Contains(t, all, "visible")
+	})
+}

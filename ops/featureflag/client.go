@@ -2,6 +2,7 @@ package featureflag
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -175,4 +176,31 @@ func (c *Client) valueFor(ctx context.Context, key, id string, extra []string) (
 		return "", false
 	}
 	return eval(f, key, id, extra)
+}
+
+// All merges the flag sets of every provider implementing Lister, in chain
+// order with first-hit-wins per key (matching evaluation precedence).
+// Providers without Lister are skipped. Per-provider errors are joined into
+// the returned error while partial results are still returned. Debug/admin
+// visibility only — not an evaluation path.
+func (c *Client) All(ctx context.Context) (Flags, error) {
+	out := Flags{}
+	var errs []error
+	for _, p := range c.providers {
+		l, ok := p.(Lister)
+		if !ok {
+			continue
+		}
+		fs, err := l.All(ctx)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for k, f := range fs {
+			if _, exists := out[k]; !exists {
+				out[k] = f
+			}
+		}
+	}
+	return out, errors.Join(errs...)
 }
