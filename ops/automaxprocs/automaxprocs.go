@@ -59,7 +59,7 @@ func WithCgroupRoot(dir string) Option {
 
 // Set tunes GOMAXPROCS and GOMEMLIMIT from the process's cgroup CPU and memory
 // limits, logging every decision at Info (and no-ops at Debug). It is
-// fail-open: a missing/unparbleable cgroup, or a non-Linux host, leaves the
+// fail-open: a missing/unparseable cgroup, or a non-Linux host, leaves the
 // runtime defaults untouched with a logged no-op. An explicit GOMAXPROCS or
 // GOMEMLIMIT environment variable is honored — that leg is skipped so the
 // operator's choice wins. The returned undo restores the prior process values

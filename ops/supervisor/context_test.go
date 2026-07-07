@@ -65,3 +65,27 @@ func TestNewContext_ForceQuit_SecondSignalExits(t *testing.T) {
 	require.ErrorAs(t, err, &ee)
 	assert.Equal(t, 130, ee.ExitCode())
 }
+
+// TestNewContext_ForceQuit_ParentCancelThenSignalExits is a regression test for
+// the force-quit escape hatch staying armed after a parent-initiated (not
+// signal-initiated) cancellation. Before the fix, the watcher goroutine
+// returned as soon as parent.Done() fired, so a subsequent impatient signal
+// was never observed and the process would not force-exit.
+func TestNewContext_ForceQuit_ParentCancelThenSignalExits(t *testing.T) {
+	if os.Getenv("FORGE_FORCEQUIT_PARENT_CHILD") == "1" {
+		parent, cancelParent := context.WithCancel(context.Background())
+		_, stop := supervisor.NewContext(supervisor.WithContext(parent), supervisor.WithForceQuit())
+		defer stop()
+		cancelParent()
+		time.Sleep(100 * time.Millisecond)
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		time.Sleep(2 * time.Second) // parent expects exit(130) before this returns
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestNewContext_ForceQuit_ParentCancelThenSignalExits")
+	cmd.Env = append(os.Environ(), "FORGE_FORCEQUIT_PARENT_CHILD=1")
+	err := cmd.Run()
+	var ee *exec.ExitError
+	require.ErrorAs(t, err, &ee)
+	assert.Equal(t, 130, ee.ExitCode())
+}

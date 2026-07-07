@@ -27,7 +27,9 @@ func WithKeys(keys ...string) Option {
 }
 
 // WithPaths redacts an attribute by its dotted group path, e.g. "user.ssn"
-// matches key "ssn" inside group "user" but not a top-level "ssn".
+// matches key "ssn" inside group "user" but not a top-level "ssn". Paths are
+// resolved relative to the root of this handler — any slog.WithGroup already
+// applied to the handler that New wraps is not part of the matched path.
 func WithPaths(paths ...string) Option {
 	return func(c *config) {
 		for _, p := range paths {

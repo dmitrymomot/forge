@@ -18,9 +18,10 @@ import (
 // Func is a config-less application body. It receives a context cancelled on
 // SIGINT/SIGTERM (or when the ctx passed to Run is cancelled) and the configured
 // logger, wires the app, and typically ends by returning supervisor.Run(ctx,…).
-// A nil or context.Canceled result is a clean stop; any other error makes Run
-// return exit code 1. Use plain defer inside fn for resource teardown — it runs
-// after fn returns (i.e. after supervisor.Run drains), and on any early error.
+// A nil result, or a context.Canceled / context.DeadlineExceeded error from a
+// cancelled or timed-out parent context, is a clean stop; any other error makes
+// Run return exit code 1. Use plain defer inside fn for resource teardown — it
+// runs after fn returns (i.e. after supervisor.Run drains), and on any early error.
 type Func func(ctx context.Context, log *slog.Logger) error
 
 // ConfigFunc is an application body that also receives a loaded, typed config.
@@ -125,7 +126,8 @@ func run(ctx context.Context, name string, opts []Option, body func(context.Cont
 	runCtx, stop := supervisor.NewContext(ctxOpts...)
 	defer stop()
 
-	if err := body(runCtx, log, o); err != nil && !errors.Is(err, context.Canceled) {
+	if err := body(runCtx, log, o); err != nil &&
+		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		log.Error("exit", slog.Any("err", err))
 		return 1
 	}

@@ -64,6 +64,28 @@ func TestRunContextCancelIsCleanShutdown(t *testing.T) {
 	}
 }
 
+func TestRunContextDeadlineExceededIsCleanShutdown(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- bootstrap.Run(ctx, "svc",
+			func(runCtx context.Context, l *slog.Logger) error {
+				<-runCtx.Done()
+				return runCtx.Err()
+			},
+			bootstrap.WithLogger(logger.NewNope()), bootstrap.WithAutoMaxProcs(false))
+	}()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Errorf("exit = %d, want 0 (context.DeadlineExceeded is clean)", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after parent deadline expired")
+	}
+}
+
 func TestRunWithRedactKeys(t *testing.T) {
 	var buf bytes.Buffer
 	bootstrap.Run(context.Background(), "svc",

@@ -38,8 +38,10 @@ func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
 		select {
 		case <-ch:
 			cancel()
-		case <-parent.Done(): // parent cancelled: nothing to force, just stop watching
-			return
+		case <-parent.Done():
+			// Parent cancelled: the graceful drain is already underway (ctx derives
+			// from parent). Keep watching for an impatient second signal so the
+			// force-quit escape hatch stays armed for parent-initiated shutdowns.
 		case <-stopped:
 			return
 		}
