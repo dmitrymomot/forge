@@ -1,5 +1,5 @@
 // Command webmiddleware demonstrates the full web-transport middleware chain:
-// recoverer -> requestid -> clientip -> reqlog, with a problem responder and a
+// recoverer -> requestid -> clientip -> requestlog, with a problem responder and a
 // logger wired to the request_id and client_ip extractors.
 package main
 
@@ -19,8 +19,8 @@ import (
 	"github.com/dmitrymomot/forge/web/problem"
 	"github.com/dmitrymomot/forge/web/recoverer"
 	"github.com/dmitrymomot/forge/web/render"
-	"github.com/dmitrymomot/forge/web/reqlog"
 	"github.com/dmitrymomot/forge/web/requestid"
+	"github.com/dmitrymomot/forge/web/requestlog"
 )
 
 // errPage is the browser-facing error template (markup lives here, not in forge).
@@ -55,7 +55,7 @@ func main() {
 		),
 		requestid.New(),
 		clientip.Middleware(clientip.TrustPrivateProxies()),
-		reqlog.New(log, reqlog.WithSkip(func(r *http.Request) bool { return r.URL.Path == "/healthz" })),
+		requestlog.New(log, requestlog.WithSkip(func(r *http.Request) bool { return r.URL.Path == "/healthz" })),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

@@ -40,13 +40,13 @@
 //
 // # Ordering
 //
-// Install compress OUTSIDE the application handler but INSIDE reqlog, so
-// reqlog measures the actual (pre-compression) bytes written by the
+// Install compress OUTSIDE the application handler but INSIDE requestlog, so
+// requestlog measures the actual (pre-compression) bytes written by the
 // handler, not the compressed wire size:
 //
 //	h := middleware.Wrap(mux,
 //		recoverer.New(),
-//		reqlog.New(log),
+//		requestlog.New(log),
 //		compressMW,
 //	)
 //

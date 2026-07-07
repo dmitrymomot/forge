@@ -37,7 +37,7 @@
 // Mount takes no middleware parameters; compose with web/middleware:
 //
 //	subroute.Mount(mux, "/admin", middleware.Wrap(adminMux, requireAuth))
-//	srv.Handler = middleware.Wrap(mux, reqlog, recoverer) // global
+//	srv.Handler = middleware.Wrap(mux, requestlog, recoverer) // global
 //
 // Middleware wrapped inside the mount observes the stripped path ("/users"),
 // while middleware wrapping the outer mux observes the full original path
