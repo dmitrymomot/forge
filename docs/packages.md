@@ -5,8 +5,9 @@
 > `package-set-v2.md` (consolidated 2026-07-04, after a cross-framework review
 > against kratos, go-kit, go-micro, fiber v3, fiber-contrib, and forge v1).
 >
-> **State: 67 shipped packages** across `core/ crypto/ resilience/ web/ data/ ops/`
-> · **54 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
+> **State: 72 shipped packages** (+3 driver subpackages) across
+> `core/ crypto/ resilience/ web/ data/ ops/`
+> · **45 roadmap** (committed) · **27 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -51,7 +52,7 @@ Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch
 clients, sentry, `gopkg.in/yaml.v3` (`ops/config`'s YAML loader, its sole
 consumer). Sanctioned for the roadmap: aws-sdk-go-v2 (`objectstore/s3`),
 `coder/websocket` (`ws`), `go-webauthn` (`webauthn`), `x/crypto`
-(password/kdf/autocert), goldmark (`emailtemplate/markdown`), the official
+(password/kdf/autocert), goldmark (`email/markdown`), the official
 MCP go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
 (`metrics/prometheus`), OTel SDK (`tracing/otel`), goquery (`htmltest`,
 test-only). **Postgres is THE database**; everything outside `data/*`, the
@@ -73,6 +74,12 @@ messaging engine, and the driver leaves stays stdlib.
 - **Admission test:** name the package's *purpose* in one sentence — it must
   end with exactly one domain noun. If it plausibly fits two domains, the
   tie-breaker is who imports it.
+- **Product-or-brick test:** every package is either a **product** — a
+  complete feature that can be wired, configured, and start working on its
+  own — or a **brick** — a primitive with two or more real consumers. A
+  slice of a feature with a single consumer is never a package; it folds
+  into its product as internal code. (This is why webhook signing lives
+  inside `webhook`, not beside it.)
 
 ## Framework-wide seams
 
@@ -128,11 +135,11 @@ forge/                              # single go.mod at the root
 │   #          recoverer reqlog requestid render htmx subroute httpclient
 │   #          cookie csrf secheaders cors timeout compress
 │   # planned: assets idempotency iplist captcha (captcha/turnstile ...)
-│   #          webhookverify autocert
+│   #          autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify maintenance
 │
 ├── view/          # view-model glue for server-rendered pages
-│   # planned: flash form pagenav
+│   # planned: flash form
 │   # icebox:  viewhelper
 │
 ├── i18n/          # localization (consumed by views, emails, API errors, jobs)
@@ -148,16 +155,16 @@ forge/                              # single go.mod at the root
 │   # icebox:  workflow
 │
 ├── realtime/      # server push
-│   # planned: sse fanout (fanout/pgbus, fanout/redisbus) ws wshub ssestream
+│   # planned: sse fanout (fanout/pgbus, fanout/redisbus) ws
 │   # icebox:  presence
 │
 ├── auth/          # authn & authz
 │   # planned: session (session/pgstore, session/cookiestore) authmw lockout
-│   #          totp otp recoverycodes apikey magiclink oauthclient rbac
+│   #          totp otp apikey magiclink oauthclient rbac
 │   # icebox:  webauthn fingerprint
 │
 ├── comms/         # message-delivery channels
-│   # planned: email emailtemplate (emailtemplate/markdown) webhook
+│   # planned: email (email/markdown) webhook
 │   # icebox:  sms (sms/twilio) push (push/webpush)
 │
 ├── ai/            # LLM seams
@@ -192,6 +199,7 @@ middleware vs response/outbound, but don't pre-split.
 | `catalog`, `locale`, `numfmt`, `datefmt` | `i18n/` | Localization is consumed by emails, API errors, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`. |
 | `form` | `view/` | Exists for server-rendered CRUD: whole-form decode, sticky values, render-friendly `Errors`. `web/request` = per-field typed reads for APIs. |
 | `sse` | `realtime/` | Push transport, stdlib-only; the htmx `SendComponent` bridge lives in `web/htmx`. |
+| `webhook` | `comms/` | Outbound signed delivery + inbound verification are two sides of one webhooks feature; communication purpose owns it, the inbound middleware is a thin adapter. |
 | `fanout` | `realtime/` | Named to keep it distinct from `jobqueue.Broker` — ephemeral fan-out vs durable claim/ack are opposite delivery semantics. |
 | `autocert` | `web/` | Exists to wire `httpserver` TLS. |
 | `geoip` | `web/` | A lookup, not communication — "clientip gives the address, geoip gives its meaning". |
@@ -215,8 +223,9 @@ Icebox:
 
 - `useragent` — stdlib User-Agent string parser (browser/OS/device/bot); feeds
   session device lists and auditlog display. String-in primitive, hence core.
-- `qrcode` — QR PNG / base64 data-URI from a string (vendored encoder). The
-  last mile of 2FA enrollment; build alongside `totp`.
+- `qrcode` — QR PNG / base64 data-URI from any string (vendored encoder):
+  2FA enrollment URIs, referral/share links, crypto wallet addresses.
+  General-purpose brick; first consumer is `totp`, build alongside it.
 - `namegen` — adjective-noun random names over `random` (default workspace
   names, Docker/Vercel pattern).
 
@@ -278,9 +287,6 @@ Returns the stdlib type.) (`cookie` is the signed + encrypted cookie codec
 - **`captcha`** (+`captcha/turnstile` …) — recommended. Server-side CAPTCHA
   verification behind a `Verifier` seam; providers are thin POST+JSON
   adapters over httpclient, no SDKs.
-- **`webhookverify`** — recommended. Inbound webhook signature verification
-  (Stripe/GitHub/Slack HMAC schemes), constant-time, timestamp tolerance;
-  reads and restores `r.Body`. Pairs with `comms/webhook` (outbound).
 - **`autocert`** — recommended. ACME/Let's Encrypt TLS via
   `x/crypto/acme/autocert` wired as `tls.Config` + HTTP-01 handler for
   httpserver.
@@ -304,8 +310,6 @@ Icebox:
   `structfields`) + sticky `Values` + render-friendly `Errors` carrying
   `validate`'s i18n keys/params (translated by `i18n/catalog`), plus
   error-class/aria/sticky-value view helpers. Backbone of server-rendered CRUD.
-- **`pagenav`** — recommended. Pagination view-model: page window with
-  ellipses + links preserving query params, over `data/pagination.Page`.
 
 Icebox: `viewhelper` — dep-free templ helpers: `Classes`, `If[T]`, `Default`,
 `QuerySet` (truncate/pluralize live in shipped `stringsx`).
@@ -334,8 +338,10 @@ is pgx `CollectRows`/sqlc — no forge wrapper.)
 
 - **`pagination`** — recommended. Opaque cursor codec (base64+JSON, optional
   HMAC via `sign`) + keyset WHERE/ORDER fragment builders emitting
-  pgx-compatible `(sql, args)` + `Page[T]` metadata. Stdlib-only; inbound
-  parsing already lives in `request.QueryPage`/`QueryCursor`.
+  pgx-compatible `(sql, args)` + `Page[T]` metadata + the page-window
+  view-model (ellipses window, links preserving query params) for
+  server-rendered navigation. Stdlib-only; inbound parsing already lives in
+  `request.QueryPage`/`QueryCursor`.
 - **`tenant`** — recommended. Tenant ID on request context + explicit
   parameterized `ScopeClause` fragments — visible at every query, never
   auto-injected. Deps: `ctxkey` only.
@@ -383,23 +389,27 @@ jobqueue kind with one registered handler.
 
 ### realtime/
 
-- **`sse`** — core. Stdlib-only Server-Sent Events writer: framing
-  (event/data/id/retry), correct headers, per-event flush, keep-alive
-  comments, ctx cancellation. Requires httpserver WriteTimeout=0 (documented).
+- **`sse`** — core. The complete Server-Sent Events package, stdlib-only:
+  typed event constructors (string/JSON/comment/retry, mirroring forge v1's
+  `SSEString`/`SSEJSON`/`SSERetry`), correct framing + headers, per-event
+  flush, keep-alive, ctx cancellation — plus the mountable endpoint over
+  `fanout`: per-request subscribe, heartbeat, disconnect handling,
+  Last-Event-ID resume via the replay ring. The handler an htmx dashboard
+  actually mounts; the low-level writer stays exported as the brick under
+  `web/htmx`'s SendComponent bridge and `llm.SSE`. Requires httpserver
+  WriteTimeout=0 (documented).
 - **`fanout`** (+`fanout/pgbus`, `fanout/redisbus`) — core. In-process
   pub/sub hub (bounded buffers, explicit slow-consumer policy) + the `Bus`
   seam for multi-instance backplanes + optional bounded `WithReplay(n)` ring.
   `pgbus` (LISTEN/NOTIFY) is the first distributed driver — multi-instance
   push with zero new infrastructure; `redisbus` takes the caller's
   `data/redis` client.
-- **`ws`** — recommended. WebSocket accept/read/write/ping-pong/close over
-  isolated `coder/websocket`, behind exported forge `Conn`/`Message`.
-- **`wshub`** — recommended. Connection registry + rooms + broadcast under
-  supervisor, with production bounds: payload/event-name/auth-blob size
-  limits, drop-frames-vs-teardown overflow policy, `Shutdown(ctx)` drain.
-- **`ssestream`** — recommended. The SSE endpoint over fanout: per-request
-  subscribe, heartbeat, disconnect handling, Last-Event-ID resume via the
-  replay ring. The endpoint an htmx dashboard actually mounts.
+- **`ws`** — recommended. The complete WebSocket package:
+  accept/read/write/ping-pong/close over isolated `coder/websocket` behind
+  exported forge `Conn`/`Message`, plus the hub — connection registry, rooms,
+  broadcast under supervisor, with production bounds (payload/event-name/
+  auth-blob size limits, drop-frames-vs-teardown overflow policy,
+  `Shutdown(ctx)` drain).
 
 Icebox: `presence` — who-is-here tracking with TTL heartbeats; consumer code
 over fanout + cache until demand appears.
@@ -422,15 +432,14 @@ over fanout + cache until demand appears.
 - **`lockout`** — recommended. Login/OTP failure counting with exponential
   delay and lockout windows over the ratelimit counter seam. (Not rate
   shaping — that's `ratelimit`; not cumulative caps — that's `quota`.)
-- **`totp`** — recommended. RFC 6238/4226 TOTP/HOTP: secret generation,
-  skew-window verify, otpauth:// provisioning URI (~150 LOC, no pquerna/otp;
-  QR rendering via `core/qrcode`).
+- **`totp`** — recommended. The complete 2FA package: RFC 6238/4226
+  TOTP/HOTP secret generation, skew-window verify, otpauth:// provisioning
+  URI (~150 LOC, no pquerna/otp; QR rendering via `core/qrcode`), and
+  one-time backup codes — generate/hash/verify-and-consume, constant-time
+  matching (persistence is consumer DB).
 - **`otp`** — recommended. Short numeric codes for email/SMS verification:
   attempt-limited, TTL'd, hashed at rest; generation via `random.DigitCode`;
   delivery is the caller's channel.
-- **`recoverycodes`** — recommended. One-time 2FA backup codes:
-  generate/hash/verify-and-consume, constant-time matching; persistence is
-  consumer DB.
 - **`apikey`** — recommended. Stripe-style prefixed keys (`sk_live_…`) with
   checksum for cheap rejection and constant-time verify; hash stored,
   plaintext shown once.
@@ -452,21 +461,25 @@ Icebox:
 - `webauthn` — passkey registration/assertion over isolated `go-webauthn`
   (CBOR/COSE is the one justified heavy auth dep).
 - `fingerprint` — versioned request fingerprint (UA + Accept headers ±IP,
-  sha256) consumed by session's hijack detection.
+  sha256). Multi-consumer brick: session's hijack detection plus future
+  anti-fraud / risk-scoring modules.
 
 ### comms/
 
-- **`email`** — core. `Sender` seam + stdlib net/smtp implementation
-  (STARTTLS, multipart, attachments). Provider adapters (SES/Postmark/…) are
-  consumer-side or isolated subpackages.
-- **`emailtemplate`** (+`emailtemplate/markdown`) — recommended. Render named
-  subject + HTML + text bodies from templates into an `email.Message`; the
-  markdown subpackage renders markdown + YAML frontmatter (subject/preheader,
-  CTA-button extension) — the designer-free transactional format; goldmark
-  confined there.
-- **`webhook`** — recommended. Outbound HMAC-signed deliveries (Stripe-style
-  `t=,v1=`) with timeout and bounded retry; in-process delivery only —
-  durability rides jobqueue. Pairs with `web/webhookverify` (inbound).
+- **`email`** (+`email/markdown`) — core. The complete email package:
+  `Sender` seam + stdlib net/smtp implementation (STARTTLS, multipart,
+  attachments) + named-template rendering (subject + HTML + text bodies into
+  a `Message`). The markdown subpackage renders markdown + YAML frontmatter
+  (subject/preheader, CTA-button extension) — the designer-free
+  transactional format; goldmark confined there. Provider adapters
+  (SES/Postmark/…) are consumer-side or isolated subpackages.
+- **`webhook`** — recommended. The complete webhooks package, both
+  directions: outbound HMAC-signed deliveries (Stripe-style `t=,v1=`) with
+  timeout and bounded retry (in-process delivery only — durability rides
+  jobqueue), and inbound signature-verification middleware
+  (Stripe/GitHub/Slack HMAC schemes, constant-time, timestamp tolerance,
+  reads and restores `r.Body`). Signing/verifying share one internal scheme
+  implementation — never a separate package.
 
 Icebox:
 
@@ -589,18 +602,20 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
-1. **Web boundary + ops glue** — `assets`, `iplist`, `webhookverify`,
-   `autocert`, `captcha`, `idempotency`; `diag`, `metrics`, `featureflag`,
-   `cli`; `webtest`, `htmltest`, `dbtest` (harnesses pay off earliest).
+1. **Web boundary + ops glue** — `assets`, `iplist`, `autocert`, `captcha`,
+   `idempotency`; `diag`, `metrics`, `featureflag`, `cli`.
 2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
-3. **Auth** — `session`, `authmw`, `lockout`, `totp`, `otp`,
-   `recoverycodes`, `apikey`, `magiclink`, `oauthclient`, `rbac`.
-4. **Views + i18n + delivery** — `flash`, `form`, `pagenav`; `catalog`,
-   `locale`, `numfmt`, `datefmt`; `email` → `emailtemplate`, `webhook`.
-5. **Realtime + AI** — `sse`, `fanout`, `ws`, `wshub`, `ssestream`; `llm`,
-   `prompt`.
+3. **Auth** — `session`, `authmw`, `lockout`, `totp`, `otp`, `apikey`,
+   `magiclink`, `oauthclient`, `rbac`.
+4. **Views + i18n + delivery** — `flash`, `form`; `catalog`, `locale`,
+   `numfmt`, `datefmt`; `email`, `webhook`.
+5. **Realtime + AI** — `fanout` → `sse`, `ws`; `llm`, `prompt`.
+6. **Test harnesses** — `webtest`, `htmltest`, `dbtest`. Deliberately last:
+   built against the full, stable package surface so the harness APIs are
+   shaped by real usage across every domain instead of guesses that would
+   churn as later waves land.
 
 **Minimal-core cut-line** (enough for a real API or htmx app end-to-end):
 `clock random id ctxkey typeconv slicex ptr validate` · `postgres migration`
@@ -622,7 +637,7 @@ httpclient` · `session authmw` · `sse fanout` · `email` · `catalog locale` �
 - **Remote config stores** (etcd/consul/nacos) — client SDKs plug in behind
   configwatch's load func / secretsource's Provider.
 - **Billing / payments abstraction** — provider-coupled business logic; use
-  stripe-go directly + forge webhookverify/httpclient/quota/money.
+  stripe-go directly + forge webhook/httpclient/quota/money.
 - **User-account lifecycle (usermanager)** — consumer domain assembled from
   forge primitives; recipe in examples/, never a package.
 - **OIDC provider** (issuing tokens to third parties) — a product; run
