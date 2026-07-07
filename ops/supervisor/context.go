@@ -22,11 +22,15 @@ func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	parent := cfg.parent
+	if parent == nil {
+		parent = context.Background()
+	}
 	if !cfg.forceQuit {
-		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	stopped := make(chan struct{})
@@ -34,6 +38,8 @@ func NewContext(opts ...ContextOption) (context.Context, context.CancelFunc) {
 		select {
 		case <-ch:
 			cancel()
+		case <-parent.Done(): // parent cancelled: nothing to force, just stop watching
+			return
 		case <-stopped:
 			return
 		}

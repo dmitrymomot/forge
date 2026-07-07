@@ -108,6 +108,7 @@ func WithRecover(enabled bool) Option {
 type ContextOption func(*contextConfig)
 
 type contextConfig struct {
+	parent    context.Context
 	forceQuit bool
 }
 
@@ -117,4 +118,12 @@ type contextConfig struct {
 // bypasses deferred cleanup by design.
 func WithForceQuit() ContextOption {
 	return func(c *contextConfig) { c.forceQuit = true }
+}
+
+// WithContext roots the signal context at parent instead of context.Background,
+// so cancelling parent triggers the same graceful shutdown a signal would.
+// bootstrap uses it to thread main's context; tests use it to shut down without
+// sending real signals. The zero/default parent remains context.Background.
+func WithContext(parent context.Context) ContextOption {
+	return func(c *contextConfig) { c.parent = parent }
 }
