@@ -177,9 +177,9 @@ forge/                              # single go.mod at the root
 │
 ├── ops/           # runtime, lifecycle, observability, app bootstrap
 │   # shipped: supervisor logger (logger/sentry) config health
-│   #          buildinfo automaxprocs logredact bootstrap
+│   #          buildinfo automaxprocs logredact bootstrap featureflag
 │   # planned: debug metrics (metrics/prometheus)
-│   #          auditlog (auditlog/pgsink) featureflag cli
+│   #          auditlog (auditlog/pgsink) cli
 │   # icebox:  tracing (tracing/otel) secretsource logsample configwatch term
 │
 └── testkit/       # black-box test harnesses
@@ -523,7 +523,7 @@ Icebox:
 ### ops/
 
 Shipped: `supervisor logger (logger/sentry) config health buildinfo
-automaxprocs logredact bootstrap`. (`config` —
+automaxprocs logredact bootstrap featureflag`. (`config` —
 formerly planned as `envconfig`, shipped renamed — layers app config from
 YAML per-env files with `${VAR:default}` substitution, `.env` inheritance,
 and env-tagged structs via `structfields` + `typeconv`; exported `Profile`
@@ -548,7 +548,12 @@ safety net for attrs you don't control.
 log → config autoload → signal context (via `supervisor.NewContext`) → exit
 code; the callback owns `supervisor.Run` and `defer` cleanup. NOT a DI
 container. This bundle also added `supervisor.WithContext(parent)` so the
-signal context can root at a caller's context.)
+signal context can root at a caller's context.
+`featureflag` — standalone flags as serializable records (enabled → deny →
+allow → rollout pipeline, token-set targeting, FNV subject bucketing): typed
+getters with defaults, YAML/options/memory sources behind a one-method store
+`Provider` seam (ctx-scoped for multi-tenancy), scope-aware `Cached` decorator
+(singleflight, serve-stale). Postgres provider is a doc.go recipe.)
 
 - **`debug`** — recommended. One internal diagnostics surface:
   `/debug/pprof/*`, `/debug/stats` (runtime/GC/goroutines JSON),
@@ -561,8 +566,6 @@ signal context can root at a caller's context.)
   audit events (actor/action/resource/outcome) over a `Sink` seam; slog +
   JSONL sinks in core; `pgsink` adds the pgx insert + keyset-paginated
   per-tenant query every B2B SaaS shows in its UI.
-- **`featureflag`** — recommended. Bool/variant flags via a `Provider` seam;
-  static + env providers in core; vendor SDKs stay consumer-side.
 - **`cli`** — recommended. Struct-described command tree over stdlib
   `flag.FlagSet`, ctx-aware Run, auto help; no cobra, no global registry.
   Covers serve/migrate/worker/seed/version.
@@ -693,7 +696,7 @@ httpclient` · `session guard` · `sse fanout` · `email` · `catalog locale` ·
 examples/ or doc.go entries committed so dropped capabilities aren't silently
 lost: grpc-server-as-supervisor.Service · reverse proxy (hostrouter +
 httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
-413) · maintenance 503 gate (featureflag + problem) · breadcrumb value type ·
+413) · breadcrumb value type ·
 notification-inbox pipeline · per-tenant encryption / GDPR crypto-shred (kdf)
 · optimistic locking + audit columns (postgres docs) · Postgres tsvector
 search · usermanager flow · templ `Classes` toggle helper (ex-viewhelper).
