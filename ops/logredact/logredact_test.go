@@ -71,6 +71,28 @@ func TestRedactByDottedPath(t *testing.T) {
 	}
 }
 
+func TestRedactByDottedPathTwoLevels(t *testing.T) {
+	var buf bytes.Buffer
+	// Two levels of nesting exercise joinPath/group-prefix accumulation at depth:
+	// only a.b.token matches, not a same-named token one level up or at the root.
+	newLog(&buf, logredact.WithPaths("a.b.token")).Info("m",
+		slog.Group("a",
+			slog.String("token", "shallow"),
+			slog.Group("b", slog.String("token", "deep"), slog.String("kind", "basic"))),
+		slog.String("token", "top"))
+	m := decode(t, &buf)
+	a := m["a"].(map[string]any)
+	if b := a["b"].(map[string]any); b["token"] != "[REDACTED]" {
+		t.Errorf("a.b.token = %v, want redacted", b["token"])
+	}
+	if a["token"] != "shallow" {
+		t.Errorf("a.token = %v, want untouched", a["token"])
+	}
+	if m["token"] != "top" {
+		t.Errorf("top-level token = %v, want untouched", m["token"])
+	}
+}
+
 func TestRedactWithAttrsBakedIn(t *testing.T) {
 	var buf bytes.Buffer
 	// With(...) routes through WithAttrs, not Handle's record attrs — the
