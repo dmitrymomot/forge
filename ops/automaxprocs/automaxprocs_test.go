@@ -83,8 +83,12 @@ func TestSetV1CPUQuota(t *testing.T) {
 	if err := os.MkdirAll(cpuDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("400000"), 0o644)
-	os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000"), 0o644)
+	if err := os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("400000"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	undo := automaxprocs.Set(nopLogger(), automaxprocs.WithCgroupRoot(root), automaxprocs.WithMemory(false))
 	defer undo()
 	if got := runtime.GOMAXPROCS(0); got != 4 {

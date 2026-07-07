@@ -97,10 +97,7 @@ func applyCPU(log *slog.Logger, c config) {
 			slog.Int("gomaxprocs", runtime.GOMAXPROCS(0)))
 		return
 	}
-	procs := int(quota) // floor
-	if procs < c.minProcs {
-		procs = c.minProcs
-	}
+	procs := max(int(quota), c.minProcs) // floor at minProcs
 	runtime.GOMAXPROCS(procs)
 	log.Info("automaxprocs: set GOMAXPROCS from cgroup CPU quota",
 		slog.Int("gomaxprocs", procs), slog.Float64("quota", quota))
