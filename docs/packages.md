@@ -51,7 +51,7 @@ Forge optimizes for a small, auditable dependency surface — not stdlib purism:
 Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch
 clients, sentry, `gopkg.in/yaml.v3` (`ops/config`'s YAML loader, its sole
 consumer). Sanctioned for the roadmap: aws-sdk-go-v2 (`objectstore/s3`),
-`coder/websocket` (`ws`), `go-webauthn` (`webauthn`), `x/crypto`
+`coder/websocket` (`websocket`), `go-webauthn` (`webauthn`), `x/crypto`
 (password/kdf/autocert), goldmark (`email/markdown`), the official
 MCP go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
 (`metrics/prometheus`), OTel SDK (`tracing/otel`), goquery (`htmltest`,
@@ -71,6 +71,11 @@ messaging engine, and the driver leaves stays stdlib.
   isolators (`resilience/cache/redis`, `msg/jobqueue/sqlbroker`).
 - **Leaf directory = package name**, unique across all domains (no forced
   import aliasing). No packages at the repository root.
+- **Names are full words or industry-standard acronyms** (`sse`, `csrf`,
+  `totp`, `cli`, `llm` — the spec/protocol name IS the word). No ad-hoc
+  abbreviations a reader must decode: `debug` not `diag`, `websocket` not
+  `ws`, `requestlog` not `reqlog`. Compounds of full words are fine
+  (`featureflag`, `objectstore`); one sanctioned exception: `imageproc`.
 - **Admission test:** name the package's *purpose* in one sentence — it must
   end with exactly one domain noun. If it plausibly fits two domains, the
   tie-breaker is who imports it.
@@ -132,9 +137,9 @@ forge/                              # single go.mod at the root
 │
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
-│   #          recoverer reqlog requestid render htmx subroute httpclient
+│   #          recoverer requestlog requestid render htmx subroute httpclient
 │   #          cookie csrf secheaders cors timeout compress
-│   # planned: assets idempotency iplist captcha (captcha/turnstile ...)
+│   # planned: assets idempotency ipfilter captcha (captcha/turnstile ...)
 │   #          autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify
 │
@@ -142,7 +147,7 @@ forge/                              # single go.mod at the root
 │   # planned: flash form
 │
 ├── i18n/          # localization (consumed by views, emails, API errors, jobs)
-│   # planned: catalog locale numfmt datefmt
+│   # planned: catalog locale numbers dates
 │
 ├── data/          # persistence
 │   # shipped: postgres migration mongo redis opensearch
@@ -154,11 +159,11 @@ forge/                              # single go.mod at the root
 │   # icebox:  workflow
 │
 ├── realtime/      # server push
-│   # planned: sse fanout (fanout/pgbus, fanout/redisbus) ws
+│   # planned: sse fanout (fanout/pgbus, fanout/redisbus) websocket
 │   # icebox:  presence
 │
 ├── auth/          # authn & authz
-│   # planned: session (session/pgstore, session/cookiestore) authmw lockout
+│   # planned: session (session/pgstore, session/cookiestore) guard lockout
 │   #          totp otp apikey magiclink oauthclient rbac
 │   # icebox:  webauthn fingerprint
 │
@@ -173,7 +178,7 @@ forge/                              # single go.mod at the root
 ├── ops/           # runtime, lifecycle, observability, app bootstrap
 │   # shipped: supervisor logger (logger/sentry) config health
 │   #          buildinfo automaxprocs logredact bootstrap
-│   # planned: diag metrics (metrics/prometheus)
+│   # planned: debug metrics (metrics/prometheus)
 │   #          auditlog (auditlog/pgsink) featureflag cli
 │   # icebox:  tracing (tracing/otel) secretsource logsample configwatch term
 │
@@ -195,7 +200,7 @@ middleware vs response/outbound, but don't pre-split.
 | `cookie` | `web/` | Composes crypto, but its purpose is the HTTP boundary (`csrf`/`flash`/`session` consumers are web-side). |
 | `render`, `htmx` | `web/` | Response-side transport, symmetric to `request`. `render.JSON` serves pure APIs; a JSON-only API importing from `view/` would read wrong. |
 | `session` | `auth/` | Purpose is identity lifecycle over a Store; `web/cookie` is just the codec it composes. |
-| `catalog`, `locale`, `numfmt`, `datefmt` | `i18n/` | Localization is consumed by emails, API errors, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`. |
+| `catalog`, `locale`, `numbers`, `dates` | `i18n/` | Localization is consumed by emails, API errors, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`. |
 | `form` | `view/` | Exists for server-rendered CRUD: whole-form decode, sticky values, render-friendly `Errors`. `web/request` = per-field typed reads for APIs. |
 | `sse` | `realtime/` | Push transport, stdlib-only; the htmx `SendComponent` bridge lives in `web/htmx`. |
 | `webhook` | `comms/` | Outbound signed delivery + inbound verification are two sides of one webhooks feature; communication purpose owns it, the inbound middleware is a thin adapter. |
@@ -237,7 +242,7 @@ Icebox:
 - `jwtverify` — verify-only JWT: RS256/ES256/EdDSA allowlist (pinned, never
   negotiated), exp/nbf/aud/iss checks, static-key + JWKS-URL sources with kid
   cache/rotation. No signing, no JWE. Serves inter-service auth, satisfies
-  `authmw.Verifier`, and replaces the verifier otherwise buried in
+  `guard.Verifier`, and replaces the verifier otherwise buried in
   `oauthclient`.
 
 Recipe owed: HKDF compound-key per-tenant encryption (master key × tenant ID
@@ -266,7 +271,7 @@ ratelimit (ratelimit/redisstore)`.
 ### web/
 
 Shipped: `httpserver hostrouter middleware request clientip problem recoverer
-reqlog requestid render htmx subroute httpclient cookie csrf secheaders cors
+requestlog requestid render htmx subroute httpclient cookie csrf secheaders cors
 timeout compress`. (`httpclient` builds a resilient outbound `*http.Client`
 via a RoundTripper stack: per-attempt timeout, jittered retry, an OPT-IN
 per-host circuit breaker, before/after hooks, and ctx-driven header
@@ -281,7 +286,7 @@ Returns the stdlib type.) (`cookie` is the signed + encrypted cookie codec
 - **`idempotency`** — recommended. Idempotency-Key middleware: replays the
   stored first response on retry, rejects key reuse with a different payload
   fingerprint. Store rides `cache.Store`'s atomic SetNX.
-- **`iplist`** — recommended. IP/CIDR allow/deny middleware over `clientip`
+- **`ipfilter`** — recommended. IP/CIDR allow/deny middleware over `clientip`
   (admin allowlists, blocklists).
 - **`captcha`** (+`captcha/turnstile` …) — recommended. Server-side CAPTCHA
   verification behind a `Verifier` seam; providers are thin POST+JSON
@@ -322,10 +327,10 @@ stdlib `cmp.Or`, query-preserving links live in `pagination`, and a templ
 - **`locale`** — core. Accept-Language negotiation (q-values, region
   fallback) + context carrier + middleware with a resolver chain
   (cookie → query → Accept-Language → default) + `logger.ContextExtractor`.
-- **`numfmt`** — recommended. Locale-aware number/currency/percent
+- **`numbers`** — recommended. Locale-aware number/currency/percent
   formatting; `Currency(money.Money)` (shipped `money` renders locale-free
   by design and defers here).
-- **`datefmt`** — recommended. Locale + timezone date/time and relative-time
+- **`dates`** — recommended. Locale + timezone date/time and relative-time
   ("3 hours ago") formatting with named presets. Gregorian only.
 
 ### data/
@@ -403,7 +408,7 @@ jobqueue kind with one registered handler.
   `pgbus` (LISTEN/NOTIFY) is the first distributed driver — multi-instance
   push with zero new infrastructure; `redisbus` takes the caller's
   `data/redis` client.
-- **`ws`** — recommended. The complete WebSocket package:
+- **`websocket`** — recommended. The complete WebSocket package:
   accept/read/write/ping-pong/close over isolated `coder/websocket` behind
   exported forge `Conn`/`Message`, plus the hub — connection registry, rooms,
   broadcast under supervisor, with production bounds (payload/event-name/
@@ -423,7 +428,7 @@ over fanout + cache until demand appears.
   detection. In-memory store in core; `pgstore` is user-indexed;
   `cookiestore` is stateless-encrypted (no UserIndex, documented); generic
   KV backing rides `cache.Store`.
-- **`authmw`** — core. Request-authentication middleware over a `Verifier`
+- **`guard`** — core. Request-authentication middleware over a `Verifier`
   seam (session/token/apikey all satisfy it) with chained credential
   extractors (header → cookie → query), built-in Basic Auth (constant-time
   via `consttime`, correct 401 + WWW-Authenticate — gates pprof/metrics/
@@ -545,7 +550,7 @@ code; the callback owns `supervisor.Run` and `defer` cleanup. NOT a DI
 container. This bundle also added `supervisor.WithContext(parent)` so the
 signal context can root at a caller's context.)
 
-- **`diag`** — recommended. One internal diagnostics surface:
+- **`debug`** — recommended. One internal diagnostics surface:
   `/debug/pprof/*`, `/debug/stats` (runtime/GC/goroutines JSON),
   `/debug/vars`, with an auth guard and a dedicated-port
   `supervisor.Service`.
@@ -606,16 +611,16 @@ Queued API additions to shipped packages (each unblocks roadmap work):
 Each wave depends only on earlier ones. Icebox packages slot in wherever
 demand appears.
 
-1. **Web boundary + ops glue** — `assets`, `iplist`, `autocert`, `captcha`,
-   `idempotency`; `diag`, `metrics`, `featureflag`, `cli`.
+1. **Web boundary + ops glue** — `assets`, `ipfilter`, `autocert`, `captcha`,
+   `idempotency`; `debug`, `metrics`, `featureflag`, `cli`.
 2. **Data + messaging** — `pagination`, `tenant`, `dataloader`,
    `objectstore`; `jobqueue` → `scheduler`, `eventbus`; `lock`, `loadshed`,
    `quota`; `auditlog`.
-3. **Auth** — `session`, `authmw`, `lockout`, `totp`, `otp`, `apikey`,
+3. **Auth** — `session`, `guard`, `lockout`, `totp`, `otp`, `apikey`,
    `magiclink`, `oauthclient`, `rbac`.
 4. **Views + i18n + delivery** — `flash`, `form`; `catalog`, `locale`,
-   `numfmt`, `datefmt`; `email`, `webhook`.
-5. **Realtime + AI** — `fanout` → `sse`, `ws`; `llm`, `prompt`.
+   `numbers`, `dates`; `email`, `webhook`.
+5. **Realtime + AI** — `fanout` → `sse`, `websocket`; `llm`, `prompt`.
 6. **Test harnesses** — `webtest`, `htmltest`, `dbtest`. Deliberately last:
    built against the full, stable package surface so the harness APIs are
    shaped by real usage across every domain instead of guesses that would
@@ -624,7 +629,7 @@ demand appears.
 **Minimal-core cut-line** (enough for a real API or htmx app end-to-end):
 `clock random id ctxkey typeconv slicex ptr validate` · `postgres migration`
 · `backoff retry ratelimit` · `middleware recoverer requestid problem
-httpclient` · `session authmw` · `sse fanout` · `email` · `catalog locale` ·
+httpclient` · `session guard` · `sse fanout` · `email` · `catalog locale` ·
 `flash form` · `config health`.
 
 ## Anti-scope — what stays in consumer repos
