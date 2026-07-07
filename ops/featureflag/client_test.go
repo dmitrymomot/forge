@@ -2,6 +2,7 @@ package featureflag_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -10,6 +11,43 @@ import (
 
 	"github.com/dmitrymomot/forge/ops/featureflag"
 )
+
+// recordingHandler captures emitted log records for assertions; it is a
+// minimal slog.Handler so tests can inspect level/message/attrs without
+// parsing formatted output.
+type recordingHandler struct {
+	records *[]slog.Record
+}
+
+func newRecordingHandler() (*recordingHandler, *[]slog.Record) {
+	records := new([]slog.Record)
+	return &recordingHandler{records: records}, records
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	*h.records = append(*h.records, r)
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// attr returns the string value of attribute key on r, if present.
+func attr(r slog.Record, key string) (string, bool) {
+	var val string
+	var found bool
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == key {
+			val = a.Value.String()
+			found = true
+			return false
+		}
+		return true
+	})
+	return val, found
+}
 
 // fakeProvider returns canned flags and optionally errors.
 type fakeProvider struct {
@@ -182,5 +220,53 @@ func TestClientAll(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, all, "invisible")
 		assert.Contains(t, all, "visible")
+	})
+}
+
+func TestClientWithLoggerWarnings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("provider error logs a warning", func(t *testing.T) {
+		t.Parallel()
+		h, records := newRecordingHandler()
+		logger := slog.New(h)
+		broken := &fakeProvider{err: assert.AnError}
+		c, err := featureflag.New(
+			featureflag.WithProvider(broken),
+			featureflag.WithBool("f", true),
+			featureflag.WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		assert.True(t, c.Bool(t.Context(), "f", false), "falls through to static flag despite provider error")
+
+		require.NotEmpty(t, *records)
+		r := (*records)[0]
+		assert.Equal(t, slog.LevelWarn, r.Level)
+		assert.Equal(t, "featureflag: provider error", r.Message)
+		flag, ok := attr(r, "flag")
+		require.True(t, ok, "record must carry a flag attribute")
+		assert.Equal(t, "f", flag)
+	})
+
+	t.Run("coercion failure logs a warning", func(t *testing.T) {
+		t.Parallel()
+		h, records := newRecordingHandler()
+		logger := slog.New(h)
+		c, err := featureflag.New(
+			featureflag.WithString("n", "not-a-number"),
+			featureflag.WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t, 0, c.Int(t.Context(), "n", 0), "falls back to default on coercion failure")
+
+		require.NotEmpty(t, *records)
+		r := (*records)[0]
+		assert.Equal(t, slog.LevelWarn, r.Level)
+		assert.Equal(t, "featureflag: coercion failed", r.Message)
+		flag, ok := attr(r, "flag")
+		require.True(t, ok, "record must carry a flag attribute")
+		assert.Equal(t, "n", flag)
 	})
 }

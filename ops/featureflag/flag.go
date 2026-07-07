@@ -52,7 +52,7 @@ func (f *Flag) fromMap(m map[string]any) error {
 			}
 			out.Enabled = b
 		case "rollout":
-			n, ok := v.(int)
+			n, ok := toInt(v)
 			if !ok {
 				return fmt.Errorf("%w: rollout must be an integer", ErrInvalidFlag)
 			}
@@ -86,6 +86,22 @@ func (f *Flag) fromScalar(v any) error {
 	}
 	*f = Flag{Value: typeconv.Format(v), Enabled: true, Rollout: 100}
 	return nil
+}
+
+// toInt normalizes the numeric kinds yaml.v3 (or other decoders) may produce
+// for an integer node. Deliberately excludes float64/string: a float rollout
+// is a malformed flag, not a value to coerce.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case uint64:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 func isScalar(v any) bool {

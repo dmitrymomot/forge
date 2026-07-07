@@ -166,8 +166,15 @@ func TestCached(t *testing.T) {
 		assert.False(t, isLister, "Cached over a non-Lister must not fake All")
 	})
 
-	t.Run("nil provider panics", func(t *testing.T) {
+	t.Run("nil provider panics with sentinel error", func(t *testing.T) {
 		t.Parallel()
-		assert.Panics(t, func() { featureflag.Cached(nil, time.Second) })
+		defer func() {
+			r := recover()
+			require.NotNil(t, r)
+			err, ok := r.(error)
+			require.True(t, ok, "panic value must be an error")
+			assert.ErrorIs(t, err, featureflag.ErrNilProvider)
+		}()
+		featureflag.Cached(nil, time.Second)
 	})
 }

@@ -45,7 +45,7 @@ func CacheClock(clk clock.Clock) CacheOption {
 // Cached panics if p is nil (programmer error, mirrors ErrNilProvider).
 func Cached(p Provider, ttl time.Duration, opts ...CacheOption) Provider {
 	if p == nil {
-		panic(ErrNilProvider.Error())
+		panic(ErrNilProvider)
 	}
 	cfg := cachedConfig{
 		scope: func(context.Context) string { return "" },
