@@ -18,7 +18,8 @@
 // wraps the whole app body, so the caller invokes supervisor.Run itself and
 // uses plain defer for cleanup — teardown runs after the callback returns,
 // whether that's after a graceful drain or an early setup error. A nil
-// result, or an error satisfying errors.Is(err, context.Canceled), is a
+// result, or an error satisfying errors.Is against context.Canceled or
+// context.DeadlineExceeded (a cancelled or timed-out parent context), is a
 // clean stop (exit code 0); any other error logs and exits 1.
 //
 // RunWithConfig[T] additionally autoloads a typed application config before

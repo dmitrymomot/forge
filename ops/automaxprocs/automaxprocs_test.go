@@ -137,6 +137,19 @@ func TestSetEnvPresentSkipsCPU(t *testing.T) {
 	}
 }
 
+func TestSetEnvPresentSkipsMemory(t *testing.T) {
+	t.Setenv("GOMAXPROCS", "")
+	t.Setenv("GOMEMLIMIT", "500MiB") // runtime read env at startup; Set must not override
+	prev := debug.SetMemoryLimit(-1)
+	undo := automaxprocs.Set(nopLogger(),
+		automaxprocs.WithCgroupRoot(writeV2(t, "", "1000000000")),
+		automaxprocs.WithCPU(false))
+	defer undo()
+	if got := debug.SetMemoryLimit(-1); got != prev {
+		t.Errorf("env present must skip memory leg; GOMEMLIMIT = %d, want %d", got, prev)
+	}
+}
+
 func TestSetMissingRootIsNoOp(t *testing.T) {
 	clearRuntimeEnv(t)
 	prevP, prevM := runtime.GOMAXPROCS(0), debug.SetMemoryLimit(-1)
