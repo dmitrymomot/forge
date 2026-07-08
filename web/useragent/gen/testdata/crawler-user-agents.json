@@ -1,0 +1,10 @@
+[
+  {"pattern": "PetalBot", "url": "https://webmaster.petalsearch.com/site/petalbot"},
+  {"pattern": "petalbot", "url": ""},
+  {"pattern": "Sogou\\ web\\ spider", "url": "http://www.sogou.com/docs/help/webmasters.htm"},
+  {"pattern": "HeadlessChrome", "instances": ["Mozilla/5.0 HeadlessChrome/126.0.0.0"]},
+  {"pattern": "NetcraftSurveyAgent", "url": ""},
+  {"pattern": "^Mozilla.*compatible$", "url": ""},
+  {"pattern": "grub", "url": ""},
+  {"pattern": "dataprovider", "url": ""}
+]
