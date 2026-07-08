@@ -9,8 +9,8 @@ var desktopOS = map[string]bool{
 
 // detectDevice is ordered most-specific-first: consoles and TVs before the
 // mobile/tablet split, desktop as the OS-derived fallback.
-func detectDevice(in input, osName string) Device {
-	model, brand := deviceModel(in)
+func detectDevice(in input, raw, osName string) Device {
+	model, brand := deviceModel(in, raw)
 	switch {
 	case in.contains("playstation 5"):
 		return Device{Type: DeviceConsole, Brand: "Sony", Model: "PlayStation 5"}
@@ -75,14 +75,14 @@ func detectDevice(in input, osName string) Device {
 // deviceModel extracts the Android-style device segment with original
 // casing: "(Linux; Android 14; SM-S918B Build/UP1A)" → "SM-S918B".
 // The frozen reduced-UA placeholder "K" maps to no model.
-func deviceModel(in input) (model, brand string) {
+func deviceModel(in input, raw string) (model, brand string) {
 	var seg string
 	if end := in.index(" build/"); end >= 0 {
 		start := end
 		for start > 0 && in.lower[start-1] != ';' && in.lower[start-1] != '(' {
 			start--
 		}
-		seg = strings.TrimSpace(in.raw[start:end])
+		seg = strings.TrimSpace(raw[start:end])
 	} else if i := in.index("android "); i >= 0 {
 		// reduced UA without Build/: model is the next comment segment,
 		// e.g. "(Linux; Android 13; SM-X710)"
@@ -95,7 +95,7 @@ func deviceModel(in input) (model, brand string) {
 			for k < len(in.lower) && in.lower[k] != ';' && in.lower[k] != ')' {
 				k++
 			}
-			seg = strings.TrimSpace(in.raw[j+1 : k])
+			seg = strings.TrimSpace(raw[j+1 : k])
 		}
 	}
 	if seg == "" || seg == "K" || seg == "k" || isLocale(seg) {

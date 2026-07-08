@@ -48,7 +48,7 @@ var browserRules = []browserRule{
 	{token: "safari/", name: "Safari", vtok: "version/"},
 }
 
-func detectBrowser(in input) Browser {
+func detectBrowser(in input, raw string) Browser {
 	for _, r := range browserRules {
 		if !in.contains(r.token) {
 			continue
@@ -57,7 +57,7 @@ func detectBrowser(in input) Browser {
 		if vtok == "" {
 			vtok = r.token
 		}
-		b := Browser{Name: r.name, Version: in.versionAfter(vtok)}
+		b := Browser{Name: r.name, Version: in.versionAfter(raw, vtok)}
 		if r.name == "Safari" {
 			if b.Version.IsZero() {
 				continue // bare "Safari/537.36" WebKit product token, not the Safari browser

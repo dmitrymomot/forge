@@ -105,9 +105,9 @@ func Parse(ua string) UserAgent {
 		res.Device.Type = DeviceBot
 		return res
 	}
-	res.Browser = detectBrowser(in)
-	res.OS = detectOS(in)
-	res.Device = detectDevice(in, res.OS.Name)
+	res.Browser = detectBrowser(in, ua)
+	res.OS = detectOS(in, ua)
+	res.Device = detectDevice(in, ua, res.OS.Name)
 	if res.Device.Brand == "Amazon" && res.OS.Name == "Android" {
 		res.OS = OS{Name: "Fire OS"} // Fire devices run Android but report Fire OS to users
 	}

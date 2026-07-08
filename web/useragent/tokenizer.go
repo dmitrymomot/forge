@@ -5,10 +5,12 @@ import (
 	"strings"
 )
 
-// input is the shared matcher state: the original string for extraction
-// (preserves model casing) and an ASCII-lowercased copy for matching.
+// input is the shared matcher state: an ASCII-lowercased copy of the raw
+// User-Agent used for matching. The original string is threaded separately
+// as a raw parameter to the functions that extract substrings from it —
+// bundling it here would taint this type's escape analysis (Go's escape
+// analysis is field-insensitive) and force the lowercase buffer to heap.
 type input struct {
-	raw   string
 	lower []byte
 }
 
@@ -25,7 +27,7 @@ func newInput(raw string, buf []byte) input {
 		}
 		b = append(b, c)
 	}
-	return input{raw: raw, lower: b}
+	return input{lower: b}
 }
 
 // index returns the offset of the lowercase needle sub in the lowered UA,
@@ -53,14 +55,14 @@ func (in input) index(sub string) int {
 func (in input) contains(sub string) bool { return in.index(sub) >= 0 }
 
 // versionAfter reads the dotted (or underscored, iOS-style) version that
-// follows the first occurrence of tok: versionAfter("chrome/") on
-// "... Chrome/138.0.0.0 ..." yields 138.0.0.0.
-func (in input) versionAfter(tok string) Version {
+// follows the first occurrence of tok in raw: versionAfter(raw, "chrome/")
+// on "... Chrome/138.0.0.0 ..." yields 138.0.0.0.
+func (in input) versionAfter(raw, tok string) Version {
 	i := in.index(tok)
 	if i < 0 {
 		return Version{}
 	}
-	return versionAt(in.raw, i+len(tok))
+	return versionAt(raw, i+len(tok))
 }
 
 func versionAt(s string, start int) Version {
