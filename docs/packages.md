@@ -124,7 +124,7 @@ forge/                              # single go.mod at the root
 │   # shipped: clock random id ctxkey typeconv structfields slicex mapx set
 │   #          ptr null enum stringsx errorsx iox bufpool encoding bytesize
 │   #          filetype validate sanitize slug decimal money
-│   # icebox:  useragent qrcode namegen
+│   # icebox:  qrcode namegen
 │
 ├── crypto/        # security primitives
 │   # shipped: consttime digest sign secret keyset kdf password token redact
@@ -138,7 +138,7 @@ forge/                              # single go.mod at the root
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
 │   #          recoverer requestlog requestid render htmx subroute httpclient
-│   #          cookie csrf secheaders cors timeout compress
+│   #          cookie csrf secheaders cors timeout compress useragent
 │   # planned: assets idempotency ipfilter captcha (captcha/turnstile ...)
 │   #          autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify
@@ -209,6 +209,7 @@ middleware vs response/outbound, but don't pre-split.
 | `geoip` | `web/` | A lookup, not communication — "clientip gives the address, geoip gives its meaning". |
 | `msg/` naming | — | Rejected `jobs/` (undersells eventbus), `async/` (collides conceptually with `resilience/`), direction names like `outbound/` (direction doesn't discriminate). |
 | `ai/` standalone | — | Enough packages to stand alone; burying them in `comms/` would make that folder a junk drawer. |
+| `useragent/gen` | `web/` | A reviewed codegen tool colocated with the generated output it produces (`bot_generated.go`) — sanctioned third-level exception to the two-level rule, same spirit as `testdata/` and driver-isolator (`cache/redis`) subdirectories. |
 
 ---
 
@@ -225,8 +226,6 @@ sanitize slug decimal money`.
 
 Icebox:
 
-- `useragent` — stdlib User-Agent string parser (browser/OS/device/bot); feeds
-  session device lists and auditlog display. String-in primitive, hence core.
 - `qrcode` — QR PNG / base64 data-URI from any string (vendored encoder):
   2FA enrollment URIs, referral/share links, crypto wallet addresses.
   General-purpose brick; first consumer is `totp`, build alongside it.
@@ -272,12 +271,15 @@ ratelimit (ratelimit/redisstore)`.
 
 Shipped: `httpserver hostrouter middleware request clientip problem recoverer
 requestlog requestid render htmx subroute httpclient cookie csrf secheaders cors
-timeout compress`. (`httpclient` builds a resilient outbound `*http.Client`
+timeout compress useragent`. (`httpclient` builds a resilient outbound `*http.Client`
 via a RoundTripper stack: per-attempt timeout, jittered retry, an OPT-IN
 per-host circuit breaker, before/after hooks, and ctx-driven header
 propagation — the transport under captcha, oauthclient, comms/*, and llm.
 Returns the stdlib type.) (`cookie` is the signed + encrypted cookie codec
-`csrf`/`flash`/`session` compose.)
+`csrf`/`flash`/`session` compose.) (`useragent` parses User-Agent strings and
+UA Client Hints into structured browser/OS/device/bot facts — canonical
+names, marketing OS versions, a categorized bot taxonomy — for session
+device lists and auditlog display lines.)
 
 - **`assets`** — recommended. Static serving over `fs.FS` with correct
   content types, range support, ETag/304 handling, and cache headers; a
