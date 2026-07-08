@@ -108,8 +108,9 @@ func Parse(ua string) UserAgent {
 	res.Browser = detectBrowser(in, ua)
 	res.OS = detectOS(in, ua)
 	res.Device = detectDevice(in, ua, res.OS.Name)
-	if res.Device.Brand == "Amazon" && res.OS.Name == "Android" {
-		res.OS = OS{Name: "Fire OS"} // Fire devices run Android but report Fire OS to users
+	if res.Device.Brand == "Amazon" && res.OS.Name == "Android" &&
+		(res.Device.Type == DeviceTablet || res.Device.Type == DeviceTV) {
+		res.OS = OS{Name: "Fire OS"} // Fire tablets/TVs run Android but report Fire OS to users
 	}
 	return res
 }

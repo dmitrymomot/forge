@@ -62,3 +62,9 @@ func TestFireDeviceReportsFireOS(t *testing.T) {
 	got := useragent.Parse("Mozilla/5.0 (Linux; Android 9; KFMAWI Build/PS7312.3038N) AppleWebKit/537.36 (KHTML, like Gecko) Silk/126.2.7 like Chrome/126.0.6478.71 Safari/537.36")
 	assert.Equal(t, "Fire OS", got.OS.Name)
 }
+
+func TestKindleEReaderNotFireOS(t *testing.T) {
+	got := useragent.Parse("Mozilla/5.0 (X11; U; Linux armv7l like Android; en-us) AppleWebKit/531.2+ (KHTML, like Gecko) Version/5.0 Safari/533.2+ Kindle/3.0+")
+	assert.NotEqual(t, "Fire OS", got.OS.Name)
+	assert.Equal(t, "Android", got.OS.Name)
+}
