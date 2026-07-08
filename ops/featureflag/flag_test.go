@@ -72,15 +72,19 @@ flags:
 			src  string
 			want error
 		}{
-			"rollout too high":  {"flags:\n  f: {value: true, rollout: 101}\n", featureflag.ErrInvalidRollout},
-			"rollout negative":  {"flags:\n  f: {value: true, rollout: -1}\n", featureflag.ErrInvalidRollout},
-			"empty key":         {"flags:\n  \"\": true\n", featureflag.ErrEmptyKey},
-			"null value":        {"flags:\n  f:\n", featureflag.ErrInvalidFlag},
-			"unknown field":     {"flags:\n  f: {value: true, rollut: 5}\n", featureflag.ErrInvalidFlag},
-			"sequence value":    {"flags:\n  f: [a, b]\n", featureflag.ErrInvalidFlag},
-			"non-string tokens": {"flags:\n  f: {value: true, allow: [1, 2]}\n", featureflag.ErrInvalidFlag},
-			"empty token":       {"flags:\n  f: {value: true, deny: [\"\"]}\n", featureflag.ErrInvalidFlag},
-			"bad enabled type":  {"flags:\n  f: {value: true, enabled: yes please}\n", featureflag.ErrInvalidFlag},
+			"rollout too high": {"flags:\n  f: {value: true, rollout: 101}\n", featureflag.ErrInvalidRollout},
+			"rollout negative": {"flags:\n  f: {value: true, rollout: -1}\n", featureflag.ErrInvalidRollout},
+			// yaml.v3 decodes an integer overflowing int64 as uint64, exercising
+			// toInt's uint64 branch; it must surface as a clear range error
+			// (ErrInvalidRollout), not a type error (ErrInvalidFlag).
+			"rollout overflows int64": {"flags:\n  f: {value: true, rollout: 9223372036854775808}\n", featureflag.ErrInvalidRollout},
+			"empty key":               {"flags:\n  \"\": true\n", featureflag.ErrEmptyKey},
+			"null value":              {"flags:\n  f:\n", featureflag.ErrInvalidFlag},
+			"unknown field":           {"flags:\n  f: {value: true, rollut: 5}\n", featureflag.ErrInvalidFlag},
+			"sequence value":          {"flags:\n  f: [a, b]\n", featureflag.ErrInvalidFlag},
+			"non-string tokens":       {"flags:\n  f: {value: true, allow: [1, 2]}\n", featureflag.ErrInvalidFlag},
+			"empty token":             {"flags:\n  f: {value: true, deny: [\"\"]}\n", featureflag.ErrInvalidFlag},
+			"bad enabled type":        {"flags:\n  f: {value: true, enabled: yes please}\n", featureflag.ErrInvalidFlag},
 		}
 		for name, tc := range cases {
 			t.Run(name, func(t *testing.T) {
