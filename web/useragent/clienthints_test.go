@@ -49,6 +49,14 @@ func TestClientHintsFullVersionUnfreezes(t *testing.T) {
 	assert.Equal(t, useragent.Version{Major: 138, Minor: 0, Patch: 7204, Full: "138.0.7204.97"}, got.Browser.Version)
 }
 
+func TestClientHintsFullVersionListNameChangeEmptyVersion(t *testing.T) {
+	got := useragent.ParseHeaders(headers(frozenChromeWin, map[string]string{
+		"Sec-CH-UA-Full-Version-List": `"Brave";v="", "Chromium";v="138.0.7204.97"`,
+	}))
+	assert.Equal(t, "Brave", got.Browser.Name)
+	assert.Equal(t, 0, got.Browser.Version.Major)
+}
+
 func TestClientHintsWindows11(t *testing.T) {
 	got := useragent.ParseHeaders(headers(frozenChromeWin, map[string]string{
 		"Sec-CH-UA-Platform":         `"Windows"`,

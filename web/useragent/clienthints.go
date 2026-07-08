@@ -25,7 +25,10 @@ func ParseHeaders(h http.Header) UserAgent {
 
 func applyClientHints(res *UserAgent, h http.Header) {
 	if name, ver, ok := pickBrand(h.Get("Sec-CH-UA-Full-Version-List")); ok {
-		res.Browser.Name = name
+		if name != res.Browser.Name {
+			res.Browser.Name = name
+			res.Browser.Version = Version{}
+		}
 		if v := parseVersion(ver); v.Major > 0 {
 			res.Browser.Version = v
 		}
