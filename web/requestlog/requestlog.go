@@ -1,4 +1,4 @@
-package reqlog
+package requestlog
 
 import (
 	"log/slog"
@@ -13,7 +13,7 @@ type config struct {
 	skip      func(*http.Request) bool
 }
 
-// Option configures the reqlog middleware.
+// Option configures the requestlog middleware.
 type Option func(*config)
 
 // WithLevelFunc maps the response status to a log level (default 5xx->Error,

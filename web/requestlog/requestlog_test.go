@@ -1,4 +1,4 @@
-package reqlog_test
+package requestlog_test
 
 import (
 	"bytes"
@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/ops/logger"
-	"github.com/dmitrymomot/forge/web/reqlog"
 	"github.com/dmitrymomot/forge/web/requestid"
+	"github.com/dmitrymomot/forge/web/requestlog"
 )
 
 func newLogger() (*slog.Logger, *bytes.Buffer) {
@@ -30,7 +30,7 @@ func lastLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 
 func TestLogsAccessLine(t *testing.T) {
 	log, buf := newLogger()
-	h := reqlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := requestlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("hi"))
 	}))
@@ -45,7 +45,7 @@ func TestLogsAccessLine(t *testing.T) {
 
 func TestLevelByStatus(t *testing.T) {
 	log, buf := newLogger()
-	h := reqlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := requestlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
@@ -54,7 +54,7 @@ func TestLevelByStatus(t *testing.T) {
 
 func TestLevelByStatus4xxIsWarn(t *testing.T) {
 	log, buf := newLogger()
-	h := reqlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := requestlog.New(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
@@ -63,7 +63,7 @@ func TestLevelByStatus4xxIsWarn(t *testing.T) {
 
 func TestWithLevelFuncOverride(t *testing.T) {
 	log, buf := newLogger()
-	h := reqlog.New(log, reqlog.WithLevelFunc(func(int) slog.Level { return slog.LevelDebug }))(
+	h := requestlog.New(log, requestlog.WithLevelFunc(func(int) slog.Level { return slog.LevelDebug }))(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }),
 	)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
@@ -73,7 +73,7 @@ func TestWithLevelFuncOverride(t *testing.T) {
 func TestSkip(t *testing.T) {
 	log, buf := newLogger()
 	skip := func(r *http.Request) bool { return r.URL.Path == "/healthz" }
-	h := reqlog.New(log, reqlog.WithSkip(skip))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h := requestlog.New(log, requestlog.WithSkip(skip))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	assert.Empty(t, buf.String())
 }
@@ -81,15 +81,15 @@ func TestSkip(t *testing.T) {
 func TestInjectsRequestIDViaExtractor(t *testing.T) {
 	var buf bytes.Buffer
 	base := slog.NewJSONHandler(&buf, nil)
-	// logger.New would wire extractors; here assert reqlog logs with request context
+	// logger.New would wire extractors; here assert requestlog logs with request context
 	// so a requestid-populated context surfaces the ID through a context handler.
 	log := slog.New(base)
 
 	h := requestid.New(requestid.WithGenerator(func() string { return "rid-9" }))(
-		reqlog.New(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
+		requestlog.New(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
 	)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	// The plain handler has no extractor; this test just asserts reqlog uses
+	// The plain handler has no extractor; this test just asserts requestlog uses
 	// r.Context() (no panic) and emits a line. Extractor wiring is covered E2E
 	// in the examples build. Assert a line was written:
 	assert.Contains(t, buf.String(), `"msg":"http request"`)
@@ -104,10 +104,10 @@ func TestReqlogSurfacesWiredContextExtractor(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// requestid (outermost) puts the ID in the context; reqlog logs via r.Context(),
+	// requestid (outermost) puts the ID in the context; requestlog logs via r.Context(),
 	// so the logger's extractor must surface it in the emitted line.
 	h := requestid.New(requestid.WithGenerator(func() string { return "rid-e2e" }))(
-		reqlog.New(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
+		requestlog.New(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
 	)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 
