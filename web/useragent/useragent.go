@@ -1,5 +1,10 @@
 package useragent
 
+import (
+	"strconv"
+	"strings"
+)
+
 // DeviceType classifies the hardware class a user agent runs on.
 type DeviceType string
 
@@ -107,4 +112,84 @@ func Parse(ua string) UserAgent {
 		res.OS = OS{Name: "Fire OS"} // Fire devices run Android but report Fire OS to users
 	}
 	return res
+}
+
+var botCategoryLabels = map[BotCategory]string{
+	BotSearchEngine:  "search engine",
+	BotAICrawler:     "AI crawler",
+	BotAIAgent:       "AI agent",
+	BotSocialPreview: "link preview",
+	BotMonitoring:    "monitoring",
+	BotScraper:       "scraper",
+	BotSEO:           "SEO",
+	BotAdvertising:   "advertising",
+	BotSecurity:      "security scanner",
+	BotWebhook:       "webhook",
+	BotFeedFetcher:   "feed fetcher",
+	BotLibrary:       "HTTP library",
+}
+
+var deviceTypeLabels = map[DeviceType]string{
+	DeviceDesktop:  "Desktop",
+	DeviceMobile:   "Mobile",
+	DeviceTablet:   "Tablet",
+	DeviceTV:       "TV",
+	DeviceConsole:  "Console",
+	DeviceWearable: "Wearable",
+	DeviceEReader:  "E-reader",
+}
+
+// String renders a human display line for session lists and audit logs:
+// "Chrome 138 on macOS 14 (Desktop)", "GPTBot (AI crawler)", "Unknown".
+func (ua UserAgent) String() string {
+	if ua.IsBot() {
+		name := ua.Bot.Name
+		if name == "" {
+			name = "Bot"
+		}
+		if label, ok := botCategoryLabels[ua.Bot.Category]; ok {
+			return name + " (" + label + ")"
+		}
+		return name
+	}
+	var b strings.Builder
+	if ua.Browser.Name != "" {
+		b.WriteString(ua.Browser.Name)
+		if ua.Browser.Version.Major > 0 {
+			b.WriteByte(' ')
+			b.WriteString(strconv.Itoa(ua.Browser.Version.Major))
+		}
+	}
+	if ua.OS.Name != "" {
+		if b.Len() > 0 {
+			b.WriteString(" on ")
+		}
+		b.WriteString(ua.OS.Name)
+		if v := osDisplayVersion(ua.OS.Version); v != "" {
+			b.WriteByte(' ')
+			b.WriteString(v)
+		}
+	}
+	if label, ok := deviceTypeLabels[ua.Device.Type]; ok {
+		if b.Len() > 0 {
+			b.WriteString(" (")
+			b.WriteString(label)
+			b.WriteByte(')')
+		} else {
+			b.WriteString(label)
+		}
+	}
+	if b.Len() == 0 {
+		return "Unknown"
+	}
+	return b.String()
+}
+
+// osDisplayVersion shows the marketing major ("14", "10"), keeps "8.1"
+// intact, and falls back to Full for non-numeric versions ("XP", "Vista").
+func osDisplayVersion(v Version) string {
+	if v.Full == "8.1" || v.Major == 0 {
+		return v.Full
+	}
+	return strconv.Itoa(v.Major)
 }
