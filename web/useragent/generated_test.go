@@ -51,3 +51,14 @@ func TestCuratedPrecedesGenerated(t *testing.T) {
 	assert.Equal(t, "Googlebot", got.Bot.Name)
 	assert.Equal(t, useragent.BotSearchEngine, got.Bot.Category)
 }
+
+// Spot-checks that a generated (non-curated) pattern produces a sane display
+// name via botNameFromPattern. "petalbot" is present in the generated table
+// and has no curated override.
+func TestGeneratedPatternNaming(t *testing.T) {
+	const pattern = "petalbot"
+	require.Contains(t, useragent.GeneratedBotPatterns, pattern, "expected %q in the generated table; pick another present, non-curated pattern if this fails", pattern)
+
+	got := useragent.Parse("Mozilla/5.0 (compatible) " + pattern)
+	assert.Equal(t, pattern, got.Bot.Name)
+}

@@ -103,7 +103,7 @@ func parseVersion(full string) Version {
 	for i := 0; i <= len(full); i++ {
 		if i < len(full) {
 			if c := full[i]; c >= '0' && c <= '9' {
-				if n < 1<<28 { // clamp: garbage like 40 digits must not overflow
+				if n < 1<<27 { // clamp: garbage like 40 digits must not overflow a 32-bit int (n*10+digit stays within range)
 					n = n*10 + int(c-'0')
 				}
 				seen = true

@@ -209,6 +209,7 @@ middleware vs response/outbound, but don't pre-split.
 | `geoip` | `web/` | A lookup, not communication — "clientip gives the address, geoip gives its meaning". |
 | `msg/` naming | — | Rejected `jobs/` (undersells eventbus), `async/` (collides conceptually with `resilience/`), direction names like `outbound/` (direction doesn't discriminate). |
 | `ai/` standalone | — | Enough packages to stand alone; burying them in `comms/` would make that folder a junk drawer. |
+| `useragent/gen` | `web/` | A reviewed codegen tool colocated with the generated output it produces (`bot_generated.go`) — sanctioned third-level exception to the two-level rule, same spirit as `testdata/` and driver-isolator (`cache/redis`) subdirectories. |
 
 ---
 

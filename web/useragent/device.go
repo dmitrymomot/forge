@@ -82,7 +82,13 @@ func deviceModel(in input, raw string) (model, brand string) {
 		for start > 0 && in.lower[start-1] != ';' && in.lower[start-1] != '(' {
 			start--
 		}
-		seg = strings.TrimSpace(raw[start:end])
+		// Only accept the segment if the scan stopped at a real delimiter.
+		// A well-formed Android UA always has one; start==0 means malformed
+		// input with no opening ';'/'(' before " build/" — leave seg empty
+		// rather than capturing the whole prefix as the model.
+		if start > 0 {
+			seg = strings.TrimSpace(raw[start:end])
+		}
 	} else if i := in.index("android "); i >= 0 {
 		// reduced UA without Build/: model is the next comment segment,
 		// e.g. "(Linux; Android 13; SM-X710)"
