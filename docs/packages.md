@@ -1,13 +1,12 @@
 # Forge — Packages: Layout, Catalog & Roadmap
 
 > Single source of truth for forge's repository layout, shipped package set,
-> and roadmap. Replaces `domain-structure.md`, `maximal-package-set.md`, and
-> `package-set-v2.md` (consolidated 2026-07-04, after a cross-framework review
-> against kratos, go-kit, go-micro, fiber v3, fiber-contrib, and forge v1).
+> and roadmap. Shaped by a cross-framework review against kratos, go-kit,
+> go-micro, fiber v3, fiber-contrib, and forge v1.
 >
-> **State: 72 shipped packages** (+3 driver subpackages) across
+> **State: 74 shipped packages** (+4 subpackages) across
 > `core/ crypto/ resilience/ web/ data/ ops/`
-> · **45 roadmap** (committed) · **24 icebox** (demand-driven, no commitment).
+> · **44 roadmap** (committed) · **23 icebox** (demand-driven, no commitment).
 
 ## Design DNA every package follows
 
@@ -41,7 +40,7 @@ Forge optimizes for a small, auditable dependency surface — not stdlib purism:
   `pgx`, official DB clients, the S3 SDK, `x/crypto`.
 - **Don't wrap** large, opinionated, fast-moving frameworks whose model would
   leak through forge's API (`watermill`, `stripe-go`, provider SDKs). Expose a
-  small interface; the consumer takes the dep in *their* repo.
+  small interface; the consumer takes the dep in _their_ repo.
 - **Build or vendor** anything small that shapes forge's own API (`id`,
   `validate`, `request`, the SKIP LOCKED job engine).
 - **Always isolate** a real dependency in a driver subpackage
@@ -76,7 +75,7 @@ messaging engine, and the driver leaves stays stdlib.
   abbreviations a reader must decode: `debug` not `diag`, `websocket` not
   `ws`, `requestlog` not `reqlog`. Compounds of full words are fine
   (`featureflag`, `objectstore`); one sanctioned exception: `imageproc`.
-- **Admission test:** name the package's *purpose* in one sentence — it must
+- **Admission test:** name the package's _purpose_ in one sentence — it must
   end with exactly one domain noun. If it plausibly fits two domains, the
   tie-breaker is who imports it.
 - **Product-or-brick test:** every package is either a **product** — a
@@ -89,11 +88,11 @@ messaging engine, and the driver leaves stays stdlib.
 ## Framework-wide seams
 
 - **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete
-  + atomic SetNX claim) is THE key-value seam. Backends: memory (shipped),
-  `cache/redis` (shipped). The memory store is LRU-evicting and unsuitable
-  for sessions/idempotency, so those consumers need `cache/redis` (or bring a
-  durable Store of their own). Consumers: `session`, `idempotency`, `otp`,
-  `lockout`, server-side `flash`. No package defines a private byte-KV store.
+    - atomic SetNX claim) is THE key-value seam. Backends: memory (shipped),
+      `cache/redis` (shipped). The memory store is LRU-evicting and unsuitable
+      for sessions/idempotency, so those consumers need `cache/redis` (or bring a
+      durable Store of their own). Consumers: `session`, `idempotency`, `otp`,
+      `lockout`, server-side `flash`. No package defines a private byte-KV store.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.
@@ -111,7 +110,7 @@ messaging engine, and the driver leaves stays stdlib.
 ## Tiers
 
 - **Roadmap** (core / recommended) — committed, listed in build order below.
-  *core* = nearly every app needs it; *recommended* = most apps.
+  _core_ = nearly every app needs it; _recommended_ = most apps.
 - **Icebox** — plausible and pre-scoped, but built only on first concrete
   demand. Not a commitment.
 
@@ -138,7 +137,8 @@ forge/                              # single go.mod at the root
 ├── web/           # HTTP in and out: transport, responses, boundary security, client
 │   # shipped: httpserver hostrouter middleware request clientip problem
 │   #          recoverer requestlog requestid render htmx subroute httpclient
-│   #          cookie csrf secheaders cors timeout compress useragent
+│   #          cookie csrf secheaders cors timeout compress
+│   #          useragent (useragent/gen)
 │   # planned: assets idempotency ipfilter captcha (captcha/turnstile ...)
 │   #          autocert
 │   # icebox:  geoip (geoip/maxmind) dnsverify
@@ -193,23 +193,23 @@ middleware vs response/outbound, but don't pre-split.
 
 ### Placement rationale (judgment calls)
 
-| Package | Domain | Why |
-|---|---|---|
-| `httpclient` | `web/` | Purpose is HTTP; consumed by `oauthclient`, `captcha`, `comms/*`, `llm` alike. Keeps `comms/` pure. |
-| `ratelimit`, `quota` | `resilience/` | Core is a keyed limiter/counter; the HTTP middleware is a thin adapter. Load-control purpose beats delivery mechanism. |
-| `cookie` | `web/` | Composes crypto, but its purpose is the HTTP boundary (`csrf`/`flash`/`session` consumers are web-side). |
-| `render`, `htmx` | `web/` | Response-side transport, symmetric to `request`. `render.JSON` serves pure APIs; a JSON-only API importing from `view/` would read wrong. |
-| `session` | `auth/` | Purpose is identity lifecycle over a Store; `web/cookie` is just the codec it composes. |
-| `catalog`, `locale`, `numbers`, `dates` | `i18n/` | Localization is consumed by emails, API errors, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`. |
-| `form` | `view/` | Exists for server-rendered CRUD: whole-form decode, sticky values, render-friendly `Errors`. `web/request` = per-field typed reads for APIs. |
-| `sse` | `realtime/` | Push transport, stdlib-only; the htmx `SendComponent` bridge lives in `web/htmx`. |
-| `webhook` | `comms/` | Outbound signed delivery + inbound verification are two sides of one webhooks feature; communication purpose owns it, the inbound middleware is a thin adapter. |
-| `fanout` | `realtime/` | Named to keep it distinct from `jobqueue.Broker` — ephemeral fan-out vs durable claim/ack are opposite delivery semantics. |
-| `autocert` | `web/` | Exists to wire `httpserver` TLS. |
-| `geoip` | `web/` | A lookup, not communication — "clientip gives the address, geoip gives its meaning". |
-| `msg/` naming | — | Rejected `jobs/` (undersells eventbus), `async/` (collides conceptually with `resilience/`), direction names like `outbound/` (direction doesn't discriminate). |
-| `ai/` standalone | — | Enough packages to stand alone; burying them in `comms/` would make that folder a junk drawer. |
-| `useragent/gen` | `web/` | A reviewed codegen tool colocated with the generated output it produces (`bot_generated.go`) — sanctioned third-level exception to the two-level rule, same spirit as `testdata/` and driver-isolator (`cache/redis`) subdirectories. |
+| Package                                 | Domain        | Why                                                                                                                                                                                                                                   |
+| --------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `httpclient`                            | `web/`        | Purpose is HTTP; consumed by `oauthclient`, `captcha`, `comms/*`, `llm` alike. Keeps `comms/` pure.                                                                                                                                   |
+| `ratelimit`, `quota`                    | `resilience/` | Core is a keyed limiter/counter; the HTTP middleware is a thin adapter. Load-control purpose beats delivery mechanism.                                                                                                                |
+| `cookie`                                | `web/`        | Composes crypto, but its purpose is the HTTP boundary (`csrf`/`flash`/`session` consumers are web-side).                                                                                                                              |
+| `render`, `htmx`                        | `web/`        | Response-side transport, symmetric to `request`. `render.JSON` serves pure APIs; a JSON-only API importing from `view/` would read wrong.                                                                                             |
+| `session`                               | `auth/`       | Purpose is identity lifecycle over a Store; `web/cookie` is just the codec it composes.                                                                                                                                               |
+| `catalog`, `locale`, `numbers`, `dates` | `i18n/`       | Localization is consumed by emails, API errors, and jobs — not just HTML views. Standalone-domain argument mirrors `ai/`.                                                                                                             |
+| `form`                                  | `view/`       | Exists for server-rendered CRUD: whole-form decode, sticky values, render-friendly `Errors`. `web/request` = per-field typed reads for APIs.                                                                                          |
+| `sse`                                   | `realtime/`   | Push transport, stdlib-only; the htmx `SendComponent` bridge lives in `web/htmx`.                                                                                                                                                     |
+| `webhook`                               | `comms/`      | Outbound signed delivery + inbound verification are two sides of one webhooks feature; communication purpose owns it, the inbound middleware is a thin adapter.                                                                       |
+| `fanout`                                | `realtime/`   | Named to keep it distinct from `jobqueue.Broker` — ephemeral fan-out vs durable claim/ack are opposite delivery semantics.                                                                                                            |
+| `autocert`                              | `web/`        | Exists to wire `httpserver` TLS.                                                                                                                                                                                                      |
+| `geoip`                                 | `web/`        | A lookup, not communication — "clientip gives the address, geoip gives its meaning".                                                                                                                                                  |
+| `msg/` naming                           | —             | Rejected `jobs/` (undersells eventbus), `async/` (collides conceptually with `resilience/`), direction names like `outbound/` (direction doesn't discriminate).                                                                       |
+| `ai/` standalone                        | —             | Enough packages to stand alone; burying them in `comms/` would make that folder a junk drawer.                                                                                                                                        |
+| `useragent/gen`                         | `web/`        | A reviewed codegen tool colocated with the generated output it produces (`bot_generated.go`) — sanctioned third-level exception to the two-level rule, same spirit as `testdata/` and driver-isolator (`cache/redis`) subdirectories. |
 
 ---
 
@@ -375,7 +375,7 @@ Icebox:
   `sqlbroker` = SKIP LOCKED on pgx with LISTEN/NOTIFY wakeups.
   `Broker{Push/Claim/Ack/Nack}` is the exported cross-broker seam.
 - **`scheduler`** — recommended. Cron/interval `supervisor.Service` that
-  *enqueues* into the engine when due; fires once per fleet via a
+  _enqueues_ into the engine when due; fires once per fleet via a
   `unique(name, scheduled_for)` insert race (sqlbroker only — in-memory mode
   is single-instance/test-only). Local ~150-LOC cron parser, no robfig/cron.
 - **`eventbus`** — recommended. Typed events, two modes: sync in-process
@@ -526,7 +526,7 @@ Icebox:
 
 Shipped: `supervisor logger (logger/sentry) config health buildinfo
 automaxprocs logredact bootstrap featureflag`. (`config` —
-formerly planned as `envconfig`, shipped renamed — layers app config from
+layers app config from
 YAML per-env files with `${VAR:default}` substitution, `.env` inheritance,
 and env-tagged structs via `structfields` + `typeconv`; exported `Profile`
 enum (dev/test/staging/prod) with predicates; boot-time only.
@@ -545,7 +545,7 @@ or dotted group path before they reach the next handler; unconditional at
 every level (no bypass knob), redacts `WithAttrs`-baked attrs and tracks the
 `WithGroup` prefix. `crypto/redact` covers values you wrap; this is the
 safety net for attrs you don't control.
-`bootstrap` — thin runtime integrator (replaces the planned `appmain` name):
+`bootstrap` — thin runtime integrator:
 `Run` / generic `RunWithConfig[T]` wire logger → automaxprocs → build-info
 log → config autoload → signal context (via `supervisor.NewContext`) → exit
 code; the callback owns `supervisor.Run` and `defer` cleanup. NOT a DI
@@ -607,8 +607,8 @@ loading; `factory` — generic closure-override test-data builders.
 
 Queued API additions to shipped packages (each unblocks roadmap work):
 
-| Package | Addition |
-|---|---|
+| Package    | Addition                                                       |
+| ---------- | -------------------------------------------------------------- |
 | `web/htmx` | SSE `SendComponent` bridge — deferred to the realtime/sse wave |
 
 ## Build order
@@ -697,8 +697,7 @@ httpclient` · `session guard` · `sse fanout` · `email` · `catalog locale` ·
 
 examples/ or doc.go entries committed so dropped capabilities aren't silently
 lost: grpc-server-as-supervisor.Service · reverse proxy (hostrouter +
-httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
-413) · breadcrumb value type ·
+httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem 413) · breadcrumb value type ·
 notification-inbox pipeline · per-tenant encryption / GDPR crypto-shred (kdf)
 · optimistic locking + audit columns (postgres docs) · Postgres tsvector
 search · usermanager flow · templ `Classes` toggle helper (ex-viewhelper).
