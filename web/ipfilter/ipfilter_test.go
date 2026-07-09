@@ -1,6 +1,7 @@
 package ipfilter_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -110,4 +111,35 @@ func TestResponderOverride(t *testing.T) {
 	if c := serve(t, mw, reqFrom("1.2.3.4:9")); c != http.StatusTeapot {
 		t.Fatalf("custom responder: %d, want 418", c)
 	}
+}
+
+func benchServe(b *testing.B, mw middleware.Middleware, r *http.Request) {
+	b.Helper()
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	b.ReportAllocs()
+	for range b.N {
+		h.ServeHTTP(rec, r)
+	}
+}
+
+func BenchmarkServeAllowed(b *testing.B) {
+	mw := ipfilter.New(ipfilter.WithAllow("203.0.113.0/24"))
+	benchServe(b, mw, reqFrom("203.0.113.9:9"))
+}
+
+func BenchmarkServeBlocked(b *testing.B) {
+	mw := ipfilter.New(ipfilter.WithAllow("203.0.113.0/24"))
+	benchServe(b, mw, reqFrom("8.8.8.8:9"))
+}
+
+func BenchmarkServeLargeList(b *testing.B) {
+	cidrs := make([]string, 0, 100)
+	for i := range 100 {
+		cidrs = append(cidrs, fmt.Sprintf("10.%d.0.0/16", i))
+	}
+	mw := ipfilter.New(ipfilter.WithAllow(cidrs...))
+	benchServe(b, mw, reqFrom("10.99.0.1:9")) // matches the last entry (worst case)
 }

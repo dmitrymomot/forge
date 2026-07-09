@@ -65,13 +65,6 @@ fingerprint. Rides `cache.Store`'s atomic SetNX.
 
 ---
 
-**web/ipfilter**
-
-IP/CIDR allow/deny middleware over `clientip` — admin allowlists, partner
-IP pinning, blocklists.
-
----
-
 **web/captcha**
 
 Server-side CAPTCHA verification behind a `Verifier` seam; providers
