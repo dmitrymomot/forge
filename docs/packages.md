@@ -572,12 +572,6 @@ values; cloud clients stay consumer-side.
 
 ---
 
-**ops/logsample**
-
-`slog.Handler` that rate-samples high-volume records.
-
----
-
 **ops/configwatch**
 
 Poll-based config reload with atomic snapshot swap, as a

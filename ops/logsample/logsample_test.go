@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dmitrymomot/forge/ops/logsample"
 )
@@ -95,4 +96,36 @@ func TestConcurrentHandleIsDeterministic(t *testing.T) {
 	if got := cap.count(); got != 200 {
 		t.Fatalf("kept %d, want 200", got)
 	}
+}
+
+func BenchmarkHandleAlwaysPass(b *testing.B) {
+	h := logsample.New(slog.DiscardHandler)
+	r := slog.NewRecord(time.Time{}, slog.LevelWarn, "msg", 0)
+	ctx := context.Background()
+	b.ReportAllocs()
+	for range b.N {
+		_ = h.Handle(ctx, r)
+	}
+}
+
+func BenchmarkHandleSampled(b *testing.B) {
+	h := logsample.New(slog.DiscardHandler, logsample.WithRate(10))
+	r := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
+	ctx := context.Background()
+	b.ReportAllocs()
+	for range b.N {
+		_ = h.Handle(ctx, r)
+	}
+}
+
+func BenchmarkHandleParallel(b *testing.B) {
+	h := logsample.New(slog.DiscardHandler, logsample.WithRate(10))
+	r := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		ctx := context.Background()
+		for pb.Next() {
+			_ = h.Handle(ctx, r)
+		}
+	})
 }
