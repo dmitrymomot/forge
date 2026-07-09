@@ -93,6 +93,10 @@ and the driver leaves stays stdlib.
   slice of a feature with a single consumer is never a package; it folds
   into its product as internal code. (This is why webhook signing lives
   inside `webhook`, not beside it.)
+- **The roadmap lists only unbuilt packages.** `packages.md` is the backlog;
+  the moment a package ships, delete its entry — a shipped package's `doc.go`
+  / godoc is its reference, not the roadmap. The catalog carries no shipped
+  markers: if a package is listed, it does not exist yet.
 
 ## Framework-wide seams
 
