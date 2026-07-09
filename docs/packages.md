@@ -57,14 +57,6 @@ immutable far-future headers) and SPA fallback. Not a bundler.
 
 ---
 
-**web/idempotency**
-
-Idempotency-Key middleware for partner-facing APIs: replays the stored
-first response on retry, rejects key reuse with a different payload
-fingerprint. Rides `cache.Store`'s atomic SetNX.
-
----
-
 **web/captcha**
 
 Server-side CAPTCHA verification behind a `Verifier` seam; providers

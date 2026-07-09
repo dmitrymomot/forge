@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -182,5 +183,28 @@ func TestOversizeResponseNotCached(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
 	if calls != 2 {
 		t.Fatalf("oversize response should not be cached; calls=%d, want 2", calls)
+	}
+}
+
+func BenchmarkReplay(b *testing.B) {
+	store := cache.NewMemoryStore()
+	h := idempotency.New(store)(okJSON())
+	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{"x":1}`, "k")) // prime
+
+	payload := `{"x":1}`
+	b.ReportAllocs()
+	for range b.N {
+		r := req("POST", "/p", payload, "k")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+}
+
+func BenchmarkFirstCall(b *testing.B) {
+	h := idempotency.New(cache.NewMemoryStore())(okJSON())
+	b.ReportAllocs()
+	for i := range b.N {
+		// distinct key per iteration so each is a fresh first-call
+		r := req("POST", "/p", `{"x":1}`, strconv.Itoa(i))
+		h.ServeHTTP(httptest.NewRecorder(), r)
 	}
 }
