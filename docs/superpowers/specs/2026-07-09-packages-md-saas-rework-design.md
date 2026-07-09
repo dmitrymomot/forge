@@ -69,16 +69,19 @@ igaming (CPA + revshare), anti-fraud system, agents platform
     `RequirePermission` middleware with the 401-vs-403 split.
   - Domain invariants ("owner can be only one") are consumer DB constraints —
     documented stance, not shipped code.
-- **`crypto/jwtverify` (icebox, verify-only) → `crypto/jwt`** — full sign +
+- **`crypto/jwtverify` (icebox, verify-only) → `auth/jwt`** — full sign +
   verify: pinned alg allowlist (never negotiated), exp/nbf/aud/iss checks,
-  JWKS serve + fetch with kid cache/rotation, key rotation via `keyset`.
-  No JWE, no alg negotiation.
+  JWKS serve + fetch with kid cache/rotation, key rotation via
+  `crypto/keyset`. No JWE, no alg negotiation. Lives in `auth/` by the
+  placement tie-breaker (all consumers are auth packages: `oauthserver`
+  issues, `oauthclient` verifies id_tokens, `guard` verifies bearers);
+  `crypto/` keeps the primitives it composes (`sign`, `keyset`).
 
 ### New packages
 
 - **`auth/oauthserver`** — machine-to-machine OAuth2 provider:
   client-credentials grant, token endpoint issuing short-lived JWTs via
-  `crypto/jwt`, JWKS endpoint, client registry behind a storage-agnostic
+  `auth/jwt`, JWKS endpoint, client registry behind a storage-agnostic
   Store. No auth-code-for-third-parties, no consent screens.
 - **`async/outbox`** — transactional outbox: intent rows committed in the
   business DB transaction + a relay `supervisor.Service` that forwards
@@ -87,6 +90,12 @@ igaming (CPA + revshare), anti-fraud system, agents platform
 
 ### Expanded scopes
 
+- **`auth/apikey`** — from key codec to the full API-key product: Stripe-style
+  prefixed keys with checksum, hash-at-rest, plaintext shown once (as before),
+  **plus** storage-agnostic management — create/list/revoke/rotate, per-key
+  scopes, optional expiry, last-used-at tracking — with keys owned by a
+  tenant or a user, and request verification wired as a `guard.Verifier`
+  (constant-time compare, key → identity/tenant resolution).
 - **`data/tenant`** — full multi-tenancy package: `Resolver` chain with
   shipped resolvers (subdomain against a base domain, custom domain via a
   storage-agnostic `DomainLookup` seam, header, cookie, path prefix,
