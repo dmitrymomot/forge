@@ -71,6 +71,16 @@ Stdlib only (`log/slog`, `sync/atomic`, `context`).
 - Concurrency: many goroutines calling `Handle` on shared + derived handlers,
   `-race` clean, kept-count within expected bound.
 
+### Benchmarks (`Benchmark*` in the test file)
+Isolate the decorator by wrapping a no-op `next` (`slog.DiscardHandler`), so the
+numbers measure only the sampling decision.
+- `BenchmarkHandle_AlwaysPass` — an at/above-threshold record (Warn); expect
+  **0 allocs/op** (record forwarded as-is).
+- `BenchmarkHandle_Sampled` — a sub-threshold record exercising the
+  increment-and-modulo drop/keep path; expect **0 allocs/op**.
+- `BenchmarkHandle_Parallel` (`b.RunParallel`) — the shared atomic counter under
+  contention, to catch a hot-path regression.
+
 ### Estimated size
 ~120–160 LOC.
 
@@ -144,6 +154,16 @@ and panicking keeps the chain-friendly `func(...) middleware.Middleware` signatu
 - `WithResponder` override changes the rejection body/status.
 - `WithClientIP` proxy config: `X-Forwarded-For` honored only when trusted.
 - Invalid CIDR → `New` panics with `ErrInvalidCIDR`.
+
+### Benchmarks (`Benchmark*` in the test file)
+Drive the middleware wrapping a no-op `next` handler via `httptest` requests; the
+prefix sets are parsed once at construction, so the benchmark measures per-request
+resolve + match.
+- `BenchmarkServe_Allowed` and `BenchmarkServe_Blocked` — the two outcomes.
+- Vary list size: a small set (a few CIDRs) and a larger set (~100 CIDRs) to show
+  membership cost scales with list length as expected.
+- Report allocs/op; the match itself (`netip.Prefix.Contains`) is alloc-free, so
+  any per-request allocation traces to resolution and is worth surfacing.
 
 ### Estimated size
 ~160–220 LOC.
@@ -257,6 +277,17 @@ fixed and documented, not configurable.
 - Runs against the in-memory `cache.Store` for the suite (durability caveat is a
   deployment concern, not a test concern).
 
+### Benchmarks (`Benchmark*` in the test file)
+Drive the middleware via `httptest` against the in-memory `cache.Store`, isolating
+the decorator's overhead from real network/DB latency.
+- `BenchmarkReplay` — the hottest path under a retry storm: key present, fingerprint
+  matches, stored response decoded and written (handler **not** invoked).
+- `BenchmarkFirstCall` — claim + run a trivial handler + capture + encode + store.
+- `BenchmarkFingerprint` — `sha256(method+path+body)` over a representative body
+  size, plus record encode/decode round-trip.
+These paths allocate by nature (buffering, hashing, stored bytes); the benchmarks
+establish a baseline and guard against regressions rather than targeting 0 allocs.
+
 ### Estimated size
 ~320–400 LOC (largest of the three; still one responsibility).
 
@@ -271,4 +302,9 @@ fixed and documented, not configurable.
 - **Env-loadable Config:** none of the three needs an env-loadable `Config` — they
   are middleware/handler constructors configured by the wiring code, not
   independently env-bootstrapped services. (No env-prefix tags required.)
+- **Benchmarks ship with every package** — each has `Benchmark*` functions
+  covering its hot path(s) with `b.ReportAllocs()`, run via `go test -bench=. -benchmem`.
+  `logsample` and `ipfilter` target **0 allocs/op** on the decision path; `idempotency`
+  benchmarks establish a regression baseline (allocation is inherent to buffering +
+  hashing + serialization).
 - **`just fmt ./<pkg>/...` + `just lint`** after each package.
