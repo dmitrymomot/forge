@@ -2,8 +2,13 @@
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
 - Run `just lint` after task finished.
-- Packages live in purpose-named domain folders (see docs/packages.md): max two levels, three only for driver isolators (`resilience/cache/redis` pattern). No packages at the repo root. Leaf directory = package name; leaf names unique across domains. New packages must name their domain before implementation.
+- Packages (docs/packages.md is the source of truth): purpose-named domain folders, max two levels (third only for driver isolators — `resilience/cache/redis`), leaf dir = package name, unique across domains, none at repo root. Names are full words or standard acronyms (`debug` not `diag`). A new package names its domain first and must be a product (complete wireable feature) or a brick (2+ real consumers) — single-consumer slices fold into their product.
+- No magic: no reflection (only `structfields`), no service containers; values via params, not context. Public API never returns unexported types.
+- One of three idioms: stateless free-funcs · `New(...Option)` + env-loadable `Config`/`DefaultConfig`/`Validate` · `supervisor.Service`. Anatomy: `doc.go` (runnable example), `config.go`, `options.go`, `errors.go` (`errors.Is`-matchable single-line sentinels). Single responsibility, ~250–850 LOC.
 - DON'T use builder pattern, USE options instead.
+- Compose via existing seams (`http.Handler`, `supervisor.Service`, `middleware.Middleware`, `cache.Store` byte-KV, ratelimit counters, `jobqueue.Broker`, problem+json errors) — never define a private duplicate.
+- Env prefixes baked into config tags (`SERVER_ADDR`); nest tagged (`env:"APP"`) to separate instances.
+- Test doubles live with the seam owner — no central fakes package.
 - Minimal dependencies, NOT zero. Depend on hardened protocol clients & crypto (pgx, S3 SDK, x/crypto) — don't reinvent wire protocols. Build/copy small utilities that shape our own API (id, validate, request, the job engine). Never wrap large/leaky frameworks (watermill, stripe-go) — expose an interface, let the consumer take the dep. Isolate every real dep behind a subpackage. Postgres is the database; data + messaging layers target pgx.
 - black-box testing ONLY!
 - PR flow: create new PR -> whait all CI passed -> fix failed workflows -> learn Claude's review -> fix all found issues and resolve fixed threads -> commit -> repeat until all issues will be fixed.
