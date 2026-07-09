@@ -98,7 +98,7 @@ func New(store cache.Store, opts ...Option) middleware.Middleware {
 			case status >= 200 && status < 500:
 				// Deterministic outcome (2xx/3xx/4xx) — freeze and replay.
 				rec := encodeDone(fp, status, filterHeader(cw.Header()), cw.buf.Bytes())
-				_ = store.Set(ctx, key, rec, cache.WithTTL(cfg.ttl))
+				_ = store.Set(context.WithoutCancel(ctx), key, rec, cache.WithTTL(cfg.ttl))
 				cw.flush()
 			default:
 				// 5xx (or 1xx) — release so a retry actually re-executes.

@@ -1,6 +1,8 @@
 package idempotency_test
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -183,6 +185,57 @@ func TestOversizeResponseNotCached(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
 	if calls != 2 {
 		t.Fatalf("oversize response should not be cached; calls=%d, want 2", calls)
+	}
+}
+
+type failingStore struct{}
+
+func (failingStore) Get(context.Context, string) ([]byte, error) {
+	return nil, errors.New("store down")
+}
+func (failingStore) Set(context.Context, string, []byte, ...cache.SetOption) error {
+	return errors.New("store down")
+}
+func (failingStore) Delete(context.Context, string) error { return errors.New("store down") }
+func (failingStore) Has(context.Context, string) (bool, error) {
+	return false, errors.New("store down")
+}
+func (failingStore) DeletePrefix(context.Context, string) error { return errors.New("store down") }
+func (failingStore) Close() error                               { return nil }
+
+func TestStoreUnavailableExecutesOnce(t *testing.T) {
+	var calls int32
+	h := idempotency.New(failingStore{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
+	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
+	if calls != 2 {
+		t.Fatalf("store down must execute each time (cannot guarantee idempotency); calls=%d, want 2", calls)
+	}
+}
+
+func TestPanicReleasesClaim(t *testing.T) {
+	store := cache.NewMemoryStore()
+	var calls int32
+	h := idempotency.New(store)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			panic("boom")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	func() {
+		defer func() { _ = recover() }() // absorb the propagating panic
+		h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
+	}()
+	r2 := httptest.NewRecorder()
+	h.ServeHTTP(r2, req("POST", "/p", `{}`, "k"))
+	if r2.Code != http.StatusOK {
+		t.Fatalf("after panic-release, retry must re-execute: got %d, want 200", r2.Code)
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d, want 2 (panic must release the claim)", calls)
 	}
 }
 

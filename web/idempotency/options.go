@@ -1,6 +1,9 @@
 package idempotency
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type config struct {
 	methods       map[string]bool
@@ -28,7 +31,7 @@ func WithMethods(m ...string) Option {
 	return func(c *config) {
 		set := make(map[string]bool, len(m))
 		for _, x := range m {
-			set[x] = true
+			set[strings.ToUpper(x)] = true
 		}
 		c.methods = set
 	}
