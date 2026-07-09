@@ -62,3 +62,37 @@ func TestRateOneKeepsEverything(t *testing.T) {
 		t.Fatalf("kept %d, want 20", got)
 	}
 }
+
+func TestDerivedHandlerSharesCounter(t *testing.T) {
+	cap := &capture{}
+	log := slog.New(logsample.New(cap, logsample.WithRate(10)))
+	child := log.With("k", "v")
+	// 5 via parent + 5 via child interleaved = 10 sub-threshold records; at rate 10
+	// a shared counter keeps exactly the 1st (=> 1). A per-handler counter would
+	// keep the 1st of each => 2.
+	for range 5 {
+		log.Info("a")
+		child.Info("b")
+	}
+	if got := cap.count(); got != 1 {
+		t.Fatalf("kept %d, want 1 (counter must be shared across derived handlers)", got)
+	}
+}
+
+func TestConcurrentHandleIsDeterministic(t *testing.T) {
+	cap := &capture{}
+	log := slog.New(logsample.New(cap, logsample.WithRate(4)))
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
+				log.Info("x")
+			}
+		})
+	}
+	wg.Wait()
+	// 800 sub-threshold records at rate 4 => (n-1)%4==0 for n=1,5,...,797 => 200.
+	if got := cap.count(); got != 200 {
+		t.Fatalf("kept %d, want 200", got)
+	}
+}
