@@ -57,21 +57,6 @@ immutable far-future headers) and SPA fallback. Not a bundler.
 
 ---
 
-**web/idempotency**
-
-Idempotency-Key middleware for partner-facing APIs: replays the stored
-first response on retry, rejects key reuse with a different payload
-fingerprint. Rides `cache.Store`'s atomic SetNX.
-
----
-
-**web/ipfilter**
-
-IP/CIDR allow/deny middleware over `clientip` — admin allowlists, partner
-IP pinning, blocklists.
-
----
-
 **web/captcha**
 
 Server-side CAPTCHA verification behind a `Verifier` seam; providers
@@ -569,12 +554,6 @@ serve/migrate/worker/seed/version.
 
 Hot-reloadable secrets behind a `Provider` seam, exposing `redact.Secret`
 values; cloud clients stay consumer-side.
-
----
-
-**ops/logsample**
-
-`slog.Handler` that rate-samples high-volume records.
 
 ---
 
