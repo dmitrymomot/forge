@@ -9,6 +9,9 @@ import (
 
 // colorHex renders c as a lowercase "#rrggbb" hex string, dropping alpha.
 // Translucency is carried separately via a fill-opacity attribute (see svgFill).
+// The channels come from color.RGBA(), which is alpha-premultiplied, so a
+// translucent saturated color is darkened; foreground/background are expected
+// to be opaque (solid), which the package targets and renders exactly.
 func colorHex(c color.Color) string {
 	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
