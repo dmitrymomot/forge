@@ -188,9 +188,32 @@ one responsibility. Do **not** fracture the package to hit the band.
   auto-raises level to Q, `ShapeDots` auto-raises level to Q, `WithSize` →
   expected integer scale, fg/bg reflected in output pixels, quiet-zone width,
   `WithLogoSize` cap enforced.
-- `bench_test.go` on a typical URL. **Perf is a cold path** (codes generated at
-  enrollment / link creation, not per request), so design.md's meta-rule
-  applies: readable first, no zero-alloc gymnastics.
+### Benchmarks (`bench_test.go`, `b.ReportAllocs()`)
+
+**Perf is a cold path** — codes are generated at enrollment / link creation,
+not per request — so design.md's meta-rule holds: readable first, no zero-alloc
+gymnastics. Benchmarks here **establish a baseline and guard against regressions**
+(especially the deliberately-expensive supersampling path), not to chase
+micro-optimizations. Per design.md, the supersampling render is perf-motivated
+complexity, so its benchmark is what justifies it in the PR.
+
+Cover, at minimum:
+
+- `BenchmarkEncode` — pure pipeline (RS + 8-mask penalty scoring is the cost),
+  at a **short input** (an `otpauth://` URI, ~v3) and a **large input** (a long
+  URL near v10+ capacity), so version scaling is visible.
+- `BenchmarkEncode` across the four EC levels at a fixed input (EC codeword
+  volume grows L→H).
+- `BenchmarkPNG_Square` — crisp integer-scaled raster (no supersampling); the
+  common 2FA/embed path and the baseline.
+- `BenchmarkPNG_Shaped` — `ShapeRounded`/`ShapeDots` supersampled path; the
+  4×-render + downsample cost measured against `BenchmarkPNG_Square` to quantify
+  the trade.
+- `BenchmarkPNG_Logo` — logo scale + composite overhead.
+- `BenchmarkSVG` — encode + string build (path assembly), short and large input.
+
+Report ns/op and allocs/op; treat large regressions in the square/SVG paths as
+signals, and keep the shaped-vs-square multiple documented as the expected cost.
 
 ## Consumers & integration
 
