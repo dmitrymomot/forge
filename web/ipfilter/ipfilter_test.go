@@ -113,15 +113,34 @@ func TestResponderOverride(t *testing.T) {
 	}
 }
 
+type discardRW struct{ h http.Header }
+
+func (d *discardRW) Header() http.Header {
+	if d.h == nil {
+		d.h = make(http.Header)
+	}
+	return d.h
+}
+func (d *discardRW) Write(p []byte) (int, error) { return len(p), nil }
+func (d *discardRW) WriteHeader(int)             {}
+
 func benchServe(b *testing.B, mw middleware.Middleware, r *http.Request) {
 	b.Helper()
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	rec := httptest.NewRecorder()
+	rec := &discardRW{}
 	b.ReportAllocs()
 	for range b.N {
 		h.ServeHTTP(rec, r)
+	}
+}
+
+func TestUnresolvableUnderDenylistOnlyAllowed(t *testing.T) {
+	// Deny-wins with no allowlist gate: an unresolvable client IP fails OPEN.
+	mw := ipfilter.New(ipfilter.WithDeny("192.0.2.0/24"))
+	if c := serve(t, mw, reqFrom("garbage-not-an-ip")); c != http.StatusOK {
+		t.Fatalf("unresolvable IP, denylist-only, should pass: %d, want 200", c)
 	}
 }
 

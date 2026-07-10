@@ -58,7 +58,8 @@ func mustParse(cidrs []string) []netip.Prefix {
 }
 
 // parsePrefix accepts a CIDR ("10.0.0.0/8") or a bare address ("10.0.0.1"),
-// returning a masked prefix so Contains matches correctly.
+// returning a canonical masked prefix. (Prefix.Contains already ignores host
+// bits, so masking is for canonical form, not matching correctness.)
 func parsePrefix(s string) (netip.Prefix, error) {
 	if p, err := netip.ParsePrefix(s); err == nil {
 		return p.Masked(), nil
@@ -67,5 +68,6 @@ func parsePrefix(s string) (netip.Prefix, error) {
 	if err != nil {
 		return netip.Prefix{}, err
 	}
-	return netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()), nil
+	addr = addr.Unmap()
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
