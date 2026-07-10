@@ -102,3 +102,25 @@ func WithVerifyHS256Keyset(ks *keyset.Keyset) VerifierOption {
 func WithClock(clk clock.Clock) VerifierOption {
 	return func(c *verifierConfig) { c.clk = clk }
 }
+
+// WithIssuer requires the iss claim to equal iss exactly.
+func WithIssuer(iss string) VerifierOption {
+	return func(c *verifierConfig) { c.iss = iss }
+}
+
+// WithAudience requires the aud claim to contain aud.
+func WithAudience(aud string) VerifierOption {
+	return func(c *verifierConfig) { c.aud = aud }
+}
+
+// WithLeeway sets the clock-skew tolerance applied to exp and nbf.
+// Default 30s.
+func WithLeeway(d time.Duration) VerifierOption {
+	return func(c *verifierConfig) { c.leeway = d }
+}
+
+// WithoutExpiry accepts tokens with no exp claim. By default a missing
+// exp is rejected as ErrExpired.
+func WithoutExpiry() VerifierOption {
+	return func(c *verifierConfig) { c.requireExp = false }
+}
