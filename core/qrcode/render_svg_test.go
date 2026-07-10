@@ -27,3 +27,27 @@ func TestSVGStructure(t *testing.T) {
 		t.Errorf("viewBox not in module units: %.80q", s)
 	}
 }
+
+func TestSVGOpaqueColorsHaveNoOpacity(t *testing.T) {
+	out, err := qrcode.SVG("hello",
+		qrcode.WithForeground(color.Black), qrcode.WithBackground(color.White))
+	if err != nil {
+		t.Fatalf("SVG: %v", err)
+	}
+	if strings.Contains(string(out), "fill-opacity") {
+		t.Error("opaque colors must not emit fill-opacity (raster/existing-output parity)")
+	}
+}
+
+func TestSVGTranslucentForegroundEmitsOpacity(t *testing.T) {
+	// A half-transparent foreground must carry through as fill-opacity so SVG
+	// matches the alpha PNG honors, instead of rendering opaque.
+	out, err := qrcode.SVG("hello",
+		qrcode.WithForeground(color.NRGBA{R: 0, G: 0, B: 0, A: 128}))
+	if err != nil {
+		t.Fatalf("SVG: %v", err)
+	}
+	if !strings.Contains(string(out), "fill-opacity=") {
+		t.Errorf("translucent foreground must emit fill-opacity: %.120q", string(out))
+	}
+}

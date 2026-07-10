@@ -103,3 +103,72 @@ func TestShapedSVGUsesCircles(t *testing.T) {
 		t.Error("ShapeDots SVG must use <circle> elements")
 	}
 }
+
+// inFinder mirrors the unexported isEyeModule: it reports whether (x, y) lands
+// in one of the three 7×7 finder patterns of a size×size matrix.
+func inFinder(size, x, y int) bool {
+	in := func(ox, oy int) bool { return x >= ox && x < ox+7 && y >= oy && y < oy+7 }
+	return in(0, 0) || in(size-7, 0) || in(0, size-7)
+}
+
+// TestSVGDotsKeepFindersSolid proves ShapeDots shapes only data modules: the
+// number of <circle> elements equals the count of dark NON-finder modules, so
+// the three finder patterns are excluded from the dots and stay solid (a
+// scannability requirement — decoders locate the symbol via the finders).
+func TestSVGDotsKeepFindersSolid(t *testing.T) {
+	const data = "svg-dots-finders"
+	// Pin the level so the SVG's effective matrix (ShapeDots raises to Q) equals
+	// the one Encode returns; otherwise the module counts would not line up.
+	m, err := qrcode.Encode(data, qrcode.WithLevel(qrcode.LevelQ))
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	out, err := qrcode.SVG(data, qrcode.WithLevel(qrcode.LevelQ), qrcode.WithModuleShape(qrcode.ShapeDots))
+	if err != nil {
+		t.Fatalf("SVG: %v", err)
+	}
+
+	size := m.Size()
+	dataDark, totalDark := 0, 0
+	for y := range size {
+		for x := range size {
+			if !m.Module(x, y) {
+				continue
+			}
+			totalDark++
+			if !inFinder(size, x, y) {
+				dataDark++
+			}
+		}
+	}
+
+	circles := strings.Count(string(out), "<circle")
+	if circles != dataDark {
+		t.Errorf("<circle> count = %d, want %d (dark non-finder modules)", circles, dataDark)
+	}
+	// The finders are always dark, so excluding them must drop the count.
+	if !m.Module(0, 0) {
+		t.Fatal("expected finder corner (0,0) to be dark")
+	}
+	if circles >= totalDark {
+		t.Errorf("circles=%d must be < total dark modules=%d (finders excluded)", circles, totalDark)
+	}
+}
+
+// TestSVGEyeRoundedRendersRoundedFinders proves EyeRounded takes effect in SVG:
+// with dotted data modules (circles), the finder cells render as rounded rects.
+func TestSVGEyeRoundedRendersRoundedFinders(t *testing.T) {
+	out, err := qrcode.SVG("eye-rounded",
+		qrcode.WithModuleShape(qrcode.ShapeDots),
+		qrcode.WithEyeShape(qrcode.EyeRounded))
+	if err != nil {
+		t.Fatalf("SVG: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `rx="0.33"`) {
+		t.Error("EyeRounded SVG must render finder cells as rounded <rect rx=\"0.33\">")
+	}
+	if !strings.Contains(s, "<circle") {
+		t.Error("dotted data modules must still render as <circle>")
+	}
+}
