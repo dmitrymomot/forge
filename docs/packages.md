@@ -311,16 +311,6 @@ WWW-Authenticate — gates pprof/metrics/staging/admin), and
 
 ---
 
-**auth/jwt**
-
-Full JWT: sign and verify with a pinned alg allowlist (RS256/ES256/EdDSA —
-never negotiated), exp/nbf/aud/iss checks, JWKS serve + fetch with kid
-cache/rotation, key rotation via `crypto/keyset`. No JWE. Consumed by
-`oauthserver` (issuing), `oauthclient` (id_token verify), `guard` (bearer
-verify), and inter-service auth.
-
----
-
 **auth/lockout**
 
 Login/OTP failure counting with exponential delay and lockout windows over
