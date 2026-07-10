@@ -2,8 +2,10 @@ package jwt
 
 import (
 	"crypto"
+	"net/http"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/crypto/keyset"
 )
 
@@ -53,4 +55,50 @@ type serveConfig struct {
 // JWKS responses. Without it no cache header is written.
 func WithCacheControl(maxAge time.Duration) ServeOption {
 	return func(c *serveConfig) { c.maxAge = maxAge }
+}
+
+// VerifierOption configures NewVerifier.
+type VerifierOption func(*verifierConfig)
+
+type verifierConfig struct {
+	clk        clock.Clock
+	jwksURL    string
+	iss        string
+	aud        string
+	keys       []Key
+	keysets    []*keyset.Keyset // asymmetric PKCS#8 material
+	hsKeysets  []*keyset.Keyset // raw HS256 secrets
+	jwksCfg    jwksConfig
+	leeway     time.Duration
+	requireExp bool
+}
+
+// jwksConfig is a placeholder for JWKS fetch settings, wired up in Task 6.
+type jwksConfig struct {
+	client   *http.Client
+	refresh  time.Duration
+	cooldown time.Duration
+}
+
+// WithKeys adds explicit verification keys (e.g. from Signer.PublicKeys).
+func WithKeys(keys ...Key) VerifierOption {
+	return func(c *verifierConfig) { c.keys = append(c.keys, keys...) }
+}
+
+// WithVerifyKeyset derives verification keys from the public halves of an
+// asymmetric keyset (PKCS#8 DER private-key material). All versions —
+// primary and retired — verify.
+func WithVerifyKeyset(ks *keyset.Keyset) VerifierOption {
+	return func(c *verifierConfig) { c.keysets = append(c.keysets, ks) }
+}
+
+// WithVerifyHS256Keyset adds every version of an HS256 secret keyset as a
+// verification key.
+func WithVerifyHS256Keyset(ks *keyset.Keyset) VerifierOption {
+	return func(c *verifierConfig) { c.hsKeysets = append(c.hsKeysets, ks) }
+}
+
+// WithClock overrides the time source used for exp/nbf checks (tests).
+func WithClock(clk clock.Clock) VerifierOption {
+	return func(c *verifierConfig) { c.clk = clk }
 }

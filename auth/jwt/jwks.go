@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
@@ -88,4 +89,11 @@ func (s *Signer) JWKS(opts ...ServeOption) http.Handler {
 		}
 		_, _ = w.Write(body)
 	})
+}
+
+// jwksCache is implemented in Task 6 (JWKS fetch).
+type jwksCache struct{}
+
+func (c *jwksCache) get(ctx context.Context, kid string) (Key, error) {
+	return Key{}, ErrUnknownKey
 }
