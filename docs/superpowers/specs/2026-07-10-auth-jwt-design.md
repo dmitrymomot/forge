@@ -191,8 +191,12 @@ top of the band; catalog scopes it as "Full JWT".
 
 ## Testing (black-box, package `jwt_test`)
 
-- Golden vectors: RFC 7515 A.1 (HS256), A.2 (RS256), A.3 (ES256),
-  RFC 8037 A.4 (EdDSA).
+- Golden vector: RFC 7515 A.1 (HS256) verbatim. RS256/ES256/EdDSA are
+  covered by stdlib-crypto cross-checks in both directions instead —
+  tokens our Signer produces must verify under stdlib `rsa`/`ecdsa`/
+  `ed25519`, and stdlib-signed tokens must pass our Verify. (RFC 8037
+  A.4's payload is not a JSON claims object, so it cannot pass full
+  Verify; long RS256/ES256 vector constants are transcription hazards.)
 - Adversarial: `alg:none`, alg-swap, HS256-with-public-key confusion,
   tampered payload/signature, padding in base64url, >64 KiB token,
   wrong/missing kid, garbage input, `typ` mismatch.
