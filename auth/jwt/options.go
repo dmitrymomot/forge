@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"crypto"
+	"time"
 
 	"github.com/dmitrymomot/forge/crypto/keyset"
 )
@@ -39,4 +40,17 @@ func WithHS256Keyset(ks *keyset.Keyset) SignerOption {
 // crypto.Signer). HS256 is not accepted here — use WithHS256Keyset.
 func WithSignerKey(kid string, alg Alg, key crypto.Signer) SignerOption {
 	return func(c *signerConfig) { c.direct = &directKey{kid: kid, alg: alg, key: key} }
+}
+
+// ServeOption configures the Signer.JWKS handler.
+type ServeOption func(*serveConfig)
+
+type serveConfig struct {
+	maxAge time.Duration
+}
+
+// WithCacheControl sets a "Cache-Control: public, max-age=..." header on
+// JWKS responses. Without it no cache header is written.
+func WithCacheControl(maxAge time.Duration) ServeOption {
+	return func(c *serveConfig) { c.maxAge = maxAge }
 }

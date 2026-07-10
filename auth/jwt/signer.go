@@ -101,6 +101,21 @@ func newSignerFromKeyset(ks *keyset.Keyset, build func(int, []byte) (signingKey,
 	return s, nil
 }
 
+// PublicKeys returns the verification halves of the signer's asymmetric
+// keys (primary first, then retired) for direct in-process wiring via
+// NewVerifier(WithKeys(...)). HS256 secrets are never included — wire the
+// HS256 keyset into the verifier with WithVerifyHS256Keyset instead.
+func (s *Signer) PublicKeys() []Key {
+	keys := make([]Key, 0, len(s.all))
+	for _, k := range s.all {
+		if k.alg == HS256 {
+			continue
+		}
+		keys = append(keys, Key{KID: k.kid, Alg: k.alg, Key: k.signer.Public()})
+	}
+	return keys
+}
+
 // Sign marshals claims with encoding/json and returns the signed compact
 // JWT. It signs exactly what it is given — no claims are auto-filled. The
 // header carries alg, kid, and typ "JWT".
