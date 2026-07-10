@@ -12,12 +12,14 @@ type Option func(*config)
 func WithLevel(l Level) Option { return func(c *config) { c.level = l } }
 
 // WithScale sets the number of pixels per module for raster output (default 8).
-// Integer scaling keeps modules crisp.
+// Integer scaling keeps modules crisp. Affects PNG/DataURI only; SVG scales
+// freely via its module-unit viewBox and ignores this.
 func WithScale(pxPerModule int) Option { return func(c *config) { c.scale = pxPerModule } }
 
 // WithSize requests an approximate output width in pixels; the renderer picks
 // the largest integer scale whose full image (modules + border) fits. Wins
-// over WithScale when both are set.
+// over WithScale when both are set. Affects PNG/DataURI only; SVG scales freely
+// via its module-unit viewBox and ignores this.
 func WithSize(targetPx int) Option { return func(c *config) { c.targetSize = targetPx } }
 
 // WithBorder sets the quiet-zone width in modules (default 4).

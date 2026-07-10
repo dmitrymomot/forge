@@ -219,7 +219,9 @@ type Matrix struct {
 // Size returns the module count per side (excludes the quiet zone).
 func (m *Matrix) Size() int { return m.g.size }
 
-// Module reports whether the module at (x, y) is dark.
+// Module reports whether the module at (x, y) is dark. x and y must be in
+// [0, Size()); out-of-range coordinates panic (the Size()-bounded render loop
+// is the intended contract).
 func (m *Matrix) Module(x, y int) bool { return m.g.at(x, y) }
 
 // Version returns the QR version (1-40).

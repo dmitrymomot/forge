@@ -4,9 +4,10 @@
 // and styled module/eye shapes.
 //
 // The encoder is byte mode only (UTF-8) with automatic version selection
-// (1–40) and error-correction levels L/M/Q/H (default M). Setting a logo or
-// ShapeDots raises the effective level to at least Q so the result stays
-// scannable.
+// (1–40) and error-correction levels L/M/Q/H (default M). When PNG, SVG, or
+// DataURI render a logo or ShapeDots, they raise the effective error-correction
+// level to at least Q so the result stays scannable; Encode ignores render
+// options and always uses the level you pass.
 //
 // # Usage
 //
