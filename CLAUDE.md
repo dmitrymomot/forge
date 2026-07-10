@@ -3,5 +3,6 @@
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
 - Run `just lint` after task finished.
-- `docs/packages.md` = package catalog & roadmap (list only). `docs/design.md` = ALL design rules — layout/naming, package idioms & anatomy, dependency policy, seams, testing policy, anti-scope. Read design.md BEFORE creating or changing any package and follow it exactly.
+- `docs/packages.md` = package catalog & roadmap (list only). `docs/design.md` = ALL design rules — layout/naming, package idioms & anatomy, dependency policy, seams, performance rules, testing policy, anti-scope. Read design.md BEFORE creating or changing any package and follow it exactly.
+- Perf: readable first, optimize only proven-hot paths; any perf-motivated complexity requires a benchmark in the PR. Hot-path rules: docs/design.md §Performance.
 - PR flow: create new PR -> whait all CI passed -> fix failed workflows -> learn Claude's review -> fix all found issues and resolve fixed threads -> commit -> repeat until all issues will be fixed.

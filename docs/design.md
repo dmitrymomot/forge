@@ -1,7 +1,7 @@
 # Forge — Design Rules
 
 > The framework constitution: packaging rules, idioms, dependency policy,
-> seams, and anti-scope. The package catalog & roadmap live in
+> seams, performance rules, and anti-scope. The package catalog & roadmap live in
 > [packages.md](packages.md). Forge targets SaaS applications: it ships the
 > ~99% of boilerplate every SaaS repeats (tenancy, authentication,
 > authorization, background work, webhooks, audit, rate limiting,
@@ -35,6 +35,37 @@
   its package prefix in the tag (`COOKIE_KEYS`, `SERVER_ADDR`, `DB_URL`).
   Nest untagged to keep default names; nest tagged (`env:"APP"`) to
   separate instances (`APP_COOKIE_KEYS`).
+
+## Performance rules — hot-path hygiene
+
+Forge code runs on every consumer's request/job hot path, so packages are
+allocation-conscious by default. The meta-rule outranks everything below:
+**readable first — optimize only what a benchmark or profile proves hot, and
+any perf-motivated complexity requires a benchmark in the PR proving it.**
+
+- **Allocation discipline:** preallocate slices/maps when size is known or
+  estimable (`make([]T, 0, n)`); `strings.Builder` over `+=` in loops; no
+  `[]byte(s)`/`string(b)` round-trips on hot paths (each one copies);
+  `strconv` over `fmt.Sprintf` for simple conversions; `sync.Pool` for
+  per-request buffers only where a benchmark justifies it. Zero allocs is
+  the target for parse/encode/middleware hot paths (`useragent` precedent).
+- **Hot structs:** keep pointer-free where practical to reduce GC scan
+  work; field layout is enforced by betteralign (`just lint`).
+- **Loops:** hoist invariants out; `regexp.MustCompile` at package level
+  only; honor `ctx.Done()` in every loop and worker.
+- **Bounded concurrency:** never spawn unbounded goroutines — worker pools
+  or semaphores with configurable bounds; bounded queues + backpressure
+  over unbounded buffering.
+- **Lock hygiene:** never hold a mutex across I/O or channel ops; plain
+  `sync.Mutex` unless reads vastly outnumber writes; mutexes for simple
+  shared state, channels for pipelines.
+- **I/O:** every external call takes a context and an explicit timeout with
+  a safe default; clients and pools are created in `New` and reused, never
+  per-call; wrap network/file I/O in bufio; stream with `io.Copy` /
+  `json.Decoder`; never read unbounded input into memory — cap request
+  bodies (`http.MaxBytesReader`).
+- **Logging:** slog attrs only, no eager formatting; guard expensive
+  attribute computation with `Enabled`/level checks.
 
 ## Dependency philosophy — minimal, not zero
 
