@@ -73,11 +73,54 @@ type verifierConfig struct {
 	requireExp bool
 }
 
-// jwksConfig is a placeholder for JWKS fetch settings, wired up in Task 6.
+// jwksConfig holds JWKS fetch settings configured via JWKSOption.
 type jwksConfig struct {
-	client   *http.Client
-	refresh  time.Duration
-	cooldown time.Duration
+	client       *http.Client
+	refresh      time.Duration
+	cooldown     time.Duration
+	fetchTimeout time.Duration
+}
+
+// JWKSOption configures JWKS fetching for WithJWKSURL.
+type JWKSOption func(*jwksConfig)
+
+// WithJWKSURL adds a remote RFC 7517 JWK set as a verification key source.
+// Fetching is lazy: the first Verify triggers it. Keys are cached in
+// memory, refreshed when the refresh interval elapses, and refetched on an
+// unknown kid no more often than the cooldown.
+func WithJWKSURL(url string, opts ...JWKSOption) VerifierOption {
+	return func(c *verifierConfig) {
+		c.jwksURL = url
+		for _, o := range opts {
+			o(&c.jwksCfg)
+		}
+	}
+}
+
+// WithHTTPClient sets the HTTP client used to fetch the JWK set.
+// Default: httpclient.New().
+func WithHTTPClient(client *http.Client) JWKSOption {
+	return func(c *jwksConfig) { c.client = client }
+}
+
+// WithRefreshInterval sets how long a fetched JWK set stays fresh.
+// Default 1h.
+func WithRefreshInterval(d time.Duration) JWKSOption {
+	return func(c *jwksConfig) { c.refresh = d }
+}
+
+// WithRefreshCooldown sets the minimum gap between unknown-kid refetches.
+// Default 1m.
+func WithRefreshCooldown(d time.Duration) JWKSOption {
+	return func(c *jwksConfig) { c.cooldown = d }
+}
+
+// WithFetchTimeout bounds each JWKS HTTP fetch. Because fetches are
+// deduplicated (the caller's context deadline does not propagate to the
+// shared fetch), this is the ceiling on how long a Verify can block on a
+// stalled JWKS endpoint. Default 30s.
+func WithFetchTimeout(d time.Duration) JWKSOption {
+	return func(c *jwksConfig) { c.fetchTimeout = d }
 }
 
 // WithKeys adds explicit verification keys (e.g. from Signer.PublicKeys).

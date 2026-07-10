@@ -13,6 +13,7 @@ import (
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/crypto/keyset"
+	"github.com/dmitrymomot/forge/web/httpclient"
 )
 
 // maxTokenLen bounds Verify input before any decoding (DoS guard).
@@ -38,7 +39,7 @@ func NewVerifier(opts ...VerifierOption) (*Verifier, error) {
 		leeway:     defaultLeeway,
 		requireExp: true,
 		clk:        clock.System(),
-		jwksCfg:    jwksConfig{refresh: time.Hour, cooldown: time.Minute},
+		jwksCfg:    jwksConfig{refresh: time.Hour, cooldown: time.Minute, fetchTimeout: 30 * time.Second},
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -77,7 +78,20 @@ func NewVerifier(opts ...VerifierOption) (*Verifier, error) {
 		requireExp: cfg.requireExp,
 		clk:        cfg.clk,
 	}
-	// Task 6 wires cfg.jwksURL into v.jwks here.
+	if cfg.jwksURL != "" {
+		client := cfg.jwksCfg.client
+		if client == nil {
+			client = httpclient.New()
+		}
+		v.jwks = &jwksCache{
+			url:          cfg.jwksURL,
+			client:       client,
+			refresh:      cfg.jwksCfg.refresh,
+			cooldown:     cfg.jwksCfg.cooldown,
+			fetchTimeout: cfg.jwksCfg.fetchTimeout,
+			clk:          cfg.clk,
+		}
+	}
 	return v, nil
 }
 
