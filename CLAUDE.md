@@ -1,3 +1,4 @@
+- Be concise!
 - Work ONLY in CURRENT branch, don't switch!
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
