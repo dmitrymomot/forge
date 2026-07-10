@@ -130,13 +130,19 @@ func WithKeys(keys ...Key) VerifierOption {
 
 // WithVerifyKeyset derives verification keys from the public halves of an
 // asymmetric keyset (PKCS#8 DER private-key material). All versions —
-// primary and retired — verify.
+// primary and retired — verify. Key sources are combinable, but their kids
+// must be disjoint: since the kid is the keyset version as a decimal
+// string, combining keysets (or a keyset with explicit keys) that share a
+// version number makes NewVerifier fail with ErrBadKey (duplicate kid).
 func WithVerifyKeyset(ks *keyset.Keyset) VerifierOption {
 	return func(c *verifierConfig) { c.keysets = append(c.keysets, ks) }
 }
 
 // WithVerifyHS256Keyset adds every version of an HS256 secret keyset as a
-// verification key.
+// verification key. Key sources are combinable, but their kids must be
+// disjoint: since the kid is the keyset version as a decimal string,
+// combining keysets (or a keyset with explicit keys) that share a version
+// number makes NewVerifier fail with ErrBadKey (duplicate kid).
 func WithVerifyHS256Keyset(ks *keyset.Keyset) VerifierOption {
 	return func(c *verifierConfig) { c.hsKeysets = append(c.hsKeysets, ks) }
 }

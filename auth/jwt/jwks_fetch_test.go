@@ -1,11 +1,15 @@
 package jwt_test
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +17,7 @@ import (
 
 	"github.com/dmitrymomot/forge/auth/jwt"
 	"github.com/dmitrymomot/forge/core/clock"
+	"github.com/dmitrymomot/forge/crypto/keyset"
 )
 
 // jwksServer serves the JWKS of the given signer and counts fetches.
@@ -340,4 +345,114 @@ func TestJWKSFetchTimeoutBounded(t *testing.T) {
 // clock 2h past the refresh TTL and the token must still be unexpired.
 func freshClaims(now time.Time) jwt.Claims {
 	return jwt.Claims{Subject: "user-1", ExpiresAt: jwt.NewNumericDate(now.Add(48 * time.Hour))}
+}
+
+// TestVerifierCombinedKeySources proves the four verifier key sources merge
+// coherently into one Verifier: WithKeys, WithVerifyHS256Keyset,
+// WithVerifyKeyset, and WithJWKSURL each resolve their own signer's token
+// through their own path, provided their kids are disjoint.
+func TestVerifierCombinedKeySources(t *testing.T) {
+	t.Parallel()
+
+	// Source A: WithKeys — an explicit Ed25519 signer, kid "kid-a".
+	_, privA, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519: %v", err)
+	}
+	sA, err := jwt.NewSigner(jwt.WithSignerKey("kid-a", jwt.EdDSA, privA))
+	if err != nil {
+		t.Fatalf("NewSigner sA: %v", err)
+	}
+
+	// Source B: WithVerifyHS256Keyset — HS256 keyset version 5, kid "5".
+	hsKS, err := keyset.New(keyset.WithPrimary(5, []byte("0123456789abcdef0123456789abcdef")))
+	if err != nil {
+		t.Fatalf("keyset hsKS: %v", err)
+	}
+	sB, err := jwt.NewSigner(jwt.WithHS256Keyset(hsKS))
+	if err != nil {
+		t.Fatalf("NewSigner sB: %v", err)
+	}
+
+	// Source C: WithVerifyKeyset — EC keyset version 7, kid "7".
+	ecPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa ecPriv: %v", err)
+	}
+	ecKS, err := keyset.New(keyset.WithPrimary(7, pkcs8(t, ecPriv)))
+	if err != nil {
+		t.Fatalf("keyset ecKS: %v", err)
+	}
+	sC, err := jwt.NewSigner(jwt.WithKeyset(ecKS))
+	if err != nil {
+		t.Fatalf("NewSigner sC: %v", err)
+	}
+
+	// Source D: WithJWKSURL — an ES256 signer served over JWKS, kid "kid-d".
+	ecPrivD, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa ecPrivD: %v", err)
+	}
+	sD, err := jwt.NewSigner(jwt.WithSignerKey("kid-d", jwt.ES256, ecPrivD))
+	if err != nil {
+		t.Fatalf("NewSigner sD: %v", err)
+	}
+	js := newJWKSServer(t, sD)
+
+	v, err := jwt.NewVerifier(
+		jwt.WithKeys(sA.PublicKeys()...),
+		jwt.WithVerifyHS256Keyset(hsKS),
+		jwt.WithVerifyKeyset(ecKS),
+		jwt.WithJWKSURL(js.URL),
+	)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	for name, s := range map[string]*jwt.Signer{"A-WithKeys": sA, "B-HS256Keyset": sB, "C-Keyset": sC, "D-JWKS": sD} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			tok, err := s.Sign(testClaims())
+			if err != nil {
+				t.Fatalf("Sign: %v", err)
+			}
+			got, err := jwt.Verify[jwt.Claims](t.Context(), v, tok)
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if got.Subject != "user-1" {
+				t.Fatalf("claims %+v, want Subject user-1", got)
+			}
+		})
+	}
+}
+
+// TestVerifyNoKidWithJWKSSourceRejected guards resolveKey's no-kid rule:
+// the sole-static-key fallback fires only when the verifier holds exactly
+// one static key AND has no JWKS source (v.jwks == nil). Here the verifier
+// has zero static keys and a JWKS source, so a kid-less header must be
+// rejected outright rather than silently trying a key or triggering a
+// try-all-keys scan.
+func TestVerifyNoKidWithJWKSSourceRejected(t *testing.T) {
+	t.Parallel()
+	ks, _ := edKeyset(t)
+	s, err := jwt.NewSigner(jwt.WithKeyset(ks))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	js := newJWKSServer(t, s) // serves exactly one key
+
+	v, err := jwt.NewVerifier(jwt.WithJWKSURL(js.URL))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	enc := base64.RawURLEncoding
+	header := `{"alg":"EdDSA"}` // no kid
+	payload := `{"exp":` + strconv.FormatInt(time.Now().Add(24*time.Hour).Unix(), 10) + `}`
+	tok := enc.EncodeToString([]byte(header)) + "." + enc.EncodeToString([]byte(payload)) + "." + enc.EncodeToString([]byte("sig"))
+
+	if _, err := jwt.Verify[jwt.Claims](t.Context(), v, tok); !errors.Is(err, jwt.ErrUnknownKey) {
+		t.Fatalf("got %v, want ErrUnknownKey", err)
+	}
 }
