@@ -1,12 +1,14 @@
 package idempotency
 
 import (
+	"net/http"
 	"strings"
 	"time"
 )
 
 type config struct {
 	methods       map[string]bool
+	namespace     func(*http.Request) string
 	header        string
 	ttl           time.Duration
 	processingTTL time.Duration
@@ -48,10 +50,27 @@ func WithTTL(d time.Duration) Option {
 
 // WithProcessingTTL sets the lifetime of the in-flight claim marker (default 1m).
 // A crashed first request's key auto-releases after this window.
+//
+// Set it above your worst-case handler latency: if the first request is still
+// running when the marker expires, a concurrent retry can claim the key and
+// execute the handler a second time.
 func WithProcessingTTL(d time.Duration) Option {
 	return func(c *config) {
 		if d > 0 {
 			c.processingTTL = d
+		}
+	}
+}
+
+// WithNamespace scopes the idempotency key by a per-request namespace — typically
+// the authenticated tenant or user ID — so keys from different principals never
+// collide in a shared Store. The namespace is prefixed to the store key; the
+// header value and request fingerprint are unchanged.
+// The namespace is length-framed into the store key, so it may safely contain any characters.
+func WithNamespace(fn func(*http.Request) string) Option {
+	return func(c *config) {
+		if fn != nil {
+			c.namespace = fn
 		}
 	}
 }

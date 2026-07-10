@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -160,6 +161,68 @@ func TestSetCookieNotReplayed(t *testing.T) {
 	}
 }
 
+func TestNamespaceIsolatesKeys(t *testing.T) {
+	store := cache.NewMemoryStore()
+	var calls int32
+	ns := func(r *http.Request) string { return r.Header.Get("X-Tenant") }
+	h := idempotency.New(store, idempotency.WithNamespace(ns))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	r1 := req("POST", "/p", `{"x":1}`, "k")
+	r1.Header.Set("X-Tenant", "acme")
+	r2 := req("POST", "/p", `{"x":1}`, "k")
+	r2.Header.Set("X-Tenant", "globex")
+	h.ServeHTTP(httptest.NewRecorder(), r1)
+	h.ServeHTTP(httptest.NewRecorder(), r2)
+	if calls != 2 {
+		t.Fatalf("different tenants must not share keys; calls=%d, want 2", calls)
+	}
+	r3 := req("POST", "/p", `{"x":1}`, "k")
+	r3.Header.Set("X-Tenant", "acme")
+	h.ServeHTTP(httptest.NewRecorder(), r3)
+	if calls != 2 {
+		t.Fatalf("same tenant+key must replay; calls=%d, want 2", calls)
+	}
+}
+
+func TestNamespaceJoinIsCollisionSafe(t *testing.T) {
+	store := cache.NewMemoryStore()
+	var calls int32
+	ns := func(r *http.Request) string { return r.Header.Get("X-NS") }
+	h := idempotency.New(store, idempotency.WithNamespace(ns))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	// Under a naive ns+":"+key join these two collide to "a:b:c"; length-framing keeps them distinct.
+	rA := req("POST", "/p", `{"x":1}`, "b:c")
+	rA.Header.Set("X-NS", "a")
+	rB := req("POST", "/p", `{"x":1}`, "c")
+	rB.Header.Set("X-NS", "a:b")
+	h.ServeHTTP(httptest.NewRecorder(), rA)
+	h.ServeHTTP(httptest.NewRecorder(), rB)
+	if calls != 2 {
+		t.Fatalf("namespaces that collide under a naive join must stay distinct; calls=%d, want 2", calls)
+	}
+}
+
+func TestFlushingResponseNotCached(t *testing.T) {
+	var calls int32
+	h := idempotency.New(cache.NewMemoryStore())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "part")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
+	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k"))
+	if calls != 2 {
+		t.Fatalf("flushed (streamed) response must not be cached; calls=%d, want 2", calls)
+	}
+}
+
 func TestOversizeRequestRejected(t *testing.T) {
 	h := idempotency.New(cache.NewMemoryStore(), idempotency.WithMaxBodySize(1024))(okJSON())
 	r := httptest.NewRecorder()
@@ -216,6 +279,22 @@ func TestStoreUnavailableExecutesOnce(t *testing.T) {
 	}
 }
 
+func TestStoreUnavailableConcurrentDuplicatesBothExecute(t *testing.T) {
+	var calls int32
+	h := idempotency.New(failingStore{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{}`, "k")) })
+	}
+	wg.Wait()
+	if calls != 2 {
+		t.Fatalf("store down: concurrent duplicates both execute; calls=%d, want 2", calls)
+	}
+}
+
 func TestPanicReleasesClaim(t *testing.T) {
 	store := cache.NewMemoryStore()
 	var calls int32
@@ -245,6 +324,7 @@ func BenchmarkReplay(b *testing.B) {
 	h.ServeHTTP(httptest.NewRecorder(), req("POST", "/p", `{"x":1}`, "k")) // prime
 
 	payload := `{"x":1}`
+	b.ResetTimer()
 	b.ReportAllocs()
 	for range b.N {
 		r := req("POST", "/p", payload, "k")

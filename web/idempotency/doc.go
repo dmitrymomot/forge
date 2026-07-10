@@ -7,9 +7,9 @@
 // and, if its status is < 500, its status/headers/body are stored under a TTL
 // and replayed to later retries. A 5xx releases the claim so a genuine retry
 // re-executes. Set-Cookie and hop-by-hop response headers are never replayed.
-// Because it buffers the response to decide whether to store it, the middleware
-// does not support response streaming or http.ResponseController features
-// (Flush, Hijack) on guarded requests — do not wrap handlers that require them.
+// The middleware buffers the response to decide whether to store it, so a
+// handler that flushes the response stream opts out of caching: its response
+// is streamed through to the client uncached rather than replayed to retries.
 //
 // The in-memory cache.Store is LRU-evicting and unsuitable here; back it with
 // cache/redis or another durable Store in production.
@@ -21,6 +21,8 @@
 // principal replays the first's stored response. Give each principal its own
 // Store, or namespace the key by the authenticated caller, so idempotency keys
 // never cross a trust boundary.
+//
+// # Usage
 //
 //	store := redis.NewStore(rdb) // resilience/cache/redis
 //	mux.Handle("/v1/charges", idempotency.New(store,

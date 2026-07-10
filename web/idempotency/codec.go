@@ -42,6 +42,8 @@ func encodeDone(fp [32]byte, status int, header http.Header, body []byte) []byte
 			writeString(&b, v)
 		}
 	}
+	// Safe to narrow to u32: request/response bodies are bounded by maxBody
+	// upstream, well below 4 GiB.
 	writeUint32(&b, uint32(len(body)))
 	b.Write(body)
 	return b.Bytes()
@@ -53,6 +55,9 @@ func decode(data []byte) (stored, error) {
 	}
 	switch data[0] {
 	case kindProcessing:
+		if len(data) != 1 {
+			return stored{}, ErrCorruptRecord
+		}
 		return stored{kind: kindProcessing}, nil
 	case kindDone:
 		// fall through to parse below
@@ -94,6 +99,9 @@ func decode(data []byte) (stored, error) {
 	}
 	s.body = make([]byte, blen)
 	if _, err := io.ReadFull(r, s.body); err != nil {
+		return stored{}, ErrCorruptRecord
+	}
+	if r.Len() != 0 {
 		return stored{}, ErrCorruptRecord
 	}
 	return s, nil

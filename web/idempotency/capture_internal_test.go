@@ -70,3 +70,28 @@ func TestCaptureMultiWriteOverflowPreservesOrder(t *testing.T) {
 		t.Fatalf("flush double-wrote: %q", rec.Body.String())
 	}
 }
+
+func TestCaptureFlushStreamsAndMarksOverflow(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c := &capture{ResponseWriter: rec, limit: 1024}
+	c.WriteHeader(200)
+	_, _ = io.WriteString(c, "ab")
+	if rec.Body.Len() != 0 {
+		t.Fatal("should be buffered before flush")
+	}
+	c.Flush()
+	if !c.over {
+		t.Fatal("Flush must flip to overflow mode")
+	}
+	if rec.Code != 200 || rec.Body.String() != "ab" {
+		t.Fatalf("Flush must stream buffered bytes: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	_, _ = io.WriteString(c, "cd")
+	if rec.Body.String() != "abcd" {
+		t.Fatalf("post-flush writes must stream: %q", rec.Body.String())
+	}
+	c.flush()
+	if rec.Body.String() != "abcd" {
+		t.Fatalf("internal flush() double-wrote: %q", rec.Body.String())
+	}
+}

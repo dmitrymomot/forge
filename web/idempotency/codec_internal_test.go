@@ -76,3 +76,13 @@ func TestDecodeCorrupt(t *testing.T) {
 		t.Fatalf("unknown kind: %v", err)
 	}
 }
+
+func TestDecodeRejectsTrailingGarbage(t *testing.T) {
+	good := encodeDone([32]byte{1}, 200, http.Header{"A": {"b"}}, []byte("hi"))
+	if _, err := decode(append(good, 0xFF)); !errors.Is(err, ErrCorruptRecord) {
+		t.Fatalf("trailing byte after done record: %v", err)
+	}
+	if _, err := decode([]byte{kindProcessing, 0x00}); !errors.Is(err, ErrCorruptRecord) {
+		t.Fatalf("trailing byte after processing marker: %v", err)
+	}
+}

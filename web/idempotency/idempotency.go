@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dmitrymomot/forge/resilience/cache"
@@ -67,11 +69,20 @@ func New(store cache.Store, opts ...Option) middleware.Middleware {
 			}
 			fp := fingerprint(r.Method, r.URL.Path, body)
 
+			storeKey := key
+			if cfg.namespace != nil {
+				ns := cfg.namespace(r)
+				// Length-frame the namespace so it can't alias with the opaque,
+				// client-controlled key across the join — e.g. ("acme","x:y") vs
+				// ("acme:x","y") must not collide.
+				storeKey = strconv.Itoa(len(ns)) + ":" + ns + key
+			}
+
 			ctx := r.Context()
-			err = store.Set(ctx, key, encodeProcessing(), cache.WithSetNonExist(), cache.WithTTL(cfg.processingTTL))
+			err = store.Set(ctx, storeKey, encodeProcessing(), cache.WithSetNonExist(), cache.WithTTL(cfg.processingTTL))
 			switch {
 			case errors.Is(err, cache.ErrExists):
-				handleExisting(w, r, store, key, fp)
+				handleExisting(w, r, store, storeKey, fp)
 				return
 			case err != nil:
 				// Store unavailable: cannot guarantee idempotency; execute once.
@@ -84,7 +95,7 @@ func New(store cache.Store, opts ...Option) middleware.Middleware {
 			defer func() {
 				if !completed {
 					// panic before completion — release the claim; the panic then propagates.
-					_ = store.Delete(context.WithoutCancel(ctx), key)
+					_ = store.Delete(context.WithoutCancel(ctx), storeKey)
 				}
 			}()
 			next.ServeHTTP(cw, r)
@@ -94,15 +105,15 @@ func New(store cache.Store, opts ...Option) middleware.Middleware {
 			switch {
 			case cw.over:
 				// Too large to cache; response already streamed to the client.
-				_ = store.Delete(context.WithoutCancel(ctx), key)
+				_ = store.Delete(context.WithoutCancel(ctx), storeKey)
 			case status >= 200 && status < 500:
 				// Deterministic outcome (2xx/3xx/4xx) — freeze and replay.
 				rec := encodeDone(fp, status, filterHeader(cw.Header()), cw.buf.Bytes())
-				_ = store.Set(context.WithoutCancel(ctx), key, rec, cache.WithTTL(cfg.ttl))
+				_ = store.Set(context.WithoutCancel(ctx), storeKey, rec, cache.WithTTL(cfg.ttl))
 				cw.flush()
 			default:
 				// 5xx (or 1xx) — release so a retry actually re-executes.
-				_ = store.Delete(context.WithoutCancel(ctx), key)
+				_ = store.Delete(context.WithoutCancel(ctx), storeKey)
 				cw.flush()
 			}
 		})
@@ -141,10 +152,13 @@ func replay(w http.ResponseWriter, rec stored) {
 
 func fingerprint(method, path string, body []byte) [32]byte {
 	h := sha256.New()
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(method)))
+	_, _ = h.Write(n[:])
 	_, _ = h.Write([]byte(method))
-	_, _ = h.Write([]byte{'\n'})
+	binary.BigEndian.PutUint32(n[:], uint32(len(path)))
+	_, _ = h.Write(n[:])
 	_, _ = h.Write([]byte(path))
-	_, _ = h.Write([]byte{'\n'})
 	_, _ = h.Write(body)
 	var out [32]byte
 	h.Sum(out[:0])
@@ -193,9 +207,7 @@ func filterHeader(src http.Header) http.Header {
 	return out
 }
 
-func reject(w http.ResponseWriter, r *http.Request, err error) {
-	problem.JSON(problem.WithStatusOf(statusOf))(w, r, err)
-}
+var reject = problem.JSON(problem.WithStatusOf(statusOf))
 
 func statusOf(err error) int {
 	switch {

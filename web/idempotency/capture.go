@@ -72,3 +72,30 @@ func (c *capture) flush() {
 		_, _ = c.ResponseWriter.Write(c.buf.Bytes())
 	}
 }
+
+// Flush implements http.Flusher. Because capture buffers to decide whether to
+// store the response, flushing is incompatible with buffering: it flips capture
+// into overflow mode (streaming the buffered bytes and everything after straight
+// to the client, caching nothing), then flushes the underlying writer.
+//
+// Flush is the only http.ResponseController capability supported through the
+// buffer: it degrades to uncached streaming. Hijack and write-deadline control
+// can't work coherently against a buffered response, so capture deliberately
+// does not expose Unwrap — http.ResponseController reports ErrNotSupported for
+// them rather than corrupting the cache with a phantom response.
+func (c *capture) Flush() {
+	if !c.over {
+		if !c.wrote {
+			c.WriteHeader(http.StatusOK)
+		}
+		c.over = true
+		c.ResponseWriter.WriteHeader(c.status)
+		if c.buf.Len() > 0 {
+			_, _ = c.ResponseWriter.Write(c.buf.Bytes())
+			c.buf.Reset()
+		}
+	}
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
