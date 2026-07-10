@@ -27,10 +27,7 @@ func encodeData(data []byte, version int, level Level) []byte {
 	}
 	// Terminator: up to 4 zero bits, not exceeding capacity.
 	remaining := total*8 - bs.length()
-	term := 4
-	if remaining < term {
-		term = remaining
-	}
+	term := min(remaining, 4)
 	bs.appendBits(0, term)
 	// Pad to a byte boundary.
 	if pad := (8 - bs.length()%8) % 8; pad > 0 {
@@ -106,10 +103,7 @@ func finalCodewords(data []byte, version int, level Level) []byte {
 
 	out := make([]byte, 0, len(all)+len(blocks)*s.ecPerBlock)
 	// Interleave data codewords column-by-column across blocks.
-	maxData := s.group1Words
-	if s.group2Words > maxData {
-		maxData = s.group2Words
-	}
+	maxData := max(s.group1Words, s.group2Words)
 	for i := range maxData {
 		for _, b := range blocks {
 			if i < len(b.data) {

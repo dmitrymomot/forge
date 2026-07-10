@@ -13,10 +13,7 @@ import (
 func resolveScale(c config, fullModules int) int {
 	if c.targetSize > 0 {
 		s := c.targetSize / fullModules
-		if s < 1 {
-			s = 1
-		}
-		return s
+		return max(s, 1)
 	}
 	return c.scale
 }
