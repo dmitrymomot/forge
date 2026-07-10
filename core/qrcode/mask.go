@@ -163,6 +163,18 @@ func colRunLength(g *grid, x int, run []int) int {
 // calcN1N3 applies rule 1 (runs of 5+ modules) and rule 3 (1:1:3:1:1
 // finder-like patterns with a 4x-module light margin on at least one side) to
 // a single row/column's run lengths.
+//
+// The finder-margin boundary tests below (`i == 3` for the left margin,
+// `i+4 >= length` for the right) mirror qrencode 4.1.1's Mask_calcN1N3
+// VERBATIM — that release is the reference tool whose output the golden
+// testdata is matched against. Do NOT "simplify" them to the ISO-idealized
+// combined form (`run[i-3] < 0 || run[i-3] >= 4*fact || i+3 >= length ||
+// run[i+3] >= 4*fact`): that form appears in some other QR implementations but
+// NOT in qrencode 4.1.1, and it diverges on inputs like a light-start line
+// with the finder run at index 3 (e.g. run=[1,1,1,3,1,1,1]: 4.1.1 scores +40,
+// the combined form scores 0). Empirically the installed qrencode binary picks
+// the mask this form predicts, not the combined one, on every input where the
+// two disagree — matching 4.1.1 exactly is what preserves parity.
 func calcN1N3(run []int, length int) int {
 	demerit := 0
 	for i := range length {
