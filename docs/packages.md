@@ -9,15 +9,6 @@ built: the moment a package ships it is removed from this list — its `doc.go`
 (godoc) becomes the reference. All design rules — layout, naming, idioms,
 dependencies, seams, anti-scope — live in [design.md](design.md).
 
-## core/
-
----
-
-**core/qrcode**
-
-QR code generation to PNG / base64 data-URI from any string (vendored
-encoder, no deps): 2FA enrollment URIs, referral/share links.
-
 ## resilience/
 
 ---
