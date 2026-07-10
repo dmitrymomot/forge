@@ -15,7 +15,12 @@ func colorHex(c color.Color) string {
 
 // SVG encodes data as an SVG document. The viewBox is expressed in module
 // units (including the quiet zone) so the markup scales to any display size.
-// Square modules only; shaped modules and eyes are added in Task 9.
+//
+// ShapeDots and ShapeRounded emit <circle> and <rect rx=...> elements per
+// module; ShapeSquare emits the single combined <path> from Task 8. EyeShape
+// is honored in PNG output only — in SVG the finder ("eye") cells render as
+// ordinary modules in the requested moduleShape, so EyeRounded is currently a
+// no-op refinement here (finder cells stay whatever shape moduleShape draws).
 func SVG(data string, opts ...Option) ([]byte, error) {
 	c, err := newConfig(opts...)
 	if err != nil {
@@ -31,7 +36,7 @@ func SVG(data string, opts ...Option) ([]byte, error) {
 
 	writeSVGHeader(&b, full)
 	writeSVGBackground(&b, full, c.bg)
-	writeSVGSquarePath(&b, m, c)
+	writeSVGModules(&b, m, c)
 	b.WriteString(`</svg>`)
 
 	return []byte(b.String()), nil
@@ -53,9 +58,52 @@ func writeSVGBackground(b *strings.Builder, full int, bg color.Color) {
 	fmt.Fprintf(b, `<rect width="%d" height="%d" fill="%s"/>`, full, full, colorHex(bg))
 }
 
+// writeSVGModules emits the dark modules in the shape requested by
+// c.moduleShape: circles for ShapeDots, rounded rects for ShapeRounded, or
+// one combined <path> of unit squares for ShapeSquare (the default, cheapest
+// to render since it needs no per-module element).
+func writeSVGModules(b *strings.Builder, m *Matrix, c config) {
+	switch c.moduleShape {
+	case ShapeDots:
+		writeSVGDots(b, m, c)
+	case ShapeRounded:
+		writeSVGRounded(b, m, c)
+	default:
+		writeSVGSquarePath(b, m, c)
+	}
+}
+
+// writeSVGDots emits one <circle> per dark module, inscribed in its unit
+// cell and offset by the quiet-zone border.
+func writeSVGDots(b *strings.Builder, m *Matrix, c config) {
+	dark := colorHex(c.fg)
+	for y := range m.Size() {
+		for x := range m.Size() {
+			if m.Module(x, y) {
+				fmt.Fprintf(b, `<circle cx="%.1f" cy="%.1f" r="0.5" fill="%s"/>`,
+					float64(x+c.border)+0.5, float64(y+c.border)+0.5, dark)
+			}
+		}
+	}
+}
+
+// writeSVGRounded emits one <rect rx="0.33"> per dark module, offset by the
+// quiet-zone border.
+func writeSVGRounded(b *strings.Builder, m *Matrix, c config) {
+	dark := colorHex(c.fg)
+	for y := range m.Size() {
+		for x := range m.Size() {
+			if m.Module(x, y) {
+				fmt.Fprintf(b, `<rect x="%d" y="%d" width="1" height="1" rx="0.33" fill="%s"/>`,
+					x+c.border, y+c.border, dark)
+			}
+		}
+	}
+}
+
 // writeSVGSquarePath emits one <path> combining every dark module as a unit
-// square, offset by the quiet-zone border. Kept as its own step so a future
-// shape switch (Task 9) can replace it without touching the header/background.
+// square, offset by the quiet-zone border. One combined path is cheaper than
+// per-module <rect> elements and keeps crisp edges via shape-rendering.
 func writeSVGSquarePath(b *strings.Builder, m *Matrix, c config) {
 	b.WriteString(`<path fill="`)
 	b.WriteString(colorHex(c.fg))
