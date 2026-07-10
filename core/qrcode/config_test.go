@@ -59,6 +59,8 @@ func TestValidate(t *testing.T) {
 		{"border negative", []Option{WithBorder(-1)}, ErrInvalidBorder},
 		{"logo too big", []Option{WithLogoSize(0.4)}, ErrInvalidLogoSize},
 		{"logo zero", []Option{WithLogoSize(0)}, ErrInvalidLogoSize},
+		{"nil foreground", []Option{WithForeground(nil)}, ErrInvalidColor},
+		{"nil background", []Option{WithBackground(nil)}, ErrInvalidColor},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -54,7 +54,7 @@ func SVG(data string, opts ...Option) ([]byte, error) {
 	full := m.Size() + 2*c.border
 	var b strings.Builder
 
-	writeSVGHeader(&b, full)
+	writeSVGHeader(&b, full, c.logo != nil)
 	writeSVGBackground(&b, full, c.bg)
 	writeSVGModules(&b, m, c)
 	if c.logo != nil {
@@ -81,15 +81,23 @@ func writeSVGLogo(b *strings.Builder, full int, c config) error {
 	pad := side / 8
 	fmt.Fprintf(b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" %s/>`,
 		pos-pad, pos-pad, side+2*pad, side+2*pad, svgFill(c.bg))
-	fmt.Fprintf(b, `<image x="%.2f" y="%.2f" width="%.2f" height="%.2f" href="%s"/>`,
-		pos, pos, side, side, uri)
+	// xlink:href duplicates href for older SVG1.1 renderers (older Safari, some
+	// email clients) that don't resolve the SVG2 bare href attribute.
+	fmt.Fprintf(b, `<image x="%.2f" y="%.2f" width="%.2f" height="%.2f" href="%s" xlink:href="%s"/>`,
+		pos, pos, side, side, uri, uri)
 	return nil
 }
 
 // writeSVGHeader opens the <svg> element with a viewBox in module units
-// (side length full, including the quiet zone) and a crisp-edges hint.
-func writeSVGHeader(b *strings.Builder, full int) {
-	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 `)
+// (side length full, including the quiet zone) and a crisp-edges hint. The
+// xlink namespace is only declared when withLogo is true, so logo-less output
+// stays byte-identical to before the xlink:href fallback was added.
+func writeSVGHeader(b *strings.Builder, full int, withLogo bool) {
+	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg"`)
+	if withLogo {
+		b.WriteString(` xmlns:xlink="http://www.w3.org/1999/xlink"`)
+	}
+	b.WriteString(` viewBox="0 0 `)
 	b.WriteString(strconv.Itoa(full))
 	b.WriteByte(' ')
 	b.WriteString(strconv.Itoa(full))

@@ -73,8 +73,28 @@ func TestSVGLogoEmbedsImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SVG: %v", err)
 	}
-	if !strings.Contains(string(out), "<image") || !strings.Contains(string(out), "data:image/png;base64,") {
+	s := string(out)
+	if !strings.Contains(s, "<image") || !strings.Contains(s, "data:image/png;base64,") {
 		t.Error("SVG logo must embed a base64 <image>")
+	}
+	if !strings.Contains(s, `xmlns:xlink="http://www.w3.org/1999/xlink"`) {
+		t.Error("SVG with logo must declare the xlink namespace")
+	}
+	if !strings.Contains(s, `xlink:href="data:image/png;base64,`) {
+		t.Error("SVG logo <image> must carry an xlink:href fallback matching href")
+	}
+}
+
+// TestSVGWithoutLogoOmitsXlinkNamespace is a regression guard: logo-less SVG
+// output must stay byte-identical to before this fix, so the xlink namespace
+// must only appear when a logo is actually rendered.
+func TestSVGWithoutLogoOmitsXlinkNamespace(t *testing.T) {
+	out, err := qrcode.SVG("hello")
+	if err != nil {
+		t.Fatalf("SVG: %v", err)
+	}
+	if strings.Contains(string(out), "xlink") {
+		t.Errorf("logo-less SVG must not mention xlink: %.120q", string(out))
 	}
 }
 

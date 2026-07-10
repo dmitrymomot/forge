@@ -12,4 +12,6 @@ var (
 	ErrInvalidBorder = errors.New("qrcode: border must be non-negative")
 	// ErrInvalidLogoSize reports a WithLogoSize outside (0, 0.3].
 	ErrInvalidLogoSize = errors.New("qrcode: logo size must be within (0, 0.3]")
+	// ErrInvalidColor reports a nil WithForeground or WithBackground value.
+	ErrInvalidColor = errors.New("qrcode: foreground and background colors must be non-nil")
 )

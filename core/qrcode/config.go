@@ -59,6 +59,9 @@ func (c config) validate() error {
 	if c.logoSize <= 0 || c.logoSize > maxLogoSize {
 		return fmt.Errorf("%w: %v", ErrInvalidLogoSize, c.logoSize)
 	}
+	if c.fg == nil || c.bg == nil {
+		return fmt.Errorf("%w", ErrInvalidColor)
+	}
 	return nil
 }
 
