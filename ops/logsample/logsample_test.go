@@ -103,7 +103,7 @@ func BenchmarkHandleAlwaysPass(b *testing.B) {
 	r := slog.NewRecord(time.Time{}, slog.LevelWarn, "msg", 0)
 	ctx := context.Background()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_ = h.Handle(ctx, r)
 	}
 }
@@ -113,7 +113,7 @@ func BenchmarkHandleSampled(b *testing.B) {
 	r := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
 	ctx := context.Background()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_ = h.Handle(ctx, r)
 	}
 }

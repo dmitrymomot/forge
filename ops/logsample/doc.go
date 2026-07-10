@@ -10,7 +10,7 @@
 //	base := slog.NewJSONHandler(os.Stdout, nil)
 //	logger := slog.New(logsample.New(base,
 //		logsample.WithRate(100),                // keep 1% of sub-threshold records
-//		logsample.WithMinLevel(slog.LevelWarn), // Warn and Error always logged
+//		logsample.WithMinLevel(slog.LevelError), // only Error+ bypasses sampling (default is Warn)
 //	))
 //	logger.Info("cache miss")  // sampled
 //	logger.Error("db down")    // always logged
