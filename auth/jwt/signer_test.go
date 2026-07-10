@@ -313,6 +313,27 @@ func TestSignRS256(t *testing.T) {
 	}
 }
 
+// TestRSAKeyTooLargeRejected guards the upper bound added alongside the
+// existing >=2048-bit floor: an oversized modulus makes every Verify on that
+// key an expensive modexp (CPU-exhaustion via a malicious JWKS), so
+// checkVerifyKey must reject it at construction, not just tiny keys.
+func TestRSAKeyTooLargeRejected(t *testing.T) {
+	t.Parallel()
+
+	hugeN := new(big.Int).Lsh(big.NewInt(1), 9000) // 9001-bit modulus, > maxRSABits
+	k := jwt.Key{KID: "1", Alg: jwt.RS256, Key: &rsa.PublicKey{N: hugeN, E: 65537}}
+	if _, err := jwt.NewVerifier(jwt.WithKeys(k)); !errors.Is(err, jwt.ErrBadKey) {
+		t.Fatalf("got %v, want ErrBadKey for a 9001-bit RSA modulus", err)
+	}
+
+	// Boundary: exactly 8192 bits must still be accepted.
+	okN := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 8192), big.NewInt(1))
+	okKey := jwt.Key{KID: "2", Alg: jwt.RS256, Key: &rsa.PublicKey{N: okN, E: 65537}}
+	if _, err := jwt.NewVerifier(jwt.WithKeys(okKey)); err != nil {
+		t.Fatalf("NewVerifier: %v, want no error for an exactly-8192-bit RSA modulus", err)
+	}
+}
+
 func TestSignRejectsUnmarshalableClaims(t *testing.T) {
 	t.Parallel()
 	s, err := jwt.NewSigner(jwt.WithHS256Keyset(hsKeyset(t)))

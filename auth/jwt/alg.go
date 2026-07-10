@@ -36,12 +36,18 @@ type Key struct {
 
 const minHS256KeyLen = 32
 
+// maxRSABits caps accepted RSA modulus size. Keys are parsed from remote
+// JWKS endpoints (parseJWK), and an oversized modulus makes every Verify on
+// that kid an expensive modexp — a CPU-exhaustion vector. 8192 bits admits
+// every realistic key (2048/3072/4096/8192) while rejecting absurd sizes.
+const maxRSABits = 8192
+
 // algForPrivate infers the pinned alg for a parsed PKCS#8 private key.
 func algForPrivate(key any) (Alg, error) {
 	switch k := key.(type) {
 	case *rsa.PrivateKey:
-		if k.N.BitLen() < 2048 {
-			return "", fmt.Errorf("%w: RSA key must be at least 2048 bits", ErrBadKey)
+		if k.N.BitLen() < 2048 || k.N.BitLen() > maxRSABits {
+			return "", fmt.Errorf("%w: RSA key must be 2048–%d bits", ErrBadKey, maxRSABits)
 		}
 		return RS256, nil
 	case *ecdsa.PrivateKey:
@@ -63,8 +69,9 @@ func checkSignerAlg(alg Alg, pub crypto.PublicKey) error {
 	case HS256:
 		return fmt.Errorf("%w: HS256 needs a secret, use WithHS256Keyset", ErrBadKey)
 	case RS256:
-		if k, ok := pub.(*rsa.PublicKey); !ok || k.N.BitLen() < 2048 {
-			return fmt.Errorf("%w: RS256 requires an RSA key of at least 2048 bits", ErrBadKey)
+		k, ok := pub.(*rsa.PublicKey)
+		if !ok || k.N.BitLen() < 2048 || k.N.BitLen() > maxRSABits {
+			return fmt.Errorf("%w: RS256 requires an RSA key of 2048–%d bits", ErrBadKey, maxRSABits)
 		}
 	case ES256:
 		if k, ok := pub.(*ecdsa.PublicKey); !ok || k.Curve != elliptic.P256() {

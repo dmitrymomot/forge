@@ -1,6 +1,7 @@
 package jwt_test
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -244,6 +245,44 @@ func TestJWKSSkipsUnusableKeys(t *testing.T) {
 	}
 	if _, err := jwt.Verify[jwt.Claims](t.Context(), v, tok); !errors.Is(err, jwt.ErrNoKeys) {
 		t.Fatalf("got %v, want ErrNoKeys when all JWKS entries are unusable", err)
+	}
+}
+
+// TestJWKSSkipsOversizedRSAKey is the actual threat path the maxRSABits cap
+// guards: a JWKS endpoint (untrusted, possibly third-party) that serves an
+// oversized RSA modulus must have that key skipped by parseJWK, not admitted
+// into the usable set. Without the cap, every Verify resolving to that kid
+// would pay an expensive modexp — a cheap, repeatable CPU-exhaustion vector.
+func TestJWKSSkipsOversizedRSAKey(t *testing.T) {
+	t.Parallel()
+
+	// 1100 bytes -> ~8800-bit modulus, over maxRSABits (8192).
+	n := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xff}, 1100))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"big","n":"` + n + `","e":"AQAB"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	v, err := jwt.NewVerifier(jwt.WithJWKSURL(srv.URL))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	ks, _ := edKeyset(t)
+	s, err := jwt.NewSigner(jwt.WithKeyset(ks))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	tok, err := s.Sign(testClaims())
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	// The oversized key is skipped, leaving the JWKS set empty, so even an
+	// unrelated valid token resolves to no usable keys.
+	if _, err := jwt.Verify[jwt.Claims](t.Context(), v, tok); !errors.Is(err, jwt.ErrNoKeys) {
+		t.Fatalf("got %v, want ErrNoKeys (oversized RSA key must be skipped, not admitted)", err)
 	}
 }
 
