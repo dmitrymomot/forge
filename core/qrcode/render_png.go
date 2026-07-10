@@ -155,6 +155,7 @@ func PNG(data string, opts ...Option) ([]byte, error) {
 		return nil, err
 	}
 	img := renderImage(m, c)
+	compositeLogo(img, c)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, err

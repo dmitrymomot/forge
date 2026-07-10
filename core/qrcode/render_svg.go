@@ -37,6 +37,16 @@ func SVG(data string, opts ...Option) ([]byte, error) {
 	writeSVGHeader(&b, full)
 	writeSVGBackground(&b, full, c.bg)
 	writeSVGModules(&b, m, c)
+	if c.logo != nil {
+		uri, err := logoDataURI(c.logo)
+		if err != nil {
+			return nil, err
+		}
+		side := float64(full) * c.logoSize
+		pos := (float64(full) - side) / 2
+		fmt.Fprintf(&b, `<image x="%.2f" y="%.2f" width="%.2f" height="%.2f" href="%s"/>`,
+			pos, pos, side, side, uri)
+	}
 	b.WriteString(`</svg>`)
 
 	return []byte(b.String()), nil
