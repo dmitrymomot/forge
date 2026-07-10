@@ -79,3 +79,46 @@ func (b *bitBuffer) appendBits(v uint, n int) {
 // when the bit count is not a multiple of eight (encodeData pads to a byte
 // boundary before calling this).
 func (b *bitBuffer) bytes() []byte { return b.buf }
+
+// finalCodewords encodes data, splits it into the version/level's EC blocks,
+// computes each block's EC codewords, and interleaves data then EC codewords
+// per ISO/IEC 18004 §8.6.
+func finalCodewords(data []byte, version int, level Level) []byte {
+	s := versionSpec(version, level)
+	all := encodeData(data, version, level)
+
+	// Split into blocks.
+	type block struct{ data, ec []byte }
+	blocks := make([]block, 0, s.group1Blocks+s.group2Blocks)
+	pos := 0
+	addBlocks := func(count, words int) {
+		for range count {
+			d := all[pos : pos+words]
+			pos += words
+			blocks = append(blocks, block{data: d, ec: ecCodewords(d, s.ecPerBlock)})
+		}
+	}
+	addBlocks(s.group1Blocks, s.group1Words)
+	addBlocks(s.group2Blocks, s.group2Words)
+
+	out := make([]byte, 0, len(all)+len(blocks)*s.ecPerBlock)
+	// Interleave data codewords column-by-column across blocks.
+	maxData := s.group1Words
+	if s.group2Words > maxData {
+		maxData = s.group2Words
+	}
+	for i := range maxData {
+		for _, b := range blocks {
+			if i < len(b.data) {
+				out = append(out, b.data[i])
+			}
+		}
+	}
+	// Interleave EC codewords column-by-column across blocks.
+	for i := range s.ecPerBlock {
+		for _, b := range blocks {
+			out = append(out, b.ec[i])
+		}
+	}
+	return out
+}
