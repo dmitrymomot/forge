@@ -37,9 +37,12 @@ func encodeData(data []byte, version int, level Level) []byte {
 		bs.appendBits(0, pad)
 	}
 	// Pad codewords 0xEC, 0x11 alternating until the data capacity is filled.
+	// base is captured before the loop because appending to out grows its
+	// length each iteration.
 	out := bs.bytes()
-	for i := len(out); i < total; i++ {
-		if (i-len(out))%2 == 0 {
+	base := len(out)
+	for i := base; i < total; i++ {
+		if (i-base)%2 == 0 {
 			out = append(out, 0xEC)
 		} else {
 			out = append(out, 0x11)

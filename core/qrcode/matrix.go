@@ -111,3 +111,146 @@ func (g *grid) placeAlignment(cx, cy int) {
 		}
 	}
 }
+
+// writeFormatInfo writes the 15-bit format information (level + mask, BCH
+// (15,5) with generator 0x537, XOR-masked with 0x5412) into both copies.
+func writeFormatInfo(g *grid, level Level, mask int) {
+	data := level.formatBits()<<3 | mask
+	bch := data << 10
+	for bch >= 1<<10 { // reduce by generator until degree < 10
+		bch ^= 0x537 << (bitLen(bch) - 11)
+	}
+	bits := (data<<10 | bch) ^ 0x5412
+	n := g.size
+	// Around the top-left finder.
+	for i := 0; i <= 5; i++ {
+		g.set(8, i, bit(bits, i))
+	}
+	g.set(8, 7, bit(bits, 6))
+	g.set(8, 8, bit(bits, 7))
+	g.set(7, 8, bit(bits, 8))
+	for i := 9; i < 15; i++ {
+		g.set(14-i, 8, bit(bits, i))
+	}
+	// Split copy near the other two finders.
+	for i := 0; i <= 7; i++ {
+		g.set(n-1-i, 8, bit(bits, i))
+	}
+	for i := 8; i < 15; i++ {
+		g.set(8, n-15+i, bit(bits, i))
+	}
+}
+
+// writeVersionInfo writes the 18-bit version information (6-bit version, BCH
+// (18,6) with generator 0x1F25, no XOR mask) into the two 3x6 blocks beside
+// the top-right and bottom-left finders. It is a no-op below version 7.
+func writeVersionInfo(g *grid, version int) {
+	if version < 7 {
+		return
+	}
+	bch := version << 12
+	for bitLen(bch) >= 13 {
+		bch ^= 0x1F25 << (bitLen(bch) - 13)
+	}
+	bits := version<<12 | bch
+	n := g.size
+	for i := range 18 {
+		b := bit(bits, i)
+		a, c := i/3, i%3
+		g.set(a, n-11+c, b)
+		g.set(n-11+c, a, b)
+	}
+}
+
+func bit(v, i int) bool { return (v>>uint(i))&1 == 1 }
+
+func bitLen(v int) int {
+	n := 0
+	for v > 0 {
+		n++
+		v >>= 1
+	}
+	return n
+}
+
+// placeData walks the standard upward/downward zigzag from the bottom-right,
+// skipping column 6 (timing) and every reserved module, writing stream bits
+// MSB-first. Any modules past the stream stay light (remainder bits are 0).
+func (g *grid) placeData(stream []byte) {
+	n := g.size
+	bitIdx := 0
+	next := func() bool {
+		if bitIdx >= len(stream)*8 {
+			return false // remainder bits are 0
+		}
+		b := (stream[bitIdx/8]>>uint(7-bitIdx%8))&1 == 1
+		bitIdx++
+		return b
+	}
+	up := true
+	for col := n - 1; col > 0; col -= 2 {
+		if col == 6 {
+			col-- // skip the vertical timing column
+		}
+		for i := range n {
+			y := i
+			if up {
+				y = n - 1 - i
+			}
+			for _, x := range [2]int{col, col - 1} {
+				if !g.isReserved(x, y) {
+					g.set(x, y, next())
+				}
+			}
+		}
+		up = !up
+	}
+}
+
+// Matrix is a computed QR symbol: a square grid of dark/light modules with no
+// quiet zone. Use the accessors to render it however you like, or pass the
+// same data + options to PNG/SVG/DataURI for a ready image.
+type Matrix struct {
+	g       *grid
+	version int
+	level   Level
+}
+
+// Size returns the module count per side (excludes the quiet zone).
+func (m *Matrix) Size() int { return m.g.size }
+
+// Module reports whether the module at (x, y) is dark.
+func (m *Matrix) Module(x, y int) bool { return m.g.at(x, y) }
+
+// Version returns the QR version (1-40).
+func (m *Matrix) Version() int { return m.version }
+
+// Level returns the error-correction level the grid was encoded at.
+func (m *Matrix) Level() Level { return m.level }
+
+// Encode builds the QR module matrix for data. It honors WithLevel; render
+// options (size, colors, logo, shapes) are ignored — pass them to PNG/SVG/
+// DataURI instead. Returns ErrTooLarge if data exceeds version-40 capacity.
+func Encode(data string, opts ...Option) (*Matrix, error) {
+	c, err := newConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+	return encodeMatrix(data, c.level)
+}
+
+// encodeMatrix runs the full pipeline at an explicit level. Renderers call it
+// with the effective (possibly raised) level.
+func encodeMatrix(data string, level Level) (*Matrix, error) {
+	raw := []byte(data)
+	version, err := pickVersion(len(raw), level)
+	if err != nil {
+		return nil, err
+	}
+	g := newGrid(version)
+	g.placeFunctionPatterns(version)
+	writeVersionInfo(g, version)
+	g.placeData(finalCodewords(raw, version, level))
+	_, masked := bestMaskForLevel(g, level)
+	return &Matrix{g: masked, version: version, level: level}, nil
+}
