@@ -12,7 +12,7 @@ import (
 // value equals the delta), so a window's expiry is fixed at its first hit.
 var incrScript = redis.NewScript(`
 local v = redis.call('INCRBY', KEYS[1], ARGV[1])
-if v == tonumber(ARGV[1]) then
+if v == tonumber(ARGV[1]) and tonumber(ARGV[2]) > 0 then
   redis.call('PEXPIRE', KEYS[1], ARGV[2])
 end
 return v`)

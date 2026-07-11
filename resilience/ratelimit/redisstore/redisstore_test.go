@@ -46,3 +46,21 @@ func TestRedisStore_IncrTTLAtomic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), got) // expired at the FIRST incr's TTL, not extended
 }
+
+func TestRedisStore_NonPositiveTTLNeverExpires(t *testing.T) {
+	client := dial(t)
+	s := redisstore.New(client, redisstore.WithPrefix("rltest:"))
+	ctx := context.Background()
+	key := "gauge-" + t.Name()
+	require.NoError(t, s.Reset(ctx, key))
+
+	n, err := s.Incr(ctx, key, 5, 0) // no expiry
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), n)
+
+	ttl, err := client.PTTL(ctx, "rltest:"+key).Result()
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(-1), ttl) // -1ms = key exists with no TTL
+
+	require.NoError(t, s.Reset(ctx, key))
+}
