@@ -28,7 +28,7 @@ func (a *Assets) serveCompressed(w http.ResponseWriter, r *http.Request, name st
 	}
 	accept := r.Header.Get("Accept-Encoding")
 	for _, enc := range a.precompress {
-		if !strings.Contains(accept, encodingToken(enc)) && !strings.Contains(accept, enc) {
+		if !acceptsEncoding(accept, encodingToken(enc)) {
 			continue
 		}
 		sibling := name + "." + enc
@@ -43,7 +43,7 @@ func (a *Assets) serveCompressed(w http.ResponseWriter, r *http.Request, name st
 		// compressed body gets its own Etag derived from the identity one.
 		identity := strings.Trim(h.Get("Etag"), `"`)
 		h.Set("Etag", strconv.Quote(identity+"."+enc))
-		if inm := r.Header.Get("If-None-Match"); inm != "" && h.Get("Etag") != "" && strings.Contains(inm, h.Get("Etag")) {
+		if inm := r.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, h.Get("Etag")) {
 			w.WriteHeader(http.StatusNotModified)
 			return true
 		}
@@ -63,4 +63,47 @@ func encodingToken(enc string) string {
 		return "gzip"
 	}
 	return enc // "br", "zstd", …
+}
+
+// acceptsEncoding reports whether the Accept-Encoding header value explicitly
+// accepts the given content-coding token (e.g. "br", "gzip"), honoring
+// q-values per RFC 9110 §12.5.3: a q=0 (or non-positive) parameter is an
+// explicit refusal, and matching is a plain token comparison (not substring)
+// so "brotli" never false-matches "br".
+func acceptsEncoding(header, token string) bool {
+	for part := range strings.SplitSeq(header, ",") {
+		coding, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(coding), token) {
+			continue
+		}
+		q, hasQ := strings.CutPrefix(strings.TrimSpace(params), "q=")
+		if !hasQ {
+			return true
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
+		return err == nil && v > 0
+	}
+	return false
+}
+
+// etagMatches reports whether the If-None-Match header value matches etag.
+// "*" matches any representation (RFC 9110 §13.1.2); otherwise the
+// comma-separated list is compared entity-tag by entity-tag, ignoring a
+// weak-prefix ("W/") since these validators are only ever compared here.
+func etagMatches(inm, etag string) bool {
+	inm = strings.TrimSpace(inm)
+	if inm == "*" {
+		return true
+	}
+	if etag == "" {
+		return false
+	}
+	for tag := range strings.SplitSeq(inm, ",") {
+		tag = strings.TrimSpace(tag)
+		tag = strings.TrimPrefix(tag, "W/")
+		if tag == etag {
+			return true
+		}
+	}
+	return false
 }

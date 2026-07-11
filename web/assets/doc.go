@@ -24,6 +24,15 @@
 // precompressed sibling (WithPrecompressed, serving a build-emitted app.<h>.css.br
 // when present and accepted), an SPA index (WithSPA), or 404.
 //
+// # Serves whatever is embedded
+//
+// Like http.FileServer, assets serves any file physically present in the
+// fs.FS at its real path (Prefix + realpath) with a no-cache Cache-Control,
+// not only fingerprinted or manifest-listed assets — so manifest.json,
+// source maps (.map), and other build artifacts left in the tree are
+// reachable too. Embed only files you intend to publish, or mount a curated
+// fs.Sub if the tree contains anything sensitive.
+//
 // # Not a bundler
 //
 // assets never transpiles, minifies, tree-shakes, or resolves an import graph,

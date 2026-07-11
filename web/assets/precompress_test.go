@@ -108,6 +108,62 @@ func TestPrecompressedDistinctEtagAnd304(t *testing.T) {
 	}
 }
 
+// TestPrecompressedQZeroRefused verifies that "br;q=0" is an explicit client
+// refusal of brotli (RFC 9110 §12.5.3), not a substring match, so the
+// identity bytes are served instead of the compressed sibling.
+func TestPrecompressedQZeroRefused(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	rec := get(t, a, a.URL("app.css"), http.Header{"Accept-Encoding": {"br;q=0, gzip"}})
+	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("Content-Encoding = %q, want empty (br refused, no gzip sibling)", enc)
+	}
+	if rec.Body.String() != "PLAINCSS" {
+		t.Fatalf("body = %q, want identity bytes", rec.Body.String())
+	}
+}
+
+// TestPrecompressedTokenNoSubstringMatch verifies that "brotli" in
+// Accept-Encoding does not false-match the "br" content-coding token.
+func TestPrecompressedTokenNoSubstringMatch(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	rec := get(t, a, a.URL("app.css"), http.Header{"Accept-Encoding": {"brotli"}})
+	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("Content-Encoding = %q, want empty (brotli != br)", enc)
+	}
+	if rec.Body.String() != "PLAINCSS" {
+		t.Fatalf("body = %q, want identity bytes", rec.Body.String())
+	}
+}
+
+// TestPrecompressedIfNoneMatchWildcard verifies If-None-Match: * 304s a
+// precompressed asset (RFC 9110 §13.1.2).
+func TestPrecompressedIfNoneMatchWildcard(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	rec := get(t, a, a.URL("app.css"), http.Header{
+		"Accept-Encoding": {"br"},
+		"If-None-Match":   {"*"},
+	})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("code = %d, want 304", rec.Code)
+	}
+}
+
+// TestPrecompressedIfNoneMatchList verifies a comma-separated If-None-Match
+// list 304s when it contains the compressed representation's Etag.
+func TestPrecompressedIfNoneMatchList(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	url := a.URL("app.css")
+	compressedEtag := get(t, a, url, http.Header{"Accept-Encoding": {"br"}}).Header().Get("Etag")
+
+	rec := get(t, a, url, http.Header{
+		"Accept-Encoding": {"br"},
+		"If-None-Match":   {`"unrelated-etag", ` + compressedEtag + `, "another"`},
+	})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("code = %d, want 304", rec.Code)
+	}
+}
+
 // TestPrecompressedUnknownContentTypeFallsThrough verifies that when the
 // fingerprinted asset's Content-Type can't be determined, the compressed
 // sibling is not served (net/http would sniff the compressed stream and
