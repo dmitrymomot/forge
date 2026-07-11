@@ -187,8 +187,13 @@ func (db *database) keyAt(off int) (string, int, error) {
 }
 
 // mapAt resolves off (following a pointer) to a map, returning the offset of its
-// first entry and the entry count.
-func (db *database) mapAt(off int) (entryOff, count int, err error) {
+// first entry and the entry count. depth guards against a pointer chain that
+// cycles back on itself (or is simply very long), which would otherwise
+// recurse without bound.
+func (db *database) mapAt(off, depth int) (entryOff, count int, err error) {
+	if depth > maxDepth {
+		return 0, 0, ErrInvalidDatabase
+	}
 	typ, size, dataOff, err := ctrl(db.data, off)
 	if err != nil {
 		return 0, 0, err
@@ -198,7 +203,7 @@ func (db *database) mapAt(off int) (entryOff, count int, err error) {
 		if perr != nil {
 			return 0, 0, perr
 		}
-		return db.mapAt(target)
+		return db.mapAt(target, depth+1)
 	}
 	if typ != typeMap {
 		return 0, 0, ErrInvalidDatabase
@@ -208,7 +213,7 @@ func (db *database) mapAt(off int) (entryOff, count int, err error) {
 
 // walkMap iterates the map at off, calling fn(key, valueOff) for each entry.
 func (db *database) walkMap(off int, fn func(key string, valueOff int) error) error {
-	entryOff, count, err := db.mapAt(off)
+	entryOff, count, err := db.mapAt(off, 0)
 	if err != nil {
 		return err
 	}
@@ -232,8 +237,13 @@ func (db *database) walkMap(off int, fn func(key string, valueOff int) error) er
 }
 
 // firstOfArray resolves off to an array and calls fn with the offset of its
-// first element (if any).
-func (db *database) firstOfArray(off int, fn func(elemOff int) error) error {
+// first element (if any). depth guards against a pointer chain that cycles
+// back on itself (or is simply very long), which would otherwise recurse
+// without bound.
+func (db *database) firstOfArray(off, depth int, fn func(elemOff int) error) error {
+	if depth > maxDepth {
+		return ErrInvalidDatabase
+	}
 	typ, size, dataOff, err := ctrl(db.data, off)
 	if err != nil {
 		return err
@@ -243,7 +253,7 @@ func (db *database) firstOfArray(off int, fn func(elemOff int) error) error {
 		if perr != nil {
 			return perr
 		}
-		return db.firstOfArray(target, fn)
+		return db.firstOfArray(target, depth+1, fn)
 	}
 	if typ != typeArray || size == 0 {
 		return nil
@@ -341,7 +351,7 @@ func (db *database) decodeLocation(off int) (geoip.Location, error) {
 				return nil
 			})
 		case "subdivisions":
-			return db.firstOfArray(vOff, func(o int) error {
+			return db.firstOfArray(vOff, 0, func(o int) error {
 				return db.walkMap(o, func(k string, oo int) error {
 					switch k {
 					case "iso_code":

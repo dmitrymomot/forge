@@ -13,7 +13,7 @@ func TestLookupCity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("81.2.69.142"))
 	if err != nil {
@@ -41,7 +41,7 @@ func TestLookupASN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("1.128.0.0"))
 	if err != nil {
@@ -56,8 +56,11 @@ func TestLookupASN(t *testing.T) {
 }
 
 func TestLookupMissIsEmptyNoError(t *testing.T) {
-	r, _ := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
-	defer r.Close()
+	r, err := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
 	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("203.0.113.1"))
 	if err != nil || !loc.Empty() {
 		t.Fatalf("got (%+v, %v), want empty + nil", loc, err)
@@ -65,8 +68,11 @@ func TestLookupMissIsEmptyNoError(t *testing.T) {
 }
 
 func TestReloadSwapsData(t *testing.T) {
-	r, _ := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
-	defer r.Close()
+	r, err := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
 	if err := r.Reload(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"), mmdb.WithASN("testdata/GeoLite2-ASN-Test.mmdb")); err != nil {
 		t.Fatal(err)
 	}
