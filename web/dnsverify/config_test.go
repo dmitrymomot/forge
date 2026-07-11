@@ -76,8 +76,8 @@ func TestConfigValidateLabelSyntax(t *testing.T) {
 	for _, label := range invalid {
 		c := base
 		c.Label = label
-		if !errors.Is(c.Validate(), dnsverify.ErrInvalidConfig) {
-			t.Errorf("Label %q must be invalid (ErrInvalidConfig), got %v", label, c.Validate())
+		if err := c.Validate(); !errors.Is(err, dnsverify.ErrInvalidConfig) {
+			t.Errorf("Label %q must be invalid (ErrInvalidConfig), got %v", label, err)
 		}
 	}
 }

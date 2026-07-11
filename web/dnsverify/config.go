@@ -49,8 +49,8 @@ func (c Config) Validate() error {
 // one or more dot-separated labels, each 1-63 ASCII characters of letters,
 // digits, hyphen, or underscore, with no leading or trailing hyphen. Underscore
 // is permitted because service labels (e.g. the default "_forge-verify",
-// "_dmarc", "_acme-challenge") begin with one. An empty string is rejected by
-// the caller before this is reached.
+// "_dmarc", "_acme-challenge") begin with one. The empty string yields a single
+// empty label and is rejected.
 func validLabelPrefix(s string) bool {
 	for label := range strings.SplitSeq(s, ".") {
 		if !validLabel(label) {
