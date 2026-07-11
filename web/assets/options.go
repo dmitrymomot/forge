@@ -67,3 +67,17 @@ func WithPrecompressed(encodings ...string) Option {
 		cf.precompress = encodings
 	}
 }
+
+// WithSPA enables single-page-app fallback: an unmatched request that the
+// predicate accepts serves index (with no-cache). The default predicate is
+// DefaultSPAWhen; pass your own to override.
+func WithSPA(index string, when ...func(*http.Request) bool) Option {
+	return func(cf *config) {
+		cf.spaIndex = index
+		if len(when) > 0 && when[0] != nil {
+			cf.spaWhen = when[0]
+		} else {
+			cf.spaWhen = DefaultSPAWhen
+		}
+	}
+}

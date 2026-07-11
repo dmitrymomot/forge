@@ -158,8 +158,9 @@ func (a *Assets) FuncMap() template.FuncMap {
 }
 
 // ServeHTTP resolves the request under Prefix to a fingerprinted (immutable),
-// plain (no-cache), or 404 response. Fingerprinted responses may be served from
-// a precompressed sibling (see WithPrecompressed). Task 6 adds SPA fallback.
+// plain (no-cache), SPA-fallback (no-cache, see WithSPA), or 404 response.
+// Fingerprinted responses may be served from a precompressed sibling (see
+// WithPrecompressed).
 func (a *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(r.URL.Path, a.prefix)
 	if rel == r.URL.Path { // request path was not under the prefix
@@ -177,6 +178,10 @@ func (a *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if fileExists(a.fsys, name) {
 		a.servePlain(w, r, name)
+		return
+	}
+	if a.spaIndex != "" && a.spaWhen != nil && a.spaWhen(r) && fileExists(a.fsys, a.spaIndex) {
+		a.serveSPA(w, r)
 		return
 	}
 	http.NotFound(w, r)
@@ -231,6 +236,9 @@ func (a *Assets) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 	}
 	http.ServeContent(w, r, name, modtime, bytes.NewReader(data))
 }
+
+// readFileFS wraps fs.ReadFile so spa.go doesn't need its own io/fs import.
+func readFileFS(fsys fs.FS, name string) ([]byte, error) { return fs.ReadFile(fsys, name) }
 
 func fileExists(fsys fs.FS, name string) bool {
 	f, err := fsys.Open(name)
