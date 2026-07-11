@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -76,10 +77,8 @@ func (v *Verifier) verifyTXT(ctx context.Context, c Challenge) (Result, error) {
 		return errResult(err)
 	}
 	for _, rec := range records {
-		for _, want := range c.Expect {
-			if rec == want {
-				return Result{Verified: true, Found: records}, nil
-			}
+		if slices.Contains(c.Expect, rec) {
+			return Result{Verified: true, Found: records}, nil
 		}
 	}
 	return Result{Found: records}, nil
@@ -113,6 +112,7 @@ func (v *Verifier) verifyIP(ctx context.Context, c Challenge, network string) (R
 		if addr, perr := netip.ParseAddr(s); perr == nil {
 			want[addr.Unmap()] = struct{}{}
 		}
+		// Skip unparseable Expect entries — a malformed IP simply cannot match.
 	}
 	found := make([]string, 0, len(got))
 	verified := false

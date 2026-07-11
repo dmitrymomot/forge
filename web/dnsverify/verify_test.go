@@ -90,6 +90,21 @@ func TestVerifyCNAMENormalizes(t *testing.T) {
 	}
 }
 
+func TestVerifyCNAMESelfReferenceIsPending(t *testing.T) {
+	v := newVerifier(t, dnsverify.NewStaticResolver(
+		dnsverify.WithCNAME("app.example.com", "app.example.com"), // target equals host (no CNAME)
+	))
+	c := dnsverify.Challenge{
+		Record: dnsverify.CNAME,
+		Host:   "app.example.com",
+		Expect: []string{"some-other-target.com"},
+	}
+	res, err := v.Verify(context.Background(), c)
+	if err != nil || res.Verified || len(res.Found) != 0 {
+		t.Fatalf("want pending (nil err, not verified, empty found), got %+v err=%v", res, err)
+	}
+}
+
 func TestVerifyAIntersects(t *testing.T) {
 	v := newVerifier(t, dnsverify.NewStaticResolver(
 		dnsverify.WithIP("example.com", netip.MustParseAddr("198.51.100.7"), netip.MustParseAddr("203.0.113.10")),
