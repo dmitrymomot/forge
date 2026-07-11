@@ -1,6 +1,7 @@
 package assets_test
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,9 +13,7 @@ import (
 func get(t *testing.T, a *assets.Assets, target string, hdr http.Header) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodGet, target, nil)
-	for k, vs := range hdr {
-		r.Header[k] = vs
-	}
+	maps.Copy(r.Header, hdr)
 	rec := httptest.NewRecorder()
 	a.ServeHTTP(rec, r)
 	return rec

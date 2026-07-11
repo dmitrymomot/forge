@@ -187,7 +187,10 @@ func fileExists(fsys fs.FS, name string) bool {
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
-	return err == nil && !info.IsDir()
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
 
 func statTime(fsys fs.FS, name string) time.Time {
