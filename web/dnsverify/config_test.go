@@ -72,6 +72,15 @@ func TestConfigValidateLabelSyntax(t *testing.T) {
 		"bad!",                  // illegal punctuation
 		"café",                  // non-ASCII
 		strings.Repeat("a", 64), // label longer than 63 chars
+		// Total prefix longer than 253 chars, built from individually valid
+		// 60-char labels (each within the 1-63 limit).
+		strings.Join([]string{
+			strings.Repeat("a", 60),
+			strings.Repeat("b", 60),
+			strings.Repeat("c", 60),
+			strings.Repeat("d", 60),
+			strings.Repeat("e", 60),
+		}, "."),
 	}
 	for _, label := range invalid {
 		c := base

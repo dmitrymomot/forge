@@ -45,13 +45,21 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// maxLabelPrefixLen caps the total Label length at the RFC 1035 hostname
+// limit (253 chars); Label is only the prefix of Label + "." + domain, so this
+// is a generous syntactic bound, not the full-name limit.
+const maxLabelPrefixLen = 253
+
 // validLabelPrefix reports whether s is a syntactically valid DNS host prefix:
 // one or more dot-separated labels, each 1-63 ASCII characters of letters,
-// digits, hyphen, or underscore, with no leading or trailing hyphen. Underscore
-// is permitted because service labels (e.g. the default "_forge-verify",
-// "_dmarc", "_acme-challenge") begin with one. The empty string yields a single
-// empty label and is rejected.
+// digits, hyphen, or underscore, with no leading or trailing hyphen, and a
+// total length within maxLabelPrefixLen. Underscore is permitted because
+// service labels (e.g. the default "_forge-verify", "_dmarc", "_acme-challenge")
+// begin with one. The empty string yields a single empty label and is rejected.
 func validLabelPrefix(s string) bool {
+	if len(s) > maxLabelPrefixLen {
+		return false
+	}
 	for label := range strings.SplitSeq(s, ".") {
 		if !validLabel(label) {
 			return false
