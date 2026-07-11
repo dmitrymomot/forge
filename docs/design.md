@@ -194,8 +194,10 @@ and the driver leaves stays stdlib.
   brute-force in-memory similarity.
 - **Agent runtime / prompt registry** — application logic; llm's tool-call
   DTOs + structured + prompt are the primitives.
-- **Product analytics / event tracking** — PostHog/Segment or an eventbus
-  subscription into the consumer's warehouse.
+- **Product analytics / event tracking** — PostHog/Segment, or
+  `async/eventrouter` feeding the consumer's warehouse: forge ships the
+  egress engine and reference adapters only — a Segment-style destination
+  catalog stays out forever.
 - **In-app notification inbox** — consumer domain; recipe: Postgres insert →
   fanout → sse.
 - **SEO artifacts** (sitemap/robots/meta) — consumer templates over
@@ -204,6 +206,10 @@ and the driver leaves stays stdlib.
 - **External policy engines** (casbin/OPA) — plug in behind the
   authorization decision seam; forge's own `rbac`/`acl`/`abac` cover native
   needs.
+- **Expression engines / stored text formulas** (cel-go/expr/govaluate) —
+  user-typed expressions evaluate in float and can't explain a payout;
+  `finance/formula` covers structured staged-linear specs, and anything
+  beyond them is a registered Go function.
 - **Long-poll transport** — SSE reconnect covers it; hand-roll over fanout if
   truly needed.
 - **Sync command bus** — a command with one handler is a function call.
@@ -225,4 +231,5 @@ httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
 413) · breadcrumb value type · notification-inbox pipeline · per-tenant
 encryption / GDPR crypto-shred (kdf) · optimistic locking + audit columns
 (postgres docs) · Postgres tsvector search · usermanager flow · templ
-`Classes` toggle helper.
+`Classes` toggle helper · click-capture pipeline (clientip/geoip/useragent
+enrichment → outbox → eventrouter).
