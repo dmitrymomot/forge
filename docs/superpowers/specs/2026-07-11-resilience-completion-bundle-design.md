@@ -371,15 +371,64 @@ Covered by new tests on each implementation.
 
 ### 5.2 Postgres migrations — pattern set by this bundle
 
-These are the repo's first pg-table-owning drivers. Each pg driver
-(`ratelimit/pgstore`, `lock/pgstore`):
+These are the repo's first pg-table-owning drivers. The mechanism is chosen so
+forge works as an **imported dependency** (not vendored) and respects
+least-privilege DB roles.
 
-- Embeds its DDL via `//go:embed schema.sql`.
-- Exposes `Schema string` and an idempotent `Migrate(ctx, *pgxpool.Pool) error`
-  (`CREATE TABLE IF NOT EXISTS …`) for self-contained setup.
-- Also ships the DDL as a versioned migrations `fs.FS` (`Migrations embed.FS`)
-  so consumers using the `migration`/goose runner (via `postgres.WithMigrator`)
-  can fold it into their normal migration flow.
+**Embedded, self-travelling SQL.** Each pg driver (`ratelimit/pgstore`,
+`lock/pgstore`) ships goose-format migrations embedded in the package:
+
+```go
+//go:embed migrations/*.sql
+var Migrations embed.FS
+```
+
+Because `embed.FS` compiles into the package, the SQL travels *inside* the
+imported module — readable at runtime from the read-only module cache, with no
+vendoring and no filesystem-path assumptions. Files use goose **timestamp**
+versioning (the ecosystem default).
+
+**Independent timeline per source — never a merged version table.** Each source
+(the consumer's app, `ratelimit`, `lock`) is applied under its **own** goose
+version table (`schema_migrations`, `forge_ratelimit_schema`,
+`forge_lock_schema`). Merging independently-authored sources into one table is
+unsafe: forge's migrations carry the timestamp of when *forge* authored them, so
+a consumer who adopts forge later is already past that timestamp on their app
+timeline — goose treats the forge migration as out-of-order/"missing" and
+refuses it (or forces the controversial `AllowMissing`). Per-source tables
+sidestep this entirely, and let forge evolve a table in a later release without
+touching the consumer's timeline.
+
+**Composite runner (new, in `data/migration`).** `migration.New` takes one
+`fs.FS`; consuming several forge drivers plus the app needs a composite that
+keeps each under its own table while fitting the single-`Migrator`
+`postgres.WithMigrator` seam:
+
+```go
+type Source struct { FS fs.FS; Table string } // Table "" => DefaultTable
+func Group(srcs ...Source) *Group             // implements Up(ctx, db) error
+// Up applies each Source under its own version table, in declared order.
+```
+
+Consumer wiring — one Migrator, isolated timelines:
+
+```go
+postgres.Open(ctx, postgres.WithMigrator(migration.Group(
+    migration.Source{FS: appMigrations},
+    migration.Source{FS: ratelimitpg.Migrations, Table: "forge_ratelimit_schema"},
+    migration.Source{FS: lockpg.Migrations,      Table: "forge_lock_schema"},
+)))
+```
+
+`New(single FS)` is unchanged; `Group` composes it (~40 LOC + tests). Forge
+tables are standalone (no FKs into app tables), so declared order is always safe.
+
+**No auto-migrate helper.** The earlier idempotent `Migrate()` /
+`CREATE TABLE IF NOT EXISTS`-at-boot idea is dropped: it is redundant with the
+one-line runner and a least-privilege footgun (invites granting the app process
+DDL rights). `doc.go` documents the raw table DDL for atlas/dbmate/flyway shops
+that do not use goose (copy into their own tool — an escape hatch, not a code
+affordance). The pgstore integration tests apply the same embedded `Migrations`.
 
 Tables: counter store → `(key text PK, value bigint, expires_at timestamptz NULL)`;
 lock store → `(key text PK, owner text, expires_at timestamptz, fence bigint)`
@@ -413,11 +462,12 @@ plus a `fence` sequence (or a monotonic bump). Final DDL decided in the plan.
 
 ```
 resilience/quota/                 ~450–650 LOC  (meter, window, limit, errors, doc)
-resilience/ratelimit/pgstore/     ~200–300 LOC  (+ schema.sql, migration)
+resilience/ratelimit/pgstore/     ~200–300 LOC  (+ migrations/ embed.FS)
 resilience/loadshed/              ~400–600 LOC  (criteria, ramp, shedder, middleware)
 resilience/lock/                  ~500–700 LOC  (store iface, memory, lock, lease, RunOnLeader)
-resilience/lock/pgstore/          ~200–300 LOC  (+ schema.sql, migration)
+resilience/lock/pgstore/          ~200–300 LOC  (+ migrations/ embed.FS)
 resilience/lock/redisstore/       ~200–300 LOC
+data/migration/                   ~40 LOC       (Source + Group composite; existing pkg)
 ```
 
 All within the single-responsibility ~250–850 LOC guidance; drivers are thin
