@@ -79,6 +79,21 @@ func TestParseMetadataAcceptsValidSmallMetadata(t *testing.T) {
 	}
 }
 
+// TestParseMetadataRejectsBadIPVersion guards against a crafted metadata
+// section with an ip_version outside {4, 6}; only those two values are
+// meaningful for tree geometry (computeIPv4Start, lookupOffset).
+func TestParseMetadataRejectsBadIPVersion(t *testing.T) {
+	data := append(append([]byte{}, metadataMarker...), buildMetadata(1, 24, 0, 2)...)
+
+	db, err := parseMetadata(data, func() error { return nil })
+	if err == nil {
+		t.Fatalf("expected error for ip_version = 0, got db = %+v", db)
+	}
+	if !errors.Is(err, ErrInvalidDatabase) {
+		t.Fatalf("err = %v, want ErrInvalidDatabase", err)
+	}
+}
+
 func loadDB(t *testing.T, name string) *database {
 	t.Helper()
 	data, err := os.ReadFile("testdata/" + name)

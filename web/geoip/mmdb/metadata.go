@@ -1,6 +1,9 @@
 package mmdb
 
-import "bytes"
+import (
+	"bytes"
+	"math"
+)
 
 var metadataMarker = []byte("\xab\xcd\xefMaxMind.com")
 
@@ -71,6 +74,9 @@ func parseMetadata(data []byte, closer func() error) (*database, error) {
 	if db.nodeCount == 0 {
 		return nil, ErrInvalidDatabase
 	}
+	if db.ipVersion != 4 && db.ipVersion != 6 {
+		return nil, ErrInvalidDatabase
+	}
 	db.nodeBytes = uint32(db.recordSize) / 4
 	// Compute geometry in uint64 and bounds-check before narrowing to
 	// uint32: nodeBytes*nodeCount can overflow uint32 for a crafted
@@ -79,6 +85,12 @@ func parseMetadata(data []byte, closer func() error) (*database, error) {
 	treeSize := uint64(db.nodeBytes) * uint64(db.nodeCount)
 	dataStart := treeSize + 16
 	if dataStart > uint64(len(data)) {
+		return nil, ErrInvalidDatabase
+	}
+	// Belt-and-suspenders: dataStart already passed the len(data) bound above,
+	// so a >=4GB geometry can only occur with a >=4GB data slice. Guard the
+	// narrowing explicitly rather than relying on that being unreachable.
+	if dataStart > math.MaxUint32 {
 		return nil, ErrInvalidDatabase
 	}
 	db.treeSize = uint32(treeSize)
