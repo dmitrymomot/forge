@@ -187,6 +187,44 @@ func TestPrecompressedWeakIfNoneMatch(t *testing.T) {
 	}
 }
 
+// TestPrecompressedWildcardAccept verifies that Accept-Encoding: * (RFC 9110
+// §12.5.3) accepts any content-coding not explicitly listed, and that an
+// explicit token always takes precedence over the wildcard.
+func TestPrecompressedWildcardAccept(t *testing.T) {
+	t.Run("bare wildcard accepts", func(t *testing.T) {
+		a := mustNew(t, precompFS(), assets.WithPrecompressed())
+		rec := get(t, a, a.URL("app.css"), http.Header{"Accept-Encoding": {"*"}})
+		if enc := rec.Header().Get("Content-Encoding"); enc != "br" {
+			t.Fatalf("Content-Encoding = %q, want br", enc)
+		}
+		if rec.Body.String() != "BROTLIBYTES" {
+			t.Fatalf("body = %q, want sibling bytes", rec.Body.String())
+		}
+	})
+
+	t.Run("wildcard q=0 refuses", func(t *testing.T) {
+		a := mustNew(t, precompFS(), assets.WithPrecompressed())
+		rec := get(t, a, a.URL("app.css"), http.Header{"Accept-Encoding": {"*;q=0"}})
+		if enc := rec.Header().Get("Content-Encoding"); enc != "" {
+			t.Fatalf("Content-Encoding = %q, want empty (*;q=0 refuses)", enc)
+		}
+		if rec.Body.String() != "PLAINCSS" {
+			t.Fatalf("body = %q, want identity bytes", rec.Body.String())
+		}
+	})
+
+	t.Run("explicit refusal wins over wildcard", func(t *testing.T) {
+		a := mustNew(t, precompFS(), assets.WithPrecompressed())
+		rec := get(t, a, a.URL("app.css"), http.Header{"Accept-Encoding": {"br;q=0, *"}})
+		if enc := rec.Header().Get("Content-Encoding"); enc == "br" {
+			t.Fatalf("Content-Encoding = %q, want not br (explicit br;q=0 must win over *)", enc)
+		}
+		if rec.Body.String() != "PLAINCSS" {
+			t.Fatalf("body = %q, want identity bytes", rec.Body.String())
+		}
+	})
+}
+
 // TestPrecompressedUnknownContentTypeFallsThrough verifies that when the
 // fingerprinted asset's Content-Type can't be determined, the compressed
 // sibling is not served (net/http would sniff the compressed stream and

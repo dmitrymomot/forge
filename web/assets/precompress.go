@@ -65,25 +65,38 @@ func encodingToken(enc string) string {
 	return enc // "br", "zstd", …
 }
 
-// acceptsEncoding reports whether the Accept-Encoding header value explicitly
-// accepts the given content-coding token (e.g. "br", "gzip"), honoring
-// q-values per RFC 9110 §12.5.3: a q=0 (or non-positive) parameter is an
-// explicit refusal, and matching is a plain token comparison (not substring)
-// so "brotli" never false-matches "br".
+// acceptsEncoding reports whether the Accept-Encoding header accepts the given
+// content-coding token (e.g. "br", "gzip") with a non-zero q-value. An explicitly
+// listed token takes precedence; otherwise a wildcard "*" applies (RFC 9110
+// §12.5.3), matching any coding not explicitly named.
 func acceptsEncoding(header, token string) bool {
+	starQ, hasStar := 0.0, false
 	for part := range strings.SplitSeq(header, ",") {
 		coding, params, _ := strings.Cut(part, ";")
-		if !strings.EqualFold(strings.TrimSpace(coding), token) {
-			continue
+		coding = strings.TrimSpace(coding)
+		switch {
+		case strings.EqualFold(coding, token):
+			return codingQ(params) > 0
+		case coding == "*":
+			starQ, hasStar = codingQ(params), true
 		}
-		q, hasQ := strings.CutPrefix(strings.TrimSpace(params), "q=")
-		if !hasQ {
-			return true
-		}
-		v, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
-		return err == nil && v > 0
 	}
-	return false
+	return hasStar && starQ > 0
+}
+
+// codingQ returns the q-value of an Accept-Encoding directive's params: 1 when no
+// "q=" is present (default accept), the parsed value when present and valid, or a
+// negative sentinel when the q-value is present but malformed (treated as refusal).
+func codingQ(params string) float64 {
+	q, hasQ := strings.CutPrefix(strings.TrimSpace(params), "q=")
+	if !hasQ {
+		return 1
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
+	if err != nil {
+		return -1
+	}
+	return v
 }
 
 // etagMatches reports whether the If-None-Match header value matches etag.
