@@ -67,6 +67,39 @@ func TestLookupMissIsEmptyNoError(t *testing.T) {
 	}
 }
 
+func TestReloadReplacesOmittedDatabase(t *testing.T) {
+	r, err := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"), mmdb.WithASN("testdata/GeoLite2-ASN-Test.mmdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("1.128.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.ASN != 1221 {
+		t.Fatalf("asn = %d, want 1221", loc.ASN)
+	}
+
+	// Reload with only the city database. This must fully replace the open
+	// databases: the omitted ASN database is closed, not left unchanged.
+	if err := r.Reload(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb")); err != nil {
+		t.Fatal(err)
+	}
+
+	loc, err = r.Lookup(context.Background(), netip.MustParseAddr("1.128.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.ASN != 0 {
+		t.Fatalf("after reload without WithASN, asn = %d, want 0", loc.ASN)
+	}
+	if loc.ASNOrg != "" {
+		t.Fatalf("after reload without WithASN, asn org = %q, want empty", loc.ASNOrg)
+	}
+}
+
 func TestReloadSwapsData(t *testing.T) {
 	r, err := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
 	if err != nil {

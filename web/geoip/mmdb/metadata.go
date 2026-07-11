@@ -24,10 +24,16 @@ type database struct {
 // parseMetadata locates and decodes the metadata section, validates it, and
 // derives the tree geometry. closer is stored on the database for Close/Reload.
 func parseMetadata(data []byte, closer func() error) (*database, error) {
-	idx := bytes.LastIndex(data, metadataMarker)
-	if idx < 0 {
+	// The MaxMind-DB spec guarantees the metadata section starts within the
+	// last 128 KiB of the file, so only scan that window instead of the
+	// whole buffer.
+	const metadataMaxSize = 128 * 1024
+	start := max(len(data)-metadataMaxSize, 0)
+	rel := bytes.LastIndex(data[start:], metadataMarker)
+	if rel < 0 {
 		return nil, ErrInvalidDatabase
 	}
+	idx := start + rel
 	off := idx + len(metadataMarker)
 
 	typ, count, entryOff, err := ctrl(data, off)

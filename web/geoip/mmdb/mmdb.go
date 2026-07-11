@@ -331,6 +331,10 @@ func (r *Reader) Lookup(_ context.Context, ip netip.Addr) (geoip.Location, error
 
 // Reload atomically replaces the open databases with freshly opened ones and
 // unmaps the previous data. On error the current databases are unchanged.
+//
+// Reload fully replaces the open databases: a database whose option is
+// omitted is CLOSED, not left unchanged. Pass every database you want open
+// on each call (e.g. both WithCity and WithASN), exactly as New does.
 func (r *Reader) Reload(opts ...Option) error {
 	return r.load(newConfig(opts...))
 }
