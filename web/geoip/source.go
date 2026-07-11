@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/netip"
+
+	"github.com/dmitrymomot/forge/web/clientip"
 )
 
 // Locator resolves an IP address to a Location. It is the low-level primitive:
@@ -46,4 +48,30 @@ func (c chainSource) Lookup(r *http.Request) (Location, error) {
 		}
 	}
 	return Location{}, firstErr
+}
+
+type locatorSource struct {
+	loc  Locator
+	opts []clientip.Option
+}
+
+// FromLocator adapts an IP-based Locator into a request Source by resolving the
+// client IP first. With no options it uses clientip.Get (honoring an installed
+// clientip.Middleware); with options it uses clientip.Resolve(r, opts...). The
+// resolved IP is looked up via loc.Lookup(r.Context(), ip). A request whose IP
+// does not parse returns (Location{}, nil).
+func FromLocator(loc Locator, opts ...clientip.Option) Source {
+	return locatorSource{loc: loc, opts: opts}
+}
+
+func (s locatorSource) Lookup(r *http.Request) (Location, error) {
+	ipStr := clientip.Get(r)
+	if len(s.opts) > 0 {
+		ipStr = clientip.Resolve(r, s.opts...)
+	}
+	ip, err := netip.ParseAddr(ipStr)
+	if err != nil {
+		return Location{}, nil
+	}
+	return s.loc.Lookup(r.Context(), ip)
 }
