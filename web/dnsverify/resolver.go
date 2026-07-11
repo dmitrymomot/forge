@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"slices"
 )
 
 // Resolver is the DNS seam. *net.Resolver satisfies it structurally, so
@@ -14,6 +15,10 @@ type Resolver interface {
 	LookupCNAME(ctx context.Context, host string) (string, error)
 	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 }
+
+// *net.Resolver satisfies Resolver — proven at compile time so a stdlib
+// signature drift breaks the build here, not in a downstream consumer.
+var _ Resolver = (*net.Resolver)(nil)
 
 // StaticResolver is an in-memory Resolver for tests. Configure it entirely at
 // construction with the With* options; it is immutable afterward and safe to
@@ -80,7 +85,7 @@ func (r *StaticResolver) LookupTXT(_ context.Context, host string) ([]string, er
 	if !ok {
 		return nil, notFound(host)
 	}
-	return v, nil
+	return slices.Clone(v), nil
 }
 
 // LookupCNAME implements Resolver.
