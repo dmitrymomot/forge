@@ -47,3 +47,11 @@ func WithDev(dev bool) Option { return func(cf *config) { cf.cfg.Dev = dev } }
 func WithCacheControl(immutable, revalidate string) Option {
 	return func(cf *config) { cf.immutableCC, cf.revalidateCC = immutable, revalidate }
 }
+
+// WithManifest sets the flat manifest path within the fs.FS (default
+// "manifest.json"). Empty disables the external read (always runtime-fingerprint).
+func WithManifest(path string) Option { return func(cf *config) { cf.cfg.ManifestPath = path } }
+
+// WithReader supplies a custom manifest Reader (e.g. a Vite adapter). It takes
+// precedence over the flat manifest.json.
+func WithReader(r Reader) Option { return func(cf *config) { cf.reader = r } }

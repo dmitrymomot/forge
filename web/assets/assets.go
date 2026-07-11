@@ -2,6 +2,8 @@ package assets
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
@@ -66,15 +68,62 @@ func New(fsys fs.FS, opts ...Option) (*Assets, error) {
 	return a, nil
 }
 
-// load populates the fingerprint table. Runtime hashing only for now; Task 4
-// adds the external-manifest and Reader paths. Dev mode keeps an empty table.
+// load populates the fingerprint table by precedence: a custom Reader, else the
+// flat manifest.json (absent → runtime), else runtime fingerprinting. Dev mode
+// keeps an empty table.
 func (a *Assets) load(c config) error {
 	if a.dev {
 		return nil
 	}
+	switch {
+	case c.reader != nil:
+		table, err := c.reader.Read(a.fsys)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrManifest, err)
+		}
+		return a.finalizeExternal(table)
+	case c.cfg.ManifestPath != "":
+		table, err := readFlatManifest(a.fsys, c.cfg.ManifestPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return a.runtime()
+		}
+		if err != nil {
+			return err
+		}
+		return a.finalizeExternal(table)
+	default:
+		return a.runtime()
+	}
+}
+
+func (a *Assets) runtime() error {
 	table, reverse, err := buildRuntime(a.fsys)
 	if err != nil {
 		return err
+	}
+	a.table, a.reverse = table, reverse
+	return nil
+}
+
+// finalizeExternal verifies each entry's hashed file exists in fsys, fills a
+// missing Integrity by hashing that file, and builds the reverse map. For an
+// external manifest the served path equals the real path.
+func (a *Assets) finalizeExternal(table map[string]Entry) error {
+	reverse := make(map[string]string, len(table))
+	for logical, e := range table {
+		if !fileExists(a.fsys, e.Path) {
+			return fmt.Errorf("%w: %q → missing file %q", ErrManifest, logical, e.Path)
+		}
+		if e.Integrity == "" {
+			data, err := fs.ReadFile(a.fsys, e.Path)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrManifest, err)
+			}
+			e.Integrity = sri(data)
+		}
+		e.real = e.Path
+		table[logical] = e
+		reverse[e.Path] = e.Path
 	}
 	a.table, a.reverse = table, reverse
 	return nil
