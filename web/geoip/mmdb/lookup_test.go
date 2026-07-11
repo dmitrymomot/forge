@@ -134,7 +134,7 @@ func TestReloadAfterClose(t *testing.T) {
 	if err := r.Reload(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb")); err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("81.2.69.142"))
 	if err != nil {
 		t.Fatal(err)
