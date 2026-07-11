@@ -155,3 +155,27 @@ func TestVerifyIPFamilyMismatchIsInvalidChallenge(t *testing.T) {
 		}
 	}
 }
+
+// emptyIPResolver returns zero addresses with a nil error from LookupNetIP,
+// modeling a resolver that answers the query but publishes no address of the
+// requested family. StaticResolver reports that as not-found instead, so this
+// double is the only way to exercise verifyIP's "resolved nothing → pending"
+// branch directly.
+type emptyIPResolver struct{ dnsverify.Resolver }
+
+func (emptyIPResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, nil
+}
+
+func TestVerifyIPPendingOnEmptyResolvedSet(t *testing.T) {
+	v := newVerifier(t, emptyIPResolver{dnsverify.NewStaticResolver()})
+	c := dnsverify.Challenge{
+		Record: dnsverify.A,
+		Host:   "example.com",
+		Expect: []string{"203.0.113.10"},
+	}
+	res, err := v.Verify(context.Background(), c)
+	if err != nil || res.Verified || len(res.Found) != 0 {
+		t.Fatalf("want pending (nil err, not verified, empty found), got %+v err=%v", res, err)
+	}
+}
