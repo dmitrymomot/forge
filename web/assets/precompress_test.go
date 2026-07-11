@@ -1,6 +1,7 @@
 package assets_test
 
 import (
+	"mime"
 	"net/http"
 	"testing"
 	"testing/fstest"
@@ -73,5 +74,59 @@ func TestPrecompressedGzToken(t *testing.T) {
 	rec := get(t, a, a.URL("a.js"), http.Header{"Accept-Encoding": {"gzip"}})
 	if enc := rec.Header().Get("Content-Encoding"); enc != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", enc)
+	}
+}
+
+// TestPrecompressedDistinctEtagAnd304 verifies the compressed representation
+// gets its own strong Etag (RFC 9110 §8.8.3), distinct from the identity
+// Etag, and that a matching If-None-Match on the encoded request 304s.
+func TestPrecompressedDistinctEtagAnd304(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	url := a.URL("app.css")
+
+	identity := get(t, a, url, nil)
+	identityEtag := identity.Header().Get("Etag")
+	if identityEtag == "" {
+		t.Fatal("identity Etag must not be empty")
+	}
+
+	compressed := get(t, a, url, http.Header{"Accept-Encoding": {"br"}})
+	compressedEtag := compressed.Header().Get("Etag")
+	if compressedEtag == "" {
+		t.Fatal("compressed Etag must not be empty")
+	}
+	if compressedEtag == identityEtag {
+		t.Fatalf("compressed Etag %q must differ from identity Etag %q", compressedEtag, identityEtag)
+	}
+
+	rec := get(t, a, url, http.Header{
+		"Accept-Encoding": {"br"},
+		"If-None-Match":   {compressedEtag},
+	})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("code = %d, want 304", rec.Code)
+	}
+}
+
+// TestPrecompressedUnknownContentTypeFallsThrough verifies that when the
+// fingerprinted asset's Content-Type can't be determined, the compressed
+// sibling is not served (net/http would sniff the compressed stream and
+// mislabel it) and the identity bytes are served instead.
+func TestPrecompressedUnknownContentTypeFallsThrough(t *testing.T) {
+	if ct := mime.TypeByExtension(".dat"); ct != "" {
+		t.Skipf("platform resolves .dat to %q, need an extension with no known type", ct)
+	}
+	fsys := fstest.MapFS{
+		"data.a1b2c3d4.dat":    {Data: []byte("PLAINDATA")},
+		"data.a1b2c3d4.dat.br": {Data: []byte("BROTLIDATA")},
+		"manifest.json":        {Data: []byte(`{"data.dat":"data.a1b2c3d4.dat"}`)},
+	}
+	a := mustNew(t, fsys, assets.WithPrecompressed())
+	rec := get(t, a, a.URL("data.dat"), http.Header{"Accept-Encoding": {"br"}})
+	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("Content-Encoding = %q, want empty (identity fallback)", enc)
+	}
+	if rec.Body.String() != "PLAINDATA" {
+		t.Fatalf("body = %q, want identity bytes", rec.Body.String())
 	}
 }

@@ -16,7 +16,16 @@ func (a *Assets) serveCompressed(w http.ResponseWriter, r *http.Request, name st
 	if len(a.precompress) == 0 {
 		return false
 	}
-	w.Header().Add("Vary", "Accept-Encoding")
+	h := w.Header()
+	h.Add("Vary", "Accept-Encoding")
+	if h.Get("Content-Type") == "" {
+		// Unknown extension: the caller couldn't set a Content-Type. Serving
+		// compressed bytes directly would let net/http sniff the COMPRESSED
+		// stream (→ application/octet-stream) alongside Content-Encoding.
+		// Fall through to identity serving, which sniffs the real bytes via
+		// http.ServeContent.
+		return false
+	}
 	accept := r.Header.Get("Accept-Encoding")
 	for _, enc := range a.precompress {
 		if !strings.Contains(accept, encodingToken(enc)) && !strings.Contains(accept, enc) {
@@ -27,9 +36,13 @@ func (a *Assets) serveCompressed(w http.ResponseWriter, r *http.Request, name st
 		if err != nil {
 			continue
 		}
-		h := w.Header()
 		h.Set("Content-Encoding", encodingToken(enc))
 		h.Del("Accept-Ranges")
+		// A strong validator must be unique per representation (RFC 9110
+		// §8.8.3); Content-Encoding changes the representation, so the
+		// compressed body gets its own Etag derived from the identity one.
+		identity := strings.Trim(h.Get("Etag"), `"`)
+		h.Set("Etag", strconv.Quote(identity+"."+enc))
 		if inm := r.Header.Get("If-None-Match"); inm != "" && h.Get("Etag") != "" && strings.Contains(inm, h.Get("Etag")) {
 			w.WriteHeader(http.StatusNotModified)
 			return true

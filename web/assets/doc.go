@@ -37,7 +37,8 @@
 //	//go:embed static
 //	var staticFS embed.FS
 //
-//	a, err := assets.New(staticFS, assets.WithSPA("index.html"))
+//	sub, _ := fs.Sub(staticFS, "static")
+//	a, err := assets.New(sub, assets.WithSPA("index.html"))
 //	if err != nil {
 //		log.Fatal(err)
 //	}
