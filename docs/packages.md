@@ -40,14 +40,6 @@ in-process store built in, Postgres advisory-lock driver.
 
 ---
 
-**web/assets**
-
-Static file serving over `fs.FS`: correct content types, range requests,
-ETag/304, cache headers; fingerprint-manifest mode (`URL()`/`Integrity()`,
-immutable far-future headers) and SPA fallback. Not a bundler.
-
----
-
 **web/captcha**
 
 Server-side CAPTCHA verification behind a `Verifier` seam; providers
