@@ -54,13 +54,6 @@ ACME/Let's Encrypt TLS via `x/crypto/acme/autocert` wired as `tls.Config`
 + HTTP-01 handler for httpserver — pairs with `tenant`'s custom-domain
 resolution for customer domains.
 
----
-
-**web/geoip**
-
-IP → country/region/ASN lookup behind a `Source` seam; CDN-header source
-(CF-IPCountry) built in stdlib-only; `geoip/maxmind` driver.
-
 ## view/
 
 ---
