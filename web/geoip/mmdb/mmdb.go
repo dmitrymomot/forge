@@ -287,7 +287,99 @@ func (db *database) enName(off int, dst *string) error {
 
 var _ geoip.Locator = (*Reader)(nil)
 
-// Lookup is implemented in Task 10.
-func (r *Reader) Lookup(ctx context.Context, ip netip.Addr) (geoip.Location, error) {
-	return geoip.Location{}, nil
+// Lookup resolves ip against the city and ASN databases, merging their fields.
+// A miss in both is (geoip.Location{}, nil); a decode failure returns an error.
+// ctx is accepted for the geoip.Locator contract; the lookup is CPU-only.
+func (r *Reader) Lookup(_ context.Context, ip netip.Addr) (geoip.Location, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.city == nil && r.asn == nil {
+		return geoip.Location{}, ErrClosed
+	}
+	var loc geoip.Location
+	if r.city != nil {
+		if off, ok := r.city.lookupOffset(ip); ok {
+			l, err := r.city.decodeLocation(off)
+			if err != nil {
+				return geoip.Location{}, err
+			}
+			loc = l
+		}
+	}
+	if r.asn != nil {
+		if off, ok := r.asn.lookupOffset(ip); ok {
+			l, err := r.asn.decodeLocation(off)
+			if err != nil {
+				return geoip.Location{}, err
+			}
+			loc.ASN = l.ASN
+			loc.ASNOrg = l.ASNOrg
+		}
+	}
+	return loc, nil
+}
+
+// Reload atomically replaces the open databases with freshly opened ones and
+// unmaps the previous data. On error the current databases are unchanged.
+func (r *Reader) Reload(opts ...Option) error {
+	return r.load(newConfig(opts...))
+}
+
+// decodeLocation selectively decodes the record at off into a geoip.Location,
+// reading only the keys we care about and skipping the rest.
+func (db *database) decodeLocation(off int) (geoip.Location, error) {
+	var loc geoip.Location
+	err := db.walkMap(off, func(key string, vOff int) error {
+		switch key {
+		case "country":
+			return db.walkMap(vOff, func(k string, o int) error {
+				if k == "iso_code" {
+					s, e := db.stringField(o)
+					loc.CountryCode = s
+					return e
+				}
+				return nil
+			})
+		case "subdivisions":
+			return db.firstOfArray(vOff, func(o int) error {
+				return db.walkMap(o, func(k string, oo int) error {
+					switch k {
+					case "iso_code":
+						s, e := db.stringField(oo)
+						loc.RegionCode = s
+						return e
+					case "names":
+						return db.enName(oo, &loc.RegionName)
+					}
+					return nil
+				})
+			})
+		case "city":
+			return db.walkMap(vOff, func(k string, o int) error {
+				if k == "names" {
+					return db.enName(o, &loc.City)
+				}
+				return nil
+			})
+		case "location":
+			return db.walkMap(vOff, func(k string, o int) error {
+				if k == "time_zone" {
+					s, e := db.stringField(o)
+					loc.TimeZone = s
+					return e
+				}
+				return nil
+			})
+		case "autonomous_system_number":
+			v, e := db.uintField(vOff)
+			loc.ASN = uint32(v)
+			return e
+		case "autonomous_system_organization":
+			s, e := db.stringField(vOff)
+			loc.ASNOrg = s
+			return e
+		}
+		return nil
+	})
+	return loc, err
 }
