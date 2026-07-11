@@ -133,3 +133,25 @@ func TestVerifyInvalidChallenge(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyIPFamilyMismatchIsInvalidChallenge(t *testing.T) {
+	// A wrong-family or unparseable Expect entry can never verify against the
+	// family-filtered LookupNetIP results, so Verify rejects it up front rather
+	// than letting it sit "pending" forever.
+	v := newVerifier(t, dnsverify.NewStaticResolver(
+		dnsverify.WithIP("example.com",
+			netip.MustParseAddr("203.0.113.10"),
+			netip.MustParseAddr("2001:db8::1"),
+		),
+	))
+	cases := []dnsverify.Challenge{
+		{Record: dnsverify.A, Host: "example.com", Expect: []string{"2001:db8::1"}},              // IPv6 in an A challenge
+		{Record: dnsverify.AAAA, Host: "example.com", Expect: []string{"203.0.113.10"}},          // IPv4 in an AAAA challenge
+		{Record: dnsverify.A, Host: "example.com", Expect: []string{"203.0.113.10", "nonsense"}}, // unparseable entry
+	}
+	for i, c := range cases {
+		if _, err := v.Verify(context.Background(), c); !errors.Is(err, dnsverify.ErrInvalidChallenge) {
+			t.Errorf("case %d: want ErrInvalidChallenge, got %v", i, err)
+		}
+	}
+}

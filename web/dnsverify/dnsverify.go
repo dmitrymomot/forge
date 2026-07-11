@@ -48,8 +48,11 @@ type Result struct {
 // Verify performs one lookup-and-compare for c. A record that is not published
 // yet (NXDOMAIN / empty) yields an unverified Result with a nil error; a
 // genuine resolver failure returns ErrLookup; a malformed Challenge returns
-// ErrInvalidChallenge. The Verifier's Timeout bounds each lookup and the
-// caller's ctx cancellation is honored.
+// ErrInvalidChallenge. A Challenge is malformed if Host or Expect is empty, the
+// Record is unknown, or — for an A/AAAA Challenge — any Expect entry is not an
+// IP of the matching family (an IPv6 literal in an A Challenge, or vice versa).
+// The Verifier's Timeout bounds each lookup and the caller's ctx cancellation
+// is honored.
 func (v *Verifier) Verify(ctx context.Context, c Challenge) (Result, error) {
 	if c.Host == "" || len(c.Expect) == 0 {
 		return Result{}, ErrInvalidChallenge
@@ -103,16 +106,27 @@ func (v *Verifier) verifyCNAME(ctx context.Context, c Challenge) (Result, error)
 }
 
 func (v *Verifier) verifyIP(ctx context.Context, c Challenge, network string) (Result, error) {
+	// Validate the Expect set before touching the network: every entry must be
+	// an IP of the record's family. A wrong-family or unparseable entry can
+	// never match the family-filtered LookupNetIP results, so it is malformed
+	// misuse — fail fast with ErrInvalidChallenge rather than sitting pending
+	// forever. This keeps Verify the single validation gate (constructors stay
+	// pure and non-erroring).
+	want := make(map[netip.Addr]struct{}, len(c.Expect))
+	for _, s := range c.Expect {
+		addr, perr := netip.ParseAddr(s)
+		if perr != nil {
+			return Result{}, fmt.Errorf("%w: Expect %q is not an IP address", ErrInvalidChallenge, s)
+		}
+		addr = addr.Unmap()
+		if (network == "ip4") != addr.Is4() {
+			return Result{}, fmt.Errorf("%w: Expect %q does not match record family %s", ErrInvalidChallenge, s, c.Record)
+		}
+		want[addr] = struct{}{}
+	}
 	got, err := v.resolver.LookupNetIP(ctx, network, c.Host)
 	if err != nil {
 		return errResult(err)
-	}
-	want := make(map[netip.Addr]struct{}, len(c.Expect))
-	for _, s := range c.Expect {
-		if addr, perr := netip.ParseAddr(s); perr == nil {
-			want[addr.Unmap()] = struct{}{}
-		}
-		// Skip unparseable Expect entries — a malformed IP simply cannot match.
 	}
 	found := make([]string, 0, len(got))
 	verified := false
