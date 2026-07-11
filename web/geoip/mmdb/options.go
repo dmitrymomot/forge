@@ -15,7 +15,6 @@ type config struct {
 // Option configures New and Reload.
 type Option func(*config)
 
-//nolint:unused // Used by New and Reload (implemented in future tasks).
 func newConfig(opts ...Option) config {
 	var c config
 	for _, o := range opts {
