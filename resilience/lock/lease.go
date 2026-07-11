@@ -7,8 +7,8 @@ import (
 )
 
 // Lease is a held distributed lock. A background goroutine refreshes it until
-// Release or ctx-cancel; if a refresh fails (expired or stolen) Done closes and
-// the holder must stop its critical section.
+// Release or ctx-cancel; if a refresh fails (expired or stolen), Done closes to
+// signal the loss and the holder must stop its critical section.
 type Lease struct {
 	lock   *Lock
 	cancel context.CancelFunc

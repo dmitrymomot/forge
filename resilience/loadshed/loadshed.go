@@ -2,6 +2,7 @@ package loadshed
 
 import (
 	"context"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
@@ -103,7 +104,8 @@ func (s *Shedder) pressure() float64 {
 
 func safePressure(c Criteria) (p float64) {
 	defer func() {
-		if recover() != nil {
+		if r := recover(); r != nil {
+			slog.Warn("loadshed: criteria panicked; failing open", "panic", r)
 			p = 0
 		}
 	}()

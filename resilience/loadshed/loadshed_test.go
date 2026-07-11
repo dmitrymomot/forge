@@ -3,9 +3,12 @@ package loadshed_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/loadshed"
 )
 
@@ -95,4 +98,29 @@ func TestAdmit_RejectionRamp(t *testing.T) {
 		_, ok = s.Acquire(context.Background())
 		assert.False(t, ok) // 0.4 >= 0.45 is false -> shed
 	})
+}
+
+// TestLatencyEWMARisesAndClamps drives the Latency criterion's EWMA through
+// the Shedder using a mock clock (Ticket.Release records latency as
+// clk.Now()-start), asserting Pressure() rises with the first sample and then
+// clamps to 1.0 once the EWMA exceeds the threshold.
+func TestLatencyEWMARisesAndClamps(t *testing.T) {
+	clk := clock.NewMock(time.Unix(0, 0))
+	lat := loadshed.Latency(100 * time.Millisecond) // threshold 100ms, default alpha 0.2
+	s := loadshed.New(loadshed.WithCriteria(lat), loadshed.WithClock(clk))
+	assert.Equal(t, 0.0, lat.Pressure()) // no samples
+
+	// one 50ms request -> first EWMA sample = 50ms -> pressure 0.5
+	tk, ok := s.Acquire(context.Background())
+	require.True(t, ok)
+	clk.Advance(50 * time.Millisecond)
+	tk.Release()
+	assert.InDelta(t, 0.5, lat.Pressure(), 1e-9)
+
+	// one 500ms request -> ewma = 0.2*500 + 0.8*50 = 140ms -> pressure 1.4 -> clamped to 1.0
+	tk, ok = s.Acquire(context.Background())
+	require.True(t, ok)
+	clk.Advance(500 * time.Millisecond)
+	tk.Release()
+	assert.Equal(t, 1.0, lat.Pressure())
 }

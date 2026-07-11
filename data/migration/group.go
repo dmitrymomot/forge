@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 )
 
@@ -35,7 +36,24 @@ func Group(sets ...Set) *GroupMigrator {
 
 // Up applies each Set's migrations under its own version table, in order. It
 // stops at the first error. The db is owned by the caller and never closed.
+//
+// Before applying anything, it verifies that every Set resolves to a distinct
+// version table (empty tables default to DefaultTable); two Sets sharing a
+// table would make goose track both under one timeline, silently skipping the
+// second source's migrations as "already applied".
 func (g *GroupMigrator) Up(ctx context.Context, db *sql.DB) error {
+	seen := make(map[string]struct{}, len(g.sets))
+	for _, s := range g.sets {
+		table := s.table
+		if table == "" {
+			table = DefaultTable
+		}
+		if _, dup := seen[table]; dup {
+			return fmt.Errorf("%w: %q", ErrDuplicateSource, table)
+		}
+		seen[table] = struct{}{}
+	}
+
 	for _, s := range g.sets {
 		if err := New(s.fsys, WithTable(s.table)).Up(ctx, db); err != nil {
 			return err
