@@ -2,6 +2,7 @@ package dnsverify_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,47 @@ func TestConfigValidate(t *testing.T) {
 	bad.TokenBytes = 4
 	if !errors.Is(bad.Validate(), dnsverify.ErrInvalidConfig) {
 		t.Error("TokenBytes < 8 must be invalid")
+	}
+}
+
+func TestConfigValidateLabelSyntax(t *testing.T) {
+	base := dnsverify.DefaultConfig()
+
+	valid := []string{
+		"_forge-verify", // default, underscore-prefixed service label
+		"_custom",
+		"verify",
+		"a",
+		"_acme-challenge",
+		"_forge-verify.sub", // dotted prefix (each part a valid label)
+	}
+	for _, label := range valid {
+		c := base
+		c.Label = label
+		if err := c.Validate(); err != nil {
+			t.Errorf("Label %q must be valid, got %v", label, err)
+		}
+	}
+
+	invalid := []string{
+		"",                      // empty
+		"_forge verify",         // space
+		"_forge-verify.",        // trailing dot → empty final label
+		".verify",               // leading dot → empty first label
+		"a..b",                  // consecutive dots → empty middle label
+		"-bad",                  // leading hyphen
+		"bad-",                  // trailing hyphen
+		"has_underscore ",       // trailing space
+		"bad!",                  // illegal punctuation
+		"café",                  // non-ASCII
+		strings.Repeat("a", 64), // label longer than 63 chars
+	}
+	for _, label := range invalid {
+		c := base
+		c.Label = label
+		if !errors.Is(c.Validate(), dnsverify.ErrInvalidConfig) {
+			t.Errorf("Label %q must be invalid (ErrInvalidConfig), got %v", label, c.Validate())
+		}
 	}
 }
 
