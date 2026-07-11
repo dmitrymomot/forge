@@ -405,18 +405,20 @@ keeps each under its own table while fitting the single-`Migrator`
 `postgres.WithMigrator` seam:
 
 ```go
-type Source struct { FS fs.FS; Table string } // Table "" => DefaultTable
-func Group(srcs ...Source) *Group             // implements Up(ctx, db) error
-// Up applies each Source under its own version table, in declared order.
+// Set is one migration source; build it with Source — no exported struct literal.
+type Set struct{ /* fsys, table — unexported */ }
+func Source(fsys fs.FS, table string) Set // table "" => DefaultTable
+func Group(sets ...Set) *Group            // implements Up(ctx, db) error
+// Group.Up applies each Set under its own version table, in declared order.
 ```
 
 Consumer wiring — one Migrator, isolated timelines:
 
 ```go
 postgres.Open(ctx, postgres.WithMigrator(migration.Group(
-    migration.Source{FS: appMigrations},
-    migration.Source{FS: ratelimitpg.Migrations, Table: "forge_ratelimit_schema"},
-    migration.Source{FS: lockpg.Migrations,      Table: "forge_lock_schema"},
+    migration.Source(appMigrations, ""), // "" => DefaultTable (schema_migrations)
+    migration.Source(ratelimitpg.Migrations, "forge_ratelimit_schema"),
+    migration.Source(lockpg.Migrations, "forge_lock_schema"),
 )))
 ```
 
