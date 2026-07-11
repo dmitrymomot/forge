@@ -3,12 +3,10 @@ package lock
 import (
 	"time"
 
-	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/core/id"
 )
 
 type config struct {
-	clk     clock.Clock
 	owner   string
 	ttl     time.Duration
 	refresh time.Duration
@@ -45,15 +43,6 @@ func WithRefreshInterval(d time.Duration) Option {
 	}
 }
 
-// WithClock injects a clock (for tests). Default clock.System().
-func WithClock(clk clock.Clock) Option {
-	return func(c *config) {
-		if clk != nil {
-			c.clk = clk
-		}
-	}
-}
-
 func defaultConfig() config {
-	return config{clk: clock.System(), owner: id.NewShort().String(), ttl: 30 * time.Second}
+	return config{owner: id.NewShort().String(), ttl: 30 * time.Second}
 }

@@ -10,7 +10,9 @@ import (
 // protected resource so a stale holder (paused past its TTL) is rejected.
 type Store interface {
 	// Acquire claims key for owner until now+ttl, returning a monotonic fencing
-	// token on success. ok is false if another live owner holds key.
+	// token on success. ok is false if another live owner holds key. The fence
+	// is guaranteed monotonically non-decreasing per key; it may or may not
+	// advance on a re-acquire by the current owner.
 	Acquire(ctx context.Context, key, owner string, ttl time.Duration) (fence uint64, ok bool, err error)
 	// Refresh extends the lease iff owner still holds key; ok is false if lost.
 	Refresh(ctx context.Context, key, owner string, ttl time.Duration) (ok bool, err error)

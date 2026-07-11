@@ -62,8 +62,11 @@ func New(client redis.UniversalClient, opts ...Option) *Store {
 	return &Store{client: client, prefix: c.prefix}
 }
 
-func (s *Store) lockKey(k string) string  { return s.prefix + k }
-func (s *Store) fenceKey(k string) string { return s.prefix + k + ":fence" }
+// lockKey and fenceKey hash-tag co-locate the lock and its fence counter on
+// "{k}" so both land in the same Redis Cluster slot — acquireScript's 2-key
+// EVAL would otherwise CROSSSLOT on a ClusterClient.
+func (s *Store) lockKey(k string) string  { return s.prefix + "{" + k + "}" }
+func (s *Store) fenceKey(k string) string { return s.prefix + "{" + k + "}:fence" }
 
 // Acquire claims key for owner until now+ttl, returning a monotonic fencing
 // token on success. ok is false if another live owner holds key.

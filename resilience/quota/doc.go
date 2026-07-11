@@ -17,8 +17,9 @@
 //	if !res.Allowed { return errPlanExceeded }
 //	if res.Overage > 0 { billing.RecordOverage(tenantID, res.Overage) }
 //
-// Gauges need a durable store (the memory store is LRU/janitor-pruned); use
-// ratelimit/pgstore for seats and storage caps.
+// Gauges need a durable store: the in-process memory store never expires a
+// no-expiry key but loses it on restart, so use ratelimit/pgstore for seats
+// and storage caps.
 //
 // # Concurrency and durability
 //
