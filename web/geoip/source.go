@@ -22,3 +22,28 @@ type Locator interface {
 type Source interface {
 	Lookup(r *http.Request) (Location, error)
 }
+
+type chainSource struct{ sources []Source }
+
+// Chain returns a Source that queries each source in order and returns the
+// first non-empty Location. A source returning an error is skipped (one broken
+// source never blanks the chain); if every source misses or errors, the first
+// error encountered is returned so the caller (e.g. Middleware) can log it.
+func Chain(sources ...Source) Source { return chainSource{sources: sources} }
+
+func (c chainSource) Lookup(r *http.Request) (Location, error) {
+	var firstErr error
+	for _, s := range c.sources {
+		loc, err := s.Lookup(r)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if !loc.Empty() {
+			return loc, nil
+		}
+	}
+	return Location{}, firstErr
+}
