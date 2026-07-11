@@ -1,10 +1,15 @@
 package assets
 
 import (
+	"bytes"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
+	"path"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -101,4 +106,93 @@ func (a *Assets) Lookup(name string) (Entry, bool) {
 // FuncMap exposes URL and Integrity as html/template funcs "asset" and "sri".
 func (a *Assets) FuncMap() template.FuncMap {
 	return template.FuncMap{"asset": a.URL, "sri": a.Integrity}
+}
+
+// ServeHTTP resolves the request under Prefix to a fingerprinted (immutable),
+// plain (no-cache), or 404 response. Task 5 adds precompressed siblings; Task 6
+// adds SPA fallback.
+func (a *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rel := strings.TrimPrefix(r.URL.Path, a.prefix)
+	if rel == r.URL.Path { // request path was not under the prefix
+		http.NotFound(w, r)
+		return
+	}
+	name := path.Clean("/" + rel)[1:] // root at "/" before Clean neutralizes traversal
+	if name == "" || !fs.ValidPath(name) {
+		http.NotFound(w, r)
+		return
+	}
+	if real, ok := a.reverse[name]; ok {
+		a.serveFingerprinted(w, r, name, real)
+		return
+	}
+	if fileExists(a.fsys, name) {
+		a.servePlain(w, r, name)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func (a *Assets) serveFingerprinted(w http.ResponseWriter, r *http.Request, served, real string) {
+	h := w.Header()
+	h.Set("Cache-Control", a.immutableCC)
+	h.Set("Etag", strconv.Quote(served)) // served name is content-addressed
+	if ct := contentType(real); ct != "" {
+		h.Set("Content-Type", ct)
+	}
+	a.serveFile(w, r, real)
+}
+
+func (a *Assets) servePlain(w http.ResponseWriter, r *http.Request, name string) {
+	data, err := fs.ReadFile(a.fsys, name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	h := w.Header()
+	h.Set("Cache-Control", a.revalidateCC)
+	h.Set("Etag", strconv.Quote(shortHash(data)))
+	if ct := contentType(name); ct != "" {
+		h.Set("Content-Type", ct)
+	}
+	http.ServeContent(w, r, name, statTime(a.fsys, name), bytes.NewReader(data))
+}
+
+// serveFile streams name via http.ServeContent (Range, If-Range, If-None-Match,
+// 304). The caller has already set Content-Type / Cache-Control / Etag.
+func (a *Assets) serveFile(w http.ResponseWriter, r *http.Request, name string) {
+	f, err := a.fsys.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	modtime := statTime(a.fsys, name)
+	if rs, ok := f.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, name, modtime, rs)
+		return
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, "read error", http.StatusInternalServerError)
+		return
+	}
+	http.ServeContent(w, r, name, modtime, bytes.NewReader(data))
+}
+
+func fileExists(fsys fs.FS, name string) bool {
+	f, err := fsys.Open(name)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	return err == nil && !info.IsDir()
+}
+
+func statTime(fsys fs.FS, name string) time.Time {
+	if info, err := fs.Stat(fsys, name); err == nil {
+		return info.ModTime()
+	}
+	return time.Time{}
 }

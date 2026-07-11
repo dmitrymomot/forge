@@ -41,3 +41,9 @@ func WithPrefix(p string) Option { return func(cf *config) { cf.cfg.Prefix = p }
 
 // WithDev toggles dev mode: unhashed URLs, no-cache, per-request re-read.
 func WithDev(dev bool) Option { return func(cf *config) { cf.cfg.Dev = dev } }
+
+// WithCacheControl overrides the Cache-Control header strings for fingerprinted
+// (immutable) and revalidated (plain / index) responses.
+func WithCacheControl(immutable, revalidate string) Option {
+	return func(cf *config) { cf.immutableCC, cf.revalidateCC = immutable, revalidate }
+}
