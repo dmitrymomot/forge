@@ -9,33 +9,6 @@ built: the moment a package ships it is removed from this list — its `doc.go`
 (godoc) becomes the reference. All design rules — layout, naming, idioms,
 dependencies, seams, anti-scope — live in [design.md](design.md).
 
-## resilience/
-
----
-
-**resilience/quota**
-
-Cumulative usage caps per subject over calendar/rolling windows
-(requests/month, seats, AI tokens) — the plan-entitlement counterpart to
-ratelimit. Subject is an opaque string; the limit resolver is caller-owned
-(no billing coupling). Storage-agnostic counter store; Postgres driver.
-
----
-
-**resilience/loadshed**
-
-Adaptive admission control: pluggable `Criteria` (concurrency + latency in
-core; CPU stays consumer-side), fail-open sampler, probabilistic rejection
-ramp. `Middleware()` for HTTP plus `Acquire()` for non-HTTP admission.
-
----
-
-**resilience/lock**
-
-Distributed mutex: TTL leases, fencing tokens, auto-refresh, and
-`RunAsLeader` as a `supervisor.Service`. Storage-agnostic 3-method Store;
-in-process store built in, Postgres advisory-lock driver.
-
 ## web/
 
 ---

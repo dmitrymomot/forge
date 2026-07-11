@@ -11,7 +11,10 @@ import (
 type Store interface {
 	// Incr atomically adds delta to key's counter and returns the new value. If
 	// this call creates the key, its TTL is set to ttl; Incr never extends the
-	// TTL of an existing (live) key.
+	// TTL of an existing (live) key. A ttl <= 0 creates the key with NO expiry
+	// (used by quota gauges); such a key lives until Reset. In the in-process
+	// memory store a no-expiry key never expires but is lost on restart, so
+	// durable gauges need a real backend (ratelimit/pgstore).
 	Incr(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
 	// Get returns the current counter, or 0 if the key is absent or expired.
 	Get(ctx context.Context, key string) (int64, error)

@@ -188,3 +188,23 @@ func TestMemoryStore_WithShardsInvalidDefaultsToOne(t *testing.T) {
 		require.NoError(t, s.Close())
 	}
 }
+
+func TestMemoryStore_NonPositiveTTLNeverExpires(t *testing.T) {
+	clk := clock.NewMock(time.Unix(0, 0))
+	s := ratelimit.NewMemoryStore(ratelimit.WithMemoryClock(clk))
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+
+	n, err := s.Incr(ctx, "gauge", 5, 0) // ttl == 0 → no expiry
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), n)
+
+	clk.Advance(1000 * time.Hour) // far past any TTL
+	got, err := s.Get(ctx, "gauge")
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), got) // still present
+
+	n, err = s.Incr(ctx, "gauge", -2, -1) // negative ttl also = no expiry
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), n)
+}

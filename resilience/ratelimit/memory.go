@@ -133,7 +133,7 @@ func (s *memoryStore) sweep() {
 		sh := &s.shards[i]
 		sh.mu.Lock()
 		for key, e := range sh.m {
-			if now.After(e.expiresAt) {
+			if expired(e.expiresAt, now) {
 				delete(sh.m, key)
 			}
 		}
@@ -161,8 +161,8 @@ func (s *memoryStore) Incr(_ context.Context, key string, delta int64, ttl time.
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	e, ok := sh.m[key]
-	if !ok || now.After(e.expiresAt) {
-		e = counter{val: delta, expiresAt: now.Add(ttl)}
+	if !ok || expired(e.expiresAt, now) {
+		e = counter{val: delta, expiresAt: expiryAt(now, ttl)}
 	} else {
 		e.val += delta
 	}
@@ -176,7 +176,7 @@ func (s *memoryStore) Get(_ context.Context, key string) (int64, error) {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	e, ok := sh.m[key]
-	if !ok || now.After(e.expiresAt) {
+	if !ok || expired(e.expiresAt, now) {
 		return 0, nil
 	}
 	return e.val, nil
@@ -200,4 +200,19 @@ func (s *memoryStore) Close() error {
 	})
 	s.wg.Wait()
 	return nil
+}
+
+// expiryAt returns the absolute expiry for a new counter. A ttl <= 0 yields the
+// zero Time, the sentinel for "no expiry".
+func expiryAt(now time.Time, ttl time.Duration) time.Time {
+	if ttl <= 0 {
+		return time.Time{}
+	}
+	return now.Add(ttl)
+}
+
+// expired reports whether a counter with expiry exp is expired as of now. The
+// zero Time means no expiry (never expired).
+func expired(exp, now time.Time) bool {
+	return !exp.IsZero() && now.After(exp)
 }
