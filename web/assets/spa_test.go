@@ -33,6 +33,9 @@ func TestSPAServesIndexForNavigation(t *testing.T) {
 	if !contains(rec.Body.String(), "<title>x</title>") {
 		t.Fatalf("body = %q, want index.html", rec.Body.String())
 	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html prefix", ct)
+	}
 }
 
 func TestSPADoesNotHideMissingAsset(t *testing.T) {

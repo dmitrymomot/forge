@@ -54,6 +54,13 @@ func TestExternalMissingFileIsErrManifest(t *testing.T) {
 	}
 }
 
+func TestExternalNullValueIsErrManifest(t *testing.T) {
+	_, err := assets.New(externalFS(`{"app.css":null}`))
+	if !errors.Is(err, assets.ErrManifest) {
+		t.Fatalf("err = %v, want ErrManifest", err)
+	}
+}
+
 func TestManifestAbsentFallsBackToRuntime(t *testing.T) {
 	// No manifest.json present → runtime fingerprinting.
 	a := mustNew(t, fstest.MapFS{"app.css": {Data: []byte("x")}})

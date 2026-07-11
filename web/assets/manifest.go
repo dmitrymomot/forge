@@ -51,6 +51,9 @@ func readFlatManifest(fsys fs.FS, path string) (map[string]Entry, error) {
 	for logical, rm := range raw {
 		var s string
 		if json.Unmarshal(rm, &s) == nil {
+			if s == "" {
+				return nil, fmt.Errorf("%w: entry %q has empty file", ErrManifest, logical)
+			}
 			out[logical] = Entry{Path: s}
 			continue
 		}

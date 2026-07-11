@@ -47,6 +47,9 @@ func TestPrecompressedSkippedWhenNotAccepted(t *testing.T) {
 	if rec.Body.String() != "PLAINCSS" {
 		t.Fatalf("body = %q, want plain asset", rec.Body.String())
 	}
+	if v := rec.Header().Get("Vary"); v != "Accept-Encoding" {
+		t.Fatalf("Vary = %q, want Accept-Encoding", v)
+	}
 }
 
 func TestPrecompressedSiblingAbsentFallsThrough(t *testing.T) {
@@ -61,6 +64,9 @@ func TestPrecompressedSiblingAbsentFallsThrough(t *testing.T) {
 	}
 	if rec.Body.String() != "NOSIBLING" {
 		t.Fatalf("body = %q", rec.Body.String())
+	}
+	if v := rec.Header().Get("Vary"); v != "Accept-Encoding" {
+		t.Fatalf("Vary = %q, want Accept-Encoding", v)
 	}
 }
 
@@ -158,6 +164,23 @@ func TestPrecompressedIfNoneMatchList(t *testing.T) {
 	rec := get(t, a, url, http.Header{
 		"Accept-Encoding": {"br"},
 		"If-None-Match":   {`"unrelated-etag", ` + compressedEtag + `, "another"`},
+	})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("code = %d, want 304", rec.Code)
+	}
+}
+
+// TestPrecompressedWeakIfNoneMatch verifies a weak ("W/"-prefixed) validator
+// still matches the compressed representation's strong Etag, since
+// etagMatches strips the weak prefix before comparing.
+func TestPrecompressedWeakIfNoneMatch(t *testing.T) {
+	a := mustNew(t, precompFS(), assets.WithPrecompressed())
+	url := a.URL("app.css")
+	compressedEtag := get(t, a, url, http.Header{"Accept-Encoding": {"br"}}).Header().Get("Etag")
+
+	rec := get(t, a, url, http.Header{
+		"Accept-Encoding": {"br"},
+		"If-None-Match":   {"W/" + compressedEtag},
 	})
 	if rec.Code != http.StatusNotModified {
 		t.Fatalf("code = %d, want 304", rec.Code)
