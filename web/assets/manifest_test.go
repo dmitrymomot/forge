@@ -26,9 +26,9 @@ func TestURLFingerprintsAtRuntime(t *testing.T) {
 }
 
 func TestURLDeterministicAndContentSensitive(t *testing.T) {
-	a1, _ := assets.New(fstest.MapFS{"app.css": {Data: []byte("A")}})
-	a2, _ := assets.New(fstest.MapFS{"app.css": {Data: []byte("A")}})
-	a3, _ := assets.New(fstest.MapFS{"app.css": {Data: []byte("B")}})
+	a1 := mustNew(t, fstest.MapFS{"app.css": {Data: []byte("A")}})
+	a2 := mustNew(t, fstest.MapFS{"app.css": {Data: []byte("A")}})
+	a3 := mustNew(t, fstest.MapFS{"app.css": {Data: []byte("B")}})
 	if a1.URL("app.css") != a2.URL("app.css") {
 		t.Fatal("same content produced different hashes")
 	}
@@ -38,7 +38,7 @@ func TestURLDeterministicAndContentSensitive(t *testing.T) {
 }
 
 func TestLookupAndUnknownPassthrough(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	if _, ok := a.Lookup("app.css"); !ok {
 		t.Fatal("Lookup(app.css) not found")
 	}
@@ -54,7 +54,7 @@ func TestLookupAndUnknownPassthrough(t *testing.T) {
 }
 
 func TestDevModePassthrough(t *testing.T) {
-	a, _ := assets.New(newFS(), assets.WithDev(true))
+	a := mustNew(t, newFS(), assets.WithDev(true))
 	if got := a.URL("app.css"); got != "/static/app.css" {
 		t.Fatalf("dev URL = %q, want unhashed", got)
 	}

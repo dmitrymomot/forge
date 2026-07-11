@@ -2,6 +2,7 @@ package assets_test
 
 import (
 	"errors"
+	"io/fs"
 	"testing"
 	"testing/fstest"
 
@@ -14,6 +15,17 @@ func newFS() fstest.MapFS {
 		"js/app.js":  {Data: []byte("console.log(1)")},
 		"index.html": {Data: []byte("<!doctype html><title>x</title>")},
 	}
+}
+
+// mustNew constructs Assets and fails the test on error, guarding the
+// nil-checked result so callers can dereference it safely.
+func mustNew(t *testing.T, fsys fs.FS, opts ...assets.Option) *assets.Assets {
+	t.Helper()
+	a, err := assets.New(fsys, opts...)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return a
 }
 
 func TestNewDefaultPrefix(t *testing.T) {

@@ -20,7 +20,7 @@ func get(t *testing.T, a *assets.Assets, target string, hdr http.Header) *httpte
 }
 
 func TestServeFingerprintedImmutable(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	url := a.URL("app.css")
 	rec := get(t, a, url, nil)
 	if rec.Code != http.StatusOK {
@@ -41,7 +41,7 @@ func TestServeFingerprintedImmutable(t *testing.T) {
 }
 
 func TestServeIfNoneMatch304(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	url := a.URL("app.css")
 	etag := get(t, a, url, nil).Header().Get("Etag")
 	rec := get(t, a, url, http.Header{"If-None-Match": {etag}})
@@ -51,7 +51,7 @@ func TestServeIfNoneMatch304(t *testing.T) {
 }
 
 func TestServeRange(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	url := a.URL("app.css")
 	rec := get(t, a, url, http.Header{"Range": {"bytes=0-3"}})
 	if rec.Code != http.StatusPartialContent {
@@ -63,7 +63,7 @@ func TestServeRange(t *testing.T) {
 }
 
 func TestServePlainNoCache(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	rec := get(t, a, "/static/app.css", nil) // unhashed path → plain branch
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d, want 200", rec.Code)
@@ -77,7 +77,7 @@ func TestServePlainNoCache(t *testing.T) {
 }
 
 func TestServeMissing404AndTraversal(t *testing.T) {
-	a, _ := assets.New(newFS())
+	a := mustNew(t, newFS())
 	if rec := get(t, a, "/static/nope.js", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing code = %d, want 404", rec.Code)
 	}
@@ -90,7 +90,7 @@ func TestServeMissing404AndTraversal(t *testing.T) {
 }
 
 func TestServeDevReadsPlain(t *testing.T) {
-	a, _ := assets.New(newFS(), assets.WithDev(true))
+	a := mustNew(t, newFS(), assets.WithDev(true))
 	rec := get(t, a, "/static/app.css", nil)
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("dev serve code=%d cc=%q", rec.Code, rec.Header().Get("Cache-Control"))
@@ -98,7 +98,7 @@ func TestServeDevReadsPlain(t *testing.T) {
 }
 
 func TestWithCacheControlOverride(t *testing.T) {
-	a, _ := assets.New(newFS(), assets.WithCacheControl("public, max-age=60", "private"))
+	a := mustNew(t, newFS(), assets.WithCacheControl("public, max-age=60", "private"))
 	rec := get(t, a, a.URL("app.css"), nil)
 	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=60" {
 		t.Fatalf("Cache-Control = %q, want override", cc)
