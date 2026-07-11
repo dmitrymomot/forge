@@ -1,5 +1,3 @@
-// Package geoip resolves a client IP to geographic and network facts behind a
-// pluggable Source seam.
 package geoip
 
 // Location holds the facts resolved for a client IP. Every field is its zero
