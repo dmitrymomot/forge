@@ -86,3 +86,10 @@ type Result struct {
 	Overage   int64 // max(0, Used - Included) — the billable signal
 	Allowed   bool
 }
+
+// makeResult derives the reported fields from a raw used total.
+func makeResult(limit Limit, used int64, reset time.Time, allowed bool) Result {
+	remaining := max(limit.Included-used, 0)
+	overage := max(used-limit.Included, 0)
+	return Result{Reset: reset, Limit: limit, Used: used, Remaining: remaining, Overage: overage, Allowed: allowed}
+}
