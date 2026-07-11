@@ -72,11 +72,17 @@ func parseMetadata(data []byte, closer func() error) (*database, error) {
 		return nil, ErrInvalidDatabase
 	}
 	db.nodeBytes = uint32(db.recordSize) / 4
-	db.treeSize = db.nodeBytes * db.nodeCount
-	db.dataStart = db.treeSize + 16
-	if int(db.treeSize) > len(data) || int(db.dataStart) > len(data) {
+	// Compute geometry in uint64 and bounds-check before narrowing to
+	// uint32: nodeBytes*nodeCount can overflow uint32 for a crafted
+	// node_count, which would wrap treeSize/dataStart and defeat the
+	// bounds check below, letting later node reads run out of data.
+	treeSize := uint64(db.nodeBytes) * uint64(db.nodeCount)
+	dataStart := treeSize + 16
+	if dataStart > uint64(len(data)) {
 		return nil, ErrInvalidDatabase
 	}
+	db.treeSize = uint32(treeSize)
+	db.dataStart = uint32(dataStart)
 	db.ipv4Start = db.computeIPv4Start()
 	return db, nil
 }
