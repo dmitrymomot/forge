@@ -117,3 +117,29 @@ func TestReloadSwapsData(t *testing.T) {
 		t.Fatalf("after reload asn = %d, want 1221", loc.ASN)
 	}
 }
+
+func TestReloadAfterClose(t *testing.T) {
+	r, err := mmdb.New(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A closed Reader returns ErrClosed until reopened.
+	if _, err := r.Lookup(context.Background(), netip.MustParseAddr("81.2.69.142")); err == nil {
+		t.Fatal("Lookup on a closed Reader should error")
+	}
+	// Reload reopens it.
+	if err := r.Reload(mmdb.WithCity("testdata/GeoIP2-City-Test.mmdb")); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	loc, err := r.Lookup(context.Background(), netip.MustParseAddr("81.2.69.142"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.CountryCode != "GB" {
+		t.Fatalf("after reopen country = %q, want GB", loc.CountryCode)
+	}
+}

@@ -74,7 +74,8 @@ func closeDB(db *database) {
 	}
 }
 
-// Close unmaps every open database. The Reader must not be used afterwards.
+// Close unmaps every open database; a subsequent Lookup returns ErrClosed. A
+// closed Reader may be reopened with Reload.
 func (r *Reader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
