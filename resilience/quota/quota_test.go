@@ -65,6 +65,21 @@ func TestAllow_CalendarWindowRollsAtBoundary(t *testing.T) {
 	assert.Equal(t, int64(0), res.Used) // fresh window
 }
 
+func TestUsageAgreesWithAllowAtMax(t *testing.T) {
+	clk := clock.NewMock(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	m := newMeter(t, quota.Calendar(quota.Monthly, nil), clk)
+	ctx := context.Background()
+	lim := quota.Limit{Included: 10, Max: 10}
+	res, err := m.Allow(ctx, "t1", 10, lim) // brings used to exactly Max
+	require.NoError(t, err)
+	assert.True(t, res.Allowed)
+	assert.Equal(t, int64(10), res.Used)
+	u, err := m.Usage(ctx, "t1", lim) // same stored state
+	require.NoError(t, err)
+	assert.True(t, u.Allowed, "Usage must agree with Allow at used==Max")
+	assert.Equal(t, int64(10), u.Used)
+}
+
 func TestAllow_InvalidInputs(t *testing.T) {
 	clk := clock.NewMock(time.Unix(0, 0))
 	m := newMeter(t, quota.Gauge(), clk)

@@ -56,7 +56,7 @@ func (m *Meter) Usage(ctx context.Context, subject string, limit Limit) (Result,
 	if err != nil {
 		return Result{}, err
 	}
-	allowed := limit.Max == Unlimited || used < limit.Max
+	allowed := limit.Max == Unlimited || used <= limit.Max
 	return makeResult(limit, used, reset, allowed), nil
 }
 
