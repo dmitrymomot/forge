@@ -57,8 +57,8 @@ func (Config) Validate() error
 // The verify core — single-shot, one lookup-and-compare.
 func (v *Verifier) Verify(ctx context.Context, c Challenge) (Result, error)
 
-// Batteries-included challenge constructors.
-func (v *Verifier) TXTChallenge(domain string) (Challenge, error)   // mints token
+// Batteries-included challenge constructors (pure — Verify is the sole gate).
+func (v *Verifier) TXTChallenge(domain string) Challenge            // mints token
 func (v *Verifier) CNAMEChallenge(host, target string) Challenge
 func (v *Verifier) AChallenge(host string, ips ...netip.Addr) Challenge
 func (v *Verifier) AAAAChallenge(host string, ips ...netip.Addr) Challenge
@@ -97,13 +97,15 @@ type Result struct {
 
 ### Challenge construction (structured, i18n-friendly)
 
-- `TXTChallenge(domain)` mints a token via `random`, sets
-  `Host = Label + "." + domain`, `Expect = ["forge-verification=<token>"]`.
-  Returns `(Challenge, error)` — the error path is token-generation failure.
-  The `forge-verification=` prefix namespaces the value so it never collides
-  with SPF / other TXT records at the same host.
-- `CNAMEChallenge` / `AChallenge` / `AAAAChallenge` take consumer-supplied
-  targets; no token, no error.
+- `TXTChallenge(domain)` mints a token via `random.URLSafe(TokenBytes)`
+  (unpadded base64url — TXT-safe), sets `Host = Label + "." + domain`,
+  `Expect = ["forge-verification=<token>"]`. The `forge-verification=` prefix
+  namespaces the value so it never collides with SPF / other TXT records at
+  the same host.
+- All constructors are **pure** (no error): `random` panics only on a broken
+  OS RNG, and `Verify` is the single validation gate (`ErrInvalidChallenge`
+  for empty `Host`/`Expect` or unknown `Record`). This keeps `TXTChallenge`
+  consistent with `CNAMEChallenge`/`AChallenge`/`AAAAChallenge`.
 - Raw `Challenge{...}` literals + `Verify` remain fully supported for advanced
   flows (e.g. a CNAME-in-host ownership token) — the batteries are opt-in.
 - **No user-facing string rendering.** The package renders no prose. Consumers
@@ -191,7 +193,8 @@ look like "DNS is broken":
   `ErrInvalidChallenge` (returned before any lookup).
 
 Sentinels in `errors.go`, single-line, `errors.Is`-matchable: `ErrLookup`,
-`ErrInvalidChallenge`.
+`ErrInvalidChallenge`, and `ErrInvalidConfig` (construction-time
+`Config.Validate` failure — the `secheaders`/`timeout` convention).
 
 The consumer distinguishes four states:
 
