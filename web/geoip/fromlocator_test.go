@@ -3,6 +3,7 @@ package geoip_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"testing"
 
@@ -21,7 +22,7 @@ func (f *fakeLocator) Lookup(_ context.Context, ip netip.Addr) (geoip.Location, 
 
 func TestFromLocatorResolvesRemoteAddr(t *testing.T) {
 	fl := &fakeLocator{loc: geoip.Location{CountryCode: "JP"}}
-	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "203.0.113.7:5555"
 
 	loc, err := geoip.FromLocator(fl).Lookup(r)
@@ -38,7 +39,7 @@ func TestFromLocatorResolvesRemoteAddr(t *testing.T) {
 
 func TestFromLocatorUnparseableIPIsMiss(t *testing.T) {
 	fl := &fakeLocator{loc: geoip.Location{CountryCode: "JP"}}
-	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "not-an-ip"
 
 	loc, err := geoip.FromLocator(fl).Lookup(r)

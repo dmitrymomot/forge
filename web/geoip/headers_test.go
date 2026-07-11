@@ -2,13 +2,14 @@ package geoip_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/dmitrymomot/forge/web/geoip"
 )
 
 func req(h map[string]string) *http.Request {
-	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	for k, v := range h {
 		r.Header.Set(k, v)
 	}

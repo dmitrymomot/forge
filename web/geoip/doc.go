@@ -32,7 +32,7 @@ func Example() {
 	h := Middleware(src)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		fmt.Println(Get(r).CountryCode)
 	}))
-	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("CF-IPCountry", "US")
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	// Output: US
