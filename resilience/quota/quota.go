@@ -88,3 +88,37 @@ func (m *Meter) Allow(ctx context.Context, subject string, cost int64, limit Lim
 	}
 	return makeResult(limit, used, reset, true), nil
 }
+
+// Add applies a signed delta to subject's counter and returns the new total.
+// Use it to reconcile a token estimate to actual (delta = actual - estimate) or
+// to release gauge units (negative delta). Add never rejects.
+func (m *Meter) Add(ctx context.Context, subject string, delta int64) (int64, error) {
+	now := m.cfg.clk.Now()
+	period, reset := m.window(subject, now)
+	return m.store.Incr(ctx, m.key(subject, period), delta, ttlFor(now, reset))
+}
+
+// Set forces subject's counter to value — seed or repair a gauge from the
+// consumer's authoritative count. It is Get+Add and is best-effort under
+// concurrency; use it for periodic reconciliation, not per-request writes.
+func (m *Meter) Set(ctx context.Context, subject string, value int64) error {
+	now := m.cfg.clk.Now()
+	period, reset := m.window(subject, now)
+	key := m.key(subject, period)
+	cur, err := m.store.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	if cur == value {
+		return nil
+	}
+	_, err = m.store.Incr(ctx, key, value-cur, ttlFor(now, reset))
+	return err
+}
+
+// Reset clears subject's counter for the current window.
+func (m *Meter) Reset(ctx context.Context, subject string) error {
+	now := m.cfg.clk.Now()
+	period, _ := m.window(subject, now)
+	return m.store.Reset(ctx, m.key(subject, period))
+}
