@@ -69,14 +69,6 @@ resolution for customer domains.
 IP → country/region/ASN lookup behind a `Source` seam; CDN-header source
 (CF-IPCountry) built in stdlib-only; `geoip/maxmind` driver.
 
----
-
-**web/dnsverify**
-
-DNS TXT-record domain-ownership verification behind a `net.Resolver` seam:
-custom-domain onboarding (with hostrouter + autocert) and email-sending
-domain checks (SPF/DKIM/return-path) for `comms/email`.
-
 ## view/
 
 ---
