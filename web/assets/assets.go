@@ -158,8 +158,8 @@ func (a *Assets) FuncMap() template.FuncMap {
 }
 
 // ServeHTTP resolves the request under Prefix to a fingerprinted (immutable),
-// plain (no-cache), or 404 response. Task 5 adds precompressed siblings; Task 6
-// adds SPA fallback.
+// plain (no-cache), or 404 response. Fingerprinted responses may be served from
+// a precompressed sibling (see WithPrecompressed). Task 6 adds SPA fallback.
 func (a *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(r.URL.Path, a.prefix)
 	if rel == r.URL.Path { // request path was not under the prefix
@@ -188,6 +188,9 @@ func (a *Assets) serveFingerprinted(w http.ResponseWriter, r *http.Request, serv
 	h.Set("Etag", strconv.Quote(served)) // served name is content-addressed
 	if ct := contentType(real); ct != "" {
 		h.Set("Content-Type", ct)
+	}
+	if a.serveCompressed(w, r, real) {
+		return
 	}
 	a.serveFile(w, r, real)
 }

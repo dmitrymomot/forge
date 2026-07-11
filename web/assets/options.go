@@ -55,3 +55,15 @@ func WithManifest(path string) Option { return func(cf *config) { cf.cfg.Manifes
 // WithReader supplies a custom manifest Reader (e.g. a Vite adapter). It takes
 // precedence over the flat manifest.json.
 func WithReader(r Reader) Option { return func(cf *config) { cf.reader = r } }
+
+// WithPrecompressed serves <file>.<enc> siblings for the given Accept-Encoding
+// tokens (default "br","gz"). Call with no args to use the defaults. forge never
+// compresses anything itself — the sibling must already exist in the fs.FS.
+func WithPrecompressed(encodings ...string) Option {
+	return func(cf *config) {
+		if len(encodings) == 0 {
+			encodings = []string{"br", "gz"}
+		}
+		cf.precompress = encodings
+	}
+}
