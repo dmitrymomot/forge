@@ -9,6 +9,35 @@ built: the moment a package ships it is removed from this list — its `doc.go`
 (godoc) becomes the reference. All design rules — layout, naming, idioms,
 dependencies, seams, anti-scope — live in [design.md](design.md).
 
+## core/
+
+---
+
+**core/fsm**
+
+Typed finite state machine: declared states and transitions with guards,
+on-transition hooks, and illegal-transition errors; pure generics, zero
+deps. Persistence is caller-owned — apply it to a status column. The
+lifecycle brick under order/subscription/verification/payout flows.
+
+---
+
+**core/country**
+
+Curated ISO-3166 static data: alpha-2/alpha-3 codes, English names,
+default currency, and dial prefix per country — the `money` ISO-4217
+precedent applied to countries. Zero deps; consumers: registration/KYC
+forms, `geoip` enrichment, `i18n`, `core/phone`.
+
+---
+
+**core/phone**
+
+E.164 phone normalization: parse/format/validate over `core/country`'s
+dial-prefix table. Consumers: `comms/sms`, `auth/otp`, KYC forms. No
+carrier metadata, no line-type detection — the libphonenumber swamp
+stays out.
+
 ## web/
 
 ---
@@ -26,6 +55,50 @@ provider SDKs.
 ACME/Let's Encrypt TLS via `x/crypto/acme/autocert` wired as `tls.Config`
 + HTTP-01 handler for httpserver — pairs with `tenant`'s custom-domain
 resolution for customer domains.
+
+---
+
+**web/shortlink**
+
+Short-code links over a storage-agnostic Store with `cache.Store`
+read-through: collision-retried generation over an unambiguous
+base58-style alphabet, vanity slugs with a reserved-word blocklist,
+expiry/deactivation with a configurable fallback, and an `OnHit` hook
+that emits — counting stays the caller's job. Redirects are 302/307 with
+no-cache headers (a cached 301 kills hit counting forever); destinations
+live server-side (never `?url=`) and are scheme-allowlisted at creation.
+Branded short domains compose `tenant` custom domains + `hostrouter`.
+Not `magiclink` (self-contained signed token); not `smartlink` (no rules
+— a code resolves to one target or one rule-table handle).
+
+---
+
+**web/smartlink**
+
+Destination-decision engine (the TDS/smartlink core): ordered rules of
+typed matchers — `Geo`, `Device`, `Locale`, `ParamEquals`, `TimeWindow`,
+`Percent` — evaluated over a caller-built visit context (no net/http
+import), first match wins, mandatory default target. Weighted splits
+bucket deterministically by hash of a caller-supplied sticky key, never
+RNG. The decision returns the matched rule and the final URL — template
+macros from the visit context, param merge policy — and is what the
+caller emits as the click event. Rule values are consumer data hydrated
+into the typed vocabulary; no DSL. Not `featureflag` ("is X on for
+subject"); not `hostrouter` (inbound hosts) — this selects outbound
+destinations. Rule storage/admin, target health checks, and bot
+filtering stay consumer-side.
+
+---
+
+**web/attribution**
+
+Marketing-touch capture: middleware records a configured param set
+(`utm_*`, click IDs, sub-IDs) into a signed cookie (`cookie` + `sign`)
+under first-touch or last-touch policy with an attribution window, and
+hands the stored touch back at conversion time. Includes a
+tracking-pixel endpoint (correct 1×1 GIF + no-cache). The "where did
+this signup come from" answer every SaaS wants and every affiliate
+platform requires; multi-touch models stay out.
 
 ## view/
 
@@ -130,6 +203,131 @@ Idempotent named-Seeder runner with an `app seed` cli.Command; mirrors
 Decode-limit-guarded resize/crop/re-encode over `x/image` — the
 avatar/logo upload → process → store pipeline.
 
+---
+
+**data/settings**
+
+Typed, scoped (tenant/user) settings over a storage-agnostic Store:
+versioned values with change history, effective-at scheduling, and
+pending-change semantics — tightening applies immediately, loosening after
+a configurable delay (the plan-downgrade / regulatory-limit change
+discipline).
+
+---
+
+**data/retention**
+
+Named retention policies run as batched delete/anonymize sweeps via
+`scheduler` + `jobqueue`: per-policy dry-run, progress checkpoints, and
+audit events. Handles the two-sided GDPR constraint — minimum retention
+and erasure deadlines — as declared policy, not cron scripts.
+
+---
+
+**data/export**
+
+Streaming CSV/JSONL/XML writers with bounded memory and a pgx-rows
+adapter — back-office exports and regulator feeds. Write-only: no XLSX,
+no import/parse side.
+
+---
+
+**data/ingest**
+
+The read side `data/export` deliberately omits: streaming CSV/JSONL parse
+with per-row `validate` and a row-addressed error report, feeding a
+batch-insert seam — the "import your data" onboarding flow. (Named
+`ingest` because `import` is a Go keyword.)
+
+---
+
+**data/clickhouse**
+
+ClickHouse connection factory in the `data/postgres` mold: DSN config with
+Validate, pooling, health ping. Connection only — query building and
+schema stay consumer-side.
+
+---
+
+**data/sqlite**
+
+SQLite connection factory in the `data/postgres` mold, owning the pragma
+discipline — WAL, `busy_timeout`, `synchronous`, foreign keys — and
+single-writer pool sizing; cgo-free `modernc.org/sqlite` isolated here.
+The zero-infra single-node story under `jobqueue/sqlite` and dev/test
+setups.
+
+## finance/
+
+---
+
+**finance/ledger**
+
+Double-entry money ledger over `core/money`: append-only postings made
+idempotent by external reference key, holds (authorize → settle/void),
+multi-currency accounts, and balance invariants enforced in SQL — not Go —
+inside the posting transaction. Hard money limits (deposit/loss caps) are
+checked in that same transaction: `quota` counters are shadows for
+drift-tolerant metering, never the regulatory gate. Storage-agnostic Store
+seam; `ledger/pgstore` is the canonical driver and owns the schema.
+
+---
+
+**finance/fxrate**
+
+Exchange rates behind a `RateSource` seam with stored snapshots; `Convert`
+records the rate applied, so audits answer "what rate at transaction
+time". Math is multiply-and-round via `core/decimal`; providers are thin
+JSON adapters over httpclient — no provider SDKs, no live streaming.
+
+---
+
+**finance/tariff**
+
+Tiered/banded rate calculation over `core/money`/`core/decimal`:
+graduated vs volume band semantics ("25% up to 10, 30% to 50, 35%
+above") with deterministic rounding, as a pure calculator — bands are
+caller-supplied values; effective-dating is the caller choosing which
+band set applies (composes `data/settings` for deal changes). Consumers:
+usage-billing overage tiers, revenue-share deals, commission plans.
+
+---
+
+**finance/formula**
+
+Formulas as structured, versioned data — never text: a spec of named
+derived metrics, each a list of (metric, decimal coefficient) terms over
+inputs or prior stages plus an optional clamp, evaluated in
+`core/decimal` with deterministic rounding. Evaluation returns an
+explanation record — every stage, every term's contribution, spec
+version, inputs — the statement line item and the dispute answer (the
+`fxrate` record-the-evaluation philosophy). Specs are immutable once
+referenced; recomputes byte-match. Derives the base (NGR, billable
+usage, commission bases) that `tariff` rates and `ledger` posts. Hard
+anti-scope: no string parsing, no conditionals, no user-typed
+expressions — anything beyond staged linear terms + clamp is a
+registered Go function; for fixed deal shapes the documented default is
+named Go functions with per-deal parameters as data.
+
+---
+
+**finance/invoice**
+
+The invoice document model — invariants, not rendering: numbering via a
+per-series `Sequence` with two explicit modes (strict-gapless
+transactional counter vs monotonic-with-gaps — the requirement is
+jurisdictional); immutable once issued, corrections are credit notes
+back-referencing the original (the corrections-post-forward rule shared
+with `ledger`); line items → tax lines → totals in `money` with per-line
+vs per-total rounding policy via `Allocate`; draft → issued →
+paid/partially-paid/void/overdue over `fsm`, paid-matching by `ledger`
+posting refs; self-billing direction (platform issues on the supplier's
+behalf — affiliate/agent payouts); multi-currency with the `fxrate`
+snapshot recorded. Tax rates are caller-supplied data — never
+determined; rendering stays out (HTML is a `render` recipe, PDF
+consumer-side); no dunning, no e-invoicing formats, no subscription or
+pricing logic (the billing anti-scope stands).
+
 ## async/
 
 ---
@@ -170,6 +368,22 @@ idempotent.
 
 ---
 
+**async/eventrouter**
+
+Event egress over `eventbus`: each destination is its own named
+subscription (slow-destination isolation for free), filter/remap as
+registered Go functions — no mapping DSL — and batched delivery with
+size+age flush, batch-level retry, and poison-event handling. Reference
+`Deliverer` adapters: generic JSON-batch HTTP and signed postbacks via
+`comms/webhook`. Destination configs are consumer data; forge ships the
+engine, never a Segment-style connector catalog. Delivery is
+at-least-once and the router never dedups: stable event IDs ride every
+delivery (`Idempotency-Key` header / payload field) and receivers dedup
+— the Stripe contract (in-router suppression would trade duplicates for
+silent loss).
+
+---
+
 **async/outbox**
 
 Transactional outbox: intent rows committed inside the business DB
@@ -179,11 +393,27 @@ redis/nats/kafka delivery.
 
 ---
 
+**async/collector**
+
+Write-behind ingestion for proven-hot fire-and-forget paths (click
+streams, beacons, telemetry): bounded in-memory buffer, batch flush by
+size+age into a `Sink` seam, explicit overload policy — drop-newest with
+counted, logged loss, never blocking the request path — and graceful
+drain as a `supervisor.Service`. No dedup — double-fires and unique-key
+rules are the downstream pipeline's concern. Reach for
+`outbox`/`eventbus` first: this package is justified only when per-event
+publish shows up in a profile (design.md §Performance — benchmark
+required).
+
+---
+
 **async/workflow**
 
 DB-checkpointed linear step sequences over the engine
-(onboarding/provisioning chains; resume after crash). No DAG, no DSL, no
-timers — not a Temporal clone.
+(onboarding/provisioning chains; resume after crash), with optional
+per-step compensation — on failure, completed steps' compensations run in
+reverse order (a payout pipeline that must undo its ledger debit). No DAG,
+no DSL, no timers — not a Temporal clone.
 
 ## realtime/
 
@@ -239,6 +469,16 @@ out other devices", GDPR deletion); `WithFingerprint(Warn|Strict)` hijack
 detection. In-memory store built in; drivers: `session/pgstore`
 (user-indexed), `session/cookiestore` (stateless-encrypted, no UserIndex —
 documented); generic KV backing rides `cache.Store`.
+
+---
+
+**auth/impersonation**
+
+Support-agent "log in as": time-boxed impersonation sessions with a
+required reason, a context flag views render as a banner, `auditlog`
+events on start/end and every action, optional `ops/approval` gate.
+Composes `session` and the authorization decision seam — the hand-rolled
+version is where privilege escalation lives.
 
 ---
 
@@ -314,6 +554,17 @@ Store. No auth-code-for-third-parties, no consent screens, no JWE.
 
 ---
 
+**auth/scim**
+
+SCIM 2.0 provisioning server for enterprise directory sync (Okta/Entra):
+Users/Groups resources, PATCH semantics, soft-delete mapping, and the
+filter subset IdPs actually send — behind a storage-agnostic Store,
+authenticated via `apikey` or `oauthserver` tokens. The enterprise
+checkbox next to SSO; SAML stays out (`oauthclient` OIDC covers modern
+IdPs).
+
+---
+
 **auth/rbac**
 
 Role-based access control: predefined roles, role nesting/inheritance (a
@@ -355,6 +606,16 @@ is the one justified heavy auth dep).
 Versioned request fingerprint (UA + Accept headers ± IP, sha256).
 Multi-consumer brick: session hijack detection, anti-fraud risk scoring.
 
+---
+
+**auth/idverify**
+
+Identity-verification (KYC/sanctions) `Verifier` seam in the `web/captcha`
+mold: applicant/check status mapped to a small enum, inbound
+webhook-status mapping; providers (`idverify/sumsub`, …) are thin
+POST+JSON adapters over httpclient — no provider SDKs. Decisioning stays
+consumer-side.
+
 ## comms/
 
 ---
@@ -377,7 +638,9 @@ HMAC-signed deliveries (Stripe-style `t=,v1=`) with timeout, bounded
 retry, and idempotency keys — durable delivery rides `async/jobqueue` —
 and inbound signature-verification middleware (Stripe/GitHub/Slack HMAC
 schemes, constant-time, timestamp tolerance, reads and restores
-`r.Body`). Signing and verifying share one internal scheme implementation.
+`r.Body`). Signing and verifying share one scheme implementation behind a
+pluggable `Scheme` seam, so bespoke partner schemes register without
+forking the package.
 
 ---
 
@@ -392,6 +655,19 @@ httpclient — never twilio-go.
 
 Push `Pusher` seam + `push/webpush` (VAPID/ECDH/AES-GCM, fully stdlib).
 FCM/APNs stay consumer-side behind the seam.
+
+---
+
+**comms/notify**
+
+Notification routing above the channel seams: typed named notifications
+dispatched per user-over-tenant preference resolution (rides
+`data/settings`) to channels registered by name — the `email`/`sms`/`push`
+Sender seams, or any consumer-registered channel (in-app inbox stays
+consumer-side per the anti-scope recipe). Fallback chains trigger on send
+failure or missing binding (no push token → email), never on "unread" —
+read tracking is a product, not a brick. Durable delivery rides
+`jobqueue`.
 
 ## ai/
 
@@ -462,7 +738,19 @@ request middleware; `metrics/prometheus` is the only adapter.
 Append-only structured audit events (actor/action/resource/outcome) over a
 `Sink` seam; slog + JSONL sinks built in; `auditlog/pgsink` adds the
 insert plus tenant-isolated, keyset-paginated queries — the audit trail
-every B2B SaaS shows in its UI.
+every B2B SaaS shows in its UI. Optional per-stream hash chaining
+(prev-hash + a verify pass) makes the trail tamper-evident for
+compliance-grade audits.
+
+---
+
+**ops/approval**
+
+Maker-checker dual control: typed approval requests (action + payload) a
+second person approves or rejects over a storage-agnostic Store; decisions
+emit `auditlog` events and approver eligibility rides the authorization
+decision seam. The two-person rule for payouts, limit overrides, and
+config changes.
 
 ---
 
