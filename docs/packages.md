@@ -40,14 +40,6 @@ in-process store built in, Postgres advisory-lock driver.
 
 ---
 
-**web/assets**
-
-Static file serving over `fs.FS`: correct content types, range requests,
-ETag/304, cache headers; fingerprint-manifest mode (`URL()`/`Integrity()`,
-immutable far-future headers) and SPA fallback. Not a bundler.
-
----
-
 **web/captcha**
 
 Server-side CAPTCHA verification behind a `Verifier` seam; providers
@@ -61,14 +53,6 @@ provider SDKs.
 ACME/Let's Encrypt TLS via `x/crypto/acme/autocert` wired as `tls.Config`
 + HTTP-01 handler for httpserver — pairs with `tenant`'s custom-domain
 resolution for customer domains.
-
----
-
-**web/dnsverify**
-
-DNS TXT-record domain-ownership verification behind a `net.Resolver` seam:
-custom-domain onboarding (with hostrouter + autocert) and email-sending
-domain checks (SPF/DKIM/return-path) for `comms/email`.
 
 ## view/
 
