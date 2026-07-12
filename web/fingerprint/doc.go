@@ -5,8 +5,9 @@
 // never a score — weighting signals into a decision is the consumer's policy.
 //
 // Collectors: Headers (UA + Accept*), ClientHints (Sec-CH-UA-* + Device-Memory
-// + DPR), ClientIP, and the JS probe (JSCollector, served by ScriptHandler and
-// fed by IngestHandler). TLS fingerprints come from the tlsprint subpackage:
+// + DPR — its high-entropy hints need the AcceptCH middleware to arrive),
+// ClientIP, and the JS probe (JSCollector, served by ScriptHandler and fed by
+// IngestHandler). TLS fingerprints come from the tlsprint subpackage:
 // trusted-proxy header sources (Cloudflare/CloudFront/generic), a local
 // raw-ClientHello JA4 computation, and RequestTLS for self-terminated crypto/tls.
 //

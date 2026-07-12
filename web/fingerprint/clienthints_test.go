@@ -1,7 +1,9 @@
 package fingerprint_test
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/web/fingerprint"
@@ -27,5 +29,26 @@ func TestClientHintsCollector(t *testing.T) {
 	}
 	if _, ok := got["ch-ua-arch"]; ok {
 		t.Fatalf("absent hint must not emit a component: %v", got)
+	}
+}
+
+func TestAcceptCHMiddleware(t *testing.T) {
+	var called bool
+	h := fingerprint.AcceptCH()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+
+	if !called {
+		t.Fatal("AcceptCH middleware did not call next handler")
+	}
+	got := rec.Header().Get("Accept-CH")
+	// Must advertise the high-entropy hints that are otherwise withheld.
+	for _, want := range []string{"Sec-CH-UA-Arch", "Sec-CH-UA-Bitness", "Sec-CH-UA-Model", "Device-Memory", "DPR"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Accept-CH %q missing high-entropy hint %q", got, want)
+		}
 	}
 }
