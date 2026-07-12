@@ -33,7 +33,7 @@ func (fp *Fingerprinter) Signals(r *http.Request, f Fingerprint) []Signal {
 	if s, ok := fp.botUA(comp); ok {
 		out = append(out, s)
 	}
-	out = append(out, fp.componentSignals(r, comp)...) // Task 6
+	out = append(out, fp.componentSignals(r, comp)...)
 	return out
 }
 
@@ -66,10 +66,4 @@ func (fp *Fingerprinter) botUA(comp map[string]string) (Signal, bool) {
 		return Signal{}, false
 	}
 	return Signal{Name: "bot-ua", Value: fam == FamilyBot, Detail: ua}, true
-}
-
-// componentSignals is a temporary stub; Task 6 moves this method (with a real
-// body) into signals_component.go and deletes this stub.
-func (fp *Fingerprinter) componentSignals(_ *http.Request, _ map[string]string) []Signal {
-	return nil
 }
