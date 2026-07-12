@@ -57,8 +57,6 @@ func Drift(old, next Digest) []string {
 
 // combineHash computes per-component HMACs and a combined HMAC over the
 // version + name/parthash pairs, with components sorted by name for stability.
-//
-//nolint:unused // wired up by (*Fingerprinter).Build in a later task of this plan
 func combineHash(secret []byte, version int, comps []Component) (string, map[string]string) {
 	sorted := slices.Clone(comps)
 	slices.SortFunc(sorted, func(a, b Component) int { return strings.Compare(a.Name, b.Name) })
