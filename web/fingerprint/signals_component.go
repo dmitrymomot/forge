@@ -6,18 +6,6 @@ import (
 	"strings"
 )
 
-// automationJA4 maps well-known non-browser JA4 client fingerprints to a label.
-// Pin values from the FoxIO JA4 reference vectors (github.com/FoxIO-LLC/ja4);
-// bounded on purpose — an unmatched TLS hash simply does not fire the signal.
-// It ships empty: no verified automation JA4 fingerprints have been pinned yet,
-// so tls-ua-mismatch always reports Value:false while still emitting the
-// signal (inputs present, nothing flagged) rather than silently omitting it.
-var automationJA4 = map[string]string{
-	// Example placeholders to be pinned during implementation from captured
-	// handshakes; keep only verified entries:
-	// "t13d1516h2_8daaf6152771_02713d6af862": "chrome-like (allowed)",
-}
-
 // componentSignals derives the component-driven signals: headless,
 // tls-ua-mismatch, lang-mismatch, ch-ua-mismatch, geo-tz-mismatch,
 // header-anomaly, and fetch-metadata-anomaly. Each emits only when its
@@ -50,8 +38,8 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 
 // tlsUAMismatch requires a JA4-format "tls" component — tlsprint.Local() or a
 // JA4 header source (e.g. tlsprint.CloudFrontJA4), NOT the JA3 hash from
-// tlsprint.CloudflareJA3, which never matches automationJA4's JA4 keys. The
-// signal is inert (always Value:false) until automationJA4 is populated with
+// tlsprint.CloudflareJA3, which never matches the pinned JA4 keys. The
+// signal is inert (always Value:false) until WithAutomationJA4 is set with
 // pinned automation fingerprints.
 func (fp *Fingerprinter) tlsUAMismatch(comp map[string]string) (Signal, bool) {
 	tls, hasTLS := comp["tls"]
@@ -63,7 +51,7 @@ func (fp *Fingerprinter) tlsUAMismatch(comp map[string]string) (Signal, bool) {
 	if !ok || fam != FamilyBrowser {
 		return Signal{}, false
 	}
-	label, flagged := automationJA4[tls]
+	label, flagged := fp.automationJA4[tls]
 	return Signal{Name: "tls-ua-mismatch", Value: flagged, Detail: label}, true
 }
 

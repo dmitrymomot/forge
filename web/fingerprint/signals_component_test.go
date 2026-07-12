@@ -84,6 +84,35 @@ func TestTLSUAMismatchSignal(t *testing.T) {
 	}
 }
 
+func TestTLSUAMismatchFiresWithPinnedJA4(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.New(cfg,
+		fingerprint.WithCollectors(
+			fingerprint.CollectorFunc(func(_ *http.Request) ([]fingerprint.Component, error) {
+				return []fingerprint.Component{
+					{Name: "tls", Value: "t13d1516h2_8daaf6152771_02713d6af862"},
+					{Name: "ua", Value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"},
+				}, nil
+			}),
+		),
+		fingerprint.WithUAFamily(func(_ string) (fingerprint.Family, bool) {
+			return fingerprint.FamilyBrowser, true
+		}),
+		fingerprint.WithAutomationJA4(map[string]string{
+			"t13d1516h2_8daaf6152771_02713d6af862": "python-requests",
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	f, _ := fp.FromRequest(r)
+	s, ok := signalByName(fp.Signals(r, f), "tls-ua-mismatch")
+	if !ok || !s.Value || s.Detail != "python-requests" {
+		t.Fatalf("expected tls-ua-mismatch=true detail=python-requests: %+v", s)
+	}
+}
+
 func TestTLSUAMismatchNotEmittedWithoutUASeam(t *testing.T) {
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg,

@@ -25,17 +25,18 @@ func (f CollectorFunc) Collect(r *http.Request) ([]Component, error) { return f(
 // Fingerprinter assembles components from its collectors, hashes them into a
 // Fingerprint, and derives Signals. Build it with New.
 type Fingerprinter struct {
-	secret  []byte
-	signer  *sign.Signer
-	cookies *cookie.Codec
-	store   cache.Store
-	geo     GeoLookup
-	ua      UAFamily
-	logger  *slog.Logger
-	clock   clock.Clock
-	cols    []Collector
-	cfg     Config
-	version int
+	store         cache.Store
+	clock         clock.Clock
+	signer        *sign.Signer
+	cookies       *cookie.Codec
+	geo           GeoLookup
+	ua            UAFamily
+	logger        *slog.Logger
+	automationJA4 map[string]string
+	secret        []byte
+	cols          []Collector
+	cfg           Config
+	version       int
 }
 
 // New validates cfg, builds the HMAC signer and signed-cookie codec, applies
