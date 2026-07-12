@@ -15,6 +15,7 @@ import (
 // response, not a crash.
 func FuzzIngest(f *testing.F) {
 	f.Add([]byte(`{"token":"x.y","data":{"timezone":"UTC"}}`))
+	f.Add([]byte(`{"token":"x.y","data":{"screen":"9999x9999x99","uadata":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fonts":"x","audio":"y","hardwareConcurrency":-5,"maxTouchPoints":99999,"deviceMemory":"0.5"}}`))
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg)
 	if err != nil {

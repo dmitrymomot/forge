@@ -24,8 +24,16 @@ type probePayload struct {
 	Platform            string   `json:"platform"`
 	Canvas              string   `json:"canvas"`
 	WebGL               string   `json:"webgl"`
+	WebGLVendor         string   `json:"webglVendor"`
+	UAData              string   `json:"uadata"`
+	Audio               string   `json:"audio"`
+	Fonts               string   `json:"fonts"`
+	Screen              string   `json:"screen"`
+	DevicePixelRatio    string   `json:"devicePixelRatio"`
+	DeviceMemory        string   `json:"deviceMemory"`
 	Languages           []string `json:"languages"`
 	HardwareConcurrency int      `json:"hardwareConcurrency"`
+	MaxTouchPoints      int      `json:"maxTouchPoints"`
 	WebDriver           bool     `json:"webdriver"`
 }
 
@@ -41,8 +49,18 @@ func normalizeProbe(p probePayload) probePayload {
 	p.Platform = clampStr(p.Platform, 40)
 	p.Canvas = clampStr(p.Canvas, 64)
 	p.WebGL = clampStr(p.WebGL, 64)
+	p.WebGLVendor = clampStr(p.WebGLVendor, 64)
+	p.UAData = clampStr(p.UAData, 128)
+	p.Audio = clampStr(p.Audio, 64)
+	p.Fonts = clampStr(p.Fonts, 64)
+	p.Screen = clampStr(p.Screen, 20)
+	p.DevicePixelRatio = clampStr(p.DevicePixelRatio, 12)
+	p.DeviceMemory = clampStr(p.DeviceMemory, 8)
 	if p.HardwareConcurrency < 0 || p.HardwareConcurrency > 1024 {
 		p.HardwareConcurrency = 0
+	}
+	if p.MaxTouchPoints < 0 || p.MaxTouchPoints > 256 {
+		p.MaxTouchPoints = 0
 	}
 	if len(p.Languages) > 10 {
 		p.Languages = p.Languages[:10]
@@ -154,6 +172,33 @@ func (c jsCollector) Collect(r *http.Request) ([]Component, error) {
 	}
 	if p.WebGL != "" {
 		comps = append(comps, Component{Name: "js-webgl", Value: p.WebGL})
+	}
+	if p.WebGLVendor != "" {
+		comps = append(comps, Component{Name: "js-webgl-vendor", Value: p.WebGLVendor})
+	}
+	if p.UAData != "" {
+		comps = append(comps, Component{Name: "js-uadata", Value: p.UAData})
+	}
+	if p.Audio != "" {
+		comps = append(comps, Component{Name: "js-audio", Value: p.Audio})
+	}
+	if p.Fonts != "" {
+		comps = append(comps, Component{Name: "js-fonts", Value: p.Fonts})
+	}
+	if p.Screen != "" {
+		comps = append(comps, Component{Name: "js-screen", Value: p.Screen})
+	}
+	if p.DevicePixelRatio != "" {
+		comps = append(comps, Component{Name: "js-dpr", Value: p.DevicePixelRatio})
+	}
+	if p.DeviceMemory != "" {
+		comps = append(comps, Component{Name: "js-devicememory", Value: p.DeviceMemory})
+	}
+	if p.HardwareConcurrency > 0 {
+		comps = append(comps, Component{Name: "js-hardware", Value: strconv.Itoa(p.HardwareConcurrency)})
+	}
+	if p.MaxTouchPoints > 0 {
+		comps = append(comps, Component{Name: "js-touch", Value: strconv.Itoa(p.MaxTouchPoints)})
 	}
 	return comps, nil
 }
