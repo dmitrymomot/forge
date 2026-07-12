@@ -186,12 +186,20 @@ v1 inspector set (lookup-dependent ones stay dark unless their seam is wired):
 | `tls-ua-mismatch` | tls + ua components | UA claims a browser, JA4 matches a known automation tool |
 | `geo-tz-mismatch` | `GeoLookup` seam + JS tz | JS timezone continent ≠ IP continent |
 | `lang-mismatch` | Accept-Language + JS | header languages ≠ `navigator.languages` |
-| `header-order-anomaly` | headers | ordering deviates from the claimed browser |
+| `header-anomaly` | headers + ua | claimed browser missing its expected header markers |
 
 `tls-ua-mismatch` v1 matches the `tls` component against a small **embedded set
 of well-known automation JA4s** (curl, python-requests, Go `net/http`,
 headless-Chrome) rather than a comprehensive JA4→browser map — a bounded,
 maintainable table, not an arms race.
+
+`header-anomaly` is **value/presence-based, not wire-order-based**: `net/http`
+parses request headers into an unordered `map`, so true header-ordering
+fingerprinting (a JA4H-style signal) would need raw-request capture and is out
+of v1 scope. v1 fires when the UA claims a modern browser but the headers that
+browser always sends are absent/inconsistent — e.g. a Chrome ≥ 90 UA with no
+`sec-ch-ua` / `sec-fetch-*`, or an `Accept` that doesn't match the claimed
+browser's canonical navigation `Accept`.
 
 The JS payload is treated as **claimed, not trusted** — its anti-fraud value is
 feeding the *mismatch* inspectors (JS says platform=Windows, UA says macOS →
