@@ -75,6 +75,11 @@ func (fp *Fingerprinter) ScriptHandler() http.Handler {
 // IngestHandler verifies the probe token, whitelists+clamps the payload, and
 // persists it (cookie by default, or the cache.Store when WithStore is set) so
 // the JSCollector can merge it on subsequent requests.
+//
+// A token accepted here is not consumed: it stays valid for further ingests
+// until it expires (TokenTTL), and each call overwrites the stored payload for
+// its nonce. This is intended — see IssueToken's doc for why single-use isn't
+// enforced and why the impact is bounded to the poster's own data.
 func (fp *Fingerprinter) IngestHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

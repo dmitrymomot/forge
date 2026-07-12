@@ -15,6 +15,13 @@ import (
 
 var connKey = ctxkey.New[*Conn]("tlsprint-conn")
 
+// maxClientHelloRecord is the largest TLS record body peek will buffer: the
+// protocol's own max record payload, and the documented "ClientHello fits one
+// record" bound. A declared length beyond this is never read into memory here
+// (see peek); the tls.Server handshake still reads the record itself and
+// rejects an oversized one on its own terms.
+const maxClientHelloRecord = 16384
+
 // Conn wraps an accepted connection, peeks the TLS ClientHello on the first Read
 // (before the tls.Server handshake consumes it), computes its JA4, and then
 // replays the buffered bytes transparently.
@@ -30,6 +37,15 @@ type listener struct{ net.Listener }
 
 // Listener wraps ln so each accepted connection is a *Conn that captures a JA4.
 // Pair it with ConnContext on your http.Server.
+//
+// The wrapper reads the ClientHello during the TLS handshake using the
+// connection's existing deadline; it never sets a deadline of its own, so it
+// can't strip the server's handshake timeout. Callers MUST set
+// http.Server.ReadTimeout (and/or ReadHeaderTimeout) to bound that read and
+// prevent a slow-loris client from holding the connection open — the same
+// requirement as any TLS server. A declared record length over 16 KiB (see
+// maxClientHelloRecord) is not buffered; JA4 capture degrades to empty rather
+// than reading an attacker-controlled amount into memory.
 func Listener(ln net.Listener) net.Listener { return listener{Listener: ln} }
 
 func (l listener) Accept() (net.Conn, error) {
@@ -61,6 +77,16 @@ func (c *Conn) peek() {
 		return
 	}
 	recLen := int(header[3])<<8 | int(header[4])
+	if recLen > maxClientHelloRecord {
+		// Declared record body exceeds the one-record ClientHello bound: don't
+		// allocate/read it here (that would be an attacker-controlled buffer up
+		// to 65535 bytes). Replay just the header; the tls.Server handshake
+		// reads the full record byte-identically from the wire and rejects an
+		// over-max TLS record itself, so this degrades to an empty JA4 rather
+		// than breaking or hanging the connection.
+		c.prefix = bytes.NewReader(header)
+		return
+	}
 	body := make([]byte, recLen)
 	n, _ := io.ReadFull(c.Conn, body)
 	full := append(append([]byte{}, header...), body[:n]...)

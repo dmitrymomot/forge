@@ -22,6 +22,13 @@ type tokenClaims struct {
 // IssueToken returns a short-lived signed token binding a fresh nonce, an expiry
 // (now + TokenTTL), and a hash of the client IP. Embed it in the page so the JS
 // probe can echo it to IngestHandler.
+//
+// The token is not single-use: it remains valid for repeated IngestHandler
+// calls until it expires, and each accepted call overwrites the stored payload
+// for its nonce. Single-use isn't enforced because the default carry is a
+// stateless signed cookie with nothing server-side to consume; the short
+// TokenTTL plus the IP-hash binding limit the effect to the poster overwriting
+// their own fingerprint data, so this is intended behavior for v1.
 func (fp *Fingerprinter) IssueToken(r *http.Request) (string, error) {
 	claims := tokenClaims{
 		Nonce:  random.String(16),
