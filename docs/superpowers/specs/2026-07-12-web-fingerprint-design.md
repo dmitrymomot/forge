@@ -64,12 +64,15 @@ wired function seams (see §Dependency boundary). When this ships, delete the
 
 3. **JS binding = stateless signed token (A) + cookie carry (C); store
    (B) available.** The server issues a short-lived `crypto/sign` token bound
-   to session + IP-hash; the probe echoes it with its payload; the ingest
-   handler verifies it, making the payload tamper-evident (client data is only
-   accepted with a valid unexpired token). The merged payload is carried in a
-   signed cookie so subsequent requests need no re-probe. A `cache.Store`
-   nonce path is offered for consumers who need cross-request correlation
-   without cookies.
+   to a fresh nonce, an expiry, and an IP-hash (no session-id claim); the
+   probe echoes it with its payload; the ingest handler verifies it, making
+   the payload tamper-evident (client data is only accepted with a valid
+   unexpired token). Per-poster isolation comes from the per-nonce signed
+   cookie the poster holds (or, with `WithStore`, the nonce-keyed store row) —
+   not from a session binding. The merged payload is carried in a signed
+   cookie so subsequent requests need no re-probe. A `cache.Store` nonce path
+   is offered for consumers who need cross-request correlation without
+   cookies.
 
 4. **Composition = `Collector` seam + preset helpers (A+C).** The `Collector`
    interface makes each layer independently black-box-testable (design.md §31)
@@ -236,11 +239,12 @@ func (fp *Fingerprinter) IngestHandler() http.Handler  // POST {token,data}: ver
 func (fp *Fingerprinter) IssueToken(r *http.Request) (string, error) // for the page
 ```
 
-Binding is stateless-signed by default (token bound to session + IP-hash,
-`TokenTTL`), cookie-carried for convenience (`web/cookie`, signed), store-backed
-optional (`WithStore(cache.Store)`). Ingest **never trusts client data blindly**:
-every field is whitelisted, size-clamped, and enum-checked; the parser is
-fuzzed.
+Binding is stateless-signed by default (token bound to nonce + IP-hash +
+expiry, `TokenTTL`; no session-id claim — per-poster isolation comes from the
+per-nonce signed cookie / nonce-keyed store row the poster holds),
+cookie-carried for convenience (`web/cookie`, signed), store-backed optional
+(`WithStore(cache.Store)`). Ingest **never trusts client data blindly**: every
+field is whitelisted, size-clamped, and enum-checked; the parser is fuzzed.
 
 `probe.js` (opt-in flags gate the heavier collectors):
 - always: screen/pixel-ratio, timezone + offset, `navigator` languages /

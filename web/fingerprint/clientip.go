@@ -15,9 +15,11 @@ type ipCollector struct{ opts []clientip.Option }
 func ClientIP(opts ...clientip.Option) Collector { return ipCollector{opts: opts} }
 
 func (c ipCollector) Collect(r *http.Request) ([]Component, error) {
-	ip := clientip.Get(r)
+	var ip string
 	if len(c.opts) > 0 {
 		ip = clientip.Resolve(r, c.opts...)
+	} else {
+		ip = clientip.Get(r)
 	}
 	if ip == "" {
 		return nil, nil

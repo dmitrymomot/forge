@@ -10,7 +10,8 @@ func Session(cfg Config, opts ...Option) (*Fingerprinter, error) {
 
 // Antifraud returns a full-stack Fingerprinter: headers + client IP + JS probe,
 // with the geoip and useragent seams wired and an optional TLS collector (pass
-// tlsprint.Chain(...), or nil to omit the TLS layer).
+// tlsprint.Chain(...), or nil to omit the TLS layer). Note: the tls-ua-mismatch
+// signal is inert (always Value:false) until automationJA4 is populated.
 func Antifraud(cfg Config, geo GeoLookup, ua UAFamily, tls Collector, opts ...Option) (*Fingerprinter, error) {
 	cols := []Collector{Headers(), ClientIP()}
 	if tls != nil {

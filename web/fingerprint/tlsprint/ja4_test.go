@@ -40,3 +40,41 @@ func TestGreaseStripping(t *testing.T) {
 		t.Fatalf("grease not stripped / counts wrong: %s", ja4(h))
 	}
 }
+
+// TestJA4EmptyCipherListIsZeroed pins the FoxIO spec's special case: when
+// every cipher is a GREASE code point (stripped to an empty list), JA4_b is
+// the literal "000000000000", not sha256("")[:12].
+func TestJA4EmptyCipherListIsZeroed(t *testing.T) {
+	h := clientHello{
+		version:    0x0304,
+		sni:        false,
+		ciphers:    []uint16{0x0a0a, 0x1a1a, 0x2a2a}, // all GREASE
+		extensions: []uint16{0x0005},
+	}
+	parts := strings.Split(ja4(h), "_")
+	if len(parts) != 3 {
+		t.Fatalf("JA4 shape wrong: %q", ja4(h))
+	}
+	if parts[1] != "000000000000" {
+		t.Fatalf("JA4_b should be all-zero for empty cipher list, got %q", parts[1])
+	}
+}
+
+// TestJA4EmptyExtensionListIsZeroed pins the FoxIO spec's special case: when
+// the client offers no extensions, JA4_c is the literal "000000000000", not a
+// hash of the empty extension list joined with signature algorithms.
+func TestJA4EmptyExtensionListIsZeroed(t *testing.T) {
+	h := clientHello{
+		version:    0x0304,
+		sni:        false,
+		ciphers:    []uint16{0x1301},
+		extensions: nil,
+	}
+	parts := strings.Split(ja4(h), "_")
+	if len(parts) != 3 {
+		t.Fatalf("JA4 shape wrong: %q", ja4(h))
+	}
+	if parts[2] != "000000000000" {
+		t.Fatalf("JA4_c should be all-zero for empty extension list, got %q", parts[2])
+	}
+}

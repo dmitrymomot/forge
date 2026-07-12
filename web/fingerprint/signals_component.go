@@ -41,6 +41,11 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 	return out
 }
 
+// tlsUAMismatch requires a JA4-format "tls" component — tlsprint.Local() or a
+// JA4 header source (e.g. tlsprint.CloudFrontJA4), NOT the JA3 hash from
+// tlsprint.CloudflareJA3, which never matches automationJA4's JA4 keys. The
+// signal is inert (always Value:false) until automationJA4 is populated with
+// pinned automation fingerprints.
 func (fp *Fingerprinter) tlsUAMismatch(comp map[string]string) (Signal, bool) {
 	tls, hasTLS := comp["tls"]
 	ua, hasUA := comp["ua"]

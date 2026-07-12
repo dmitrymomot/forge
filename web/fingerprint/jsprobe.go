@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,9 +101,13 @@ func (fp *Fingerprinter) IngestHandler() http.Handler {
 				http.Error(w, "store error", http.StatusInternalServerError)
 				return
 			}
-			_ = fp.cookies.SetSigned(w, cookieName, claims.Nonce)
+			if err := fp.cookies.SetSigned(w, cookieName, claims.Nonce); err != nil && fp.logger.Enabled(r.Context(), slog.LevelDebug) {
+				fp.logger.DebugContext(r.Context(), "fingerprint: ingest cookie set failed", slog.Any("error", err))
+			}
 		} else {
-			_ = fp.cookies.SetSigned(w, cookieName, base64.RawURLEncoding.EncodeToString(payload))
+			if err := fp.cookies.SetSigned(w, cookieName, base64.RawURLEncoding.EncodeToString(payload)); err != nil && fp.logger.Enabled(r.Context(), slog.LevelDebug) {
+				fp.logger.DebugContext(r.Context(), "fingerprint: ingest cookie set failed", slog.Any("error", err))
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})

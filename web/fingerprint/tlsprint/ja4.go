@@ -49,9 +49,14 @@ func ja4a(h clientHello) string {
 }
 
 // ja4b is the first 12 hex chars of sha256 over the GREASE-stripped cipher
-// suites, each lowercase 4-hex, sorted ascending, joined by ",".
+// suites, each lowercase 4-hex, sorted ascending, joined by ",". Per the FoxIO
+// JA4 spec, an empty (post-GREASE-strip) cipher list is the literal
+// "000000000000" rather than sha256("")[:12].
 func ja4b(h clientHello) string {
 	ciphers := stripGREASE(h.ciphers)
+	if len(ciphers) == 0 {
+		return "000000000000"
+	}
 	slices.Sort(ciphers)
 	return hash12(strings.Join(hexList(ciphers), ","))
 }
@@ -60,6 +65,9 @@ func ja4b(h clientHello) string {
 // "<sorted extensions>_<signature algorithms in order>". Extensions are
 // GREASE-stripped, then SNI(0x0000) and ALPN(0x0010) are excluded and the rest
 // sorted ascending; signature algorithms stay in wire order (not GREASE-stripped).
+// Per the FoxIO JA4 spec, when that filtered extension list is empty the whole
+// JA4_c section is the literal "000000000000" rather than a hash of the
+// signature-algorithm-only input.
 func ja4c(h clientHello) string {
 	exts := stripGREASE(h.extensions)
 	filtered := make([]uint16, 0, len(exts))
@@ -68,6 +76,9 @@ func ja4c(h clientHello) string {
 			continue
 		}
 		filtered = append(filtered, e)
+	}
+	if len(filtered) == 0 {
+		return "000000000000"
 	}
 	slices.Sort(filtered)
 	input := strings.Join(hexList(filtered), ",") + "_" + strings.Join(hexList(h.sigAlgs), ",")
