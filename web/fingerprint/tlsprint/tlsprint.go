@@ -1,14 +1,3 @@
-// Package tlsprint contributes a TLS (JA3/JA4) fingerprint as the "tls"
-// fingerprint component, sourced from headers set by a trusted upstream
-// (Cloudflare, CloudFront, or a self-hosted proxy such as Envoy/Caddy/Traefik).
-//
-// A raw JA3/JA4 hash is only trustworthy when it was computed by something
-// that actually terminated the TLS handshake and forwarded the result over a
-// channel the app controls — never trust it straight from an arbitrary
-// client-supplied header. TrustFunc expresses that gate: build one with
-// TrustPrivateProxies or TrustRanges, then pass it to a header source. A nil
-// TrustFunc trusts nothing (the header is always dropped) — the gate fails
-// closed, never open.
 package tlsprint
 
 import (
