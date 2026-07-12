@@ -19,8 +19,9 @@ var automationJA4 = map[string]string{
 }
 
 // componentSignals derives the component-driven signals: headless,
-// tls-ua-mismatch, lang-mismatch, geo-tz-mismatch, and header-anomaly. Each
-// emits only when its required components and seams are present.
+// tls-ua-mismatch, lang-mismatch, ch-ua-mismatch, geo-tz-mismatch,
+// header-anomaly, and fetch-metadata-anomaly. Each emits only when its
+// required components and seams are present.
 func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]string) []Signal {
 	var out []Signal
 	if v, ok := comp["js-webdriver"]; ok {
@@ -39,6 +40,9 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 		out = append(out, s)
 	}
 	if s, ok := fp.headerAnomaly(r, comp); ok {
+		out = append(out, s)
+	}
+	if s, ok := fetchMetadataAnomaly(r); ok {
 		out = append(out, s)
 	}
 	return out
@@ -169,6 +173,23 @@ func (fp *Fingerprinter) headerAnomaly(r *http.Request, comp map[string]string) 
 	}
 	missing := r.Header.Get("Sec-Ch-Ua") == "" || r.Header.Get("Sec-Fetch-Site") == ""
 	return Signal{Name: "header-anomaly", Value: missing, Detail: "Chrome UA without Sec-Ch-Ua/Sec-Fetch-*"}, true
+}
+
+// fetchMetadataAnomaly flags Sec-Fetch-* header combinations a conforming
+// browser never emits: a navigation with an "empty" destination, or a
+// "document" destination outside navigate mode. It reads the headers raw (they
+// are per-request context, never hashed) and emits only when at least one
+// Sec-Fetch-* header is present.
+func fetchMetadataAnomaly(r *http.Request) (Signal, bool) {
+	site := r.Header.Get("Sec-Fetch-Site")
+	mode := r.Header.Get("Sec-Fetch-Mode")
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	if site == "" && mode == "" && dest == "" {
+		return Signal{}, false
+	}
+	anomaly := (mode == "navigate" && dest == "empty") ||
+		(dest == "document" && mode != "" && mode != "navigate")
+	return Signal{Name: "fetch-metadata-anomaly", Value: anomaly, Detail: "mode=" + mode + " dest=" + dest}, true
 }
 
 // primaryLang returns the base language subtag of the first entry ("en-US,..." -> "en").

@@ -216,6 +216,40 @@ func TestCHUAMismatchSignal(t *testing.T) {
 	}
 }
 
+func TestFetchMetadataAnomalySignal(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(fingerprint.Headers()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Contradiction a real browser never sends: navigate mode with empty dest.
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "empty")
+	f, _ := fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "fetch-metadata-anomaly"); !ok || !s.Value {
+		t.Fatalf("expected fetch-metadata-anomaly=true: %+v", fp.Signals(r, f))
+	}
+
+	// Normal top-level navigation.
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.Header.Set("Sec-Fetch-Site", "none")
+	r2.Header.Set("Sec-Fetch-Mode", "navigate")
+	r2.Header.Set("Sec-Fetch-Dest", "document")
+	f2, _ := fp.FromRequest(r2)
+	if s, ok := signalByName(fp.Signals(r2, f2), "fetch-metadata-anomaly"); !ok || s.Value {
+		t.Fatalf("expected fetch-metadata-anomaly=false: %+v", fp.Signals(r2, f2))
+	}
+
+	// No Sec-Fetch-* headers at all → not emitted.
+	r3 := httptest.NewRequest("GET", "/", nil)
+	f3, _ := fp.FromRequest(r3)
+	if _, ok := signalByName(fp.Signals(r3, f3), "fetch-metadata-anomaly"); ok {
+		t.Fatal("fetch-metadata-anomaly must not emit without any Sec-Fetch-* header")
+	}
+}
+
 func TestHeadlessSignal(t *testing.T) {
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(
