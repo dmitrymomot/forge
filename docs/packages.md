@@ -9,6 +9,12 @@ built: the moment a package ships it is removed from this list — its `doc.go`
 (godoc) becomes the reference. All design rules — layout, naming, idioms,
 dependencies, seams, anti-scope — live in [design.md](design.md).
 
+Every entry ends with a `Deps:` line listing the forge packages it
+imports: unmarked names are already shipped (buildable today); names
+tagged `(planned)` are elsewhere in this file and define build order.
+External module deps stay in the entry prose. Composition partners
+(packages a consumer wires alongside) are not deps and are not listed.
+
 ## core/
 
 ---
@@ -20,6 +26,8 @@ on-transition hooks, and illegal-transition errors; pure generics, zero
 deps. Persistence is caller-owned — apply it to a status column. The
 lifecycle brick under order/subscription/verification/payout flows.
 
+Deps: none (stdlib only).
+
 ---
 
 **core/country**
@@ -29,6 +37,8 @@ default currency, and dial prefix per country — the `money` ISO-4217
 precedent applied to countries. Zero deps; consumers: registration/KYC
 forms, `geoip` enrichment, `i18n`, `core/phone`.
 
+Deps: none (stdlib only).
+
 ---
 
 **core/phone**
@@ -37,6 +47,8 @@ E.164 phone normalization: parse/format/validate over `core/country`'s
 dial-prefix table. Consumers: `comms/sms`, `auth/otp`, KYC forms. No
 carrier metadata, no line-type detection — the libphonenumber swamp
 stays out.
+
+Deps: `core/country` (planned).
 
 ## web/
 
@@ -48,6 +60,8 @@ Server-side CAPTCHA verification behind a `Verifier` seam; providers
 (`captcha/turnstile`, …) are thin POST+JSON adapters over httpclient — no
 provider SDKs.
 
+Deps: `web/httpclient`.
+
 ---
 
 **web/autocert**
@@ -55,6 +69,8 @@ provider SDKs.
 ACME/Let's Encrypt TLS via `x/crypto/acme/autocert` wired as `tls.Config`
 + HTTP-01 handler for httpserver — pairs with `tenant`'s custom-domain
 resolution for customer domains.
+
+Deps: `web/httpserver`.
 
 ---
 
@@ -70,6 +86,8 @@ live server-side (never `?url=`) and are scheme-allowlisted at creation.
 Branded short domains compose `tenant` custom domains + `hostrouter`.
 Not `magiclink` (self-contained signed token); not `smartlink` (no rules
 — a code resolves to one target or one rule-table handle).
+
+Deps: `core/random`, `resilience/cache`.
 
 ---
 
@@ -88,6 +106,8 @@ subject"); not `hostrouter` (inbound hosts) — this selects outbound
 destinations. Rule storage/admin, target health checks, and bot
 filtering stay consumer-side.
 
+Deps: `core/clock`.
+
 ---
 
 **web/attribution**
@@ -100,6 +120,8 @@ tracking-pixel endpoint (correct 1×1 GIF + no-cache). The "where did
 this signup come from" answer every SaaS wants and every affiliate
 platform requires; multi-touch models stay out.
 
+Deps: `web/cookie`, `crypto/sign`.
+
 ## view/
 
 ---
@@ -110,6 +132,8 @@ One-shot messages surviving a redirect over a pluggable Store:
 signed-cookie store built in (composes `cookie`); server-side store rides
 `cache.Store`. For PRG and htmx flows.
 
+Deps: `web/cookie`, `resilience/cache`.
+
 ---
 
 **view/form**
@@ -118,6 +142,8 @@ Whole-form decode into structs (reflection confined to `structfields`),
 sticky `Values`, render-friendly `Errors` carrying `validate`'s i18n keys
 (translated by `i18n/catalog`), plus error-class/aria helpers. Backbone of
 server-rendered CRUD.
+
+Deps: `core/structfields`, `core/validate`; `i18n/catalog` (planned).
 
 ## i18n/
 
@@ -129,6 +155,8 @@ Message catalog with fs.FS/JSON loaders and curated CLDR plural rules;
 `T(loc, key, args...)` selects plural forms internally; fallback chains;
 translates `validate` violation keys. Zero deps — no x/text, no YAML.
 
+Deps: none (stdlib only).
+
 ---
 
 **i18n/locale**
@@ -137,6 +165,8 @@ Accept-Language negotiation (q-values, region fallback), context carrier,
 middleware with a resolver chain (cookie → query → Accept-Language →
 default), and a logger context extractor.
 
+Deps: `ops/logger`.
+
 ---
 
 **i18n/numbers**
@@ -144,12 +174,16 @@ default), and a logger context extractor.
 Locale-aware number/currency/percent formatting; `Currency(money.Money)` —
 the locale rendering `core/money` defers by design.
 
+Deps: `core/money`.
+
 ---
 
 **i18n/dates**
 
 Locale + timezone date/time and relative-time ("3 hours ago") formatting
 with named presets. Gregorian only.
+
+Deps: none (stdlib only).
 
 ## data/
 
@@ -161,6 +195,8 @@ Opaque cursor codec (base64+JSON, optional HMAC via `sign`), keyset
 WHERE/ORDER fragment builders emitting pgx-compatible `(sql, args)`,
 `Page[T]` metadata, and the page-window view-model (ellipses, links
 preserving query params) for server-rendered navigation.
+
+Deps: `crypto/sign`.
 
 ---
 
@@ -174,12 +210,16 @@ transport-agnostic carrier (jobqueue handlers set/read tenant without
 HTTP), and explicit parameterized `ScopeClause` SQL fragments — visible at
 every query, never auto-injected.
 
+Deps: none (stdlib only).
+
 ---
 
 **data/dataloader**
 
 Generic per-request batch-and-cache loader collapsing N+1 lookups; pure
 generics, no DB imports; the batch fn is caller-owned.
+
+Deps: none (stdlib only).
 
 ---
 
@@ -189,6 +229,8 @@ Blob `Store` seam with a path-traversal-safe disk adapter;
 `objectstore/s3` driver on aws-sdk-go-v2. Magic-byte MIME validation via
 `filetype`, tenant key-prefix scoping, presigned URLs.
 
+Deps: `core/filetype`.
+
 ---
 
 **data/seed**
@@ -196,12 +238,16 @@ Blob `Store` seam with a path-traversal-safe disk adapter;
 Idempotent named-Seeder runner with an `app seed` cli.Command; mirrors
 `migration`'s shape.
 
+Deps: `data/postgres`; `ops/cli` (planned).
+
 ---
 
 **data/imageproc**
 
 Decode-limit-guarded resize/crop/re-encode over `x/image` — the
 avatar/logo upload → process → store pipeline.
+
+Deps: none forge-internal (x/image external).
 
 ---
 
@@ -213,6 +259,8 @@ pending-change semantics — tightening applies immediately, loosening after
 a configurable delay (the plan-downgrade / regulatory-limit change
 discipline).
 
+Deps: `core/clock`.
+
 ---
 
 **data/retention**
@@ -222,6 +270,8 @@ Named retention policies run as batched delete/anonymize sweeps via
 audit events. Handles the two-sided GDPR constraint — minimum retention
 and erasure deadlines — as declared policy, not cron scripts.
 
+Deps: `async/scheduler`, `async/jobqueue`, `ops/auditlog` (all planned).
+
 ---
 
 **data/export**
@@ -229,6 +279,8 @@ and erasure deadlines — as declared policy, not cron scripts.
 Streaming CSV/JSONL/XML writers with bounded memory and a pgx-rows
 adapter — back-office exports and regulator feeds. Write-only: no XLSX,
 no import/parse side.
+
+Deps: `data/postgres`.
 
 ---
 
@@ -239,6 +291,8 @@ with per-row `validate` and a row-addressed error report, feeding a
 batch-insert seam — the "import your data" onboarding flow. (Named
 `ingest` because `import` is a Go keyword.)
 
+Deps: `core/validate`.
+
 ---
 
 **data/clickhouse**
@@ -246,6 +300,8 @@ batch-insert seam — the "import your data" onboarding flow. (Named
 ClickHouse connection factory in the `data/postgres` mold: DSN config with
 Validate, pooling, health ping. Connection only — query building and
 schema stay consumer-side.
+
+Deps: none forge-internal (driver external).
 
 ---
 
@@ -256,6 +312,8 @@ discipline — WAL, `busy_timeout`, `synchronous`, foreign keys — and
 single-writer pool sizing; cgo-free `modernc.org/sqlite` isolated here.
 The zero-infra single-node story under `jobqueue/sqlite` and dev/test
 setups.
+
+Deps: none forge-internal (modernc.org/sqlite external).
 
 ## finance/
 
@@ -313,6 +371,9 @@ ref; the ledger records money that moved, never attempts. Mongo-only
 stacks give the ledger its own Postgres and bridge with idempotent refs
 + a reconcile sweep (recipe owed).
 
+Deps: `core/money`, `core/clock`, `data/postgres`, `data/migration`;
+tests: `testkit/dbtest` (planned).
+
 ---
 
 **finance/fxrate**
@@ -321,6 +382,8 @@ Exchange rates behind a `RateSource` seam with stored snapshots; `Convert`
 records the rate applied, so audits answer "what rate at transaction
 time". Math is multiply-and-round via `core/decimal`; providers are thin
 JSON adapters over httpclient — no provider SDKs, no live streaming.
+
+Deps: `core/decimal`, `web/httpclient`.
 
 ---
 
@@ -332,6 +395,8 @@ above") with deterministic rounding, as a pure calculator — bands are
 caller-supplied values; effective-dating is the caller choosing which
 band set applies (composes `data/settings` for deal changes). Consumers:
 usage-billing overage tiers, revenue-share deals, commission plans.
+
+Deps: `core/money`, `core/decimal`.
 
 ---
 
@@ -350,6 +415,8 @@ anti-scope: no string parsing, no conditionals, no user-typed
 expressions — anything beyond staged linear terms + clamp is a
 registered Go function; for fixed deal shapes the documented default is
 named Go functions with per-deal parameters as data.
+
+Deps: `core/decimal`.
 
 ---
 
@@ -370,6 +437,8 @@ determined; rendering stays out (HTML is a `render` recipe, PDF
 consumer-side); no dunning, no e-invoicing formats, no subscription or
 pricing logic (the billing anti-scope stands).
 
+Deps: `core/money`; `core/fsm` (planned).
+
 ## async/
 
 ---
@@ -389,6 +458,9 @@ dev/test), `jobqueue/redis`, `jobqueue/nats`, `jobqueue/kafka`. SQL
 drivers support transactional enqueue (`PushTx(ctx, tx, …)`); non-SQL
 brokers get it via `async/outbox`.
 
+Deps: `ops/supervisor`; drivers: `data/postgres`, `data/redis`,
+`data/sqlite` (planned).
+
 ---
 
 **async/scheduler**
@@ -396,6 +468,8 @@ brokers get it via `async/outbox`.
 Cron/interval `supervisor.Service` that *enqueues* into the engine when
 due; fires once per fleet via a `unique(name, scheduled_for)` insert race
 on SQL drivers; small local cron parser, no robfig/cron.
+
+Deps: `ops/supervisor`; `async/jobqueue` (planned).
 
 ---
 
@@ -407,6 +481,8 @@ own queue, publish fans out one message per subscription, competing
 consumers within one, at-least-once. Transactional publish on SQL drivers;
 exports the `Seen(ctx, tx, id)` idempotency inbox. Handlers must be
 idempotent.
+
+Deps: `async/jobqueue` (planned).
 
 ---
 
@@ -424,6 +500,8 @@ delivery (`Idempotency-Key` header / payload field) and receivers dedup
 — the Stripe contract (in-router suppression would trade duplicates for
 silent loss).
 
+Deps: `web/httpclient`; `async/eventbus`, `comms/webhook` (planned).
+
 ---
 
 **async/outbox**
@@ -432,6 +510,8 @@ Transactional outbox: intent rows committed inside the business DB
 transaction plus a relay `supervisor.Service` that forwards committed rows
 into any `Broker` — the bridge from a Postgres/SQLite transaction to
 redis/nats/kafka delivery.
+
+Deps: `ops/supervisor`; `async/jobqueue` (planned).
 
 ---
 
@@ -447,6 +527,8 @@ rules are the downstream pipeline's concern. Reach for
 publish shows up in a profile (design.md §Performance — benchmark
 required).
 
+Deps: `ops/supervisor`.
+
 ---
 
 **async/workflow**
@@ -456,6 +538,8 @@ DB-checkpointed linear step sequences over the engine
 per-step compensation — on failure, completed steps' compensations run in
 reverse order (a payout pipeline that must undo its ledger debit). No DAG,
 no DSL, no timers — not a Temporal clone.
+
+Deps: `async/jobqueue` (planned).
 
 ## realtime/
 
@@ -471,6 +555,8 @@ handling, Last-Event-ID resume via the replay ring. The low-level writer
 stays exported as the brick under `web/htmx`'s SendComponent bridge and
 `llm.SSE`. Requires httpserver WriteTimeout=0 (documented).
 
+Deps: `realtime/fanout` (planned).
+
 ---
 
 **realtime/fanout**
@@ -480,6 +566,8 @@ with the `Bus` seam for multi-instance backplanes and an optional bounded
 `WithReplay(n)` ring. Drivers: `fanout/pgbus` (LISTEN/NOTIFY — multi-
 instance push with zero new infrastructure), `fanout/redisbus` (takes the
 caller's `data/redis` client).
+
+Deps: drivers ride `data/postgres`, `data/redis`.
 
 ---
 
@@ -491,12 +579,16 @@ the hub — connection registry, rooms, broadcast under supervisor, with
 production bounds (payload/event-name/auth-blob limits,
 drop-frames-vs-teardown overflow policy, `Shutdown(ctx)` drain).
 
+Deps: `ops/supervisor` (coder/websocket external).
+
 ---
 
 **realtime/presence**
 
 Who-is-here tracking with TTL heartbeats over `fanout` + `cache` — online
 indicators, concurrent-viewer counts.
+
+Deps: `resilience/cache`; `realtime/fanout` (planned).
 
 ## auth/
 
@@ -512,6 +604,8 @@ detection. In-memory store built in; drivers: `session/pgstore`
 (user-indexed), `session/cookiestore` (stateless-encrypted, no UserIndex —
 documented); generic KV backing rides `cache.Store`.
 
+Deps: `resilience/cache`, `data/postgres`; `auth/fingerprint` (planned).
+
 ---
 
 **auth/impersonation**
@@ -521,6 +615,8 @@ required reason, a context flag views render as a banner, `auditlog`
 events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the authorization decision seam — the hand-rolled
 version is where privilege escalation lives.
+
+Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
 
 ---
 
@@ -532,6 +628,8 @@ apikey all satisfy it) with chained credential extractors (header → cookie
 WWW-Authenticate — gates pprof/metrics/staging/admin), and
 `IdentityFromContext`.
 
+Deps: `crypto/consttime`, `web/problem`.
+
 ---
 
 **auth/lockout**
@@ -539,6 +637,8 @@ WWW-Authenticate — gates pprof/metrics/staging/admin), and
 Login/OTP failure counting with exponential delay and lockout windows over
 the ratelimit counter seam. (Not rate shaping — that's `ratelimit`; not
 cumulative caps — that's `quota`.)
+
+Deps: `resilience/ratelimit`.
 
 ---
 
@@ -549,6 +649,8 @@ skew-window verify, otpauth:// provisioning URI, and one-time backup codes
 (generate/hash/verify-and-consume, constant-time). QR image rendering
 lights up via `core/qrcode`. Persistence is consumer DB.
 
+Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
+
 ---
 
 **auth/otp**
@@ -556,6 +658,8 @@ lights up via `core/qrcode`. Persistence is consumer DB.
 Short numeric codes for email/SMS verification: attempt-limited, TTL'd,
 hashed at rest; generation via `random.DigitCode`; delivery is the
 caller's channel.
+
+Deps: `core/random`, `crypto/digest`.
 
 ---
 
@@ -568,6 +672,8 @@ scopes, optional expiry, last-used-at tracking) behind a storage-agnostic
 Store, and request verification as a `guard.Verifier` (constant-time, key →
 identity/tenant resolution).
 
+Deps: `core/random`, `crypto/consttime`; `auth/guard` (planned).
+
 ---
 
 **auth/magiclink**
@@ -577,6 +683,8 @@ team invites (role/tenant claims as a documented example), verify and
 unsubscribe links. Stateless by default; `WithStore` for single-use
 redemption. Does not send email.
 
+Deps: `crypto/token`, `resilience/cache`.
+
 ---
 
 **auth/oauthclient**
@@ -584,6 +692,8 @@ redemption. Does not send email.
 OAuth2/OIDC client: auth-code + PKCE, state, token exchange,
 id_token/userinfo verification via `auth/jwt` (alg-pinned), provider
 presets. On net/http over `httpclient` — no x/oauth2.
+
+Deps: `auth/jwt`, `web/httpclient`.
 
 ---
 
@@ -593,6 +703,8 @@ Machine-to-machine OAuth2 provider for partner-facing APIs:
 client-credentials grant, token endpoint issuing short-lived JWTs via
 `auth/jwt`, JWKS endpoint, client registry behind a storage-agnostic
 Store. No auth-code-for-third-parties, no consent screens, no JWE.
+
+Deps: `auth/jwt`.
 
 ---
 
@@ -605,6 +717,8 @@ authenticated via `apikey` or `oauthserver` tokens. The enterprise
 checkbox next to SSO; SAML stays out (`oauthclient` OIDC covers modern
 IdPs).
 
+Deps: `auth/guard` (planned).
+
 ---
 
 **auth/rbac**
@@ -616,6 +730,8 @@ effective permission set. Feeds the shared authorization decision seam
 consumed by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
 assignment behind a storage-agnostic Store.
 
+Deps: none (stdlib only).
+
 ---
 
 **auth/acl**
@@ -624,6 +740,8 @@ Per-subject / per-resource grant and deny overrides (deny wins) layered
 onto rbac decisions — "this manager sees exactly these assigned agents".
 The runtime-data authorization layer: storage-agnostic Store with drivers;
 composes into the same decision seam.
+
+Deps: none (stdlib only).
 
 ---
 
@@ -634,6 +752,8 @@ own subtree but not subagents' player details" — evaluated in the shared
 decision seam alongside rbac/acl. The relationship data (trees,
 assignments) stays consumer code feeding the predicate; no policy DSL.
 
+Deps: none (stdlib only).
+
 ---
 
 **auth/webauthn**
@@ -641,12 +761,16 @@ assignments) stays consumer code feeding the predicate; no policy DSL.
 Passkey registration and assertion over isolated `go-webauthn` (CBOR/COSE
 is the one justified heavy auth dep).
 
+Deps: none forge-internal (go-webauthn external).
+
 ---
 
 **auth/fingerprint**
 
 Versioned request fingerprint (UA + Accept headers ± IP, sha256).
 Multi-consumer brick: session hijack detection, anti-fraud risk scoring.
+
+Deps: none (stdlib only).
 
 ---
 
@@ -657,6 +781,8 @@ mold: applicant/check status mapped to a small enum, inbound
 webhook-status mapping; providers (`idverify/sumsub`, …) are thin
 POST+JSON adapters over httpclient — no provider SDKs. Decisioning stays
 consumer-side.
+
+Deps: `web/httpclient`.
 
 ## comms/
 
@@ -671,6 +797,8 @@ frontmatter (subject/preheader, CTA-button extension) — the designer-free
 transactional format; goldmark confined there. Provider adapters
 (SES/Postmark/…) are consumer-side or isolated subpackages.
 
+Deps: none forge-internal (goldmark external, isolated).
+
 ---
 
 **comms/webhook**
@@ -684,6 +812,8 @@ schemes, constant-time, timestamp tolerance, reads and restores
 pluggable `Scheme` seam, so bespoke partner schemes register without
 forking the package.
 
+Deps: `web/httpclient`, `crypto/sign`; `async/jobqueue` (planned).
+
 ---
 
 **comms/sms**
@@ -691,12 +821,16 @@ forking the package.
 SMS `Sender` seam; `sms/twilio` driver is a stdlib form-POST over
 httpclient — never twilio-go.
 
+Deps: `web/httpclient`.
+
 ---
 
 **comms/push**
 
 Push `Pusher` seam + `push/webpush` (VAPID/ECDH/AES-GCM, fully stdlib).
 FCM/APNs stay consumer-side behind the seam.
+
+Deps: `web/httpclient`.
 
 ---
 
@@ -710,6 +844,8 @@ consumer-side per the anti-scope recipe). Fallback chains trigger on send
 failure or missing binding (no push token → email), never on "unread" —
 read tracking is a product, not a brick. Durable delivery rides
 `jobqueue`.
+
+Deps: `data/settings`, `async/jobqueue` (both planned).
 
 ## ai/
 
@@ -726,6 +862,8 @@ truncation; exported usage type (prices are consumer-supplied — never
 library data). Drivers `llm/openai`, `llm/anthropic` are stdlib JSON+SSE
 adapters over httpclient — never the official SDKs.
 
+Deps: `web/httpclient`; `realtime/sse` (planned).
+
 ---
 
 **ai/prompt**
@@ -734,12 +872,16 @@ Type-safe prompt templating from an fs.FS registry over text/template
 with strict missing-key errors. Mechanical only — no chains/agents. Not
 html/template (escaping corrupts prompts).
 
+Deps: none (stdlib only).
+
 ---
 
 **ai/structured**
 
 Coerce noisy LLM output into typed values: fence-strip, strict JSON decode
 into T, repair-prompt on failure.
+
+Deps: none (stdlib only).
 
 ---
 
@@ -748,6 +890,8 @@ into T, repair-prompt on failure.
 `Embedder` seam + stdlib vector math (cosine, top-k) for small in-memory
 corpora; no ANN, no persistence.
 
+Deps: none (stdlib only).
+
 ---
 
 **ai/mcpserver**
@@ -755,6 +899,8 @@ corpora; no ANN, no persistence.
 Expose explicitly-registered app operations as MCP tools (stdio +
 streamable-HTTP) as `supervisor.Service` / `http.Handler`; hand-declared
 schemas, no reflection; official MCP go-sdk isolated here.
+
+Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ## ops/
 
@@ -766,12 +912,16 @@ One internal diagnostics surface: `/debug/pprof/*`, `/debug/stats`
 (runtime/GC/goroutines JSON), `/debug/vars`, with an auth guard and a
 dedicated-port `supervisor.Service`.
 
+Deps: `ops/supervisor`; `auth/guard` (planned).
+
 ---
 
 **ops/metrics**
 
 Counter/Gauge/Histogram `Recorder` facade with an expvar default and
 request middleware; `metrics/prometheus` is the only adapter.
+
+Deps: none (stdlib only).
 
 ---
 
@@ -784,6 +934,8 @@ every B2B SaaS shows in its UI. Optional per-stream hash chaining
 (prev-hash + a verify pass) makes the trail tamper-evident for
 compliance-grade audits.
 
+Deps: `ops/logger`, `data/postgres`; `data/pagination` (planned).
+
 ---
 
 **ops/approval**
@@ -794,6 +946,8 @@ emit `auditlog` events and approver eligibility rides the authorization
 decision seam. The two-person rule for payouts, limit overrides, and
 config changes.
 
+Deps: `ops/auditlog` (planned).
+
 ---
 
 **ops/cli**
@@ -802,12 +956,16 @@ Struct-described command tree over stdlib `flag.FlagSet`, ctx-aware Run,
 auto help; no cobra, no global registry. Covers
 serve/migrate/worker/seed/version.
 
+Deps: none (stdlib only).
+
 ---
 
 **ops/tracing**
 
 `Tracer` seam, W3C traceparent middleware, trace_id log extractor;
 `tracing/otel` driver isolated. Pairs with httpclient propagation.
+
+Deps: none forge-internal (otel external, isolated).
 
 ---
 
@@ -816,12 +974,16 @@ serve/migrate/worker/seed/version.
 Hot-reloadable secrets behind a `Provider` seam, exposing `redact.Secret`
 values; cloud clients stay consumer-side.
 
+Deps: `crypto/redact`.
+
 ---
 
 **ops/configwatch**
 
 Poll-based config reload with atomic snapshot swap, as a
 `supervisor.Service`.
+
+Deps: `ops/supervisor`.
 
 ## testkit/
 
@@ -832,6 +994,8 @@ Poll-based config reload with atomic snapshot swap, as a
 Black-box HTTP harness: real `:0` server from an `http.Handler`, fluent
 request builder, `testing.TB` response asserts.
 
+Deps: none (stdlib only).
+
 ---
 
 **testkit/htmltest**
@@ -841,6 +1005,8 @@ webtest responses and `email/markdown` bodies are the named consumers
 (text/attr/count/exists, form-field values, htmx fragments); goquery as a
 test-only dep, isolated here.
 
+Deps: none forge-internal (goquery external, test-only).
+
 ---
 
 **testkit/dbtest**
@@ -848,14 +1014,20 @@ test-only dep, isolated here.
 pgx test helpers: per-test tx-rollback isolation, ephemeral schema,
 Postgres template-DB clone. No testcontainers.
 
+Deps: `data/postgres`.
+
 ---
 
 **testkit/golden**
 
 Golden-file snapshots with `-update` and testdata fixture loading.
 
+Deps: none (stdlib only).
+
 ---
 
 **testkit/factory**
 
 Generic closure-override test-data builders.
+
+Deps: none (stdlib only).
