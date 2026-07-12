@@ -604,7 +604,7 @@ detection. In-memory store built in; drivers: `session/pgstore`
 (user-indexed), `session/cookiestore` (stateless-encrypted, no UserIndex —
 documented); generic KV backing rides `cache.Store`.
 
-Deps: `resilience/cache`, `data/postgres`; `auth/fingerprint` (planned).
+Deps: `resilience/cache`, `data/postgres`; `web/fingerprint`.
 
 ---
 
@@ -762,15 +762,6 @@ Passkey registration and assertion over isolated `go-webauthn` (CBOR/COSE
 is the one justified heavy auth dep).
 
 Deps: none forge-internal (go-webauthn external).
-
----
-
-**auth/fingerprint**
-
-Versioned request fingerprint (UA + Accept headers ± IP, sha256).
-Multi-consumer brick: session hijack detection, anti-fraud risk scoring.
-
-Deps: none (stdlib only).
 
 ---
 
