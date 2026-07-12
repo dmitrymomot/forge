@@ -6,7 +6,9 @@
 // that actually terminated the TLS handshake and forwarded the result over a
 // channel the app controls — never trust it straight from an arbitrary
 // client-supplied header. TrustFunc expresses that gate: build one with
-// TrustPrivateProxies or TrustRanges, then pass it to a header source.
+// TrustPrivateProxies or TrustRanges, then pass it to a header source. A nil
+// TrustFunc trusts nothing (the header is always dropped) — the gate fails
+// closed, never open.
 package tlsprint
 
 import (
@@ -67,25 +69,30 @@ type headerSource struct {
 	header  string
 }
 
-// CloudflareJA3 reads the Cf-Ja3-Hash header when trusted.
+// CloudflareJA3 reads the Cf-Ja3-Hash header when trusted. A nil TrustFunc
+// trusts nothing (the header is always dropped) — pass an explicit TrustFunc
+// (e.g. TrustPrivateProxies) to enable the source.
 func CloudflareJA3(trusted TrustFunc) fingerprint.Collector {
 	return headerSource{header: "Cf-Ja3-Hash", trusted: trusted}
 }
 
 // CloudFrontJA4 reads the CloudFront-Viewer-JA4-Fingerprint header when
-// trusted.
+// trusted. A nil TrustFunc trusts nothing (the header is always dropped) —
+// pass an explicit TrustFunc (e.g. TrustPrivateProxies) to enable the source.
 func CloudFrontJA4(trusted TrustFunc) fingerprint.Collector {
 	return headerSource{header: "CloudFront-Viewer-JA4-Fingerprint", trusted: trusted}
 }
 
 // Header reads an arbitrary upstream TLS-fingerprint header (Envoy/Caddy/
-// Traefik) when trusted.
+// Traefik) when trusted. A nil TrustFunc trusts nothing (the header is
+// always dropped) — pass an explicit TrustFunc (e.g. TrustPrivateProxies) to
+// enable the source.
 func Header(name string, trusted TrustFunc) fingerprint.Collector {
 	return headerSource{header: name, trusted: trusted}
 }
 
 func (s headerSource) Collect(r *http.Request) ([]fingerprint.Component, error) {
-	if s.trusted != nil && !s.trusted(r) {
+	if s.trusted == nil || !s.trusted(r) {
 		return nil, nil
 	}
 	v := strings.TrimSpace(r.Header.Get(s.header))
