@@ -232,4 +232,5 @@ httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
 encryption / GDPR crypto-shred (kdf) · optimistic locking + audit columns
 (postgres docs) · Postgres tsvector search · usermanager flow · templ
 `Classes` toggle helper · click-capture pipeline (clientip/geoip/useragent
-enrichment → outbox → eventrouter).
+enrichment → outbox → eventrouter) · ledger beside a Mongo-only stack (own
+Postgres, idempotent refs + reconcile sweep).
