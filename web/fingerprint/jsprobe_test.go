@@ -28,6 +28,22 @@ func TestScriptHandlerServesJS(t *testing.T) {
 	}
 }
 
+func TestScriptHandlerServesExpandedProbe(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	fp.ScriptHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/_fp/probe.js", nil))
+	body := rec.Body.String()
+	for _, marker := range []string{"getHighEntropyValues", "OfflineAudioContext", "detectFonts", "webglVendor", "maxTouchPoints"} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("probe.js missing %q", marker)
+		}
+	}
+}
+
 func TestIngestThenCollect(t *testing.T) {
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg)
