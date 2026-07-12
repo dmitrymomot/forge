@@ -32,6 +32,9 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 	if s, ok := langMismatch(comp); ok {
 		out = append(out, s)
 	}
+	if s, ok := chUAMismatch(comp); ok {
+		out = append(out, s)
+	}
 	if s, ok := fp.geoTZMismatch(comp); ok {
 		out = append(out, s)
 	}
@@ -88,6 +91,66 @@ func (fp *Fingerprinter) geoTZMismatch(comp map[string]string) (Signal, bool) {
 		return Signal{}, false
 	}
 	return Signal{Name: "geo-tz-mismatch", Value: jsCont != info.Continent, Detail: tz + " vs " + info.Continent}, true
+}
+
+// chUAMismatch compares the Client-Hint platform (ch-ua-platform, e.g. "Windows")
+// against navigator.platform (js-platform, e.g. "Win32") through a coarse OS
+// normalization; disagreement is a spoofing tell. It fires only when both
+// normalize to a known, differing OS. Ambiguous values — bare "Linux arm*",
+// shared by Android and desktop Linux — yield no signal, avoiding false positives.
+func chUAMismatch(comp map[string]string) (Signal, bool) {
+	chPlat, hasCH := comp["ch-ua-platform"]
+	jsPlat, hasJS := comp["js-platform"]
+	if !hasCH || !hasJS {
+		return Signal{}, false
+	}
+	chOS := osFromClientHint(chPlat)
+	jsOS := osFromJSPlatform(jsPlat)
+	if chOS == "" || jsOS == "" {
+		return Signal{}, false
+	}
+	return Signal{Name: "ch-ua-mismatch", Value: chOS != jsOS, Detail: chPlat + " vs " + jsPlat}, true
+}
+
+// osFromClientHint maps a Sec-CH-UA-Platform value (a quoted token) to a coarse
+// OS key, or "" when unknown.
+func osFromClientHint(v string) string {
+	switch strings.Trim(v, `"`) {
+	case "Windows":
+		return "windows"
+	case "macOS":
+		return "macos"
+	case "iOS":
+		return "ios"
+	case "Android":
+		return "android"
+	case "Chrome OS", "Chromium OS":
+		return "chromeos"
+	case "Linux":
+		return "linux"
+	default:
+		return ""
+	}
+}
+
+// osFromJSPlatform maps a navigator.platform value to a coarse OS key, or ""
+// when unknown or ambiguous (bare "Linux arm*" is shared by Android and desktop
+// Linux, so it is treated as unknown).
+func osFromJSPlatform(v string) string {
+	switch {
+	case strings.HasPrefix(v, "Win"):
+		return "windows"
+	case strings.HasPrefix(v, "Mac"):
+		return "macos"
+	case strings.HasPrefix(v, "iPhone"), strings.HasPrefix(v, "iPad"), strings.HasPrefix(v, "iPod"):
+		return "ios"
+	case strings.HasPrefix(v, "Linux x86"), strings.HasPrefix(v, "Linux i"):
+		return "linux"
+	case strings.Contains(v, "CrOS"):
+		return "chromeos"
+	default:
+		return ""
+	}
 }
 
 // headerAnomaly fires when the UA claims a modern Chromium browser but the

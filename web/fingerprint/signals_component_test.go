@@ -174,6 +174,48 @@ func TestHeaderAnomalyNotEmittedForNonChromeUA(t *testing.T) {
 	}
 }
 
+func TestCHUAMismatchSignal(t *testing.T) {
+	newFP := func(chPlatform, jsPlatform string) *fingerprint.Fingerprinter {
+		cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+		fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(
+			fingerprint.CollectorFunc(func(_ *http.Request) ([]fingerprint.Component, error) {
+				return []fingerprint.Component{
+					{Name: "ch-ua-platform", Value: chPlatform},
+					{Name: "js-platform", Value: jsPlatform},
+				}, nil
+			}),
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fp
+	}
+
+	// Contradiction: CH says Windows, JS says a Mac.
+	fp := newFP(`"Windows"`, "MacIntel")
+	r := httptest.NewRequest("GET", "/", nil)
+	f, _ := fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); !ok || !s.Value {
+		t.Fatalf("expected ch-ua-mismatch=true: %+v", fp.Signals(r, f))
+	}
+
+	// Agreement: CH Windows, JS Win32.
+	fp = newFP(`"Windows"`, "Win32")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); !ok || s.Value {
+		t.Fatalf("expected ch-ua-mismatch=false: %+v", fp.Signals(r, f))
+	}
+
+	// Ambiguous JS platform (Android/desktop Linux share "Linux armv8l") → not emitted.
+	fp = newFP(`"Android"`, "Linux armv8l")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if _, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); ok {
+		t.Fatal("ch-ua-mismatch must not emit on an ambiguous js-platform")
+	}
+}
+
 func TestHeadlessSignal(t *testing.T) {
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(
