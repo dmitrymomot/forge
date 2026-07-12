@@ -97,11 +97,10 @@ field is whitelisted and clamped in `normalizeProbe`, exactly like the existing
 | `hardwareConcurrency` | `js-hardware` | **already collected, currently dropped — the bug fix** ([jsprobe.go:28](web/fingerprint/jsprobe.go:28)) |
 | `screen` (`"WxHxdepth"`) | `js-screen` | clamp 20 |
 | `devicePixelRatio` | `js-dpr` | clamp 12 |
-| `maxTouchPoints` | `js-touch` | int, clamp range 0–256 |
-| `deviceMemory` | `js-devicememory` | clamp 8 |
+| `maxTouchPoints` | `js-touch` | int, clamp range 0–256; emit only when > 0 |
+| `deviceMemory` | `js-devicememory` | **string** (values are floats: 0.25/0.5/1/2/4/8); clamp 8 |
 | WebGL **vendor** | `js-webgl-vendor` | today only renderer is captured; clamp 64 |
-| `navigator.userAgentData` high-entropy | `js-uadata` | `getHighEntropyValues(['platform','model','architecture','bitness'])`, joined + clamp 128 |
-| timezone **offset** (minutes) | `js-tz-offset` | int |
+| `navigator.userAgentData` high-entropy | `js-uadata` | async `getHighEntropyValues(['platform','platformVersion','model','architecture','bitness'])`, joined + clamp 128 |
 | **AudioContext** hash | `js-audio` | one short hash of an `OfflineAudioContext` render; clamp 64 |
 | **font** detection hash | `js-fonts` | hash of the detected subset of a fixed ~40-font probe list, via `measureText` width deltas; clamp 64 — **never the raw list** |
 
@@ -150,8 +149,12 @@ permanently inert. Changes:
 ### Unit 6 — Presets + docs
 
 - `Session()` → append `ClientHints()` (stays pure-stdlib, passive).
-- `Antifraud()` → append `ClientHints()`; fold `tlsprint.RequestTLS()` into its
-  TLS `Chain(...)` as the self-terminated fallback after the CDN/Local sources.
+- `Antifraud()` → append `ClientHints()`. **`RequestTLS()` is NOT folded in by
+  the preset**: `RequestTLS` lives in `tlsprint`, which imports the parent
+  `fingerprint` package, so `fingerprint`'s `Antifraud` cannot reference it
+  (import cycle). Consumers compose it into the `tls Collector` argument they
+  already pass — e.g. `tlsprint.Chain(tlsprint.CloudFrontJA4(t), tlsprint.RequestTLS())`
+  — documented on `RequestTLS` and in the `Antifraud` doc comment.
 - Refresh `doc.go`: new collectors, the `WithAutomationJA4` capture recipe, the
   icebox note, and the component-name table.
 
