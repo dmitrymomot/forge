@@ -58,8 +58,18 @@ func TestMiddlewareCollectorErrorNeverFailsRequest(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("response code = %d, want %d", w.Code, http.StatusOK)
 	}
-	if !ok || got.Fingerprint.Hash == "" {
+	if !ok {
 		t.Fatalf("result not stashed despite a working collector: ok=%v %+v", ok, got)
+	}
+	var foundUA bool
+	for _, c := range got.Fingerprint.Components {
+		if c.Name == "ua" {
+			foundUA = true
+			break
+		}
+	}
+	if !foundUA {
+		t.Fatalf("Fingerprint.Components missing %q component from the working collector: %+v", "ua", got.Fingerprint.Components)
 	}
 }
 
