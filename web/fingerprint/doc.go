@@ -10,6 +10,14 @@
 // trusted-proxy header sources (Cloudflare/CloudFront/generic), a local
 // raw-ClientHello JA4 computation, and RequestTLS for self-terminated crypto/tls.
 //
+// Hash churn from Client Hints: enabling Client Hints — as the Session and
+// Antifraud presets now do by wiring in ClientHints() — adds ch-ua-* components,
+// which changes Fingerprint.Hash and adds new keys to Digest.Parts for any
+// request carrying Client Hints, with no schema Version bump. On the first
+// comparison after upgrading, Drift reports those new component names as
+// changed once; consumers who compare Hash for equality instead of using Drift
+// will see every Client-Hint-bearing device re-fingerprint one time.
+//
 // Making tls-ua-mismatch fire: it stays inert until WithAutomationJA4 pins the
 // JA4 fingerprints of non-browser clients you observe. Pinned TLS fingerprints
 // drift as tools update, so harvest them from your own traffic rather than

@@ -9,7 +9,7 @@ import (
 // componentSignals derives the component-driven signals: headless,
 // tls-ua-mismatch, lang-mismatch, ch-ua-mismatch, geo-tz-mismatch,
 // header-anomaly, and fetch-metadata-anomaly. Each emits only when its
-// required components and seams are present.
+// required inputs (components, seams, or raw request headers) are present.
 func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]string) []Signal {
 	var out []Signal
 	if v, ok := comp["js-webdriver"]; ok {
@@ -105,7 +105,9 @@ func chUAMismatch(comp map[string]string) (Signal, bool) {
 }
 
 // osFromClientHint maps a Sec-CH-UA-Platform value (a quoted token) to a coarse
-// OS key, or "" when unknown.
+// OS key, or "" when unknown. ChromeOS ("Chrome OS"/"Chromium OS") is treated
+// as ambiguous (no signal) because navigator.platform can't distinguish it
+// from desktop Linux — see osFromJSPlatform.
 func osFromClientHint(v string) string {
 	switch strings.Trim(v, `"`) {
 	case "Windows":
@@ -117,7 +119,10 @@ func osFromClientHint(v string) string {
 	case "Android":
 		return "android"
 	case "Chrome OS", "Chromium OS":
-		return "chromeos"
+		// ChromeOS reports navigator.platform "Linux x86_64" — indistinguishable
+		// from desktop Linux — so treat it as ambiguous and emit no signal,
+		// mirroring the bare-"Linux arm*" case in osFromJSPlatform.
+		return ""
 	case "Linux":
 		return "linux"
 	default:
@@ -127,7 +132,9 @@ func osFromClientHint(v string) string {
 
 // osFromJSPlatform maps a navigator.platform value to a coarse OS key, or ""
 // when unknown or ambiguous (bare "Linux arm*" is shared by Android and desktop
-// Linux, so it is treated as unknown).
+// Linux, so it is treated as unknown). ChromeOS reports "Linux x86_64", which
+// deliberately maps to "linux" here — there is no separate chromeos key,
+// since navigator.platform cannot distinguish ChromeOS from desktop Linux.
 func osFromJSPlatform(v string) string {
 	switch {
 	case strings.HasPrefix(v, "Win"):
@@ -138,8 +145,6 @@ func osFromJSPlatform(v string) string {
 		return "ios"
 	case strings.HasPrefix(v, "Linux x86"), strings.HasPrefix(v, "Linux i"):
 		return "linux"
-	case strings.Contains(v, "CrOS"):
-		return "chromeos"
 	default:
 		return ""
 	}

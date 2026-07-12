@@ -243,6 +243,15 @@ func TestCHUAMismatchSignal(t *testing.T) {
 	if _, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); ok {
 		t.Fatal("ch-ua-mismatch must not emit on an ambiguous js-platform")
 	}
+
+	// ChromeOS: CH says "Chrome OS" but navigator.platform is "Linux x86_64"
+	// (indistinguishable from desktop Linux) → must not emit (no false positive).
+	fp = newFP(`"Chrome OS"`, "Linux x86_64")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if _, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); ok {
+		t.Fatal("ch-ua-mismatch must not emit for ChromeOS (navigator.platform indistinguishable from desktop Linux)")
+	}
 }
 
 func TestFetchMetadataAnomalySignal(t *testing.T) {

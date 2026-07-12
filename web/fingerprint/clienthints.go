@@ -10,7 +10,10 @@ import (
 // excluded: Sec-CH-UA-Platform-Version and -Full-Version-List churn on every
 // browser update and their entropy is already in the "ua" component; Sec-Fetch-*
 // are per-request context (not device identity), so they feed signals raw
-// instead of being hashed as components.
+// instead of being hashed as components. Note that the included "ch-ua" value
+// itself carries the browser's major version (e.g. `"Chromium";v="126"`), so it
+// will churn alongside "ua" on major browser updates too — a conscious
+// trade-off kept for the brand-list entropy it provides.
 var clientHintHeaders = []headerPair{
 	{"Sec-CH-UA", "ch-ua"},
 	{"Sec-CH-UA-Platform", "ch-ua-platform"},
