@@ -1,8 +1,11 @@
 - Be concise!
+- Never use line breaks to limit line length (no manual wrapping of prose, markdown, PR/commit bodies; let lines run and soft-wrap).
 - Work ONLY in CURRENT branch, don't switch!
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
 - Run `just lint` after task finished.
 - `docs/packages.md` = package catalog & roadmap (list only). `docs/design.md` = ALL design rules — layout/naming, package idioms & anatomy, dependency policy, seams, performance rules, testing policy, anti-scope. Read design.md BEFORE creating or changing any package and follow it exactly.
 - Perf: readable first, optimize only proven-hot paths; any perf-motivated complexity requires a benchmark in the PR. Hot-path rules: docs/design.md §Performance.
+- Benchmarks are REQUIRED for every package: `bench_test.go` + post-benchmark optimization pass (measured wins only); before/after numbers in the PR.
+- Every package must work in BOTH single-tenant and multi-tenant apps: tenant scoping enters via an optional construction-time seam (e.g. a scope-from-context hook), never per-call-site string composition; fail closed when a configured scope is missing; single-tenant use pays zero ceremony.
 - PR flow: create new PR -> whait all CI passed -> fix failed workflows -> learn Claude's review -> fix all found issues and resolve fixed threads -> commit -> repeat until all issues will be fixed.
