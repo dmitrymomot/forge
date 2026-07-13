@@ -201,7 +201,9 @@ func (m *Manager) Play(ctx context.Context, playerID string) (*Stream, Proof, er
 // SetClientSeed rotates the player's pair onto clientSeed: the current
 // pair (if any) is revealed and a fresh committed pair is created with
 // the given client seed, so played (pair, nonce) history is never
-// mutated. Creates the first pair when none exists.
+// mutated. Creates the first pair when none exists. A concurrent writer
+// racing the rotation returns an error matching both ErrStore and
+// ErrExists; the caller should retry.
 func (m *Manager) SetClientSeed(ctx context.Context, playerID, clientSeed string) (Seed, error) {
 	scope, err := m.scopeFrom(ctx)
 	if err != nil {
@@ -235,6 +237,8 @@ func (m *Manager) SetClientSeed(ctx context.Context, playerID, clientSeed string
 // Rotate reveals the player's active pair — the returned old Seed carries
 // the ServerSeed for verification — and creates a fresh committed pair
 // inheriting the current client seed. ErrNotFound without an active pair.
+// A concurrent writer racing the rotation returns an error matching both
+// ErrStore and ErrExists; the caller should retry.
 func (m *Manager) Rotate(ctx context.Context, playerID string) (Seed, Seed, error) {
 	scope, err := m.scopeFrom(ctx)
 	if err != nil {
