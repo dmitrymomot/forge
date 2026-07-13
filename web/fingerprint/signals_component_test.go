@@ -84,6 +84,35 @@ func TestTLSUAMismatchSignal(t *testing.T) {
 	}
 }
 
+func TestTLSUAMismatchFiresWithPinnedJA4(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.New(cfg,
+		fingerprint.WithCollectors(
+			fingerprint.CollectorFunc(func(_ *http.Request) ([]fingerprint.Component, error) {
+				return []fingerprint.Component{
+					{Name: "tls", Value: "t13d1516h2_8daaf6152771_02713d6af862"},
+					{Name: "ua", Value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"},
+				}, nil
+			}),
+		),
+		fingerprint.WithUAFamily(func(_ string) (fingerprint.Family, bool) {
+			return fingerprint.FamilyBrowser, true
+		}),
+		fingerprint.WithAutomationJA4(map[string]string{
+			"t13d1516h2_8daaf6152771_02713d6af862": "python-requests",
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	f, _ := fp.FromRequest(r)
+	s, ok := signalByName(fp.Signals(r, f), "tls-ua-mismatch")
+	if !ok || !s.Value || s.Detail != "python-requests" {
+		t.Fatalf("expected tls-ua-mismatch=true detail=python-requests: %+v", s)
+	}
+}
+
 func TestTLSUAMismatchNotEmittedWithoutUASeam(t *testing.T) {
 	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
 	fp, err := fingerprint.New(cfg,
@@ -171,6 +200,91 @@ func TestHeaderAnomalyNotEmittedForNonChromeUA(t *testing.T) {
 	f, _ := fp.FromRequest(r)
 	if _, ok := signalByName(fp.Signals(r, f), "header-anomaly"); ok {
 		t.Fatal("header-anomaly should not emit for a non-Chrome browser UA")
+	}
+}
+
+func TestCHUAMismatchSignal(t *testing.T) {
+	newFP := func(chPlatform, jsPlatform string) *fingerprint.Fingerprinter {
+		cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+		fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(
+			fingerprint.CollectorFunc(func(_ *http.Request) ([]fingerprint.Component, error) {
+				return []fingerprint.Component{
+					{Name: "ch-ua-platform", Value: chPlatform},
+					{Name: "js-platform", Value: jsPlatform},
+				}, nil
+			}),
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fp
+	}
+
+	// Contradiction: CH says Windows, JS says a Mac.
+	fp := newFP(`"Windows"`, "MacIntel")
+	r := httptest.NewRequest("GET", "/", nil)
+	f, _ := fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); !ok || !s.Value {
+		t.Fatalf("expected ch-ua-mismatch=true: %+v", fp.Signals(r, f))
+	}
+
+	// Agreement: CH Windows, JS Win32.
+	fp = newFP(`"Windows"`, "Win32")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); !ok || s.Value {
+		t.Fatalf("expected ch-ua-mismatch=false: %+v", fp.Signals(r, f))
+	}
+
+	// Ambiguous JS platform (Android/desktop Linux share "Linux armv8l") → not emitted.
+	fp = newFP(`"Android"`, "Linux armv8l")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if _, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); ok {
+		t.Fatal("ch-ua-mismatch must not emit on an ambiguous js-platform")
+	}
+
+	// ChromeOS: CH says "Chrome OS" but navigator.platform is "Linux x86_64"
+	// (indistinguishable from desktop Linux) → must not emit (no false positive).
+	fp = newFP(`"Chrome OS"`, "Linux x86_64")
+	r = httptest.NewRequest("GET", "/", nil)
+	f, _ = fp.FromRequest(r)
+	if _, ok := signalByName(fp.Signals(r, f), "ch-ua-mismatch"); ok {
+		t.Fatal("ch-ua-mismatch must not emit for ChromeOS (navigator.platform indistinguishable from desktop Linux)")
+	}
+}
+
+func TestFetchMetadataAnomalySignal(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.New(cfg, fingerprint.WithCollectors(fingerprint.Headers()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Contradiction a real browser never sends: navigate mode with empty dest.
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "empty")
+	f, _ := fp.FromRequest(r)
+	if s, ok := signalByName(fp.Signals(r, f), "fetch-metadata-anomaly"); !ok || !s.Value {
+		t.Fatalf("expected fetch-metadata-anomaly=true: %+v", fp.Signals(r, f))
+	}
+
+	// Normal top-level navigation.
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.Header.Set("Sec-Fetch-Site", "none")
+	r2.Header.Set("Sec-Fetch-Mode", "navigate")
+	r2.Header.Set("Sec-Fetch-Dest", "document")
+	f2, _ := fp.FromRequest(r2)
+	if s, ok := signalByName(fp.Signals(r2, f2), "fetch-metadata-anomaly"); !ok || s.Value {
+		t.Fatalf("expected fetch-metadata-anomaly=false: %+v", fp.Signals(r2, f2))
+	}
+
+	// No Sec-Fetch-* headers at all → not emitted.
+	r3 := httptest.NewRequest("GET", "/", nil)
+	f3, _ := fp.FromRequest(r3)
+	if _, ok := signalByName(fp.Signals(r3, f3), "fetch-metadata-anomaly"); ok {
+		t.Fatal("fetch-metadata-anomaly must not emit without any Sec-Fetch-* header")
 	}
 }
 

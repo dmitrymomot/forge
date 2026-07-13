@@ -26,6 +26,27 @@ func TestSessionPreset(t *testing.T) {
 	}
 }
 
+func TestSessionPresetEmitsClientHints(t *testing.T) {
+	cfg := fingerprint.Config{Secret: "s", Version: 1, TokenTTL: time.Minute}
+	fp, err := fingerprint.Session(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Sec-CH-UA-Platform", `"Windows"`)
+	f, _ := fp.FromRequest(r)
+	found := false
+	for _, c := range f.Components {
+		if c.Name == "ch-ua-platform" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected ch-ua-platform component from Session preset, got %+v", f.Components)
+	}
+}
+
 // TestAntifraudPresetBuildsAndCollectsJS proves Antifraud wires the header,
 // client-IP, geo, and UA seams, and that the JS collector appended after New
 // actually round-trips a probe payload end to end through the preset's

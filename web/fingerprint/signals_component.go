@@ -6,21 +6,10 @@ import (
 	"strings"
 )
 
-// automationJA4 maps well-known non-browser JA4 client fingerprints to a label.
-// Pin values from the FoxIO JA4 reference vectors (github.com/FoxIO-LLC/ja4);
-// bounded on purpose — an unmatched TLS hash simply does not fire the signal.
-// It ships empty: no verified automation JA4 fingerprints have been pinned yet,
-// so tls-ua-mismatch always reports Value:false while still emitting the
-// signal (inputs present, nothing flagged) rather than silently omitting it.
-var automationJA4 = map[string]string{
-	// Example placeholders to be pinned during implementation from captured
-	// handshakes; keep only verified entries:
-	// "t13d1516h2_8daaf6152771_02713d6af862": "chrome-like (allowed)",
-}
-
 // componentSignals derives the component-driven signals: headless,
-// tls-ua-mismatch, lang-mismatch, geo-tz-mismatch, and header-anomaly. Each
-// emits only when its required components and seams are present.
+// tls-ua-mismatch, lang-mismatch, ch-ua-mismatch, geo-tz-mismatch,
+// header-anomaly, and fetch-metadata-anomaly. Each emits only when its
+// required inputs (components, seams, or raw request headers) are present.
 func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]string) []Signal {
 	var out []Signal
 	if v, ok := comp["js-webdriver"]; ok {
@@ -32,10 +21,16 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 	if s, ok := langMismatch(comp); ok {
 		out = append(out, s)
 	}
+	if s, ok := chUAMismatch(comp); ok {
+		out = append(out, s)
+	}
 	if s, ok := fp.geoTZMismatch(comp); ok {
 		out = append(out, s)
 	}
 	if s, ok := fp.headerAnomaly(r, comp); ok {
+		out = append(out, s)
+	}
+	if s, ok := fetchMetadataAnomaly(r); ok {
 		out = append(out, s)
 	}
 	return out
@@ -43,8 +38,8 @@ func (fp *Fingerprinter) componentSignals(r *http.Request, comp map[string]strin
 
 // tlsUAMismatch requires a JA4-format "tls" component — tlsprint.Local() or a
 // JA4 header source (e.g. tlsprint.CloudFrontJA4), NOT the JA3 hash from
-// tlsprint.CloudflareJA3, which never matches automationJA4's JA4 keys. The
-// signal is inert (always Value:false) until automationJA4 is populated with
+// tlsprint.CloudflareJA3, which never matches the pinned JA4 keys. The
+// signal is inert (always Value:false) until WithAutomationJA4 is set with
 // pinned automation fingerprints.
 func (fp *Fingerprinter) tlsUAMismatch(comp map[string]string) (Signal, bool) {
 	tls, hasTLS := comp["tls"]
@@ -56,7 +51,7 @@ func (fp *Fingerprinter) tlsUAMismatch(comp map[string]string) (Signal, bool) {
 	if !ok || fam != FamilyBrowser {
 		return Signal{}, false
 	}
-	label, flagged := automationJA4[tls]
+	label, flagged := fp.automationJA4[tls]
 	return Signal{Name: "tls-ua-mismatch", Value: flagged, Detail: label}, true
 }
 
@@ -90,6 +85,71 @@ func (fp *Fingerprinter) geoTZMismatch(comp map[string]string) (Signal, bool) {
 	return Signal{Name: "geo-tz-mismatch", Value: jsCont != info.Continent, Detail: tz + " vs " + info.Continent}, true
 }
 
+// chUAMismatch compares the Client-Hint platform (ch-ua-platform, e.g. "Windows")
+// against navigator.platform (js-platform, e.g. "Win32") through a coarse OS
+// normalization; disagreement is a spoofing tell. It fires only when both
+// normalize to a known, differing OS. Ambiguous values — bare "Linux arm*",
+// shared by Android and desktop Linux — yield no signal, avoiding false positives.
+func chUAMismatch(comp map[string]string) (Signal, bool) {
+	chPlat, hasCH := comp["ch-ua-platform"]
+	jsPlat, hasJS := comp["js-platform"]
+	if !hasCH || !hasJS {
+		return Signal{}, false
+	}
+	chOS := osFromClientHint(chPlat)
+	jsOS := osFromJSPlatform(jsPlat)
+	if chOS == "" || jsOS == "" {
+		return Signal{}, false
+	}
+	return Signal{Name: "ch-ua-mismatch", Value: chOS != jsOS, Detail: chPlat + " vs " + jsPlat}, true
+}
+
+// osFromClientHint maps a Sec-CH-UA-Platform value (a quoted token) to a coarse
+// OS key, or "" when unknown. ChromeOS ("Chrome OS"/"Chromium OS") is treated
+// as ambiguous (no signal) because navigator.platform can't distinguish it
+// from desktop Linux — see osFromJSPlatform.
+func osFromClientHint(v string) string {
+	switch strings.Trim(v, `"`) {
+	case "Windows":
+		return "windows"
+	case "macOS":
+		return "macos"
+	case "iOS":
+		return "ios"
+	case "Android":
+		return "android"
+	case "Chrome OS", "Chromium OS":
+		// ChromeOS reports navigator.platform "Linux x86_64" — indistinguishable
+		// from desktop Linux — so treat it as ambiguous and emit no signal,
+		// mirroring the bare-"Linux arm*" case in osFromJSPlatform.
+		return ""
+	case "Linux":
+		return "linux"
+	default:
+		return ""
+	}
+}
+
+// osFromJSPlatform maps a navigator.platform value to a coarse OS key, or ""
+// when unknown or ambiguous (bare "Linux arm*" is shared by Android and desktop
+// Linux, so it is treated as unknown). ChromeOS reports "Linux x86_64", which
+// deliberately maps to "linux" here — there is no separate chromeos key,
+// since navigator.platform cannot distinguish ChromeOS from desktop Linux.
+func osFromJSPlatform(v string) string {
+	switch {
+	case strings.HasPrefix(v, "Win"):
+		return "windows"
+	case strings.HasPrefix(v, "Mac"):
+		return "macos"
+	case strings.HasPrefix(v, "iPhone"), strings.HasPrefix(v, "iPad"), strings.HasPrefix(v, "iPod"):
+		return "ios"
+	case strings.HasPrefix(v, "Linux x86"), strings.HasPrefix(v, "Linux i"):
+		return "linux"
+	default:
+		return ""
+	}
+}
+
 // headerAnomaly fires when the UA claims a modern Chromium browser but the
 // Client-Hints / Fetch-Metadata headers that browser always sends are absent.
 func (fp *Fingerprinter) headerAnomaly(r *http.Request, comp map[string]string) (Signal, bool) {
@@ -106,6 +166,23 @@ func (fp *Fingerprinter) headerAnomaly(r *http.Request, comp map[string]string) 
 	}
 	missing := r.Header.Get("Sec-Ch-Ua") == "" || r.Header.Get("Sec-Fetch-Site") == ""
 	return Signal{Name: "header-anomaly", Value: missing, Detail: "Chrome UA without Sec-Ch-Ua/Sec-Fetch-*"}, true
+}
+
+// fetchMetadataAnomaly flags Sec-Fetch-* header combinations a conforming
+// browser never emits: a navigation with an "empty" destination, or a
+// "document" destination outside navigate mode. It reads the headers raw (they
+// are per-request context, never hashed) and emits only when at least one
+// Sec-Fetch-* header is present.
+func fetchMetadataAnomaly(r *http.Request) (Signal, bool) {
+	site := r.Header.Get("Sec-Fetch-Site")
+	mode := r.Header.Get("Sec-Fetch-Mode")
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	if site == "" && mode == "" && dest == "" {
+		return Signal{}, false
+	}
+	anomaly := (mode == "navigate" && dest == "empty") ||
+		(dest == "document" && mode != "" && mode != "navigate")
+	return Signal{Name: "fetch-metadata-anomaly", Value: anomaly, Detail: "mode=" + mode + " dest=" + dest}, true
 }
 
 // primaryLang returns the base language subtag of the first entry ("en-US,..." -> "en").

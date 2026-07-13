@@ -2,6 +2,7 @@ package fingerprint
 
 import (
 	"log/slog"
+	"maps"
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/cache"
@@ -41,4 +42,14 @@ func WithClock(c clock.Clock) Option {
 			fp.clock = c
 		}
 	}
+}
+
+// WithAutomationJA4 pins non-browser JA4 client fingerprints to labels so the
+// tls-ua-mismatch signal fires (Value:true) when the "tls" component matches a
+// pinned fingerprint under a browser-family UA. Ships empty by design — pinned
+// TLS fingerprints drift as tools update, so populate this from fingerprints you
+// capture from your own traffic (see the tlsprint.Listener / Conn.JA4() capture
+// recipe in the package doc). The map is cloned.
+func WithAutomationJA4(m map[string]string) Option {
+	return func(fp *Fingerprinter) { fp.automationJA4 = maps.Clone(m) }
 }
