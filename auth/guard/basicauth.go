@@ -22,7 +22,7 @@ const dummyPassword = "guard-basicauth-dummy-password-for-unknown-users"
 // indistinguishable to the client. Every failure gets 401 with a
 // WWW-Authenticate Basic challenge through the responder (default
 // problem.JSON 401). On success the request carries
-// Identity{Subject: username, Method: "basic"} — From/MustFrom work as
+// Identity{Subject: username, Method: guard.MethodBasic} — From/MustFrom work as
 // behind New. Panics on an empty users map, or on an empty username or
 // password entry — a gate with no valid credentials, or with a credential
 // that authenticates unconditionally, is a wiring bug. Accepted options:
