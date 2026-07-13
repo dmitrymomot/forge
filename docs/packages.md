@@ -641,27 +641,6 @@ Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
 
 ---
 
-**auth/oauthclient**
-
-OAuth2/OIDC client: auth-code + PKCE, state, token exchange,
-id_token/userinfo verification via `auth/jwt` (alg-pinned), provider
-presets. On net/http over `httpclient` — no x/oauth2.
-
-Deps: `auth/jwt`, `web/httpclient`.
-
----
-
-**auth/oauthserver**
-
-Machine-to-machine OAuth2 provider for partner-facing APIs:
-client-credentials grant, token endpoint issuing short-lived JWTs via
-`auth/jwt`, JWKS endpoint, client registry behind a storage-agnostic
-Store. No auth-code-for-third-parties, no consent screens, no JWE.
-
-Deps: `auth/jwt`.
-
----
-
 **auth/scim**
 
 SCIM 2.0 provisioning server for enterprise directory sync (Okta/Entra):
