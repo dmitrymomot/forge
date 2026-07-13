@@ -11,17 +11,22 @@ import (
 // first 12 characters for dashboard display.
 type Key struct {
 	CreatedAt  time.Time
-	ExpiresAt  time.Time         // zero = never expires
-	LastUsedAt time.Time         // zero = never used
-	RevokedAt  time.Time         // zero = active
-	Meta       map[string]string // caller extras, copied into Identity.Meta on verify
-	Hash       string            // hex SHA-256 of the full plaintext key
-	Preview    string            // first 12 plaintext chars — safe to display
-	Name       string            // human label
-	Subject    string            // principal the key acts as — never empty
-	Tenant     string            // owning tenant; empty in single-tenant apps
-	Scopes     []string          // carried into Identity.Scopes; never enforced here
-	ID         id.UUID           // UUIDv7 record id — time-ordered, never secret-derived
+	ExpiresAt  time.Time // zero = never expires
+	LastUsedAt time.Time // zero = never used
+	RevokedAt  time.Time // zero = active
+	// Meta holds caller extras, copied into Identity.Meta on verify. The
+	// keys "key_id" and "key_name" are reserved: Verify always sets
+	// Identity.Meta["key_id"] and, when Name is non-empty,
+	// Identity.Meta["key_name"], overriding any stored value under those
+	// same keys.
+	Meta    map[string]string
+	Hash    string   // hex SHA-256 of the full plaintext key
+	Preview string   // first 12 plaintext chars — safe to display
+	Name    string   // human label
+	Subject string   // principal the key acts as — never empty
+	Tenant  string   // owning tenant; empty in single-tenant apps
+	Scopes  []string // carried into Identity.Scopes; never enforced here
+	ID      id.UUID  // UUIDv7 record id — time-ordered, never secret-derived
 }
 
 // CreateParams describes a key to mint. Subject is required: for personal

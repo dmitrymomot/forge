@@ -10,6 +10,9 @@ import (
 // Store persists Key records. Implementations must be safe for concurrent
 // use. Create fails with ErrDuplicate when a record with the same ID or
 // Hash exists; lookups and mutators return ErrNotFound for unknown ids.
+// Implementations may normalize nil and empty Scopes/Meta (and a nil vs.
+// empty List result) in either direction; callers must not depend on
+// which form is returned.
 type Store interface {
 	Create(ctx context.Context, k Key) error
 	Get(ctx context.Context, keyID id.UUID) (Key, error)
