@@ -2,6 +2,7 @@ package apikey_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -154,4 +155,53 @@ func TestRotate_DeadKeysRejected(t *testing.T) {
 	require.NoError(t, store.Expire(ctx, expired.ID, time.Now().UTC().Add(-time.Minute)))
 	_, _, err = mgr.Rotate(ctx, expired.ID, time.Hour)
 	assert.ErrorIs(t, err, apikey.ErrKeyExpired)
+}
+
+// errExpireBoom is a sentinel returned by expireFailStore.Expire, used to
+// prove Rotate compensates for the failure rather than stranding a live,
+// unreferenceable replacement key.
+var errExpireBoom = errors.New("expire boom")
+
+// expireFailStore wraps a real Store, always failing Expire, and records
+// the id passed to Revoke so the test can prove Rotate compensates the
+// freshly-minted replacement — never the old key, which must stay valid.
+type expireFailStore struct {
+	apikey.Store
+	revokedID id.UUID
+}
+
+func (s *expireFailStore) Expire(context.Context, id.UUID, time.Time) error {
+	return errExpireBoom
+}
+
+func (s *expireFailStore) Revoke(ctx context.Context, keyID id.UUID, at time.Time) error {
+	s.revokedID = keyID
+	return s.Store.Revoke(ctx, keyID, at)
+}
+
+func TestRotate_ExpireFailureRevokesReplacement(t *testing.T) {
+	t.Parallel()
+	mem := apikey.NewMemoryStore()
+	fake := &expireFailStore{Store: mem}
+	mgr := apikey.New(fake)
+	ctx := context.Background()
+
+	old, oldPlain, err := mgr.Create(ctx, apikey.CreateParams{Subject: "u1"})
+	require.NoError(t, err)
+
+	_, _, err = mgr.Rotate(ctx, old.ID, time.Hour)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errExpireBoom)
+
+	// Availability: the old key is untouched and still verifies.
+	_, err = mgr.Verify(ctx, oldPlain)
+	require.NoError(t, err)
+
+	// Compensation ran on the replacement's id, not the old key's.
+	require.False(t, fake.revokedID.IsZero())
+	assert.NotEqual(t, old.ID, fake.revokedID)
+
+	replacement, err := mem.Get(ctx, fake.revokedID)
+	require.NoError(t, err)
+	assert.False(t, replacement.RevokedAt.IsZero())
 }

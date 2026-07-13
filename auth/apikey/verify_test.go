@@ -177,6 +177,30 @@ func TestVerify_TouchThrottling(t *testing.T) {
 	})
 }
 
+func TestVerify_ReservedMetaKeysOverridden(t *testing.T) {
+	t.Parallel()
+	// key_id and key_name are reserved: Verify must always set them from
+	// the record's own ID/Name, overriding any attacker-supplied values
+	// stashed in stored Meta under those same keys.
+	store := apikey.NewMemoryStore()
+	mgr := apikey.New(store, apikey.WithPrefix("sk_live"))
+	ctx := context.Background()
+
+	k, plaintext, err := mgr.Create(ctx, apikey.CreateParams{
+		Subject: "user_42",
+		Name:    "CI deploy",
+		Meta:    map[string]string{"key_id": "spoofed", "key_name": "spoofed"},
+	})
+	require.NoError(t, err)
+
+	identity, err := mgr.Verify(ctx, plaintext)
+	require.NoError(t, err)
+	assert.Equal(t, k.ID.String(), identity.Meta["key_id"])
+	assert.NotEqual(t, "spoofed", identity.Meta["key_id"])
+	assert.Equal(t, "CI deploy", identity.Meta["key_name"])
+	assert.NotEqual(t, "spoofed", identity.Meta["key_name"])
+}
+
 func TestVerify_IdentityMetaIsolated(t *testing.T) {
 	t.Parallel()
 	mgr, _, _, plaintext := issue(t)

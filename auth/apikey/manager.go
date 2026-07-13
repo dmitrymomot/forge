@@ -148,6 +148,12 @@ func (m *Manager) Rotate(ctx context.Context, keyID id.UUID, grace time.Duration
 		return Key{}, "", err
 	}
 	if err := m.store.Expire(ctx, old.ID, now.Add(grace)); err != nil {
+		// The replacement is already persisted and its plaintext was never
+		// returned to the caller, so leaving it active would strand a live,
+		// unreferenceable key. Best-effort revoke it — the old key stays
+		// valid, so the caller keeps a working credential — before
+		// surfacing the failure.
+		_ = m.store.Revoke(ctx, replacement.ID, now)
 		return Key{}, "", fmt.Errorf("apikey: rotate: %w", err)
 	}
 	return replacement, plaintext, nil
