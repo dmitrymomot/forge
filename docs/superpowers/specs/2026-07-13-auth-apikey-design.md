@@ -217,9 +217,10 @@ r.Use(guard.New(mgr, guard.WithExtractors(guard.BearerHeader(), guard.Header("X-
 ## Errors
 
 `errors.go`, single-line `errors.Is`-matchable sentinels: `ErrNotFound`
-(store), `ErrMalformedKey`, `ErrKeyNotFound`, `ErrKeyRevoked`,
-`ErrKeyExpired`, `ErrSubjectRequired`, `ErrTenantMismatch`. Nil store or
-invalid prefix panics at construction.
+and `ErrDuplicate` (store contract), `ErrMalformedKey`, `ErrKeyNotFound`,
+`ErrKeyRevoked`, `ErrKeyExpired`, `ErrSubjectRequired`,
+`ErrTenantMismatch`, and `ErrScope` (fail-closed WithScope hook failure /
+empty tenant). Nil store or invalid prefix panics at construction.
 
 ## Testing
 
