@@ -8,4 +8,9 @@ var (
 
 	// ErrInvalidClientSeed reports a client seed outside 1-64 chars of [A-Za-z0-9_-].
 	ErrInvalidClientSeed = errors.New("rng: client seed must be 1-64 chars of [A-Za-z0-9_-]")
+
+	// ErrInvalidTable reports invalid drop-table construction: no entries,
+	// empty or duplicate keys, zero weights, weight-sum overflow, or bad
+	// pity configuration.
+	ErrInvalidTable = errors.New("rng: invalid table")
 )
