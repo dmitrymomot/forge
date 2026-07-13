@@ -67,6 +67,9 @@ func Query(name string) Extractor {
 		for q != "" {
 			var pair string
 			pair, q, _ = strings.Cut(q, "&")
+			if strings.Contains(pair, ";") {
+				continue
+			}
 			k, v, _ := strings.Cut(pair, "=")
 			if strings.ContainsAny(k, "%+") {
 				dec, err := url.QueryUnescape(k)
@@ -81,7 +84,7 @@ func Query(name string) Extractor {
 			if strings.ContainsAny(v, "%+") {
 				dec, err := url.QueryUnescape(v)
 				if err != nil {
-					return "", false
+					continue
 				}
 				v = dec
 			}

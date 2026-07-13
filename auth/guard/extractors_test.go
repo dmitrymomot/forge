@@ -103,4 +103,17 @@ func TestQuery(t *testing.T) {
 	if got, ok := guard.Query("first")(enc); !ok || got != "1" {
 		t.Fatalf("Query(first) = (%q, %v), want first occurrence (1, true)", got, ok)
 	}
+
+	// Regression: malformed %-escape on the first occurrence must not abort the
+	// scan — a later valid occurrence still wins (matches url.Values.Get).
+	dup := httptest.NewRequest(http.MethodGet, "/p?token=%zz&token=realtoken", nil)
+	if got, ok := guard.Query("token")(dup); !ok || got != "realtoken" {
+		t.Fatalf("Query(token) malformed-then-valid = (%q, %v), want (realtoken, true)", got, ok)
+	}
+	// Regression: a raw semicolon in a pair invalidates it (stdlib parseQuery
+	// drops the whole pair), so the credential reads as absent.
+	semi := httptest.NewRequest(http.MethodGet, "/p?token=abc;xyz", nil)
+	if _, ok := guard.Query("token")(semi); ok {
+		t.Fatal("Query(token) with raw semicolon: want ok=false (matches url.Values.Get)")
+	}
 }
