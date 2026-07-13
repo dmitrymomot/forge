@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,31 @@ func newStore(t *testing.T) cache.Store {
 	store := cache.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
 	return store
+}
+
+// ttlSpyStore wraps a cache.Store and records the effective TTL passed to
+// the most recent Set call, so tests can assert on the TTL argument itself
+// rather than on effects that could pass for other reasons.
+type ttlSpyStore struct {
+	cache.Store
+	mu       sync.Mutex
+	lastTTL  time.Duration
+	setCalls int
+}
+
+func (s *ttlSpyStore) Set(ctx context.Context, key string, val []byte, opts ...cache.SetOption) error {
+	resolved := cache.ApplySetOptions(opts...)
+	s.mu.Lock()
+	s.lastTTL = resolved.TTL
+	s.setCalls++
+	s.mu.Unlock()
+	return s.Store.Set(ctx, key, val, opts...)
+}
+
+func (s *ttlSpyStore) LastTTL() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastTTL
 }
 
 func TestNew_Valid(t *testing.T) {
@@ -400,5 +426,60 @@ func TestVerify_PurposeIsolation(t *testing.T) {
 	}
 	if err := reset.Verify(t.Context(), "user@example.com", code); !errors.Is(err, otp.ErrNotFound) {
 		t.Fatalf("cross-purpose verify: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestVerify_MismatchRewriteUsesRemainingTTL(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewMock(baseTime)
+	spy := &ttlSpyStore{Store: cache.NewMemoryStore()}
+	t.Cleanup(func() { _ = spy.Close() })
+	o, err := otp.New(testSecret, spy, otp.WithClock(clk), otp.WithTTL(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := o.Generate(t.Context(), "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := spy.LastTTL(); got != 10*time.Minute {
+		t.Fatalf("Generate TTL = %v, want 10m", got)
+	}
+
+	clk.Advance(4 * time.Minute)
+	if err := o.Verify(t.Context(), "user@example.com", wrongCode(code)); !errors.Is(err, otp.ErrCodeMismatch) {
+		t.Fatalf("err = %v, want ErrCodeMismatch", err)
+	}
+
+	got := spy.LastTTL()
+	if got != 6*time.Minute {
+		t.Fatalf("mismatch-rewrite TTL = %v, want exactly 6m (remaining time), not the full ttl", got)
+	}
+	if got >= 10*time.Minute {
+		t.Fatalf("mismatch-rewrite TTL = %v, must be strictly less than the full 10m ttl", got)
+	}
+}
+
+func TestVerify_WrongVersionByte(t *testing.T) {
+	t.Parallel()
+	store := newStore(t)
+	o, err := otp.New(testSecret, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Generate(t.Context(), "user@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	key := storageKey("default", "", "user@example.com")
+	// Correct length (42 bytes), wrong version byte: exercises the
+	// wrong-version-at-correct-length branch of decodeRecord, distinct from
+	// the too-short-to-parse case in TestVerify_CorruptRecord.
+	bad := make([]byte, 42)
+	bad[0] = 0xFF
+	if err := store.Set(t.Context(), key, bad); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Verify(t.Context(), "user@example.com", "123456"); !errors.Is(err, otp.ErrNotFound) {
+		t.Fatalf("wrong-version record: err = %v, want ErrNotFound", err)
 	}
 }
