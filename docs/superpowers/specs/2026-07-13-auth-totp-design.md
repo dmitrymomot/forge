@@ -140,6 +140,7 @@ func (m *Manager) Enabled(ctx context.Context, subject string) (bool, error)
 func (m *Manager) LastVerified(ctx context.Context, subject string) (time.Time, error)
 func (m *Manager) RegenerateBackupCodes(ctx context.Context, subject string) ([]string, error)
 func (m *Manager) Disable(ctx context.Context, subject string) error
+func (m *Manager) DisableAll(ctx context.Context, subjectPrefix string) (int, error)
 
 type Enrollment struct {
     Secret string // show for manual entry
@@ -179,6 +180,12 @@ Semantics:
 - **LastVerified** — `ErrNotEnrolled` unless a confirmed record exists;
   zero time when confirmed but never re-verified.
 - **Disable** — deletes the record entirely (secret, hashes, state).
+- **DisableAll** — bulk-deletes every record whose subject starts with
+  `subjectPrefix` (tenant offboarding: `DisableAll(ctx, tenantID+"/")`),
+  returns the count. Requires the store to implement the optional
+  `BulkDeleter` extension — `ErrUnsupported` otherwise. Deleting one user
+  across all tenants is *not* prefix-shaped (user is the suffix); the doc.go
+  recipe is to iterate the app's own membership list and `Disable` each.
 
 ### Options (Manager-only, on top of core options)
 
@@ -196,6 +203,7 @@ var (
     ErrNotEnrolled     = errors.New("totp: not enrolled")
     ErrAlreadyEnrolled = errors.New("totp: already enrolled")
     ErrNotFound        = errors.New("totp: record not found") // store sentinel
+    ErrUnsupported     = errors.New("totp: store does not support bulk delete")
 )
 ```
 
@@ -231,6 +239,19 @@ The two atomic methods carry all concurrency correctness; `Get`/`Save`/`Delete`
 are dumb CRUD. `NewMemoryStore()` ships in-package: `map[string]*Record` under
 an `sync.RWMutex`, records deep-copied on the way in and out.
 
+Optional extension (session `UserIndex` precedent — keeps the required seam
+small while both built-in stores implement it):
+
+```go
+type BulkDeleter interface {
+    DeleteByPrefix(ctx context.Context, subjectPrefix string) (int, error)
+}
+```
+
+`Manager.DisableAll` type-asserts the store and returns `ErrUnsupported` for
+custom stores that skip it. Memory store: `strings.HasPrefix` sweep under the
+write lock.
+
 ## pgstore
 
 ```go
@@ -252,6 +273,10 @@ func New(pool *pgxpool.Pool, opts ...Option) *Store
   rows-affected = the boolean.
 - `Get` maps no-rows to `totp.ErrNotFound`. `Save` is an upsert
   (`INSERT … ON CONFLICT (subject) DO UPDATE`).
+- `DeleteByPrefix`: `DELETE FROM forge_totp WHERE subject LIKE $1 || '%'`
+  with `%`, `_`, `\` escaped in the prefix; rows-affected = the count.
+  Prefix deletes are rare admin operations — a seq scan is acceptable, no
+  extra index.
 
 ## doc.go recipes
 
@@ -267,7 +292,9 @@ func New(pool *pgxpool.Pool, opts ...Option) *Store
    2FA (`subject = userID`) vs per-tenant enrollment
    (`subject = tenantID + "/" + userID`), with the separator-safety note and
    guidance on picking a model (does an enrollment belong to the account or
-   to the membership?).
+   to the membership?). Cleanup patterns: tenant offboarding =
+   `DisableAll(ctx, tenantID+"/")`; account deletion across tenants =
+   iterate the app's membership list, `Disable` each.
 5. **Custom Store contract** — the exact atomicity requirements of
    `MarkUsed`/`ConsumeBackup`, with the reference SQL.
 6. **Brute-force pointer** — code guessing is rate-limited by `auth/lockout`
@@ -310,6 +337,8 @@ auth/totp/pgstore/
   exactly one success (`-race`).
 - **pgstore integration**: same lifecycle + MarkUsed/ConsumeBackup atomicity
   against ephemeral docker pg16; skipped without DSN.
+- **DeleteByPrefix**: deletes exactly the prefix-matched subjects (memory +
+  pg); LIKE metacharacters (`%`, `_`, `\`) in a prefix must not over-match.
 - **Fuzz**: `Verify` (secret/code inputs — malformed base32 must error, never
   panic) and backup-code normalization.
 - **Bench** (repo rule): `Verify` and `Code` with alloc counts; memory-store
