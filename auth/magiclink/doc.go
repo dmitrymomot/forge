@@ -39,6 +39,10 @@
 // wrong purpose), ErrExpired, ErrUsed, ErrScopeMismatch, and ErrStore (store
 // failure; redemption fails closed).
 //
+// The token arrives as attacker-controlled input before signature
+// verification, and verification cost is linear in its length, so callers
+// should bound the token query-parameter/form-field size at the HTTP layer.
+//
 // Multi-tenant apps bind links to a tenant with WithScope: Issue stamps the
 // scope resolved from ctx into the token, Peek/Redeem recompute it and fail
 // closed on mismatch. A link issued with an empty scope is global and

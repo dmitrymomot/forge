@@ -435,6 +435,18 @@ func TestIssueURLBadBaseErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestWithBaseURLRelativeRejected(t *testing.T) {
+	_, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithBaseURL("app.example.com/verify"))
+	require.Error(t, err, "scheme-less base URL must be rejected")
+}
+
+func TestIssueURLRelativeBaseErrors(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+	_, err = m.IssueURL(context.Background(), "app.example.com/verify", loginClaims{UserID: "u_1"})
+	require.Error(t, err, "scheme-less per-call base must be rejected")
+}
+
 func TestIssueURLScopeHookError(t *testing.T) {
 	hookErr := errors.New("no tenant in ctx")
 	m, err := magiclink.New[loginClaims](testKey, "login",

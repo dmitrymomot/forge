@@ -86,9 +86,11 @@ func WithEncrypt(box *secret.Box) Option {
 }
 
 // WithStore enables single-use redemption: Redeem atomically claims each link
-// and returns ErrUsed on replay. A nil store is rejected. The bundled LRU
-// memory store can evict live keys; production single-use needs cache/redis
-// or another durable Store.
+// and returns ErrUsed on replay. A nil store is rejected. The bundled memory
+// store can evict live keys, and reclaims expired one-time claims only when
+// built with cache.WithCleanupInterval (lazy expiry never revisits a
+// redeemed key); production single-use should use cache/redis or another
+// durable Store.
 func WithStore(s cache.Store) Option {
 	return func(c *config) {
 		if s == nil {
@@ -116,16 +118,21 @@ func WithScope(fn func(context.Context) (string, error)) Option {
 }
 
 // WithBaseURL sets the default base used by IssueURL when its base argument
-// is empty — the single-domain convenience. Must be a non-empty, parsable
-// URL.
+// is empty — the single-domain convenience. Must be a non-empty, parsable,
+// absolute URL (scheme and host).
 func WithBaseURL(u string) Option {
 	return func(c *config) {
 		if u == "" {
 			c.errs = append(c.errs, errors.New("magiclink: empty base URL"))
 			return
 		}
-		if _, err := url.Parse(u); err != nil {
+		parsed, err := url.Parse(u)
+		if err != nil {
 			c.errs = append(c.errs, fmt.Errorf("magiclink: invalid base URL: %w", err))
+			return
+		}
+		if parsed.Scheme == "" || parsed.Host == "" {
+			c.errs = append(c.errs, fmt.Errorf("magiclink: base URL must be absolute (scheme and host): %q", u))
 			return
 		}
 		c.baseURL = u

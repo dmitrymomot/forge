@@ -100,6 +100,9 @@ func (m *Manager[T]) IssueURL(ctx context.Context, base string, payload T) (stri
 	if err != nil {
 		return "", fmt.Errorf("magiclink: invalid base URL: %w", err)
 	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("magiclink: base URL must be absolute (scheme and host): %q", base)
+	}
 	link, err := m.Issue(ctx, payload)
 	if err != nil {
 		return "", err
