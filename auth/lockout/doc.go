@@ -53,9 +53,10 @@
 // closed with ErrScope. Single-tenant apps omit it and pay zero ceremony.
 //
 // The failure counter's TTL is fixed when the first failure of a burst
-// creates it (the counter seam never extends a live TTL), so keep the window
-// at or above the maximum lock — the defaults (30m window, 15m max lock)
-// comply — or escalation memory expires before the last lock does.
+// creates it (the counter seam never extends a live TTL), so New enforces
+// window >= maxLock and rejects configs that violate it — the defaults (30m
+// window, 15m max lock) comply — otherwise escalation memory would expire
+// before the last lock does.
 //
 // Out of scope: CAPTCHA hooks, lockout notifications, IP reputation, and
 // admin unlock APIs beyond Reset (which is the unlock). Successful-login

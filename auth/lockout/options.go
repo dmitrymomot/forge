@@ -35,9 +35,10 @@ func WithFactor(f float64) Option { return func(c *config) { c.factor = f } }
 func WithMaxLock(d time.Duration) Option { return func(c *config) { c.maxLock = d } }
 
 // WithWindow sets the failure-memory window. The counter's TTL is fixed when
-// the first failure of a burst creates it (Incr never extends a live TTL):
-// keep window >= max lock or escalation memory expires before the last lock
-// does. Default 30 minutes.
+// the first failure of a burst creates it (Incr never extends a live TTL), so
+// New enforces window >= max lock and rejects configs that violate it —
+// otherwise escalation memory would expire before the last lock does.
+// Default 30 minutes.
 func WithWindow(d time.Duration) Option { return func(c *config) { c.window = d } }
 
 // WithClock injects a clock (for tests). Default clock.System().

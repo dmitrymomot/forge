@@ -61,6 +61,8 @@ func New(counters ratelimit.Store, locks cache.Store, opts ...Option) (*Locker, 
 		return nil, errors.New("lockout: max lock must be >= base lock")
 	case cfg.window <= 0:
 		return nil, errors.New("lockout: window must be > 0")
+	case cfg.window < cfg.maxLock:
+		return nil, errors.New("lockout: window must be >= max lock")
 	}
 	return &Locker{counters: counters, locks: locks, cfg: cfg}, nil
 }
@@ -141,8 +143,15 @@ func (l *Locker) Reset(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := errors.Join(l.counters.Reset(ctx, failsKey), l.locks.Delete(ctx, lockKey)); err != nil {
-		return fmt.Errorf("%w: %w", ErrStore, err)
+	cerr := l.counters.Reset(ctx, failsKey)
+	lerr := l.locks.Delete(ctx, lockKey)
+	switch {
+	case cerr != nil && lerr != nil:
+		return fmt.Errorf("%w: %w; %w", ErrStore, cerr, lerr)
+	case cerr != nil:
+		return fmt.Errorf("%w: %w", ErrStore, cerr)
+	case lerr != nil:
+		return fmt.Errorf("%w: %w", ErrStore, lerr)
 	}
 	return nil
 }

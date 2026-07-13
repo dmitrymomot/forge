@@ -3,6 +3,7 @@ package lockout
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Do wraps one authentication attempt: it rejects locked identities with a
@@ -31,7 +32,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 	case errors.Is(err, ErrFailedAttempt):
 		fres, ferr := l.Fail(ctx, key)
 		if ferr != nil {
-			return errors.Join(err, ferr)
+			return fmt.Errorf("%w: %w", err, ferr)
 		}
 		if fres.Locked {
 			return &LockedError{Result: fres, Err: err}

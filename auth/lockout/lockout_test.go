@@ -48,6 +48,7 @@ func TestNewValidation(t *testing.T) {
 		{"nan factor", counters, locks, []lockout.Option{lockout.WithFactor(math.NaN())}},
 		{"max below base", counters, locks, []lockout.Option{lockout.WithBaseLock(time.Hour), lockout.WithMaxLock(time.Minute)}},
 		{"zero window", counters, locks, []lockout.Option{lockout.WithWindow(0)}},
+		{"window below max lock", counters, locks, []lockout.Option{lockout.WithWindow(time.Minute), lockout.WithMaxLock(2 * time.Minute)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -226,7 +227,12 @@ func TestLockExpiryUnlocks(t *testing.T) {
 
 func TestWindowExpiryForgets(t *testing.T) {
 	t.Parallel()
-	lk := newLocker(t, lockout.WithThreshold(3), lockout.WithWindow(100*time.Millisecond))
+	lk := newLocker(t,
+		lockout.WithThreshold(3),
+		lockout.WithWindow(100*time.Millisecond),
+		lockout.WithBaseLock(50*time.Millisecond),
+		lockout.WithMaxLock(100*time.Millisecond),
+	)
 	ctx := context.Background()
 	_, err := lk.Fail(ctx, "u")
 	require.NoError(t, err)
@@ -315,7 +321,9 @@ func TestStoreErrorWrapsErrStore(t *testing.T) {
 	require.ErrorIs(t, aerr, lockout.ErrStore)
 	_, ferr := lk.Fail(ctx, "u")
 	require.ErrorIs(t, ferr, lockout.ErrStore)
-	require.ErrorIs(t, lk.Reset(ctx, "u"), lockout.ErrStore)
+	rerr := lk.Reset(ctx, "u")
+	require.ErrorIs(t, rerr, lockout.ErrStore)
+	require.NotContains(t, rerr.Error(), "\n", "error string must be single-line") //nolint:nilaway // rerr is guaranteed non-nil by require.ErrorIs above
 }
 
 var errBoom = errors.New("boom")
