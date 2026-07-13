@@ -15,13 +15,15 @@ import (
 
 // envelope wraps the consumer payload inside the signed token.
 type envelope[T any] struct {
-	Payload T `json:"pld"`
+	Payload T      `json:"pld"`
+	Scope   string `json:"scp,omitempty"`
 }
 
 // Manager issues and redeems magic-link tokens carrying a payload of type T.
 type Manager[T any] struct {
 	codec   *token.Codec[envelope[T]]
 	store   cache.Store
+	scopeFn func(context.Context) (string, error)
 	purpose string
 	ttl     time.Duration
 }
@@ -37,7 +39,7 @@ func New[T any](key []byte, purpose string, opts ...Option) (*Manager[T], error)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec, store: c.store, purpose: purpose, ttl: c.ttl}, nil
+	return &Manager[T]{codec: codec, store: c.store, scopeFn: c.scopeFn, purpose: purpose, ttl: c.ttl}, nil
 }
 
 // FromKeyset builds a rotation-aware Manager (signs under the primary key,
@@ -51,12 +53,17 @@ func FromKeyset[T any](ks *keyset.Keyset, purpose string, opts ...Option) (*Mana
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec, store: c.store, purpose: purpose, ttl: c.ttl}, nil
+	return &Manager[T]{codec: codec, store: c.store, scopeFn: c.scopeFn, purpose: purpose, ttl: c.ttl}, nil
 }
 
-// Issue creates a signed link token for payload.
+// Issue creates a signed link token for payload. With a scope hook configured
+// the resolved scope is stamped into the token; a hook error aborts issuance.
 func (m *Manager[T]) Issue(ctx context.Context, payload T) (string, error) {
-	return m.codec.Issue(envelope[T]{Payload: payload})
+	scope, err := m.resolveScope(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.codec.Issue(envelope[T]{Payload: payload, Scope: scope})
 }
 
 // Peek verifies a link without consuming it. Serve it on GET so email
@@ -110,14 +117,28 @@ func (m *Manager[T]) storeKey(link string) string {
 	return "magiclink:" + m.purpose + ":" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// verify parses the token and maps crypto/token errors to package sentinels.
-// Signature verification runs before any store I/O.
+// verify parses the token, maps crypto/token errors to package sentinels, and
+// enforces scope. Signature verification runs before any store I/O.
 func (m *Manager[T]) verify(ctx context.Context, link string) (envelope[T], error) {
 	env, err := m.codec.Parse(link)
 	if err != nil {
 		return envelope[T]{}, mapTokenErr(err)
 	}
+	scope, err := m.resolveScope(ctx)
+	if err != nil {
+		return envelope[T]{}, err
+	}
+	if env.Scope != "" && env.Scope != scope {
+		return envelope[T]{}, ErrScopeMismatch
+	}
 	return env, nil
+}
+
+func (m *Manager[T]) resolveScope(ctx context.Context) (string, error) {
+	if m.scopeFn == nil {
+		return "", nil
+	}
+	return m.scopeFn(ctx)
 }
 
 func mapTokenErr(err error) error {

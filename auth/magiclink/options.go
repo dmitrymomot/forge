@@ -1,6 +1,7 @@
 package magiclink
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -11,11 +12,12 @@ import (
 )
 
 type config struct {
-	clk   clock.Clock
-	store cache.Store
-	box   *secret.Box
-	errs  []error
-	ttl   time.Duration
+	clk     clock.Clock
+	store   cache.Store
+	box     *secret.Box
+	scopeFn func(context.Context) (string, error)
+	errs    []error
+	ttl     time.Duration
 }
 
 // Option configures New/FromKeyset.
@@ -90,5 +92,21 @@ func WithStore(s cache.Store) Option {
 			return
 		}
 		c.store = s
+	}
+}
+
+// WithScope binds links to a tenant scope resolved from ctx (forge-wide
+// multi-tenancy hook). Issue stamps the resolved scope into the token;
+// Peek/Redeem recompute it and fail closed on mismatch. An empty resolved
+// scope means a global link, valid in any tenant context; a hook that wants
+// to forbid global issuance returns an error when ctx lacks a tenant. A nil
+// hook is rejected.
+func WithScope(fn func(context.Context) (string, error)) Option {
+	return func(c *config) {
+		if fn == nil {
+			c.errs = append(c.errs, errors.New("magiclink: nil scope hook"))
+			return
+		}
+		c.scopeFn = fn
 	}
 }

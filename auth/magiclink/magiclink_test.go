@@ -269,3 +269,78 @@ func TestWithStoreNilRejected(t *testing.T) {
 	_, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithStore(nil))
 	require.Error(t, err)
 }
+
+type tenantKey struct{}
+
+func tenantCtx(scope string) context.Context {
+	return context.WithValue(context.Background(), tenantKey{}, scope)
+}
+
+func tenantScope(ctx context.Context) (string, error) {
+	v, _ := ctx.Value(tenantKey{}).(string)
+	return v, nil
+}
+
+func TestScopeMatrix(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "invite", magiclink.WithScope(tenantScope))
+	require.NoError(t, err)
+
+	// Global link (issued without tenant in ctx): valid everywhere.
+	global, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+	_, err = m.Redeem(tenantCtx("acme"), global)
+	require.NoError(t, err, "global link redeems inside a tenant")
+	_, err = m.Redeem(context.Background(), global)
+	require.NoError(t, err, "global link redeems globally")
+
+	// Scoped link: valid only in the exact tenant it was issued in.
+	scoped, err := m.Issue(tenantCtx("acme"), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+	_, err = m.Peek(tenantCtx("acme"), scoped)
+	require.NoError(t, err, "Peek applies the same scope rule")
+	_, err = m.Redeem(tenantCtx("acme"), scoped)
+	require.NoError(t, err)
+	_, err = m.Redeem(tenantCtx("globex"), scoped)
+	assert.ErrorIs(t, err, magiclink.ErrScopeMismatch)
+	_, err = m.Redeem(context.Background(), scoped)
+	assert.ErrorIs(t, err, magiclink.ErrScopeMismatch, "scoped link is not global")
+}
+
+func TestScopeHookErrorPropagates(t *testing.T) {
+	hookErr := errors.New("no tenant in ctx")
+	m, err := magiclink.New[loginClaims](testKey, "invite",
+		magiclink.WithScope(func(ctx context.Context) (string, error) {
+			if v, ok := ctx.Value(tenantKey{}).(string); ok {
+				return v, nil
+			}
+			return "", hookErr
+		}))
+	require.NoError(t, err)
+
+	_, err = m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	assert.ErrorIs(t, err, hookErr, "hook error aborts issuance")
+
+	link, err := m.Issue(tenantCtx("acme"), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, hookErr, "hook error aborts redemption")
+}
+
+func TestScopedTokenOnUnscopedManagerRejected(t *testing.T) {
+	scoped, err := magiclink.New[loginClaims](testKey, "invite", magiclink.WithScope(tenantScope))
+	require.NoError(t, err)
+	plain, err := magiclink.New[loginClaims](testKey, "invite")
+	require.NoError(t, err)
+
+	link, err := scoped.Issue(tenantCtx("acme"), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	// Config drift fails closed: no hook means ctx scope is always "".
+	_, err = plain.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrScopeMismatch)
+}
+
+func TestWithScopeNilRejected(t *testing.T) {
+	_, err := magiclink.New[loginClaims](testKey, "invite", magiclink.WithScope(nil))
+	require.Error(t, err)
+}
