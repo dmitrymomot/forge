@@ -22,4 +22,11 @@ var (
 	// implementations return it from Create; the Manager consumes it
 	// internally when racing get-or-create.
 	ErrExists = errors.New("rng: active seed already exists")
+
+	// ErrNoScope reports fail-closed tenancy: the configured scope hook
+	// errored or returned an empty scope.
+	ErrNoScope = errors.New("rng: scope unavailable")
+
+	// ErrStore wraps store/driver failures surfaced by the Manager.
+	ErrStore = errors.New("rng: store failure")
 )
