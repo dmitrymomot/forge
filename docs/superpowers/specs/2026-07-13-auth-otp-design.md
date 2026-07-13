@@ -49,7 +49,7 @@ func (o *OTP) Revoke(ctx context.Context, identifier string) error
 | `WithPurpose(string)` | `"default"` | one instance per flow (login, email-verify, …); purpose isolates keys |
 | `WithTTL(time.Duration)` | 10 min | code lifetime; must be > 0 |
 | `WithLength(int)` | 6 | digits; valid range 4–10 |
-| `WithMaxAttempts(int)` | 5 | per-code verify attempts; must be > 0 |
+| `WithMaxAttempts(int)` | 5 | per-code verify attempts; valid 1-255 (stored as one byte) |
 | `WithScope(func(ctx) (string, error))` | nil | tenant hook, see below |
 | `WithClock(clock.Clock)` | `clock.System()` | expiry math in tests |
 
