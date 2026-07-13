@@ -195,3 +195,46 @@ func (t *TOTP) Code(secret string, at time.Time) (string, error) {
 	counter := uint64(at.Unix() / t.stepSeconds())
 	return hotp(t.cfg.algorithm.hashFunc(), key, counter, t.cfg.digits), nil
 }
+
+// Verify checks code against every step in [now-skew, now+skew] — all
+// windows evaluated without early exit, compared in constant time — then
+// rejects any match at or before lastUsed's step (ErrReplayed). On success
+// it returns the matched step-start time (UTC, whole seconds): persist it
+// and pass it back as lastUsed on the next call. Zero lastUsed = never
+// verified. ErrInvalidCode when no window matches.
+func (t *TOTP) Verify(secret, code string, lastUsed time.Time) (time.Time, error) {
+	key, err := decodeSecret(secret)
+	if err != nil {
+		return time.Time{}, err
+	}
+	step := t.stepSeconds()
+	cur := t.cfg.clk.Now().Unix() / step
+	last := int64(-1)
+	if !lastUsed.IsZero() {
+		last = lastUsed.Unix() / step
+	}
+
+	matched, replayed := int64(-1), false
+	for off := -t.cfg.skew; off <= t.cfg.skew; off++ {
+		c := cur + int64(off)
+		if c < 0 {
+			continue
+		}
+		if !consttime.StringEqual(hotp(t.cfg.algorithm.hashFunc(), key, uint64(c), t.cfg.digits), code) {
+			continue
+		}
+		if c <= last {
+			replayed = true
+		} else if c > matched {
+			matched = c
+		}
+	}
+	switch {
+	case matched >= 0:
+		return time.Unix(matched*step, 0).UTC(), nil
+	case replayed:
+		return time.Time{}, ErrReplayed
+	default:
+		return time.Time{}, ErrInvalidCode
+	}
+}
