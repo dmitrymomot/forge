@@ -1,7 +1,3 @@
-// Package totp implements RFC 6238 TOTP / RFC 4226 HOTP two-factor
-// authentication: secret generation, skew-window verification with replay
-// rejection, otpauth:// provisioning URIs, one-time backup codes, and a
-// Manager over a tenant-aware Store seam. See doc.go for recipes.
 package totp
 
 import (
