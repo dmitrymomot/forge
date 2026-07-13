@@ -23,13 +23,19 @@ const dummyPassword = "guard-basicauth-dummy-password-for-unknown-users"
 // WWW-Authenticate Basic challenge through the responder (default
 // problem.JSON 401). On success the request carries
 // Identity{Subject: username, Method: "basic"} — From/MustFrom work as
-// behind New. Panics on an empty users map — a gate with no valid
-// credentials is a wiring bug. Accepted options: WithRealm, WithResponder;
-// WithExtractors, WithOptional, and WithChallenge are ignored (the scheme
-// and challenge are fixed).
+// behind New. Panics on an empty users map, or on an empty username or
+// password entry — a gate with no valid credentials, or with a credential
+// that authenticates unconditionally, is a wiring bug. Accepted options:
+// WithRealm, WithResponder; WithExtractors, WithOptional, and WithChallenge
+// are ignored (the scheme and challenge are fixed).
 func BasicAuth(users map[string]string, opts ...Option) middleware.Middleware {
 	if len(users) == 0 {
 		panic("guard: BasicAuth requires at least one user")
+	}
+	for user, pass := range users {
+		if user == "" || pass == "" {
+			panic("guard: BasicAuth users must have non-empty username and password")
+		}
 	}
 	cfg := config{
 		responder: problem.JSON(problem.WithStatus(http.StatusUnauthorized)),

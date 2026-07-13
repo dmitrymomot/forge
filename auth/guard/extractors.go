@@ -61,6 +61,11 @@ func Cookie(name string) Extractor {
 //
 // It scans RawQuery directly instead of calling r.URL.Query(), which would
 // allocate the full url.Values map per request (benchmark in the PR).
+//
+// Unlike r.URL.Query(), the scan does not enforce net/url's 10,000-parameter
+// cap, so it still resolves a credential in a pathologically long query
+// string (a benign divergence — finding a valid credential is not a
+// bypass).
 func Query(name string) Extractor {
 	return func(r *http.Request) (string, bool) {
 		q := r.URL.RawQuery

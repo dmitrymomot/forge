@@ -43,6 +43,14 @@ func WithOptional() Option {
 // The error passed to the responder matches guard.ErrNoCredential or
 // guard.ErrInvalidCredential via errors.Is; verify failures also match the
 // verifier's own error.
+//
+// The error passed to a custom responder carries the verifier's own message
+// (so errors.Is matches both the guard sentinel and the verifier error). A
+// responder that renders err.Error() into the client response —
+// problem.JSON does this for 4xx — therefore leaks that message. To keep
+// the "no verifier detail to the client" guarantee, render only a generic
+// message or the guard sentinel (as New's default responder does), not the
+// raw error.
 func WithResponder(r problem.Responder) Option {
 	return func(c *config) {
 		if r != nil {

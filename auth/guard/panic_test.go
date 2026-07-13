@@ -34,6 +34,12 @@ func TestBasicAuth_EmptyUsersPanics(t *testing.T) {
 	mustPanic(t, "BasicAuth(empty)", func() { guard.BasicAuth(map[string]string{}) })
 }
 
+func TestBasicAuth_EmptyCredentialPanics(t *testing.T) {
+	t.Parallel()
+	mustPanic(t, "BasicAuth(empty password)", func() { guard.BasicAuth(map[string]string{"admin": ""}) })
+	mustPanic(t, "BasicAuth(empty username)", func() { guard.BasicAuth(map[string]string{"": "pw"}) })
+}
+
 func TestWithRealm_InvalidPanics(t *testing.T) {
 	t.Parallel()
 	mustPanic(t, `WithRealm(quote)`, func() { guard.WithRealm(`sta"ging`) })
