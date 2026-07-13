@@ -29,7 +29,7 @@ func TestNewTable_Validation(t *testing.T) {
 		{"zero weight", []rng.Entry[string]{{Key: "a", Weight: 0}}},
 		{"duplicate key", []rng.Entry[string]{{Key: "a", Weight: 1}, {Key: "a", Weight: 2}}},
 		{"overflow", []rng.Entry[string]{{Key: "a", Weight: math.MaxUint64}, {Key: "b", Weight: 1}}},
-		{"exceeds int64", []rng.Entry[string]{{Key: "a", Weight: math.MaxInt64}, {Key: "b", Weight: 1}}},
+		{"exceeds int", []rng.Entry[string]{{Key: "a", Weight: math.MaxInt64}, {Key: "b", Weight: 1}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

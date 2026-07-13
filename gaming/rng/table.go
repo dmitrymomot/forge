@@ -49,7 +49,8 @@ type Table[T any] struct {
 }
 
 // NewTable validates entries and builds an immutable table. Entries need
-// non-empty unique keys and weights > 0; the weight sum must fit int64.
+// non-empty unique keys and weights > 0; the weight sum must fit int (the
+// range Pick draws over via IntN), so it is bounded to the platform int.
 func NewTable[T any](entries []Entry[T], opts ...TableOption) (*Table[T], error) {
 	var cfg tableConfig
 	for _, o := range opts {
@@ -87,8 +88,8 @@ func NewTable[T any](entries []Entry[T], opts ...TableOption) (*Table[T], error)
 		binary.BigEndian.PutUint64(buf[:], e.Weight)
 		_, _ = h.Write(buf[:])
 	}
-	if total > math.MaxInt64 {
-		return nil, fmt.Errorf("%w: weight sum must fit int64", ErrInvalidTable)
+	if total > math.MaxInt {
+		return nil, fmt.Errorf("%w: weight sum must fit int", ErrInvalidTable)
 	}
 	t := &Table[T]{
 		entries: append([]Entry[T](nil), entries...),
@@ -131,6 +132,7 @@ func NewTable[T any](entries []Entry[T], opts ...TableOption) (*Table[T], error)
 // Pick draws one entry (rng/v1 weighted pick: IntN(totalWeight), first
 // cumulative bucket in entry order wins).
 func (t *Table[T]) Pick(s *Stream) Entry[T] {
+	// The int cast is exact: NewTable bounds the weight sum to math.MaxInt.
 	draw := uint64(s.IntN(int(t.cum[len(t.cum)-1])))
 	i := sort.Search(len(t.cum), func(i int) bool { return draw < t.cum[i] })
 	return t.entries[i]
