@@ -62,12 +62,15 @@
 //
 // State rides the resilience/cache.Store seam. Keys carry no PII (scope and
 // identifier are hashed with length-prefixed domain separation); values are
-// 42-byte records holding the attempt counter, expiry, and the
-// HMAC-SHA256(secret, code) digest. The in-memory store's LRU eviction makes
-// it unsuitable for production codes — use cache/redis or another durable
+// 42-byte records holding a format-version byte, the attempt counter, expiry,
+// and the HMAC-SHA256(secret, code) digest. The in-memory store's LRU eviction
+// makes it unsuitable for production codes — use cache/redis or another durable
 // Store. A failed attempt rewrites the record with its remaining TTL, so
 // retries never extend a code's life. The attempt counter is
 // read-modify-write: concurrent wrong guesses can overshoot the limit by the
 // in-flight count, which is immaterial against a million-value keyspace;
-// per-identifier lockout is auth/lockout's layer.
+// per-identifier lockout is auth/lockout's layer. Single-use is enforced per
+// completed verification, not as a mutual exclusion: concurrent submissions of
+// the correct code may each succeed before either deletes the record — harmless,
+// since that requires already holding the valid code.
 package otp

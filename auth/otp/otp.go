@@ -99,7 +99,10 @@ func (o *OTP) resolveScope(ctx context.Context) (string, error) {
 
 // storageKey derives the deterministic store key. Scope and identifier are
 // length-prefixed before hashing so composite values cannot collide, and
-// hashed so no PII (emails, phone numbers) appears in store keys.
+// hashed so no PII (emails, phone numbers) appears in store keys. purpose is
+// trusted construction-time input, so it rides the key prefix unhashed; the
+// fixed-width hex suffix still prevents cross-purpose collision. If purpose
+// ever comes to carry untrusted input, length-prefix it into the hash too.
 func (o *OTP) storageKey(scope, identifier string) string {
 	buf := make([]byte, 0, 8+len(scope)+len(identifier))
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(scope)))
