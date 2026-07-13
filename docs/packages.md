@@ -620,16 +620,6 @@ Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
 
 ---
 
-**auth/lockout**
-
-Login/OTP failure counting with exponential delay and lockout windows over
-the ratelimit counter seam. (Not rate shaping — that's `ratelimit`; not
-cumulative caps — that's `quota`.)
-
-Deps: `resilience/ratelimit`.
-
----
-
 **auth/scim**
 
 SCIM 2.0 provisioning server for enterprise directory sync (Okta/Entra):
