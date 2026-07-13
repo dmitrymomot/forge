@@ -3,6 +3,8 @@ package magiclink
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/clock"
@@ -16,6 +18,8 @@ type config struct {
 	store   cache.Store
 	box     *secret.Box
 	scopeFn func(context.Context) (string, error)
+	baseURL string
+	param   string
 	errs    []error
 	ttl     time.Duration
 }
@@ -24,7 +28,7 @@ type config struct {
 type Option func(*config)
 
 func newConfig(purpose string, opts ...Option) (*config, error) {
-	c := &config{clk: clock.System(), ttl: 15 * time.Minute}
+	c := &config{clk: clock.System(), ttl: 15 * time.Minute, param: "token"}
 	for _, o := range opts {
 		o(c)
 	}
@@ -108,5 +112,34 @@ func WithScope(fn func(context.Context) (string, error)) Option {
 			return
 		}
 		c.scopeFn = fn
+	}
+}
+
+// WithBaseURL sets the default base used by IssueURL when its base argument
+// is empty — the single-domain convenience. Must be a non-empty, parsable
+// URL.
+func WithBaseURL(u string) Option {
+	return func(c *config) {
+		if u == "" {
+			c.errs = append(c.errs, errors.New("magiclink: empty base URL"))
+			return
+		}
+		if _, err := url.Parse(u); err != nil {
+			c.errs = append(c.errs, fmt.Errorf("magiclink: invalid base URL: %w", err))
+			return
+		}
+		c.baseURL = u
+	}
+}
+
+// WithParam sets the query parameter name IssueURL appends the token under
+// (default "token"). Empty is rejected.
+func WithParam(name string) Option {
+	return func(c *config) {
+		if name == "" {
+			c.errs = append(c.errs, errors.New("magiclink: empty param name"))
+			return
+		}
+		c.param = name
 	}
 }

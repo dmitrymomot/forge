@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/dmitrymomot/forge/crypto/keyset"
@@ -25,6 +26,8 @@ type Manager[T any] struct {
 	store   cache.Store
 	scopeFn func(context.Context) (string, error)
 	purpose string
+	baseURL string
+	param   string
 	ttl     time.Duration
 }
 
@@ -39,7 +42,15 @@ func New[T any](key []byte, purpose string, opts ...Option) (*Manager[T], error)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec, store: c.store, scopeFn: c.scopeFn, purpose: purpose, ttl: c.ttl}, nil
+	return &Manager[T]{
+		codec:   codec,
+		store:   c.store,
+		scopeFn: c.scopeFn,
+		purpose: purpose,
+		baseURL: c.baseURL,
+		param:   c.param,
+		ttl:     c.ttl,
+	}, nil
 }
 
 // FromKeyset builds a rotation-aware Manager (signs under the primary key,
@@ -53,7 +64,15 @@ func FromKeyset[T any](ks *keyset.Keyset, purpose string, opts ...Option) (*Mana
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec, store: c.store, scopeFn: c.scopeFn, purpose: purpose, ttl: c.ttl}, nil
+	return &Manager[T]{
+		codec:   codec,
+		store:   c.store,
+		scopeFn: c.scopeFn,
+		purpose: purpose,
+		baseURL: c.baseURL,
+		param:   c.param,
+		ttl:     c.ttl,
+	}, nil
 }
 
 // Issue creates a signed link token for payload. With a scope hook configured
@@ -64,6 +83,31 @@ func (m *Manager[T]) Issue(ctx context.Context, payload T) (string, error) {
 		return "", err
 	}
 	return m.codec.Issue(envelope[T]{Payload: payload, Scope: scope})
+}
+
+// IssueURL issues a link token and appends it as a query parameter to base
+// (multi-tenant/white-label callers pass the tenant's base per call). An
+// empty base falls back to WithBaseURL; both empty is an error. Existing
+// query parameters on the base are preserved.
+func (m *Manager[T]) IssueURL(ctx context.Context, base string, payload T) (string, error) {
+	if base == "" {
+		base = m.baseURL
+	}
+	if base == "" {
+		return "", errors.New("magiclink: no base URL")
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("magiclink: invalid base URL: %w", err)
+	}
+	link, err := m.Issue(ctx, payload)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set(m.param, link)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // Peek verifies a link without consuming it. Serve it on GET so email

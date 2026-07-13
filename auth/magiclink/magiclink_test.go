@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -343,4 +344,83 @@ func TestScopedTokenOnUnscopedManagerRejected(t *testing.T) {
 func TestWithScopeNilRejected(t *testing.T) {
 	_, err := magiclink.New[loginClaims](testKey, "invite", magiclink.WithScope(nil))
 	require.Error(t, err)
+}
+
+func TestIssueURLDefaultBase(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithBaseURL("https://app.example.com/auth/verify"))
+	require.NoError(t, err)
+
+	u, err := m.IssueURL(context.Background(), "", loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(u)
+	require.NoError(t, err)
+	assert.Equal(t, "https", parsed.Scheme)
+	assert.Equal(t, "app.example.com", parsed.Host)
+	assert.Equal(t, "/auth/verify", parsed.Path)
+
+	link := parsed.Query().Get("token")
+	require.NotEmpty(t, link)
+	got, err := m.Redeem(context.Background(), link)
+	require.NoError(t, err)
+	assert.Equal(t, "u_1", got.UserID)
+}
+
+func TestIssueURLPerCallBaseWins(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "invite",
+		magiclink.WithBaseURL("https://app.example.com/join"))
+	require.NoError(t, err)
+
+	u, err := m.IssueURL(context.Background(), "https://acme.example.com/join",
+		loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(u, "https://acme.example.com/join?token="), u)
+}
+
+func TestIssueURLNoBaseErrors(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+
+	_, err = m.IssueURL(context.Background(), "", loginClaims{UserID: "u_1"})
+	require.Error(t, err)
+}
+
+func TestIssueURLPreservesExistingQuery(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+
+	u, err := m.IssueURL(context.Background(),
+		"https://app.example.com/verify?lang=de", loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(u)
+	require.NoError(t, err)
+	assert.Equal(t, "de", parsed.Query().Get("lang"))
+	assert.NotEmpty(t, parsed.Query().Get("token"))
+}
+
+func TestWithParamRename(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithParam("t"))
+	require.NoError(t, err)
+
+	u, err := m.IssueURL(context.Background(), "https://app.example.com/verify",
+		loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(u)
+	require.NoError(t, err)
+	assert.NotEmpty(t, parsed.Query().Get("t"))
+	assert.Empty(t, parsed.Query().Get("token"))
+}
+
+func TestURLOptionValidation(t *testing.T) {
+	_, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithParam(""))
+	require.Error(t, err, "empty param name must be rejected")
+
+	_, err = magiclink.New[loginClaims](testKey, "login", magiclink.WithBaseURL(""))
+	require.Error(t, err, "empty base URL must be rejected")
+
+	_, err = magiclink.New[loginClaims](testKey, "login", magiclink.WithBaseURL("://bad"))
+	require.Error(t, err, "unparsable base URL must be rejected")
 }
