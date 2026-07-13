@@ -26,13 +26,12 @@ Two layers, both public:
 2. **Manager** — the flow orchestrator over `Store`. This is the documented
    front door.
 
-`docs/packages.md` entry for `auth/totp` is updated in the same PR: deps become
-`core/random`, `core/clock`, `crypto/consttime`, `crypto/secret`
-(+ `crypto/keyset` for the rotation constructor); pgstore adds `data/postgres`
-+ `data/migration`. `core/qrcode` is *not* imported — we emit the otpauth URI,
-the consumer renders it (`qrcode.DataURI(uri)`); the catalog note changes from
-"QR image rendering lights up via core/qrcode" to "QR rendering composes with
-core/qrcode".
+`docs/packages.md` entry for `auth/totp` is deleted in the same PR (design.md
+roadmap rule: the catalog lists only unbuilt packages; doc.go becomes the
+reference). Actual deps: `core/random`, `core/clock`, `crypto/consttime`,
+`crypto/secret` (+ `crypto/keyset` for the rotation constructor); pgstore adds
+`data/postgres` + `data/migration`. `core/qrcode` is *not* imported — we emit
+the otpauth URI, the consumer renders it (`qrcode.DataURI(uri)`).
 
 ## Decisions (resolved during brainstorming)
 
@@ -257,7 +256,7 @@ deep-copied on the way in and out.
 
 ```go
 var Migrations fs.FS // embedded goose migration
-func New(pool *pgxpool.Pool, opts ...Option) *Store
+func New(pool *pgxpool.Pool) *Store // no options needed (apikey/pgstore precedent)
 ```
 
 - Table `forge_totp`: `tenant text NOT NULL DEFAULT ''`, `subject text`,
