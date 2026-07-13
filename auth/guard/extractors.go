@@ -2,6 +2,7 @@ package guard
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -26,7 +27,13 @@ func BearerHeader() Extractor {
 }
 
 // Header extracts the named header's value verbatim (e.g. "X-API-Key").
+//
+// name is canonicalized once here instead of on every request: r.Header.Get
+// re-canonicalizes its argument on each call, which allocates whenever name
+// isn't already in canonical form (e.g. "X-API-Key" vs "X-Api-Key";
+// benchmark in the PR).
 func Header(name string) Extractor {
+	name = http.CanonicalHeaderKey(name)
 	return func(r *http.Request) (string, bool) {
 		v := r.Header.Get(name)
 		return v, v != ""
@@ -51,9 +58,35 @@ func Cookie(name string) Extractor {
 // Credentials in query strings leak into access logs, browser history, and
 // Referer headers. Prefer BearerHeader or Cookie; reserve Query for signed,
 // short-lived links.
+//
+// It scans RawQuery directly instead of calling r.URL.Query(), which would
+// allocate the full url.Values map per request (benchmark in the PR).
 func Query(name string) Extractor {
 	return func(r *http.Request) (string, bool) {
-		v := r.URL.Query().Get(name)
-		return v, v != ""
+		q := r.URL.RawQuery
+		for q != "" {
+			var pair string
+			pair, q, _ = strings.Cut(q, "&")
+			k, v, _ := strings.Cut(pair, "=")
+			if strings.ContainsAny(k, "%+") {
+				dec, err := url.QueryUnescape(k)
+				if err != nil {
+					continue
+				}
+				k = dec
+			}
+			if k != name {
+				continue
+			}
+			if strings.ContainsAny(v, "%+") {
+				dec, err := url.QueryUnescape(v)
+				if err != nil {
+					return "", false
+				}
+				v = dec
+			}
+			return v, v != ""
+		}
+		return "", false
 	}
 }

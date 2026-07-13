@@ -55,6 +55,11 @@ func TestHeader(t *testing.T) {
 	if _, ok := guard.Header("X-Empty")(r); ok {
 		t.Fatal("Header(X-Empty): empty value must read as no credential")
 	}
+	// name canonicalization must stay case-insensitive regardless of the
+	// casing passed in (guard.Header pre-canonicalizes once at construction).
+	if got, ok := guard.Header("x-api-key")(r); !ok || got != "key123" {
+		t.Fatalf("Header(x-api-key) = (%q, %v), want (key123, true)", got, ok)
+	}
 }
 
 func TestCookie(t *testing.T) {
@@ -86,5 +91,16 @@ func TestQuery(t *testing.T) {
 	}
 	if _, ok := guard.Query("empty")(r); ok {
 		t.Fatal("Query(empty): empty value must read as no credential")
+	}
+
+	enc := httptest.NewRequest(http.MethodGet, "/p?tok%65n=q%74ok&plus=a+b&first=1&first=2", nil)
+	if got, ok := guard.Query("token")(enc); !ok || got != "qtok" {
+		t.Fatalf("Query(token) encoded = (%q, %v), want (qtok, true)", got, ok)
+	}
+	if got, ok := guard.Query("plus")(enc); !ok || got != "a b" {
+		t.Fatalf("Query(plus) = (%q, %v), want (a b, true)", got, ok)
+	}
+	if got, ok := guard.Query("first")(enc); !ok || got != "1" {
+		t.Fatalf("Query(first) = (%q, %v), want first occurrence (1, true)", got, ok)
 	}
 }
