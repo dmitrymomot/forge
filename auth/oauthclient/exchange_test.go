@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/forge/auth/jwt"
 	"github.com/dmitrymomot/forge/auth/oauthclient"
 	"github.com/dmitrymomot/forge/core/clock"
 )
@@ -74,6 +75,20 @@ func TestExchangeExpiredFlow(t *testing.T) {
 	require.ErrorIs(t, err, oauthclient.ErrFlowExpired)
 }
 
+// TestExchangeZeroFlowTTLClampedToDefault proves WithFlowTTL(0) does NOT
+// disable flow expiry (crypto/token treats a zero token.WithTTL as "never
+// expires"): New must clamp a non-positive flowTTL to the 10m default
+// before building the flow codec.
+func TestExchangeZeroFlowTTLClampedToDefault(t *testing.T) {
+	f := newFakeOIDC(t)
+	mock := clock.NewMock(time.Now())
+	c := f.newClient(t, oauthclient.WithClock(mock), oauthclient.WithFlowTTL(0))
+	flow, authQ := startFlow(t, c)
+	mock.Advance(11 * time.Minute) // past the clamped 10m default
+	_, err := c.Exchange(context.Background(), flow.FlowToken, callbackQuery(authQ, "code-1"))
+	require.ErrorIs(t, err, oauthclient.ErrFlowExpired, "0 must clamp to the default TTL, not disable expiry")
+}
+
 func TestExchangeTamperedFlowToken(t *testing.T) {
 	f := newFakeOIDC(t)
 	c := f.newClient(t)
@@ -89,6 +104,39 @@ func TestExchangeNonceMismatch(t *testing.T) {
 	f.IDTokenClaims["nonce"] = "wrong-nonce"
 	_, err := c.Exchange(context.Background(), flow.FlowToken, callbackQuery(authQ, "code-1"))
 	require.ErrorIs(t, err, oauthclient.ErrNonceMismatch)
+}
+
+// TestExchangeIDTokenWrongAudience proves the id_token's aud is pinned to
+// the client's ClientID (verifierFor sets jwt.WithAudience(p.ClientID)): an
+// id_token minted for a different audience must be rejected, guarding
+// against id_token substitution if the pinning were ever dropped.
+func TestExchangeIDTokenWrongAudience(t *testing.T) {
+	f := newFakeOIDC(t)
+	c := f.newClient(t)
+	flow, authQ := startFlow(t, c)
+	withNonce(f, authQ) // isolate the failure to aud, not the nonce check
+	f.IDTokenClaims["aud"] = "other-client"
+
+	res, err := c.Exchange(context.Background(), flow.FlowToken, callbackQuery(authQ, "code-1"))
+	require.Error(t, err)
+	require.ErrorIs(t, err, jwt.ErrAudienceMismatch)
+	assert.Nil(t, res)
+}
+
+// TestExchangeIDTokenWrongIssuer proves the id_token's iss is pinned to the
+// provider's configured Issuer (verifierFor sets jwt.WithIssuer(p.Issuer)):
+// an id_token claiming a different issuer must be rejected.
+func TestExchangeIDTokenWrongIssuer(t *testing.T) {
+	f := newFakeOIDC(t)
+	c := f.newClient(t)
+	flow, authQ := startFlow(t, c)
+	withNonce(f, authQ) // isolate the failure to iss, not the nonce check
+	f.IDTokenClaims["iss"] = "https://evil.example.com"
+
+	res, err := c.Exchange(context.Background(), flow.FlowToken, callbackQuery(authQ, "code-1"))
+	require.Error(t, err)
+	require.ErrorIs(t, err, jwt.ErrIssuerMismatch)
+	assert.Nil(t, res)
 }
 
 func TestExchangeTokenEndpointRFCError(t *testing.T) {

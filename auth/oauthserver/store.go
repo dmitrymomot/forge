@@ -5,7 +5,8 @@ import "context"
 // Store persists the client registry. Implementations must return
 // ErrDuplicateClient from Create on an existing ID and ErrClientNotFound
 // from Get/Update on a missing one. List("") returns every client;
-// List(tenantID) filters by tenant.
+// List(tenantID) filters by tenant. List always returns a non-nil
+// (possibly empty) slice, ordered by creation time then ID.
 type Store interface {
 	Create(ctx context.Context, c Client) error
 	Get(ctx context.Context, id string) (Client, error)

@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/auth/jwt"
 	"github.com/dmitrymomot/forge/auth/oauthserver"
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
@@ -87,6 +89,34 @@ func TestAuthCodeRedemptionHappyPath(t *testing.T) {
 	assert.Equal(t, "user-1", idt.Subject, "reserved sub claim survives the hook")
 	assert.Equal(t, "n-1", idt.Nonce)
 	assert.Equal(t, "u1@example.com", idt.Email)
+}
+
+// TestAuthCodeZeroTTLClampedToDefault proves WithCodeTTL(0) does NOT
+// disable code expiry (crypto/token treats a zero token.WithTTL as "never
+// expires"): New must clamp a non-positive codeTTL to the 60s default
+// before building the code codec.
+func TestAuthCodeZeroTTLClampedToDefault(t *testing.T) {
+	mock := clock.NewMock(time.Now())
+	store := oauthserver.NewMemoryStore()
+	cfg := oauthserver.DefaultConfig()
+	cfg.Issuer = "https://auth.example.com"
+	srv, err := oauthserver.New(testSigner(t), store,
+		oauthserver.WithConfig(cfg),
+		oauthserver.WithClock(mock),
+		oauthserver.WithCodeStore(cacheStore(t)),
+		oauthserver.WithCodeKeyset(testKeyset(t)),
+		oauthserver.WithAuthenticator(staticUser("user-1")),
+		oauthserver.WithCodeTTL(0),
+	)
+	require.NoError(t, err)
+	creds := acClient(t, srv)
+
+	code := obtainCode(t, srv, creds.ClientID)
+	mock.Advance(2 * time.Minute) // past the clamped 60s default
+
+	rec := postToken(t, srv.TokenHandler(), redeemForm(code), creds.ClientID, creds.ClientSecret)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Equal(t, "invalid_grant", decodeJSON(t, rec)["error"], "0 must clamp to the default TTL, not disable expiry")
 }
 
 func TestAuthCodeReplayRejected(t *testing.T) {

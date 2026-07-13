@@ -41,6 +41,9 @@ func New(ks *keyset.Keyset, opts ...Option) (*Client, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	if cfg.flowTTL <= 0 {
+		cfg.flowTTL = 10 * time.Minute
+	}
 	for name, p := range cfg.providers {
 		if name == "" {
 			return nil, fmt.Errorf("%w: empty provider name", ErrInvalidConfig)

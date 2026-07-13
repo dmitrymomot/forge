@@ -1,7 +1,9 @@
 package oauthserver
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 )
 
@@ -56,6 +58,14 @@ func (s *memoryStore) List(_ context.Context, tenantID string) ([]Client, error)
 			out = append(out, c.clone())
 		}
 	}
+	// Order matches pgstore's `ORDER BY created_at, id` so both backends are
+	// interchangeable.
+	slices.SortFunc(out, func(a, b Client) int {
+		if d := a.CreatedAt.Compare(b.CreatedAt); d != 0 {
+			return d
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
 	return out, nil
 }
 

@@ -71,7 +71,8 @@ func WithUserClaims(fn func(ctx context.Context, subject string) (map[string]any
 	return func(c *serverConfig) { c.userClaims = fn }
 }
 
-// WithCodeTTL bounds authorization-code lifetime. Default 60s.
+// WithCodeTTL bounds authorization-code lifetime. A non-positive duration
+// falls back to the default (60s).
 func WithCodeTTL(d time.Duration) Option {
 	return func(c *serverConfig) { c.codeTTL = d }
 }

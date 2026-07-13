@@ -63,6 +63,9 @@ func New(signer *jwt.Signer, store Store, opts ...Option) (*Server, error) {
 	if sc.cfg.TokenTTL <= 0 {
 		sc.cfg.TokenTTL = DefaultConfig().TokenTTL
 	}
+	if sc.codeTTL <= 0 {
+		sc.codeTTL = time.Minute
+	}
 	if err := sc.cfg.Validate(); err != nil {
 		return nil, err
 	}

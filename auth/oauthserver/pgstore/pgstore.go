@@ -97,7 +97,7 @@ func (s *Store) List(ctx context.Context, tenantID string) ([]oauthserver.Client
 		return nil, err
 	}
 	defer rows.Close()
-	var out []oauthserver.Client
+	out := []oauthserver.Client{}
 	for rows.Next() {
 		c, err := scanClient(rows)
 		if err != nil {

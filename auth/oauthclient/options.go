@@ -58,7 +58,8 @@ func WithCookieName(n string) Option {
 	return func(c *clientConfig) { c.cookieName = n }
 }
 
-// WithFlowTTL bounds how long a started flow stays completable. Default 10m.
+// WithFlowTTL bounds how long a started flow stays completable. A
+// non-positive duration falls back to the default (10m).
 func WithFlowTTL(d time.Duration) Option {
 	return func(c *clientConfig) { c.flowTTL = d }
 }
