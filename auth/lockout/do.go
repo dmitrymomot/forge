@@ -15,7 +15,9 @@ import (
 // wrapping the fn error, otherwise the fn error passes through unchanged.
 // Every other error passes through uncounted, so infrastructure failures can
 // never lock a user out. A failed post-success Reset is returned as an
-// ErrStore-wrapped error rather than swallowed.
+// ErrStore-wrapped error rather than swallowed — so a non-nil return is not
+// always a denial: match *LockedError or ErrFailedAttempt to decide whether
+// to reject the login, rather than treating any error as a failed attempt.
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error {
 	res, err := l.Allow(ctx, key)
 	if err != nil {

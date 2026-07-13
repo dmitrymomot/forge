@@ -38,13 +38,22 @@
 //		return nil
 //	})
 //
+// A non-nil Do error is not always an auth denial: a failed post-success
+// Reset surfaces as an ErrStore-wrapped error even though the credentials
+// were valid. Decide whether to reject the login by matching *LockedError or
+// ErrFailedAttempt (errors.As/errors.Is), not by a bare err != nil, which
+// would deny a valid user over a store hiccup during cleanup.
+//
 // Middleware gates the Allow half over net/http and stashes the extracted
 // key in the context for the handler's Fail/Reset calls:
 //
 //	mw := lk.Middleware(func(r *http.Request) string { return r.PostFormValue("email") })
 //	mux.Handle("POST /login", mw(loginHandler))
 //
-// It fails closed (503) on store errors by default; WithFailOpen restores
+// An empty key from the KeyFunc skips the check and passes the request
+// through, so a KeyFunc reading attacker-controlled input (a header, say)
+// must not return "" unless the handler itself rejects the empty case. It
+// fails closed (503) on store errors by default; WithFailOpen restores
 // availability-first behavior.
 //
 // Caller keys (emails, phones, IPs) are SHA-256 hashed into store keys —
