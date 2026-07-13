@@ -620,16 +620,6 @@ Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
 
 ---
 
-**auth/lockout**
-
-Login/OTP failure counting with exponential delay and lockout windows over
-the ratelimit counter seam. (Not rate shaping — that's `ratelimit`; not
-cumulative caps — that's `quota`.)
-
-Deps: `resilience/ratelimit`.
-
----
-
 **auth/totp**
 
 The complete 2FA package: RFC 6238/4226 TOTP/HOTP secret generation,
