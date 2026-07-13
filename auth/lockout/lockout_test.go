@@ -3,6 +3,7 @@ package lockout_test
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,7 @@ func TestNewValidation(t *testing.T) {
 		{"zero threshold", counters, locks, []lockout.Option{lockout.WithThreshold(0)}},
 		{"zero base lock", counters, locks, []lockout.Option{lockout.WithBaseLock(0)}},
 		{"factor below one", counters, locks, []lockout.Option{lockout.WithFactor(0.5)}},
+		{"nan factor", counters, locks, []lockout.Option{lockout.WithFactor(math.NaN())}},
 		{"max below base", counters, locks, []lockout.Option{lockout.WithBaseLock(time.Hour), lockout.WithMaxLock(time.Minute)}},
 		{"zero window", counters, locks, []lockout.Option{lockout.WithWindow(0)}},
 	}

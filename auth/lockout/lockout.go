@@ -55,7 +55,7 @@ func New(counters ratelimit.Store, locks cache.Store, opts ...Option) (*Locker, 
 		return nil, errors.New("lockout: threshold must be >= 1")
 	case cfg.baseLock <= 0:
 		return nil, errors.New("lockout: base lock must be > 0")
-	case cfg.factor < 1:
+	case cfg.factor < 1 || math.IsNaN(cfg.factor):
 		return nil, errors.New("lockout: factor must be >= 1")
 	case cfg.maxLock < cfg.baseLock:
 		return nil, errors.New("lockout: max lock must be >= base lock")
@@ -92,7 +92,11 @@ func (l *Locker) Allow(ctx context.Context, key string) (Result, error) {
 // creates a lock whose duration escalates with the failure count; exactly one
 // concurrent crosser creates the marker (SetNX), losers report the winner's
 // expiry. A Fail while already locked increments the counter (escalating the
-// next lock) but never extends the current one.
+// next lock) but never extends the current one. Below the threshold, the
+// returned Locked reflects only the failure counter, not the lock marker —
+// Allow is the authoritative check, since a live lock marker can outlast the
+// failure-counter window and make a below-threshold Fail report Locked:false
+// while Allow reports locked.
 func (l *Locker) Fail(ctx context.Context, key string) (Result, error) {
 	failsKey, lockKey, err := l.keys(ctx, key)
 	if err != nil {
