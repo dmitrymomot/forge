@@ -641,16 +641,6 @@ Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
 
 ---
 
-**auth/otp**
-
-Short numeric codes for email/SMS verification: attempt-limited, TTL'd,
-hashed at rest; generation via `random.DigitCode`; delivery is the
-caller's channel.
-
-Deps: `core/random`, `crypto/digest`.
-
----
-
 **auth/magiclink**
 
 Signed, TTL'd, single-use links over `crypto/token`: passwordless login,
