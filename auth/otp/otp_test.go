@@ -16,7 +16,7 @@ import (
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
-var testSecret = []byte("0123456789abcdef")
+var testSecret = []byte("0123456789abcdef0123456789abcdef")
 
 func newStore(t *testing.T) cache.Store {
 	t.Helper()

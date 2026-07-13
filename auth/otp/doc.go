@@ -11,7 +11,7 @@
 // Create one instance per flow — the purpose isolates codes so a login code
 // can never verify a password reset:
 //
-//	secret := []byte(os.Getenv("OTP_SECRET")) // min 16 bytes
+//	secret := []byte(os.Getenv("OTP_SECRET")) // min 32 bytes
 //	store := redis.NewStore(client)           // resilience/cache/redis; memory store for dev/tests
 //
 //	loginOTP, err := otp.New(secret, store, otp.WithPurpose("login"))

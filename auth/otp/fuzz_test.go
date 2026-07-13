@@ -16,7 +16,7 @@ import (
 func FuzzVerify(f *testing.F) {
 	store := cache.NewMemoryStore()
 	f.Cleanup(func() { _ = store.Close() })
-	o, err := otp.New([]byte("0123456789abcdef"), store)
+	o, err := otp.New([]byte("0123456789abcdef0123456789abcdef"), store)
 	if err != nil {
 		f.Fatal(err)
 	}

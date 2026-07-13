@@ -12,7 +12,7 @@ func newBenchOTP(b *testing.B, opts ...otp.Option) *otp.OTP {
 	b.Helper()
 	store := cache.NewMemoryStore()
 	b.Cleanup(func() { _ = store.Close() })
-	o, err := otp.New([]byte("0123456789abcdef"), store, opts...)
+	o, err := otp.New([]byte("0123456789abcdef0123456789abcdef"), store, opts...)
 	if err != nil {
 		b.Fatal(err)
 	}

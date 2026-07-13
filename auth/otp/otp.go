@@ -15,7 +15,10 @@ import (
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
-const minSecretLen = 16
+// minSecretLen is the smallest accepted HMAC pepper. 32 bytes matches the
+// SHA-256 output size, the floor RFC 2104 recommends for an HMAC key: a
+// shorter key adds no security over one hashed down to the block size.
+const minSecretLen = 32
 
 // OTP issues and verifies short numeric one-time codes for a single flow
 // (purpose). Create one instance per flow; see WithPurpose.
@@ -26,9 +29,10 @@ type OTP struct {
 }
 
 // New returns an OTP issuer/verifier. secret is the HMAC pepper for codes
-// at rest (min 16 bytes; load it from the environment, e.g. OTP_SECRET) and
+// at rest (min 32 bytes; load it from the environment, e.g. OTP_SECRET) and
 // store is the shared TTL-KV seam (cache.NewMemoryStore for tests/dev,
-// cache/redis in production).
+// cache/redis in production). secret is copied, so a caller may reuse or zero
+// its backing array afterward without affecting the returned OTP.
 func New(secret []byte, store cache.Store, opts ...Option) (*OTP, error) {
 	cfg := config{
 		clock:       clock.System(),
@@ -56,7 +60,11 @@ func New(secret []byte, store cache.Store, opts ...Option) (*OTP, error) {
 	case cfg.clock == nil:
 		return nil, fmt.Errorf("%w: clock must not be nil", ErrInvalidConfig)
 	}
-	return &OTP{store: store, cfg: cfg, secret: secret}, nil
+	// Copy the pepper so a caller reusing or zeroing its backing array can't
+	// silently change how codes hash.
+	sec := make([]byte, len(secret))
+	copy(sec, secret)
+	return &OTP{store: store, cfg: cfg, secret: sec}, nil
 }
 
 // Generate issues a fresh code for identifier and stores its keyed hash with
