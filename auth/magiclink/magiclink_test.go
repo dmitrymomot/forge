@@ -212,9 +212,7 @@ func TestConcurrentRedeemSingleWinner(t *testing.T) {
 	var wins, used atomic.Int32
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := m.Redeem(context.Background(), link)
 			switch {
 			case err == nil:
@@ -222,7 +220,7 @@ func TestConcurrentRedeemSingleWinner(t *testing.T) {
 			case errors.Is(err, magiclink.ErrUsed):
 				used.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	assert.Equal(t, int32(1), wins.Load(), "exactly one redeem wins")
