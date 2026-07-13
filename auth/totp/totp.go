@@ -5,12 +5,18 @@
 package totp
 
 import (
+	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base32"
+	"encoding/binary"
 	"fmt"
 	"hash"
+	"strings"
 	"time"
+
+	"github.com/dmitrymomot/forge/crypto/consttime"
 )
 
 // Algorithm selects the HMAC hash for code derivation.
@@ -98,4 +104,78 @@ func (c *config) validateCore() error {
 		return fmt.Errorf("totp: unknown algorithm %d", int(c.algorithm))
 	}
 	return nil
+}
+
+// decodeSecret parses a base32 shared secret leniently: users retype
+// secrets by hand, so lowercase, interior spaces, and trailing padding are
+// all accepted. Never panics on malformed input.
+func decodeSecret(s string) ([]byte, error) {
+	s = strings.ToUpper(strings.ReplaceAll(s, " ", ""))
+	s = strings.TrimRight(s, "=")
+	b, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("totp: decode secret: %w", err)
+	}
+	return b, nil
+}
+
+// hotp computes the RFC 4226 code: HMAC(key, counter) → dynamic truncation
+// → digits decimal digits, zero-padded.
+func hotp(h func() hash.Hash, key []byte, counter uint64, digits int) string {
+	mac := hmac.New(h, key)
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], counter)
+	mac.Write(msg[:])
+	sum := mac.Sum(nil)
+
+	off := sum[len(sum)-1] & 0x0f
+	v := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7fffffff
+
+	mod := uint32(1_000_000)
+	if digits == 8 {
+		mod = 100_000_000
+	}
+	code := v % mod
+
+	out := make([]byte, digits)
+	for i := digits - 1; i >= 0; i-- {
+		out[i] = '0' + byte(code%10)
+		code /= 10
+	}
+	return string(out)
+}
+
+// HOTPCode computes the RFC 4226 code for counter. Counter state is the
+// caller's; most consumers want time-based Code/Verify instead.
+func (t *TOTP) HOTPCode(secret string, counter uint64) (string, error) {
+	key, err := decodeSecret(secret)
+	if err != nil {
+		return "", err
+	}
+	return hotp(t.cfg.algorithm.hashFunc(), key, counter, t.cfg.digits), nil
+}
+
+// VerifyHOTP checks code against counters counter..counter+lookahead
+// (constant-time, no early exit) and returns the next counter value to
+// persist (matched+1). ErrInvalidCode when nothing matches.
+func (t *TOTP) VerifyHOTP(secret, code string, counter uint64, lookahead int) (uint64, error) {
+	if lookahead < 0 {
+		return 0, fmt.Errorf("totp: negative lookahead %d", lookahead)
+	}
+	key, err := decodeSecret(secret)
+	if err != nil {
+		return 0, err
+	}
+	var next uint64
+	found := false
+	for i := range lookahead + 1 {
+		c := counter + uint64(i)
+		if consttime.StringEqual(hotp(t.cfg.algorithm.hashFunc(), key, c, t.cfg.digits), code) && !found {
+			next, found = c+1, true
+		}
+	}
+	if !found {
+		return 0, ErrInvalidCode
+	}
+	return next, nil
 }
