@@ -22,12 +22,14 @@ Primary consumers: any service exposing a partner/programmatic API.
 
 ## Placement
 
-`auth/apikey`, single package, no subpackages in this PR. Imports:
-`auth/guard`, `core/id`, `core/random`, `crypto/consttime` (+ stdlib
-`crypto/sha256`, `hash/crc32`). Standard anatomy: `doc.go` (runnable
-example), `apikey.go` (Key/Filter/CreateParams), `keygen.go`,
-`manager.go`, `verify.go`, `store.go` (seam), `memory.go` (in-memory
-store), `options.go`, `errors.go`, black-box tests + `bench_test.go`.
+`auth/apikey` core package plus one driver subpackage
+`auth/apikey/pgstore` (pgx). Core imports: `auth/guard`, `core/id`,
+`core/random`, `crypto/consttime` (+ stdlib `crypto/sha256`,
+`hash/crc32`) — core never imports a driver client. Standard anatomy:
+`doc.go` (runnable example), `apikey.go` (Key/Filter/CreateParams),
+`keygen.go`, `manager.go`, `verify.go`, `store.go` (seam), `memory.go`
+(in-memory store), `options.go`, `errors.go`, black-box tests +
+`bench_test.go`.
 
 When this ships: delete the `auth/apikey` entry from docs/packages.md and
 un-tag the planned-dep references (`auth/scim`); the entry's dep line gains
@@ -135,7 +137,40 @@ type Store interface {
 Targeted mutators instead of a generic `Update`: each is one statement in a
 SQL driver and cannot clobber concurrent writes. `NewMemoryStore()`
 (mutex-guarded map by ID + hash index) ships in-package as the seam-owner
-test double; a `pg` driver subpackage is a follow-up, not this PR.
+test double; the postgres driver ships in this PR (next section).
+
+## Postgres driver (`auth/apikey/pgstore`)
+
+Follows the established pgstore idiom (`resilience/lock/pgstore`):
+`New(pool *pgxpool.Pool) *Store`, embedded goose migration exported as
+`Migrations` (rooted via `fs.Sub` so the .sql files sit at fsys root),
+applied by the consumer through `data/migration` under its own version
+table (`forge_apikey_schema` — never shared, per the migration.Group
+collision rule).
+
+```sql
+CREATE TABLE forge_api_keys (
+    id           uuid PRIMARY KEY,
+    hash         text NOT NULL UNIQUE,
+    preview      text NOT NULL,
+    name         text NOT NULL DEFAULT '',
+    subject      text NOT NULL,
+    tenant       text NOT NULL DEFAULT '',
+    scopes       text[] NOT NULL DEFAULT '{}',
+    meta         jsonb NOT NULL DEFAULT '{}',
+    created_at   timestamptz NOT NULL,
+    expires_at   timestamptz,
+    last_used_at timestamptz,
+    revoked_at   timestamptz
+);
+CREATE INDEX forge_api_keys_list_idx ON forge_api_keys (tenant, subject, id DESC);
+```
+
+Mapping rules: zero `time.Time` ⇔ SQL `NULL` on the three nullable
+columns; `List` orders by `id DESC` (UUIDv7 is time-ordered, so this is
+newest-first straight off the index); `GetByHash` hits the unique hash
+index — the verify hot path is one indexed point lookup. Filter clauses
+are appended only for non-empty `Subject`/`Tenant`.
 
 ## Manager API
 
@@ -195,12 +230,17 @@ expired / empty-subject record); touch throttling via injected stale
 (old+new both verify, old dies after grace); scope-hook enforcement
 including cross-tenant `ErrNotFound` and fail-closed hook errors; guard
 integration end-to-end (401/200 through `guard.New(mgr)`); memory-store
-contract tests. Fuzz: `FuzzVerify` over the parse/checksum path.
+contract tests. The same store contract suite runs against pgstore as
+integration tests, gated on `FORGE_TEST_POSTGRES_DSN` (skip when unset;
+run live against ephemeral docker pg16 during development, as in the
+resilience-bundle flow) — plus pg-specific cases: NULL⇔zero-time
+round-trip, hash-uniqueness violation, `List` ordering/filtering, and
+migration apply. Fuzz: `FuzzVerify` over the parse/checksum path.
 Benchmarks (repo requirement): keygen, `Verify` hit, malformed reject —
 target ~zero allocs on the reject path.
 
 ## Anti-scope
 
-No HTTP management handlers; no scope-enforcement middleware; no SQL driver
-in this PR (memory store only); no encryption-at-rest beyond hashing; no
-per-key rate limiting; no idle-based expiry.
+No HTTP management handlers; no scope-enforcement middleware; no drivers
+beyond pgstore (redis/sqlite not planned); no encryption-at-rest beyond
+hashing; no per-key rate limiting; no idle-based expiry.
