@@ -12,6 +12,7 @@ import (
 
 	"github.com/dmitrymomot/forge/auth/jwt"
 	"github.com/dmitrymomot/forge/auth/oauthserver"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 // obtainCode drives the authorize endpoint and returns the issued code.
@@ -156,6 +157,72 @@ func TestAuthCodeUserClaimsHookErrorFailsClosed(t *testing.T) {
 			return nil, errors.New("directory down")
 		}))
 	creds := acClient(t, srv)
+	code := obtainCode(t, srv, creds.ClientID)
+	rec := postToken(t, srv.TokenHandler(), redeemForm(code), creds.ClientID, creds.ClientSecret)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, "server_error", decodeJSON(t, rec)["error"])
+}
+
+func TestAuthCodeGrantNotAllowedClient(t *testing.T) {
+	srv := acServer(t, "user-1", true)
+	creds := acClient(t, srv)
+	code := obtainCode(t, srv, creds.ClientID)
+
+	// A separate client_credentials-only client can never redeem a code,
+	// even a real, unclaimed one: the grant check runs before the code is
+	// parsed or claimed.
+	ccCreds, err := srv.CreateClient(context.Background(), oauthserver.CreateClientInput{
+		Name: "cc-only", Grants: []string{oauthserver.GrantClientCredentials},
+	})
+	require.NoError(t, err)
+
+	rec := postToken(t, srv.TokenHandler(), redeemForm(code), ccCreds.ClientID, ccCreds.ClientSecret)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "unauthorized_client", decodeJSON(t, rec)["error"])
+}
+
+func TestAuthCodeGarbageCodeInvalidGrant(t *testing.T) {
+	srv := acServer(t, "user-1", true)
+	creds := acClient(t, srv)
+
+	rec := postToken(t, srv.TokenHandler(), redeemForm("garbage-not-a-sealed-token"), creds.ClientID, creds.ClientSecret)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "invalid_grant", decodeJSON(t, rec)["error"])
+}
+
+// failingCodeStore is a cache.Store whose Set always fails with a
+// non-ErrExists error, simulating a store outage during code redemption.
+type failingCodeStore struct{}
+
+func (failingCodeStore) Get(ctx context.Context, key string) ([]byte, error) { return nil, nil }
+
+func (failingCodeStore) Set(ctx context.Context, key string, val []byte, opts ...cache.SetOption) error {
+	return errors.New("store down")
+}
+
+func (failingCodeStore) Delete(ctx context.Context, key string) error { return nil }
+
+func (failingCodeStore) Has(ctx context.Context, key string) (bool, error) { return false, nil }
+
+func (failingCodeStore) DeletePrefix(ctx context.Context, prefix string) error { return nil }
+
+func (failingCodeStore) Close() error { return nil }
+
+func TestAuthCodeStoreOutageFailsClosed(t *testing.T) {
+	cfg := oauthserver.DefaultConfig()
+	cfg.Issuer = "https://auth.example.com"
+	srv, err := oauthserver.New(testSigner(t), oauthserver.NewMemoryStore(),
+		oauthserver.WithConfig(cfg),
+		oauthserver.WithCodeStore(failingCodeStore{}),
+		oauthserver.WithCodeKeyset(testKeyset(t)),
+		oauthserver.WithAuthenticator(staticUser("user-1")),
+	)
+	require.NoError(t, err)
+	creds := acClient(t, srv)
+
+	// AuthorizeHandler only requires codeStore != nil; the code is issued
+	// via s.codes (the keyset), never touching codeStore. Only redemption
+	// calls codeStore.Set, so this single server exercises both ends.
 	code := obtainCode(t, srv, creds.ClientID)
 	rec := postToken(t, srv.TokenHandler(), redeemForm(code), creds.ClientID, creds.ClientSecret)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
