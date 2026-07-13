@@ -186,3 +186,98 @@ func (m *Manager) ConfirmEnroll(ctx context.Context, subject, code string) ([]st
 	}
 	return codes, nil
 }
+
+// Verify checks code for subject: TOTP first (replay-safe — the matched
+// step is atomically claimed in the store), then falls back to one-time
+// backup codes (atomically consumed). One call serves a single "enter your
+// code or a backup code" input. ErrNotEnrolled for absent or unconfirmed
+// records; ErrReplayed when the step was already claimed (including by a
+// concurrent request); ErrInvalidCode otherwise.
+func (m *Manager) Verify(ctx context.Context, subject, code string) (VerifyResult, error) {
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	rec, err := m.record(ctx, tenant, subject)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if !rec.Confirmed {
+		return VerifyResult{}, ErrNotEnrolled
+	}
+	plain, err := m.openSecret(rec)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+
+	matchedAt, verr := m.t.Verify(plain, code, rec.LastUsedAt)
+	switch {
+	case verr == nil:
+		ok, err := m.store.MarkUsed(ctx, tenant, subject, matchedAt)
+		if err != nil {
+			return VerifyResult{}, fmt.Errorf("totp: store mark used: %w", err)
+		}
+		if !ok {
+			return VerifyResult{}, ErrReplayed
+		}
+		return VerifyResult{}, nil
+	case errors.Is(verr, ErrReplayed):
+		return VerifyResult{}, ErrReplayed
+	}
+
+	// TOTP mismatch — try the backup codes.
+	idx, ok := VerifyBackupCode(code, rec.BackupHashes)
+	if !ok {
+		return VerifyResult{}, ErrInvalidCode
+	}
+	consumed, err := m.store.ConsumeBackup(ctx, tenant, subject, rec.BackupHashes[idx])
+	if err != nil {
+		return VerifyResult{}, fmt.Errorf("totp: store consume backup: %w", err)
+	}
+	if !consumed {
+		// Lost a race: someone spent this code between Get and here.
+		return VerifyResult{}, ErrInvalidCode
+	}
+	return VerifyResult{
+		UsedBackupCode: true,
+		// Count from the snapshot we verified against; a concurrent consume
+		// may make this off by one — it is advisory UI data, not state.
+		BackupRemaining: len(rec.BackupHashes) - 1,
+	}, nil
+}
+
+// Enabled reports whether subject has a confirmed enrollment. Absent and
+// pending both read false — it is a policy query, not an error path.
+func (m *Manager) Enabled(ctx context.Context, subject string) (bool, error) {
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return false, err
+	}
+	rec, err := m.store.Get(ctx, tenant, subject)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("totp: store get: %w", err)
+	}
+	return rec.Confirmed, nil
+}
+
+// LastVerified returns the step-start time of the last successful TOTP
+// verification — the input to a grace-period check (see doc.go). Zero time
+// with a nil error cannot happen for a confirmed record (ConfirmEnroll
+// stamps the first step); ErrNotEnrolled for absent or pending records.
+func (m *Manager) LastVerified(ctx context.Context, subject string) (time.Time, error) {
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	rec, err := m.record(ctx, tenant, subject)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !rec.Confirmed {
+		return time.Time{}, ErrNotEnrolled
+	}
+	return rec.LastUsedAt, nil
+}
