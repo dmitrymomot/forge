@@ -439,16 +439,6 @@ pricing logic (the billing anti-scope stands).
 
 Deps: `core/money`; `core/fsm` (planned).
 
-## gaming/
-
----
-
-**gaming/rng**
-
-Deterministic random outcomes for game mechanics over one explicitly specified, frozen derivation algorithm (`rng/v1`: HMAC-SHA256 block expansion of serverSeed/clientSeed/nonce; rejection-sampled ints, 53-bit floats, spec'd Fisher–Yates) — reproducible in any language, so outcomes are third-party verifiable forever. Two entry points, same `Stream` type: `Casual()` (CSPRNG, zero ceremony — SaaS lootboxes, marketing wheels) and a provably-fair seed-chain `Manager` (commit–reveal: published SHA-256 commitment, player client seed, atomic per-bet nonce, rotation with reveal) behind a 5-method `Store` seam — memory store in-package, `rng/pgstore` pgx driver with embedded migrations. Mechanics are pure functions over a `Stream`: uniform ints/floats, multi-value per nonce (slot reels), weighted `Table[T]` with audit `Version()` hash and pure pity (guaranteed-drop counter returned to the caller, never stored), shuffle/`Deal` (cards, raffles), dice. Fail-closed `WithScope` tenancy. Anti-scope: no game math (paylines/RTP), no certified-RNG claims, no bet/wallet integration (compose with `ledger`).
-
-Deps: `core/random`, `core/clock`, `core/id`.
-
 ## async/
 
 ---
