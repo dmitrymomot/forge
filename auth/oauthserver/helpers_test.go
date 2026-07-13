@@ -28,8 +28,6 @@ func testSigner(tb testing.TB) *jwt.Signer {
 }
 
 // testKeyset builds an HMAC keyset for sealing auth codes.
-//
-//nolint:unused // consumed in Task 10 (WithCodeKeyset for the authorize endpoint)
 func testKeyset(tb testing.TB) *keyset.Keyset {
 	tb.Helper()
 	ks, err := keyset.New(keyset.WithPrimary(1, []byte("0123456789abcdef0123456789abcdef")))
