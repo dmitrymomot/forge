@@ -55,6 +55,16 @@ core/qrcode".
   state machine; the store sees only opaque bytes.
 - **Encryption at rest is mandatory.** `NewManager` requires key material;
   there is no plaintext-storage configuration.
+- **Tenancy-agnostic via an opaque `subject` key.** Multi-tenant apps
+  disagree about where 2FA lives: account-global (GitHub — one enrollment
+  across all orgs; key = userID) vs per-tenant identity (Slack — separate
+  enrollment per workspace; key = tenantID+userID). The Manager/Store key is
+  therefore an opaque `subject string` — the consumer encodes whatever
+  identifies an enrollment in their auth model. Single-tenant apps pass the
+  user ID; per-tenant apps pass a composite like `tenantID + "/" + userID`
+  (safe when IDs cannot contain the separator — forge `core/id` IDs never
+  do). No tenant parameter, no ctx-derived tenant func (at login time there
+  is no authenticated context to derive from). Documented as a doc.go recipe.
 - **pgstore ships in the same PR** (precedent: `resilience/lock/pgstore`).
 
 ## API surface — core primitives
@@ -123,13 +133,13 @@ func VerifyBackupCode(code string, hashes [][]byte) (idx int, ok bool)
 func NewManager(store Store, key []byte, opts ...Option) (*Manager, error)
 func ManagerFromKeyset(store Store, ks *keyset.Keyset, opts ...Option) (*Manager, error)
 
-func (m *Manager) BeginEnroll(ctx context.Context, userID, account string) (*Enrollment, error)
-func (m *Manager) ConfirmEnroll(ctx context.Context, userID, code string) (backupCodes []string, err error)
-func (m *Manager) Verify(ctx context.Context, userID, code string) (VerifyResult, error)
-func (m *Manager) Enabled(ctx context.Context, userID string) (bool, error)
-func (m *Manager) LastVerified(ctx context.Context, userID string) (time.Time, error)
-func (m *Manager) RegenerateBackupCodes(ctx context.Context, userID string) ([]string, error)
-func (m *Manager) Disable(ctx context.Context, userID string) error
+func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*Enrollment, error)
+func (m *Manager) ConfirmEnroll(ctx context.Context, subject, code string) (backupCodes []string, err error)
+func (m *Manager) Verify(ctx context.Context, subject, code string) (VerifyResult, error)
+func (m *Manager) Enabled(ctx context.Context, subject string) (bool, error)
+func (m *Manager) LastVerified(ctx context.Context, subject string) (time.Time, error)
+func (m *Manager) RegenerateBackupCodes(ctx context.Context, subject string) ([]string, error)
+func (m *Manager) Disable(ctx context.Context, subject string) error
 
 type Enrollment struct {
     Secret string // show for manual entry
@@ -204,16 +214,16 @@ type Record struct {
 }
 
 type Store interface {
-    Get(ctx context.Context, userID string) (*Record, error) // ErrNotFound when absent
-    Save(ctx context.Context, userID string, r *Record) error // upsert, full replace
-    Delete(ctx context.Context, userID string) error          // no-op when absent
+    Get(ctx context.Context, subject string) (*Record, error) // ErrNotFound when absent
+    Save(ctx context.Context, subject string, r *Record) error // upsert, full replace
+    Delete(ctx context.Context, subject string) error          // no-op when absent
     // MarkUsed atomically sets LastUsedAt=usedAt iff the stored value is
     // earlier (or zero). false = a concurrent verify already claimed this
     // or a later step. This is the replay/race gate.
-    MarkUsed(ctx context.Context, userID string, usedAt time.Time) (bool, error)
+    MarkUsed(ctx context.Context, subject string, usedAt time.Time) (bool, error)
     // ConsumeBackup atomically removes hash if present. false = not present
     // (already spent or never existed). This is the single-use gate.
-    ConsumeBackup(ctx context.Context, userID string, hash []byte) (bool, error)
+    ConsumeBackup(ctx context.Context, subject string, hash []byte) (bool, error)
 }
 ```
 
@@ -228,20 +238,20 @@ var Migrations fs.FS // embedded goose migration
 func New(pool *pgxpool.Pool, opts ...Option) *Store
 ```
 
-- Table `forge_totp`: `user_id text PK`, `secret bytea NOT NULL`,
+- Table `forge_totp`: `subject text PK`, `secret bytea NOT NULL`,
   `confirmed boolean NOT NULL DEFAULT false`,
   `last_used_at timestamptz`, `backup_hashes bytea[] NOT NULL DEFAULT '{}'`,
   `created_at` / `updated_at timestamptz NOT NULL DEFAULT now()`.
 - Applied via `data/migration` under its own version table
   (`forge_totp_schema`), same as lock/pgstore.
 - `MarkUsed`: `UPDATE forge_totp SET last_used_at=$2, updated_at=now()
-  WHERE user_id=$1 AND (last_used_at IS NULL OR last_used_at < $2)` —
+  WHERE subject=$1 AND (last_used_at IS NULL OR last_used_at < $2)` —
   rows-affected = the boolean.
 - `ConsumeBackup`: `UPDATE forge_totp SET backup_hashes=array_remove(backup_hashes,$2),
-  updated_at=now() WHERE user_id=$1 AND $2 = ANY(backup_hashes)` —
+  updated_at=now() WHERE subject=$1 AND $2 = ANY(backup_hashes)` —
   rows-affected = the boolean.
 - `Get` maps no-rows to `totp.ErrNotFound`. `Save` is an upsert
-  (`INSERT … ON CONFLICT (user_id) DO UPDATE`).
+  (`INSERT … ON CONFLICT (subject) DO UPDATE`).
 
 ## doc.go recipes
 
@@ -253,9 +263,14 @@ func New(pool *pgxpool.Pool, opts ...Option) *Store
 3. **Remember-this-device, device-scoped (recommended)** — signed cookie via
    `crypto/token` (`WithPurpose("2fa-device")`, TTL = trust window), checked
    before prompting. Three lines each side.
-4. **Custom Store contract** — the exact atomicity requirements of
+4. **Multi-tenancy** — subject-key encoding for both models: account-global
+   2FA (`subject = userID`) vs per-tenant enrollment
+   (`subject = tenantID + "/" + userID`), with the separator-safety note and
+   guidance on picking a model (does an enrollment belong to the account or
+   to the membership?).
+5. **Custom Store contract** — the exact atomicity requirements of
    `MarkUsed`/`ConsumeBackup`, with the reference SQL.
-5. **Brute-force pointer** — code guessing is rate-limited by `auth/lockout`
+6. **Brute-force pointer** — code guessing is rate-limited by `auth/lockout`
    (planned), not by this package.
 
 ## File anatomy
