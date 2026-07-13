@@ -523,13 +523,11 @@ func TestVerify_ConcurrentWrongGuesses(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := o.Verify(t.Context(), "user@example.com", bad); err == nil {
 				t.Error("wrong code verified")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
