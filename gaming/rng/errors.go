@@ -13,4 +13,13 @@ var (
 	// empty or duplicate keys, zero weights, weight-sum overflow, or bad
 	// pity configuration.
 	ErrInvalidTable = errors.New("rng: invalid table")
+
+	// ErrNotFound reports an unknown seed id or a missing active pair.
+	ErrNotFound = errors.New("rng: seed not found")
+
+	// ErrExists reports a conflicting record: an active pair already
+	// exists for the (scope, player), or the record id collides. Store
+	// implementations return it from Create; the Manager consumes it
+	// internally when racing get-or-create.
+	ErrExists = errors.New("rng: active seed already exists")
 )
