@@ -58,6 +58,22 @@
 // ErrScope instead of falling through to a shared bucket. Single-tenant
 // applications omit the option.
 //
+// The hook is arbitrary — it maps the request context to a scope string — so
+// one construction serves every tenancy shape:
+//
+//   - Single-tenant: omit WithScope; every identifier shares one namespace.
+//   - White-label (tenant-locked): return the tenant the request is bound to.
+//     A sibling tenant with the same identifier gets a different code, and a
+//     request that arrives without a tenant fails closed.
+//   - Global user switching tenants: return the active tenant while the user is
+//     inside one, and a reserved, non-empty global sentinel (e.g. "@global") at
+//     the platform level. "Switching" is just a different context per request;
+//     each scope is an isolated bucket.
+//
+// Because the hook fails closed on an empty string, the global case must return
+// a non-empty sentinel, not "". Keep that sentinel disjoint from real tenant
+// IDs so a global user and a tenant can never collide in the same bucket.
+//
 // # Storage
 //
 // State rides the resilience/cache.Store seam. Keys carry no PII (scope and
