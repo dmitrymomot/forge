@@ -18,13 +18,12 @@ import (
 // providers. It is stateless: flow state rides a sealed crypto/token blob
 // (cookie or caller-held), so any instance can complete any flow.
 type Client struct {
-	clk       clock.Clock
-	codec     *token.Codec[flowState]
-	providers map[string]Provider
-	source    func(ctx context.Context, name string) (Provider, error)
-	binding   func(ctx context.Context) (string, error)
-	hc        *http.Client
-	//nolint:unused // consumed in Task 4/5 (verifierFor caching)
+	clk        clock.Clock
+	codec      *token.Codec[flowState]
+	providers  map[string]Provider
+	source     func(ctx context.Context, name string) (Provider, error)
+	binding    func(ctx context.Context) (string, error)
+	hc         *http.Client
 	verifiers  sync.Map // issuer\x00jwks\x00clientID -> *jwt.Verifier
 	redirect   string
 	cookieName string
@@ -111,8 +110,6 @@ func (c *Client) resolve(ctx context.Context, name string) (Provider, error) {
 }
 
 // verifierFor returns a cached alg-pinned verifier for p's id_tokens.
-//
-//nolint:unused // consumed in Task 4/5 (id_token verification)
 func (c *Client) verifierFor(p Provider) (*jwt.Verifier, error) {
 	key := p.Issuer + "\x00" + p.JWKSURL + "\x00" + p.ClientID
 	if v, ok := c.verifiers.Load(key); ok {
