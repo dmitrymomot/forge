@@ -239,8 +239,17 @@ authz seam.
 Hot path (valid credential): one extractor scan (header reads, no
 allocation), one Verify call (verifier-owned cost), one context value.
 No regex, no per-request option evaluation (config resolved in `New`).
-Zero-alloc target for the guard's own work per design.md §Performance;
-no benchmark-gated complexity anticipated.
+Zero-alloc target for the guard's own work per design.md §Performance.
+
+**Benchmarks are required** (project policy, all packages): `bench_test.go`
+covers the valid-bearer flow, the 401 path, each shipped extractor,
+BasicAuth success/failure, and LogExtractor. After the baseline run, a
+post-benchmark optimization pass applies only measured wins (expected:
+`Query` swaps `r.URL.Query()`'s full-map alloc for a `RawQuery` scan).
+Inherent costs are documented, not optimized away: ~2 allocs/op for the
+context store (`WithContext` + `WithValue`, requestid-identical), stdlib
+cookie parsing in `Cookie`, and base64+HMAC in BasicAuth (constant-time is
+the point). Before/after numbers go in the PR description.
 
 ## Testing
 

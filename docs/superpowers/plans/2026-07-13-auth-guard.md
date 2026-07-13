@@ -21,6 +21,7 @@
 - Options are `type Option func(*config)` — never builders.
 - No Claude/AI attribution lines in any commit message.
 - Package size target ~350–450 LOC excluding tests (spec).
+- Benchmarks are REQUIRED (project policy for all packages): `bench_test.go` with `b.ReportAllocs()`, baseline recorded, then a post-benchmark optimization pass applying only measured wins (Task 6). Before/after numbers go in the PR description.
 
 ---
 
@@ -1352,10 +1353,254 @@ git commit -m "docs(guard): package docs; mark auth/guard shipped in catalog"
 
 ---
 
+### Task 6: Benchmarks + post-benchmark optimization
+
+**Files:**
+- Create: `auth/guard/bench_test.go`
+- Modify (only where a benchmark justifies it): `auth/guard/extractors.go`
+
+**Interfaces:**
+- Consumes: the complete public API from Tasks 1–4 (`New`, `VerifierFunc`, `Identity`, `From`, `BearerHeader`, `Header`, `Cookie`, `Query`, `BasicAuth`, `LogExtractor`, `WithExtractors`).
+- Produces: the benchmark suite, a recorded baseline, and measured optimizations. Record the before/after table — it goes in the PR description (design.md: perf-motivated complexity requires a benchmark in the PR).
+
+- [ ] **Step 1: Write the benchmarks**
+
+`auth/guard/bench_test.go`:
+
+```go
+package guard_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/dmitrymomot/forge/auth/guard"
+)
+
+// nopWriter discards the response so benchmarks measure guard's work, not
+// httptest.ResponseRecorder's buffer growth.
+type nopWriter struct{ h http.Header }
+
+func (w *nopWriter) Header() http.Header         { return w.h }
+func (w *nopWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (w *nopWriter) WriteHeader(int)             {}
+
+func benchVerifier() guard.Verifier {
+	id := guard.Identity{Subject: "u1", Tenant: "t1", Method: "bearer"}
+	return guard.VerifierFunc(func(context.Context, string) (guard.Identity, error) {
+		return id, nil
+	})
+}
+
+func BenchmarkNew_ValidBearer(b *testing.B) {
+	var depth int
+	h := guard.New(benchVerifier())(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if id, ok := guard.From(r.Context()); ok {
+			depth += len(id.Subject)
+		}
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	w := &nopWriter{h: make(http.Header)}
+	b.ReportAllocs()
+	for b.Loop() {
+		h.ServeHTTP(w, r)
+	}
+	_ = depth
+}
+
+func BenchmarkNew_Reject401(b *testing.B) {
+	h := guard.New(benchVerifier(), guard.WithChallenge(`Bearer realm="api"`))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil) // no credential
+	w := &nopWriter{h: make(http.Header)}
+	b.ReportAllocs()
+	for b.Loop() {
+		h.ServeHTTP(w, r)
+	}
+}
+
+func BenchmarkExtractors(b *testing.B) {
+	bearer := httptest.NewRequest(http.MethodGet, "/", nil)
+	bearer.Header.Set("Authorization", "Bearer tok123")
+	apikey := httptest.NewRequest(http.MethodGet, "/", nil)
+	apikey.Header.Set("X-API-Key", "key123")
+	withCookie := httptest.NewRequest(http.MethodGet, "/", nil)
+	withCookie.AddCookie(&http.Cookie{Name: "sid", Value: "abc"})
+	withQuery := httptest.NewRequest(http.MethodGet, "/p?a=1&token=qtok&c=3", nil)
+
+	benches := []struct {
+		name string
+		x    guard.Extractor
+		r    *http.Request
+	}{
+		{"BearerHeader", guard.BearerHeader(), bearer},
+		{"Header", guard.Header("X-API-Key"), apikey},
+		{"Cookie", guard.Cookie("sid"), withCookie},
+		{"Query", guard.Query("token"), withQuery},
+	}
+	for _, bb := range benches {
+		b.Run(bb.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, ok := bb.x(bb.r); !ok {
+					b.Fatal("extractor missed")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkBasicAuth(b *testing.B) {
+	users := map[string]string{"ops": "s3cret"}
+	inner := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+
+	good := httptest.NewRequest(http.MethodGet, "/", nil)
+	good.SetBasicAuth("ops", "s3cret")
+	bad := httptest.NewRequest(http.MethodGet, "/", nil)
+	bad.SetBasicAuth("ops", "wrong")
+
+	h := guard.BasicAuth(users)(inner)
+	w := &nopWriter{h: make(http.Header)}
+
+	b.Run("success", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			h.ServeHTTP(w, good)
+		}
+	})
+	b.Run("wrong-password", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			h.ServeHTTP(w, bad)
+		}
+	})
+}
+
+func BenchmarkLogExtractor(b *testing.B) {
+	var ctx context.Context
+	h := guard.New(benchVerifier())(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		ctx = r.Context()
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	h.ServeHTTP(&nopWriter{h: make(http.Header)}, r)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, ok := guard.LogExtractor(ctx); !ok {
+			b.Fatal("no identity in ctx")
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run the baseline and record it**
+
+Run: `just bench ./auth/guard/`
+Expected: all benchmarks run; save the full output (it becomes the "before" column of the PR table).
+
+- [ ] **Step 3: Interpret against expected findings**
+
+Optimize only measured wins; these costs are **inherent — do not "fix" them**:
+
+- `New_ValidBearer`: ~2 allocs/op from `r.WithContext` + `context.WithValue` — the ctx-storage idiom itself (requestid pays the same). Extractor and verify dispatch must add 0.
+- `Extractors/BearerHeader`, `Extractors/Header`: expect **0 allocs/op** (substring sharing). If either allocates, that's a bug to fix, not a trade-off.
+- `Extractors/Cookie`: stdlib `r.Cookie` parses the Cookie header per call — do NOT hand-roll cookie parsing (correctness risk, cold-ish path).
+- `Extractors/Query`: `r.URL.Query()` builds the full `url.Values` map per call — expect several allocs/op. This is the one expected optimization; apply Step 4 only if the baseline confirms it.
+- `BasicAuth/*`: dominated by base64 decode + `consttime` HMAC — constant-time is the point; success and wrong-password should cost roughly the same (sanity-check that, it validates the timing design).
+- `New_Reject401`: error wrap + problem JSON encode — cold path by definition; no action.
+
+- [ ] **Step 4: Apply the Query optimization (only if baseline confirms the allocs)**
+
+Replace the `Query` body in `auth/guard/extractors.go` (keep the doc comment, add the perf note):
+
+```go
+// Query extracts the named query parameter.
+//
+// Credentials in query strings leak into access logs, browser history, and
+// Referer headers. Prefer BearerHeader or Cookie; reserve Query for signed,
+// short-lived links.
+//
+// It scans RawQuery directly instead of calling r.URL.Query(), which would
+// allocate the full url.Values map per request (benchmark in the PR).
+func Query(name string) Extractor {
+	return func(r *http.Request) (string, bool) {
+		q := r.URL.RawQuery
+		for q != "" {
+			var pair string
+			pair, q, _ = strings.Cut(q, "&")
+			k, v, _ := strings.Cut(pair, "=")
+			if strings.ContainsAny(k, "%+") {
+				dec, err := url.QueryUnescape(k)
+				if err != nil {
+					continue
+				}
+				k = dec
+			}
+			if k != name {
+				continue
+			}
+			if strings.ContainsAny(v, "%+") {
+				dec, err := url.QueryUnescape(v)
+				if err != nil {
+					return "", false
+				}
+				v = dec
+			}
+			return v, v != ""
+		}
+		return "", false
+	}
+}
+```
+
+Add `"net/url"` to the imports of `extractors.go`. Semantics must stay identical to `r.URL.Query().Get(name)` for present/absent/empty and first-occurrence-wins; extend `TestQuery` in `auth/guard/extractors_test.go` with the encoding cases:
+
+```go
+	// appended to the TestQuery body:
+	enc := httptest.NewRequest(http.MethodGet, "/p?tok%65n=q%74ok&plus=a+b&first=1&first=2", nil)
+	if got, ok := guard.Query("token")(enc); !ok || got != "qtok" {
+		t.Fatalf("Query(token) encoded = (%q, %v), want (qtok, true)", got, ok)
+	}
+	if got, ok := guard.Query("plus")(enc); !ok || got != "a b" {
+		t.Fatalf("Query(plus) = (%q, %v), want (a b, true)", got, ok)
+	}
+	if got, ok := guard.Query("first")(enc); !ok || got != "1" {
+		t.Fatalf("Query(first) = (%q, %v), want first occurrence (1, true)", got, ok)
+	}
+```
+
+- [ ] **Step 5: Verify tests still pass, re-run the benchmark, record the delta**
+
+```bash
+just test ./auth/guard/
+just bench ./auth/guard/
+```
+
+Expected: tests PASS; `Extractors/Query` allocs drop to 0–1/op (0 for unescaped values). Keep both baseline and after numbers for the PR description.
+
+- [ ] **Step 6: Full check and commit**
+
+```bash
+just fmt ./auth/guard/
+just lint
+git add auth/guard/
+git commit -m "perf(guard): benchmark suite; Query extractor scans RawQuery (no url.Values alloc)"
+```
+
+(If Step 4 was skipped because the baseline showed no win, commit just the benchmarks: `test(guard): benchmark suite for middleware hot paths`.)
+
+---
+
 ## Verification Checklist (post-plan)
 
 - [ ] `just test ./auth/guard/` — all green, race-clean
 - [ ] `just lint` — clean
+- [ ] `just bench ./auth/guard/` — suite runs; baseline + after numbers captured for the PR description; BearerHeader/Header at 0 allocs/op
+- [ ] BasicAuth success vs wrong-password benchmark times roughly equal (constant-time sanity check)
 - [ ] `grep -rn "IdentityFromContext" auth/guard/` — empty (reader is `From`/`MustFrom`)
 - [ ] `grep -n "auth/guard" docs/packages.md` — only the three dependent `Deps:` lines
 - [ ] doc.go compiles as prose examples (no Example funcs needed; ipfilter precedent)
