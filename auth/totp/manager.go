@@ -121,6 +121,15 @@ func (m *Manager) openSecret(r *Record) (string, error) {
 // earlier unconfirmed one, so re-showing the QR is safe — and returns the
 // plaintext secret and provisioning URI for the UI. ErrAlreadyEnrolled if a
 // confirmed enrollment exists; Disable first to re-enroll.
+//
+// The ErrAlreadyEnrolled guard is check-then-act, not atomic: a BeginEnroll
+// racing a concurrent ConfirmEnroll for the same subject can read the record
+// while it is still pending and then overwrite the just-confirmed enrollment
+// back to unconfirmed, orphaning the backup codes ConfirmEnroll returned.
+// Enroll and confirm are sequential user actions, so this needs two in-flight
+// requests for one subject at the same instant; serialize per-subject
+// enrollment (or gate on a conditional store write) if that is reachable in
+// your deployment.
 func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*Enrollment, error) {
 	if subject == "" {
 		return nil, errors.New("totp: empty subject")
