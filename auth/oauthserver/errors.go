@@ -10,7 +10,9 @@ var (
 	ErrClientRevoked = errors.New("oauthserver: client revoked")
 	// ErrDuplicateClient is returned by Store.Create on an ID collision.
 	ErrDuplicateClient = errors.New("oauthserver: duplicate client")
-	// ErrInvalidConfig is returned by New/AuthorizeHandler for invalid setup.
+	// ErrInvalidConfig is returned by New/AuthorizeHandler for invalid setup,
+	// and by the management methods when a configured WithScope hook resolves
+	// an empty tenant (fail-closed — an empty tenant is never a valid scope).
 	ErrInvalidConfig = errors.New("oauthserver: invalid config")
 	// ErrInvalidInput is returned by CreateClient for invalid input.
 	ErrInvalidInput = errors.New("oauthserver: invalid input")
