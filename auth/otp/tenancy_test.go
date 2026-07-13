@@ -124,3 +124,36 @@ func TestTenancy_GlobalUserSwitchingTenants(t *testing.T) {
 		t.Fatalf("acme verify: %v", err)
 	}
 }
+
+// TestTenancy_SentinelTenantCollision makes the doc's disjointness caveat
+// verifiable: if the reserved global sentinel is NOT kept distinct from real
+// tenant IDs, a global user and the colliding tenant share one bucket. This
+// test deliberately violates the rule to prove the failure mode exists —
+// production apps must keep the sentinel disjoint from tenant IDs.
+func TestTenancy_SentinelTenantCollision(t *testing.T) {
+	t.Parallel()
+	const sentinel = "@global"
+	scope := func(ctx context.Context) (string, error) {
+		if tenant, ok := ctx.Value(ctxTenant{}).(string); ok && tenant != "" {
+			return tenant, nil
+		}
+		return sentinel, nil
+	}
+	o, err := otp.New(testSecret, newStore(t), otp.WithScope(scope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform := t.Context()                                            // resolves to sentinel
+	colliding := context.WithValue(t.Context(), ctxTenant{}, sentinel) // tenant id == sentinel
+
+	code, err := o.Generate(platform, "admin@platform.com")
+	if err != nil {
+		t.Fatalf("platform Generate: %v", err)
+	}
+	// Same identifier + same resolved scope -> same bucket, so a code issued at
+	// the platform level IS visible to the colliding tenant. That shared
+	// visibility is exactly why the sentinel must stay disjoint from tenant IDs.
+	if err := o.Verify(colliding, "admin@platform.com", code); err != nil {
+		t.Fatalf("collision: verify = %v, want success (proves the shared-bucket failure mode)", err)
+	}
+}
