@@ -620,18 +620,6 @@ Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
 
 ---
 
-**auth/guard**
-
-Request-authentication middleware over a `Verifier` seam (session, jwt,
-apikey all satisfy it) with chained credential extractors (header → cookie
-→ query), built-in Basic Auth (constant-time, correct 401 +
-WWW-Authenticate — gates pprof/metrics/staging/admin), and
-`IdentityFromContext`.
-
-Deps: `crypto/consttime`, `web/problem`.
-
----
-
 **auth/lockout**
 
 Login/OTP failure counting with exponential delay and lockout windows over
@@ -650,29 +638,6 @@ skew-window verify, otpauth:// provisioning URI, and one-time backup codes
 lights up via `core/qrcode`. Persistence is consumer DB.
 
 Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
-
----
-
-**auth/otp**
-
-Short numeric codes for email/SMS verification: attempt-limited, TTL'd,
-hashed at rest; generation via `random.DigitCode`; delivery is the
-caller's channel.
-
-Deps: `core/random`, `crypto/digest`.
-
----
-
-**auth/apikey**
-
-The full API-key product for tenant- or user-owned keys: Stripe-style
-prefixed keys (`sk_live_…`) with checksum for cheap rejection, hash stored,
-plaintext shown once — plus management (create/list/revoke/rotate, per-key
-scopes, optional expiry, last-used-at tracking) behind a storage-agnostic
-Store, and request verification as a `guard.Verifier` (constant-time, key →
-identity/tenant resolution).
-
-Deps: `core/random`, `crypto/consttime`; `auth/guard` (planned).
 
 ---
 
@@ -717,7 +682,7 @@ authenticated via `apikey` or `oauthserver` tokens. The enterprise
 checkbox next to SSO; SAML stays out (`oauthclient` OIDC covers modern
 IdPs).
 
-Deps: `auth/guard` (planned).
+Deps: `auth/guard`.
 
 ---
 
@@ -903,7 +868,7 @@ One internal diagnostics surface: `/debug/pprof/*`, `/debug/stats`
 (runtime/GC/goroutines JSON), `/debug/vars`, with an auth guard and a
 dedicated-port `supervisor.Service`.
 
-Deps: `ops/supervisor`; `auth/guard` (planned).
+Deps: `ops/supervisor`, `auth/guard`.
 
 ---
 
