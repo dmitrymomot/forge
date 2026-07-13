@@ -66,6 +66,46 @@ func TestCompleteHappyPath(t *testing.T) {
 	assert.Equal(t, -1, cleared[0].MaxAge)
 }
 
+func TestCompleteClearsCookieOnExchangeFailure(t *testing.T) {
+	f := newFakeOIDC(t)
+	c := f.newClient(t)
+
+	// Begin
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "https://app.example.com/auth/idp", nil)
+	require.NoError(t, c.Begin(rec, req, "idp"))
+	flowCookie := rec.Result().Cookies()[0]
+
+	// Callback with a forged state: Exchange fails before hitting the token
+	// endpoint, but the flow cookie must still be cleared.
+	cbURL := "https://app.example.com/cb?code=code-1&state=forged-state"
+	cbReq := httptest.NewRequest(http.MethodGet, cbURL, nil)
+	cbReq.AddCookie(flowCookie)
+	cbRec := httptest.NewRecorder()
+
+	_, err := c.Complete(cbRec, cbReq)
+	require.ErrorIs(t, err, oauthclient.ErrStateMismatch)
+
+	cleared := cbRec.Result().Cookies()
+	require.Len(t, cleared, 1)
+	assert.Equal(t, "oauth_flow", cleared[0].Name)
+	assert.Equal(t, -1, cleared[0].MaxAge)
+}
+
+func TestBeginUnknownProviderNoCookieNoRedirect(t *testing.T) {
+	f := newFakeOIDC(t)
+	c := f.newClient(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "https://app.example.com/auth/nope", nil)
+	err := c.Begin(rec, req, "nope")
+	require.ErrorIs(t, err, oauthclient.ErrUnknownProvider)
+
+	assert.Empty(t, rec.Result().Cookies())
+	assert.Empty(t, rec.Header().Get("Location"))
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestCompleteWithoutCookie(t *testing.T) {
 	f := newFakeOIDC(t)
 	c := f.newClient(t)
