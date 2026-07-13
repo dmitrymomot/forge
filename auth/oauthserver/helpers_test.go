@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,7 @@ import (
 	"github.com/dmitrymomot/forge/auth/jwt"
 	"github.com/dmitrymomot/forge/auth/oauthserver"
 	"github.com/dmitrymomot/forge/crypto/keyset"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 // testSigner builds an Ed25519 jwt.Signer.
@@ -46,4 +48,17 @@ func newServer(tb testing.TB, opts ...oauthserver.Option) (*oauthserver.Server, 
 	srv, err := oauthserver.New(testSigner(tb), store, append(base, opts...)...)
 	require.NoError(tb, err)
 	return srv, store
+}
+
+// staticUser is an Authenticator that always returns subject.
+func staticUser(subject string) func(http.ResponseWriter, *http.Request) (string, bool) {
+	return func(w http.ResponseWriter, r *http.Request) (string, bool) { return subject, true }
+}
+
+// cacheStore returns a memory cache.Store cleaned up with the test.
+func cacheStore(tb testing.TB) cache.Store {
+	tb.Helper()
+	s := cache.NewMemoryStore()
+	tb.Cleanup(func() { _ = s.Close() })
+	return s
 }

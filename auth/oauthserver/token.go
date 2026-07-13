@@ -1,6 +1,10 @@
 package oauthserver
 
 import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +14,7 @@ import (
 	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/crypto/consttime"
 	"github.com/dmitrymomot/forge/crypto/digest"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 // accessClaims is the access-token claim set. sub is the client for M2M
@@ -45,8 +50,7 @@ func (s *Server) TokenHandler() http.Handler {
 		case GrantClientCredentials:
 			s.handleClientCredentials(w, r, cl)
 		case GrantAuthorizationCode:
-			// Replaced with the real implementation in the auth-code task.
-			writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", "authorization_code not configured")
+			s.handleAuthorizationCode(w, r, cl)
 		default:
 			writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", "")
 		}
@@ -136,4 +140,102 @@ func (s *Server) signAccessToken(sub string, cl Client, scope string) (string, t
 	}
 	tok, err := s.signer.Sign(claims)
 	return tok, ttl, err
+}
+
+// pkceChallenge is the RFC 7636 S256 transform.
+func pkceChallenge(verifier string) string {
+	return base64.RawURLEncoding.EncodeToString(digest.SHA256([]byte(verifier)))
+}
+
+// handleAuthorizationCode redeems a sealed single-use code for an access
+// token + id_token. No refresh token is issued: the first-party app builds
+// its own session from the result.
+func (s *Server) handleAuthorizationCode(w http.ResponseWriter, r *http.Request, cl Client) {
+	if s.codes == nil || s.codeStore == nil {
+		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", "authorization_code not configured")
+		return
+	}
+	if !cl.AllowsGrant(GrantAuthorizationCode) {
+		writeTokenError(w, http.StatusBadRequest, "unauthorized_client", "")
+		return
+	}
+	ac, err := s.codes.Parse(r.PostForm.Get("code"))
+	if err != nil {
+		writeTokenError(w, http.StatusBadRequest, "invalid_grant", "")
+		return
+	}
+	// Single-use: claim the jti before any further validation so every
+	// structurally-valid redemption attempt burns the code (RFC 6749
+	// leans toward revoking on suspicious replay).
+	err = s.codeStore.Set(r.Context(), "oauthserver:code:"+ac.JTI, []byte{1},
+		cache.WithTTL(s.codeTTL+time.Minute), cache.WithSetNonExist())
+	switch {
+	case errors.Is(err, cache.ErrExists):
+		writeTokenError(w, http.StatusBadRequest, "invalid_grant", "code already redeemed")
+		return
+	case err != nil:
+		// Store outage: fail closed rather than risk double redemption.
+		writeTokenError(w, http.StatusInternalServerError, "server_error", "")
+		return
+	}
+	if ac.ClientID != cl.ID || r.PostForm.Get("redirect_uri") != ac.RedirectURI {
+		writeTokenError(w, http.StatusBadRequest, "invalid_grant", "")
+		return
+	}
+	verifier := r.PostForm.Get("code_verifier")
+	if verifier == "" || !consttime.StringEqual(pkceChallenge(verifier), ac.Challenge) {
+		writeTokenError(w, http.StatusBadRequest, "invalid_grant", "")
+		return
+	}
+	access, ttl, err := s.signAccessToken(ac.Subject, cl, ac.Scope)
+	if err != nil {
+		writeTokenError(w, http.StatusInternalServerError, "server_error", "")
+		return
+	}
+	idt, err := s.signIDToken(r.Context(), cl, ac)
+	if err != nil {
+		writeTokenError(w, http.StatusInternalServerError, "server_error", "")
+		return
+	}
+	writeTokenResponse(w, tokenResponse{
+		AccessToken: access, TokenType: "Bearer",
+		ExpiresIn: int64(ttl.Seconds()), Scope: ac.Scope, IDToken: idt,
+	})
+}
+
+// reservedIDClaims are id_token claims the WithUserClaims hook may not override.
+var reservedIDClaims = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true, "iat": true, "nonce": true,
+}
+
+// signIDToken mints the OIDC id_token for the code's subject, audience'd
+// to the redeeming client.
+func (s *Server) signIDToken(ctx context.Context, cl Client, ac authCode) (string, error) {
+	ttl := cl.TokenTTL
+	if ttl <= 0 {
+		ttl = s.cfg.TokenTTL
+	}
+	now := s.clk.Now()
+	claims := map[string]any{
+		"iss": s.cfg.Issuer,
+		"sub": ac.Subject,
+		"aud": cl.ID,
+		"exp": now.Add(ttl).Unix(),
+		"iat": now.Unix(),
+	}
+	if ac.Nonce != "" {
+		claims["nonce"] = ac.Nonce
+	}
+	if s.userClaims != nil {
+		extra, err := s.userClaims(ctx, ac.Subject)
+		if err != nil {
+			return "", fmt.Errorf("oauthserver: user claims hook: %w", err)
+		}
+		for k, v := range extra {
+			if !reservedIDClaims[k] {
+				claims[k] = v
+			}
+		}
+	}
+	return s.signer.Sign(claims)
 }
