@@ -3,7 +3,10 @@ package magiclink_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/crypto/keyset"
 	"github.com/dmitrymomot/forge/crypto/secret"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 type loginClaims struct {
@@ -154,4 +158,116 @@ func TestFromKeysetRotation(t *testing.T) {
 	got, err := mNew.Redeem(context.Background(), link)
 	require.NoError(t, err)
 	assert.Equal(t, "u_1", got.UserID)
+}
+
+func newMemStore(t *testing.T) cache.Store {
+	t.Helper()
+	s := cache.NewMemoryStore()
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestSingleUseRedeem(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithStore(newMemStore(t)))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	got, err := m.Redeem(context.Background(), link)
+	require.NoError(t, err)
+	assert.Equal(t, "u_1", got.UserID)
+
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrUsed)
+}
+
+func TestPeekDoesNotConsume(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithStore(newMemStore(t)))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	_, err = m.Peek(context.Background(), link)
+	require.NoError(t, err)
+	_, err = m.Peek(context.Background(), link)
+	require.NoError(t, err, "Peek must be repeatable")
+
+	_, err = m.Redeem(context.Background(), link)
+	require.NoError(t, err, "Redeem must still succeed after Peek")
+
+	_, err = m.Peek(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrUsed, "Peek after Redeem reports used")
+}
+
+func TestConcurrentRedeemSingleWinner(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithStore(newMemStore(t)))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	const n = 32
+	var wins, used atomic.Int32
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := m.Redeem(context.Background(), link)
+			switch {
+			case err == nil:
+				wins.Add(1)
+			case errors.Is(err, magiclink.ErrUsed):
+				used.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int32(1), wins.Load(), "exactly one redeem wins")
+	assert.Equal(t, int32(n-1), used.Load(), "all others see ErrUsed")
+}
+
+type failingStore struct{ err error }
+
+func (f failingStore) Get(context.Context, string) ([]byte, error) { return nil, f.err }
+func (f failingStore) Set(context.Context, string, []byte, ...cache.SetOption) error {
+	return f.err
+}
+func (f failingStore) Delete(context.Context, string) error      { return f.err }
+func (f failingStore) Has(context.Context, string) (bool, error) { return false, f.err }
+func (f failingStore) DeletePrefix(context.Context, string) error {
+	return f.err
+}
+func (f failingStore) Close() error { return nil }
+
+func TestStoreFailureFailsClosed(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithStore(failingStore{err: errors.New("boom")}))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrStore)
+	_, err = m.Peek(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrStore)
+}
+
+func TestJunkRejectedBeforeStore(t *testing.T) {
+	// Signature check precedes store I/O: junk must yield ErrInvalid even
+	// when every store call would fail.
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithStore(failingStore{err: errors.New("boom")}))
+	require.NoError(t, err)
+
+	_, err = m.Redeem(context.Background(), "garbage.token")
+	assert.ErrorIs(t, err, magiclink.ErrInvalid)
+}
+
+func TestWithStoreNilRejected(t *testing.T) {
+	_, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithStore(nil))
+	require.Error(t, err)
 }

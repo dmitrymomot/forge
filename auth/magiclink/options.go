@@ -7,13 +7,15 @@ import (
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/crypto/secret"
 	"github.com/dmitrymomot/forge/crypto/token"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 type config struct {
-	clk  clock.Clock
-	box  *secret.Box
-	errs []error
-	ttl  time.Duration
+	clk   clock.Clock
+	store cache.Store
+	box   *secret.Box
+	errs  []error
+	ttl   time.Duration
 }
 
 // Option configures New/FromKeyset.
@@ -74,5 +76,19 @@ func WithEncrypt(box *secret.Box) Option {
 			return
 		}
 		c.box = box
+	}
+}
+
+// WithStore enables single-use redemption: Redeem atomically claims each link
+// and returns ErrUsed on replay. A nil store is rejected. The bundled LRU
+// memory store can evict live keys; production single-use needs cache/redis
+// or another durable Store.
+func WithStore(s cache.Store) Option {
+	return func(c *config) {
+		if s == nil {
+			c.errs = append(c.errs, errors.New("magiclink: nil store"))
+			return
+		}
+		c.store = s
 	}
 }

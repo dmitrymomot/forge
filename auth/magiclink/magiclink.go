@@ -2,11 +2,15 @@ package magiclink
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dmitrymomot/forge/crypto/keyset"
 	"github.com/dmitrymomot/forge/crypto/token"
+	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
 // envelope wraps the consumer payload inside the signed token.
@@ -16,7 +20,10 @@ type envelope[T any] struct {
 
 // Manager issues and redeems magic-link tokens carrying a payload of type T.
 type Manager[T any] struct {
-	codec *token.Codec[envelope[T]]
+	codec   *token.Codec[envelope[T]]
+	store   cache.Store
+	purpose string
+	ttl     time.Duration
 }
 
 // New builds a single-key Manager. Purpose is required: two managers with the
@@ -30,7 +37,7 @@ func New[T any](key []byte, purpose string, opts ...Option) (*Manager[T], error)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec}, nil
+	return &Manager[T]{codec: codec, store: c.store, purpose: purpose, ttl: c.ttl}, nil
 }
 
 // FromKeyset builds a rotation-aware Manager (signs under the primary key,
@@ -44,7 +51,7 @@ func FromKeyset[T any](ks *keyset.Keyset, purpose string, opts ...Option) (*Mana
 	if err != nil {
 		return nil, err
 	}
-	return &Manager[T]{codec: codec}, nil
+	return &Manager[T]{codec: codec, store: c.store, purpose: purpose, ttl: c.ttl}, nil
 }
 
 // Issue creates a signed link token for payload.
@@ -53,25 +60,54 @@ func (m *Manager[T]) Issue(ctx context.Context, payload T) (string, error) {
 }
 
 // Peek verifies a link without consuming it. Serve it on GET so email
-// scanners that prefetch links cannot burn them.
+// scanners that prefetch links cannot burn them. With a store configured it
+// reports ErrUsed for already-redeemed links (best-effort; the consuming
+// Redeem is authoritative).
 func (m *Manager[T]) Peek(ctx context.Context, link string) (T, error) {
 	var zero T
 	env, err := m.verify(ctx, link)
 	if err != nil {
 		return zero, err
 	}
+	if m.store != nil {
+		used, err := m.store.Has(ctx, m.storeKey(link))
+		if err != nil {
+			return zero, fmt.Errorf("%w: %w", ErrStore, err)
+		}
+		if used {
+			return zero, ErrUsed
+		}
+	}
 	return env.Payload, nil
 }
 
 // Redeem verifies a link and, when a store is configured, atomically consumes
-// it. Without a store it is verify-only and multi-use.
+// it: the first call wins, replays return ErrUsed, store failures fail closed
+// with ErrStore. Without a store it is verify-only and multi-use.
 func (m *Manager[T]) Redeem(ctx context.Context, link string) (T, error) {
 	var zero T
 	env, err := m.verify(ctx, link)
 	if err != nil {
 		return zero, err
 	}
+	if m.store != nil {
+		err := m.store.Set(ctx, m.storeKey(link), []byte{1},
+			cache.WithTTL(m.ttl), cache.WithSetNonExist())
+		switch {
+		case errors.Is(err, cache.ErrExists):
+			return zero, ErrUsed
+		case err != nil:
+			return zero, fmt.Errorf("%w: %w", ErrStore, err)
+		}
+	}
 	return env.Payload, nil
+}
+
+// storeKey derives the single-use claim key. The token hash is globally
+// unique (each token carries a random nonce), so scope is not needed here.
+func (m *Manager[T]) storeKey(link string) string {
+	sum := sha256.Sum256([]byte(link))
+	return "magiclink:" + m.purpose + ":" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // verify parses the token and maps crypto/token errors to package sentinels.
