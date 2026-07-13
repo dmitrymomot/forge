@@ -127,7 +127,38 @@ func TestScope_FailClosed(t *testing.T) {
 	mErr := newManager(t, store, totp.WithScope(func(context.Context) (string, error) {
 		return "", boom
 	}))
-	_, err = mErr.Enabled(t.Context(), "alice")
+	ctx := t.Context()
+
+	// All 8 methods must fail closed with ErrScope wrapping boom.
+	_, err = mErr.BeginEnroll(ctx, "alice", "a@acme.com")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.ConfirmEnroll(ctx, "alice", "123456")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.Verify(ctx, "alice", "123456")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.Enabled(ctx, "alice")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.LastVerified(ctx, "alice")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.RegenerateBackupCodes(ctx, "alice")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	err = mErr.Disable(ctx, "alice")
+	assert.ErrorIs(t, err, totp.ErrScope)
+	assert.ErrorIs(t, err, boom)
+
+	_, err = mErr.DisableTenant(ctx)
 	assert.ErrorIs(t, err, totp.ErrScope)
 	assert.ErrorIs(t, err, boom)
 }
