@@ -179,3 +179,19 @@ func (t *TOTP) VerifyHOTP(secret, code string, counter uint64, lookahead int) (u
 	}
 	return next, nil
 }
+
+func (t *TOTP) stepSeconds() int64 { return int64(t.cfg.period / time.Second) }
+
+// Code computes the TOTP code for an explicit instant — client side, CLIs,
+// tests. Server-side verification should use Verify.
+func (t *TOTP) Code(secret string, at time.Time) (string, error) {
+	if at.Unix() < 0 {
+		return "", fmt.Errorf("totp: time %s is before the unix epoch", at)
+	}
+	key, err := decodeSecret(secret)
+	if err != nil {
+		return "", err
+	}
+	counter := uint64(at.Unix() / t.stepSeconds())
+	return hotp(t.cfg.algorithm.hashFunc(), key, counter, t.cfg.digits), nil
+}
