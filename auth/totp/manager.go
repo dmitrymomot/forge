@@ -281,3 +281,61 @@ func (m *Manager) LastVerified(ctx context.Context, subject string) (time.Time, 
 	}
 	return rec.LastUsedAt, nil
 }
+
+// RegenerateBackupCodes invalidates every outstanding backup code and
+// returns a fresh set — the only time the new codes exist in plaintext.
+// ErrNotEnrolled unless a confirmed enrollment exists.
+func (m *Manager) RegenerateBackupCodes(ctx context.Context, subject string) ([]string, error) {
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := m.record(ctx, tenant, subject)
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Confirmed {
+		return nil, ErrNotEnrolled
+	}
+	codes, hashes, err := GenerateBackupCodes(m.t.cfg.backupCount, m.t.cfg.backupLength)
+	if err != nil {
+		return nil, err
+	}
+	rec.BackupHashes = hashes
+	if err := m.store.Save(ctx, tenant, subject, rec); err != nil {
+		return nil, fmt.Errorf("totp: store save: %w", err)
+	}
+	return codes, nil
+}
+
+// Disable removes the enrollment entirely — secret, backup codes, state.
+// Idempotent: disabling an absent enrollment is a no-op.
+func (m *Manager) Disable(ctx context.Context, subject string) error {
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return err
+	}
+	if err := m.store.Delete(ctx, tenant, subject); err != nil {
+		return fmt.Errorf("totp: store delete: %w", err)
+	}
+	return nil
+}
+
+// DisableTenant bulk-deletes every enrollment in the scope-resolved tenant
+// (offboarding, GDPR erasure) and returns the count. It requires WithScope:
+// an unscoped Manager has no tenant to delete and returns ErrScope.
+// Platform-level jobs run it with a context bound to the target tenant.
+func (m *Manager) DisableTenant(ctx context.Context) (int, error) {
+	if m.t.cfg.scope == nil {
+		return 0, ErrScope
+	}
+	tenant, err := m.tenant(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, err := m.store.DeleteTenant(ctx, tenant)
+	if err != nil {
+		return 0, fmt.Errorf("totp: store delete tenant: %w", err)
+	}
+	return n, nil
+}
