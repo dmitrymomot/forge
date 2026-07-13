@@ -124,7 +124,7 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, cfg Co
 		case <-timer.C:
 		}
 	}
-	return fmt.Errorf("%w: %v", ErrConnect, lastErr)
+	return fmt.Errorf("%w: %w", ErrConnect, lastErr)
 }
 
 // backoff returns base·2^attempt, capped at maxConnectBackoff. A non-positive base

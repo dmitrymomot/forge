@@ -78,7 +78,7 @@
 // the DSN sets compress explicitly (compress=zstd, compress=false, ...). WithOptions
 // is the escape hatch for anything Config does not cover — TLS, the Settings map,
 // block buffer size, a custom dialer, JWT auth; it runs last, on the fully-built
-// *clickhouse.Options.
+// *clickhouse.Options. The pool and timeout DSN query params (max_open_conns, max_idle_conns, conn_max_lifetime, dial_timeout) are overridden by the matching Config fields whenever those are non-zero — set them via Config, not the DSN.
 //
 // # Errors and conveniences
 //
