@@ -126,7 +126,7 @@ Rules:
 - **`Play`** consumes the nonce atomically (`ConsumeNonce`, one `UPDATE … RETURNING` in pgstore) and returns the pre-increment value in `Proof.Nonce`. No active pair → get-or-create, then consume (self-healing; also heals a rotate that crashed between reveal and create).
 - **`Play` on a revealed seed is impossible by construction** — consumption targets the active row only.
 - **`SetClientSeed` rotates rather than mutates**: if an active pair exists it is revealed and a fresh pair is created with the new client seed; if none exists the first pair is created with it. Every `(seed pair, nonce)` triple is immutable once played — history only grows.
-- **`Rotate`** requires an active pair (`ErrNotFound` otherwise); reveal-then-create is two store ops, not atomic — a crash between them leaves no active pair, healed by the next `ActiveSeed`/`Play`.
+- **`Rotate`** requires an active pair (`ErrNotFound` otherwise); the next pair inherits the current client seed (the player's chosen value persists across rotations). Reveal-then-create is two store ops, not atomic — a crash between them leaves no active pair, healed by the next `ActiveSeed`/`Play`.
 - **Verification is stateless**: the player recomputes with `New(revealedSeed, clientSeed, nonce)` and `VerifyCommitment`; a JS reimplementation needs only the doc.go spec.
 
 ## Store seam
@@ -146,13 +146,13 @@ type Store interface {
     Active(ctx context.Context, scope, playerID string) (Record, error)       // ErrNotFound
     Create(ctx context.Context, r Record) error                                // ErrExists if an active pair exists for (scope, player)
     ConsumeNonce(ctx context.Context, scope, playerID string) (Record, error)  // atomic: returns Record with the nonce to use, persists Nonce+1; ErrNotFound if no active pair
-    Reveal(ctx context.Context, scope, id string) (Record, error)              // active → revealed, sets RevealedAt; ErrNotFound
+    Reveal(ctx context.Context, scope, id string, at time.Time) (Record, error) // sets status revealed + RevealedAt=at (idempotent: already-revealed returns unchanged); ErrNotFound
     Get(ctx context.Context, scope, id string) (Record, error)                 // ErrNotFound
 }
 ```
 
 - **Memory store** ships in-package (map + mutex) for tests/dev.
-- **`gaming/rng/pgstore`** — pgx driver, embedded migrations via `migration.Group("rng")`. Table `rng_seeds`: `id text pk, scope text not null default '', player_id text not null, server_seed bytea not null, client_seed text not null, nonce bigint not null default 0, status text not null, algorithm text not null, created_at timestamptz, revealed_at timestamptz`; partial unique index on `(scope, player_id) where status = 'active'`. `ConsumeNonce` is `UPDATE … SET nonce = nonce + 1 WHERE … AND status = 'active' RETURNING …, nonce - 1 AS consumed` (Postgres `RETURNING` sees the post-update row, so the consumed value is `nonce - 1`).
+- **`gaming/rng/pgstore`** — pgx driver, embedded migrations exposed as `pgstore.Migrations fs.FS` and applied via `migration.New(pgstore.Migrations, migration.WithTable("forge_rng_schema"))` (apikey/lock/ratelimit precedent). Table `forge_rng_seeds`: `id text pk, scope text not null default '', player_id text not null, server_seed bytea not null, client_seed text not null, nonce bigint not null default 0, status text not null, algorithm text not null, created_at timestamptz, revealed_at timestamptz`; partial unique index on `(scope, player_id) where status = 'active'`. `ConsumeNonce` is `UPDATE … SET nonce = nonce + 1 WHERE … AND status = 'active' RETURNING …, nonce - 1 AS consumed` (Postgres `RETURNING` sees the post-update row, so the consumed value is `nonce - 1`).
 - **Sensitivity note (doc.go):** rows hold the plaintext server seed until reveal — inherent to commit–reveal. The table must be treated as secret material; at-rest encryption is the consumer's storage concern (disk/pgcrypto), consistent with session stores.
 
 ## Tenancy
