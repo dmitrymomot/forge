@@ -630,17 +630,6 @@ Deps: `resilience/ratelimit`.
 
 ---
 
-**auth/totp**
-
-The complete 2FA package: RFC 6238/4226 TOTP/HOTP secret generation,
-skew-window verify, otpauth:// provisioning URI, and one-time backup codes
-(generate/hash/verify-and-consume, constant-time). QR image rendering
-lights up via `core/qrcode`. Persistence is consumer DB.
-
-Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
-
----
-
 **auth/magiclink**
 
 Signed, TTL'd, single-use links over `crypto/token`: passwordless login,
