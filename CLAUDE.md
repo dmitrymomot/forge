@@ -1,4 +1,5 @@
 - Be concise!
+- Never use line breaks to limit line length (no manual wrapping of prose, markdown, PR/commit bodies; let lines run and soft-wrap).
 - Work ONLY in CURRENT branch, don't switch!
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
