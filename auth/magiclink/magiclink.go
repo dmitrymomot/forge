@@ -9,15 +9,20 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/crypto/keyset"
 	"github.com/dmitrymomot/forge/crypto/token"
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
-// envelope wraps the consumer payload inside the signed token.
+// envelope wraps the consumer payload inside the signed token. Exp (Unix
+// nanoseconds) is stamped only for single-use managers and sizes the store
+// claim's TTL to the link's remaining lifetime; crypto/token remains
+// authoritative for actual expiry.
 type envelope[T any] struct {
 	Payload T      `json:"pld"`
 	Scope   string `json:"scp,omitempty"`
+	Exp     int64  `json:"exp,omitempty"`
 }
 
 // Manager issues and redeems magic-link tokens carrying a payload of type T.
@@ -25,10 +30,12 @@ type Manager[T any] struct {
 	codec   *token.Codec[envelope[T]]
 	store   cache.Store
 	scopeFn func(context.Context) (string, error)
+	clk     clock.Clock
 	purpose string
 	baseURL string
 	param   string
 	ttl     time.Duration
+	maxLen  int
 }
 
 // New builds a single-key Manager. Purpose is required: two managers with the
@@ -46,10 +53,12 @@ func New[T any](key []byte, purpose string, opts ...Option) (*Manager[T], error)
 		codec:   codec,
 		store:   c.store,
 		scopeFn: c.scopeFn,
+		clk:     c.clk,
 		purpose: purpose,
 		baseURL: c.baseURL,
 		param:   c.param,
 		ttl:     c.ttl,
+		maxLen:  c.maxLen,
 	}, nil
 }
 
@@ -68,10 +77,12 @@ func FromKeyset[T any](ks *keyset.Keyset, purpose string, opts ...Option) (*Mana
 		codec:   codec,
 		store:   c.store,
 		scopeFn: c.scopeFn,
+		clk:     c.clk,
 		purpose: purpose,
 		baseURL: c.baseURL,
 		param:   c.param,
 		ttl:     c.ttl,
+		maxLen:  c.maxLen,
 	}, nil
 }
 
@@ -82,7 +93,13 @@ func (m *Manager[T]) Issue(ctx context.Context, payload T) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return m.codec.Issue(envelope[T]{Payload: payload, Scope: scope})
+	env := envelope[T]{Payload: payload, Scope: scope}
+	// Stamp expiry only for single-use managers, where Redeem uses it to size
+	// the claim TTL; stateless tokens stay lean (omitempty drops it).
+	if m.store != nil {
+		env.Exp = m.clk.Now().Add(m.ttl).UnixNano()
+	}
+	return m.codec.Issue(env)
 }
 
 // parseAbsoluteURL parses u and requires an absolute URL (both scheme and
@@ -159,7 +176,7 @@ func (m *Manager[T]) Redeem(ctx context.Context, link string) (T, error) {
 	}
 	if m.store != nil {
 		err := m.store.Set(ctx, m.storeKey(link), []byte{1},
-			cache.WithTTL(m.ttl), cache.WithSetNonExist())
+			cache.WithTTL(m.claimTTL(env)), cache.WithSetNonExist())
 		switch {
 		case errors.Is(err, cache.ErrExists):
 			return zero, ErrUsed
@@ -168,6 +185,28 @@ func (m *Manager[T]) Redeem(ctx context.Context, link string) (T, error) {
 		}
 	}
 	return env.Payload, nil
+}
+
+// claimGrace covers crypto/token's one-second expiry granularity: Parse rejects
+// a token only once now.Unix() passes its exp second, so a token stays
+// presentable for up to ~1s beyond the nanosecond Exp stamped here. The claim
+// adds this margin so it always outlives the window in which a replay could
+// still pass verify — never a weaker guarantee than a full-TTL claim.
+const claimGrace = 5 * time.Second
+
+// claimTTL sizes the single-use claim to the link's remaining lifetime (plus
+// claimGrace) rather than the full configured TTL, so a link redeemed near
+// expiry does not pin a store key for a further full TTL. It never returns a
+// non-positive value (which cache.WithTTL treats as "never expire"): if the
+// remaining time is unavailable (Exp unset — a token issued by a store-less
+// manager) it falls back to the full TTL, which always outlives the link.
+func (m *Manager[T]) claimTTL(env envelope[T]) time.Duration {
+	if env.Exp > 0 {
+		if ttl := time.Duration(env.Exp-m.clk.Now().UnixNano()) + claimGrace; ttl > 0 {
+			return ttl
+		}
+	}
+	return m.ttl
 }
 
 // storeKey derives the single-use claim key. The token hash is globally
@@ -180,6 +219,12 @@ func (m *Manager[T]) storeKey(link string) string {
 // verify parses the token, maps crypto/token errors to package sentinels, and
 // enforces scope. Signature verification runs before any store I/O.
 func (m *Manager[T]) verify(ctx context.Context, link string) (envelope[T], error) {
+	// Defense-in-depth: reject oversized input before any base64/JSON/HMAC
+	// work, so a forgotten HTTP-layer size limit can't turn an oversized
+	// token query param into cheap CPU abuse.
+	if len(link) > m.maxLen {
+		return envelope[T]{}, fmt.Errorf("%w: link exceeds %d bytes", ErrInvalid, m.maxLen)
+	}
 	env, err := m.codec.Parse(link)
 	if err != nil {
 		return envelope[T]{}, mapTokenErr(err)

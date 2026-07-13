@@ -464,3 +464,143 @@ func TestIssueURLScopeHookError(t *testing.T) {
 		loginClaims{UserID: "u_1"})
 	assert.ErrorIs(t, err, hookErr)
 }
+
+// ttlSpyStore records the TTL passed to Set so tests can assert the single-use
+// claim is sized to the link's remaining lifetime. Set always succeeds.
+type ttlSpyStore struct {
+	mu      sync.Mutex
+	lastTTL time.Duration
+}
+
+func (s *ttlSpyStore) Get(context.Context, string) ([]byte, error) { return nil, cache.ErrNotFound }
+func (s *ttlSpyStore) Set(_ context.Context, _ string, _ []byte, opts ...cache.SetOption) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastTTL = cache.ApplySetOptions(opts...).TTL
+	return nil
+}
+func (s *ttlSpyStore) Delete(context.Context, string) error       { return nil }
+func (s *ttlSpyStore) Has(context.Context, string) (bool, error)  { return false, nil }
+func (s *ttlSpyStore) DeletePrefix(context.Context, string) error { return nil }
+func (s *ttlSpyStore) Close() error                               { return nil }
+
+func TestRedeemClaimTTLTracksRemainingLifetime(t *testing.T) {
+	clk := clock.NewMock(time.Now())
+	spy := &ttlSpyStore{}
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithTTL(15*time.Minute), magiclink.WithClock(clk), magiclink.WithStore(spy))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	clk.Advance(10 * time.Minute) // 5m of the 15m lifetime remains
+
+	_, err = m.Redeem(context.Background(), link)
+	require.NoError(t, err)
+
+	spy.mu.Lock()
+	got := spy.lastTTL
+	spy.mu.Unlock()
+	// The claim must track the remaining ~5m (plus a small grace), far below
+	// the full 15m, and stay positive so it never becomes a never-expiring key.
+	assert.Positive(t, got)
+	assert.Greater(t, got, 5*time.Minute, "claim outlives the link's remaining lifetime")
+	assert.Less(t, got, 6*time.Minute, "claim tracks remaining lifetime, not the full TTL")
+}
+
+func TestRedeemClaimTTLFallsBackWithoutExp(t *testing.T) {
+	// A token issued by a store-less manager carries no Exp; redeeming it on a
+	// single-use manager must fall back to the full TTL — a safe claim that
+	// always outlives the link — never a non-positive (never-expiring) TTL.
+	stateless, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+	link, err := stateless.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	spy := &ttlSpyStore{}
+	single, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithTTL(15*time.Minute), magiclink.WithStore(spy))
+	require.NoError(t, err)
+
+	_, err = single.Redeem(context.Background(), link)
+	require.NoError(t, err)
+
+	spy.mu.Lock()
+	got := spy.lastTTL
+	spy.mu.Unlock()
+	assert.Equal(t, 15*time.Minute, got, "claim falls back to full TTL when Exp is absent")
+}
+
+func TestDefaultTokenLengthCap(t *testing.T) {
+	// A VALID but oversized token (large payload) must be rejected by the
+	// default 8192-byte cap before decode — this distinguishes cap-rejection
+	// from a mere malformed-input rejection.
+	big := loginClaims{UserID: strings.Repeat("x", 9000)}
+	lax, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithMaxTokenLength(1<<20))
+	require.NoError(t, err)
+	link, err := lax.Issue(context.Background(), big)
+	require.NoError(t, err)
+	require.Greater(t, len(link), 8192, "payload forces the token over the default cap")
+
+	// The lax manager accepts its own valid token...
+	got, err := lax.Redeem(context.Background(), link)
+	require.NoError(t, err)
+	assert.Equal(t, big.UserID, got.UserID)
+
+	// ...but a default-cap manager rejects the same valid token purely on length.
+	def, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+	_, err = def.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrInvalid)
+	_, err = def.Peek(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrInvalid)
+}
+
+func TestSingleUseHoldsUntilTokenExpiry(t *testing.T) {
+	// End-to-end guard for the single-use guarantee across the claimTTL change:
+	// a redeemed link must stay ErrUsed for a replay right up to token expiry
+	// (the claim must outlive the token's verifiable window), then ErrExpired.
+	clk := clock.NewMock(time.Now())
+	store := cache.NewMemoryStore(cache.WithClock(clk))
+	t.Cleanup(func() { _ = store.Close() })
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithTTL(time.Minute), magiclink.WithClock(clk), magiclink.WithStore(store))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+
+	_, err = m.Redeem(context.Background(), link)
+	require.NoError(t, err)
+
+	// One second before expiry the token still verifies, so the claim must
+	// still block the replay — no double-redeem window.
+	clk.Advance(59 * time.Second)
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrUsed)
+
+	// Past expiry, verify rejects the link before the store is even consulted.
+	clk.Advance(2 * time.Second)
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrExpired)
+}
+
+func TestWithMaxTokenLength(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithMaxTokenLength(16))
+	require.NoError(t, err)
+
+	link, err := m.Issue(context.Background(), loginClaims{UserID: "u_1"})
+	require.NoError(t, err)
+	require.Greater(t, len(link), 16, "a real token exceeds the tiny cap")
+
+	_, err = m.Redeem(context.Background(), link)
+	assert.ErrorIs(t, err, magiclink.ErrInvalid, "over-cap link rejected before decode")
+}
+
+func TestWithMaxTokenLengthInvalid(t *testing.T) {
+	_, err := magiclink.New[loginClaims](testKey, "login", magiclink.WithMaxTokenLength(0))
+	require.Error(t, err, "zero max length must be rejected")
+	_, err = magiclink.New[loginClaims](testKey, "login", magiclink.WithMaxTokenLength(-1))
+	require.Error(t, err, "negative max length must be rejected")
+}

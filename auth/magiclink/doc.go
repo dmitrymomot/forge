@@ -40,8 +40,10 @@
 // failure; redemption fails closed).
 //
 // The token arrives as attacker-controlled input before signature
-// verification, and verification cost is linear in its length, so callers
-// should bound the token query-parameter/form-field size at the HTTP layer.
+// verification, and verification cost is linear in its length. Peek and Redeem
+// reject links over a generous default cap (8192 bytes) before any decode as
+// defense-in-depth; tune it with WithMaxTokenLength, and still prefer bounding
+// the token query-parameter/form-field size at the HTTP layer.
 //
 // Multi-tenant apps bind links to a tenant with WithScope: Issue stamps the
 // scope resolved from ctx into the token, Peek/Redeem recompute it and fail

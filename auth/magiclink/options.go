@@ -11,6 +11,12 @@ import (
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
+// defaultMaxTokenLength caps accepted link length before any decode/verify
+// work, as defense-in-depth against oversized-input CPU abuse. It is generous
+// — a magic link must fit in a URL, which servers cap well below this — while
+// still bounding a forgotten HTTP-layer limit. Tune with WithMaxTokenLength.
+const defaultMaxTokenLength = 8192
+
 type config struct {
 	clk     clock.Clock
 	store   cache.Store
@@ -20,13 +26,14 @@ type config struct {
 	param   string
 	errs    []error
 	ttl     time.Duration
+	maxLen  int
 }
 
 // Option configures New/FromKeyset.
 type Option func(*config)
 
 func newConfig(purpose string, opts ...Option) (*config, error) {
-	c := &config{clk: clock.System(), ttl: 15 * time.Minute, param: "token"}
+	c := &config{clk: clock.System(), ttl: 15 * time.Minute, param: "token", maxLen: defaultMaxTokenLength}
 	for _, o := range opts {
 		o(c)
 	}
@@ -129,6 +136,20 @@ func WithBaseURL(u string) Option {
 			return
 		}
 		c.baseURL = u
+	}
+}
+
+// WithMaxTokenLength caps the accepted link length (default 8192 bytes); Peek
+// and Redeem reject longer input with ErrInvalid before any base64/JSON/HMAC
+// work — defense-in-depth against oversized-input CPU abuse on endpoints that
+// forgot an HTTP-layer size limit. n must be positive.
+func WithMaxTokenLength(n int) Option {
+	return func(c *config) {
+		if n <= 0 {
+			c.errs = append(c.errs, errors.New("magiclink: max token length must be positive"))
+			return
+		}
+		c.maxLen = n
 	}
 }
 
