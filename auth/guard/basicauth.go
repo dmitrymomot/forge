@@ -64,21 +64,24 @@ func BasicAuth(users map[string]string, opts ...Option) middleware.Middleware {
 				reject(ErrInvalidCredential)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(identityKey.With(r.Context(), Identity{Subject: user, Method: "basic"})))
+			next.ServeHTTP(w, r.WithContext(identityKey.With(r.Context(), Identity{Subject: user, Method: MethodBasic})))
 		})
 	}
 }
 
 // ParseUsers parses BasicAuth credentials from the "user1:pass1,user2:pass2"
 // env-string format. Passwords may contain colons (the split is at the first
-// colon) but not commas. It rejects (wrapping ErrInvalidUsers) empty input,
-// entries without a colon, empty usernames or passwords, and duplicate
-// usernames.
+// colon) but not commas. Whitespace surrounding each username and password
+// is trimmed, so a password cannot carry leading/trailing spaces via this
+// helper; internal spaces are preserved. It rejects (wrapping
+// ErrInvalidUsers) empty input, entries without a colon, empty usernames or
+// passwords, and duplicate usernames.
 func ParseUsers(s string) (map[string]string, error) {
 	entries := strings.Split(s, ",")
 	users := make(map[string]string, len(entries))
 	for _, e := range entries {
 		user, pass, found := strings.Cut(strings.TrimSpace(e), ":")
+		user, pass = strings.TrimSpace(user), strings.TrimSpace(pass)
 		if !found || user == "" || pass == "" {
 			return nil, fmt.Errorf("%w: entry %q", ErrInvalidUsers, e)
 		}

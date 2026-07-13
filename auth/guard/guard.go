@@ -18,9 +18,21 @@ type Identity struct {
 	Meta    map[string]string // verifier-specific extras (email, key id, …)
 	Subject string            // principal id — never empty on success
 	Tenant  string            // optional tenant id
-	Method  string            // how the request authenticated: "bearer", "session", "apikey", "basic"
+	Method  Method            // how the request authenticated; see the Method* constants
 	Scopes  []string          // permissions/scopes for the future authz seam
 }
+
+// Method names how a request authenticated. The constants below cover the
+// built-in gate (MethodBasic) and the first-party adapters; Method is a plain
+// string type, so a custom Verifier may set its own value.
+type Method string
+
+const (
+	MethodBearer  Method = "bearer"  // Authorization: Bearer (auth/jwt, auth/apikey)
+	MethodSession Method = "session" // session cookie (auth/session)
+	MethodAPIKey  Method = "apikey"  // API key
+	MethodBasic   Method = "basic"   // HTTP Basic Auth (guard.BasicAuth)
+)
 
 // Verifier turns an extracted credential into an Identity. A returned error
 // means the credential is rejected: the middleware answers 401 and never

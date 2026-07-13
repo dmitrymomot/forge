@@ -116,6 +116,7 @@ func TestParseUsers(t *testing.T) {
 		{"single", "ops:s3cret", map[string]string{"ops": "s3cret"}, false},
 		{"multiple with space", "a:1, b:2", map[string]string{"a": "1", "b": "2"}, false},
 		{"password with colon", "ops:pa:ss", map[string]string{"ops": "pa:ss"}, false},
+		{"whitespace around colon", "ops : s3cret", map[string]string{"ops": "s3cret"}, false},
 		{"empty input", "", nil, true},
 		{"no colon", "opspass", nil, true},
 		{"empty user", ":pass", nil, true},

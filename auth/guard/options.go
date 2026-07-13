@@ -22,11 +22,16 @@ type Option func(*config)
 // WithExtractors replaces the default extractor chain (BearerHeader only).
 // Extractors run in order and the first hit wins — later extractors are not
 // fallbacks for a credential that fails verification. Panics on an empty
-// list: a guard that can never find a credential is a wiring bug. BasicAuth
-// ignores this option (its scheme is fixed).
+// list or a nil extractor: a guard that can never find a credential is a
+// wiring bug. BasicAuth ignores this option (its scheme is fixed).
 func WithExtractors(xs ...Extractor) Option {
 	if len(xs) == 0 {
 		panic("guard: WithExtractors requires at least one extractor")
+	}
+	for _, x := range xs {
+		if x == nil {
+			panic("guard: WithExtractors received a nil extractor")
+		}
 	}
 	return func(c *config) { c.extractors = xs }
 }

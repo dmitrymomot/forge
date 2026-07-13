@@ -28,6 +28,13 @@ func TestWithExtractors_EmptyPanics(t *testing.T) {
 	})
 }
 
+func TestWithExtractors_NilElementPanics(t *testing.T) {
+	t.Parallel()
+	mustPanic(t, "WithExtractors(nil)", func() {
+		guard.New(okVerifier(), guard.WithExtractors(nil))
+	})
+}
+
 func TestBasicAuth_EmptyUsersPanics(t *testing.T) {
 	t.Parallel()
 	mustPanic(t, "BasicAuth(nil)", func() { guard.BasicAuth(nil) })

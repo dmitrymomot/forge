@@ -19,7 +19,7 @@
 //		if err != nil {
 //			return guard.Identity{}, err // client sees a generic 401
 //		}
-//		return guard.Identity{Subject: c.Subject, Tenant: c.TenantID, Scopes: c.Scopes, Method: "bearer"}, nil
+//		return guard.Identity{Subject: c.Subject, Tenant: c.TenantID, Scopes: c.Scopes, Method: guard.MethodBearer}, nil
 //	})
 //
 //	authn := guard.New(verifier, guard.WithChallenge(`Bearer realm="api"`))
