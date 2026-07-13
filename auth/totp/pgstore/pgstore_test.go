@@ -76,6 +76,60 @@ func TestPg_SaveGetRoundTrip(t *testing.T) {
 	assert.True(t, got.LastUsedAt.IsZero(), "NULL maps back to zero time")
 }
 
+func TestPg_SavePendingAndConfirm(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	sub := subj()
+	secret := []byte("sealed-" + sub)
+
+	// SavePending on absent → stores a pending record with no backup codes.
+	ok, err := s.SavePending(ctx, "", sub, &totp.Record{Secret: secret})
+	require.NoError(t, err)
+	assert.True(t, ok)
+	got, err := s.Get(ctx, "", sub)
+	require.NoError(t, err)
+	assert.False(t, got.Confirmed)
+	assert.Equal(t, secret, got.Secret)
+	assert.Empty(t, got.BackupHashes)
+	assert.True(t, got.LastUsedAt.IsZero())
+
+	// SavePending again overwrites the still-pending secret.
+	secret2 := []byte("sealed2-" + sub)
+	ok, err = s.SavePending(ctx, "", sub, &totp.Record{Secret: secret2})
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	// Confirm with the stale secret → refused (a racing SavePending swapped it).
+	at := time.Unix(1_700_000_050, 0).UTC()
+	ok, err = s.Confirm(ctx, "", sub, secret, at, [][]byte{{1}})
+	require.NoError(t, err)
+	assert.False(t, ok, "secret mismatch must not confirm")
+
+	// Confirm with the current secret → activates.
+	ok, err = s.Confirm(ctx, "", sub, secret2, at, [][]byte{{1, 2}, {3, 4}})
+	require.NoError(t, err)
+	assert.True(t, ok)
+	got, err = s.Get(ctx, "", sub)
+	require.NoError(t, err)
+	assert.True(t, got.Confirmed)
+	assert.True(t, got.LastUsedAt.Equal(at))
+	assert.Equal(t, [][]byte{{1, 2}, {3, 4}}, got.BackupHashes)
+
+	// Confirm again → false (already confirmed).
+	ok, err = s.Confirm(ctx, "", sub, secret2, at, [][]byte{{9}})
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// SavePending must refuse to clobber a confirmed enrollment.
+	ok, err = s.SavePending(ctx, "", sub, &totp.Record{Secret: []byte("sealed3")})
+	require.NoError(t, err)
+	assert.False(t, ok)
+	got, err = s.Get(ctx, "", sub)
+	require.NoError(t, err)
+	assert.True(t, got.Confirmed)
+	assert.Equal(t, secret2, got.Secret, "confirmed record untouched")
+}
+
 func TestPg_MarkUsed(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

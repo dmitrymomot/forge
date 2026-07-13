@@ -82,6 +82,48 @@ func (s *Store) Save(ctx context.Context, tenant, subject string, r *totp.Record
 	return err
 }
 
+// SavePending atomically stores a fresh pending enrollment, refusing to
+// overwrite a confirmed one — the ON CONFLICT DO UPDATE ... WHERE clause makes
+// the guard atomic against a concurrent Confirm, so a racing BeginEnroll
+// cannot revert a just-confirmed enrollment to pending.
+func (s *Store) SavePending(ctx context.Context, tenant, subject string, r *totp.Record) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO forge_totp (tenant, subject, secret, confirmed, last_used_at, backup_hashes)
+		 VALUES ($1, $2, $3, false, NULL, '{}'::bytea[])
+		 ON CONFLICT (tenant, subject) DO UPDATE SET
+		   secret = EXCLUDED.secret,
+		   confirmed = false,
+		   last_used_at = NULL,
+		   backup_hashes = '{}'::bytea[],
+		   updated_at = now()
+		 WHERE forge_totp.confirmed = false`,
+		tenant, subject, r.Secret)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// Confirm atomically activates a pending enrollment only if it is still
+// pending and its secret is unchanged. The WHERE clause resolves concurrent
+// confirms of the same code — and a racing SavePending that swapped the secret
+// — to exactly one winner, and never activates a secret the user did not prove.
+func (s *Store) Confirm(ctx context.Context, tenant, subject string, expectedSecret []byte, lastUsedAt time.Time, hashes [][]byte) (bool, error) {
+	h := hashes
+	if h == nil {
+		h = [][]byte{}
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE forge_totp
+		 SET confirmed = true, last_used_at = $3, backup_hashes = $4, updated_at = now()
+		 WHERE tenant = $1 AND subject = $2 AND confirmed = false AND secret = $5`,
+		tenant, subject, lastUsedAt, h, expectedSecret)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // Delete removes the record; absent is a no-op.
 func (s *Store) Delete(ctx context.Context, tenant, subject string) error {
 	_, err := s.pool.Exec(ctx,

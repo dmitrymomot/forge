@@ -122,14 +122,10 @@ func (m *Manager) openSecret(r *Record) (string, error) {
 // plaintext secret and provisioning URI for the UI. ErrAlreadyEnrolled if a
 // confirmed enrollment exists; Disable first to re-enroll.
 //
-// The ErrAlreadyEnrolled guard is check-then-act, not atomic: a BeginEnroll
-// racing a concurrent ConfirmEnroll for the same subject can read the record
-// while it is still pending and then overwrite the just-confirmed enrollment
-// back to unconfirmed, orphaning the backup codes ConfirmEnroll returned.
-// Enroll and confirm are sequential user actions, so this needs two in-flight
-// requests for one subject at the same instant; serialize per-subject
-// enrollment (or gate on a conditional store write) if that is reachable in
-// your deployment.
+// The confirmed-enrollment guard is the atomic Store.SavePending write, not a
+// separate read: a BeginEnroll racing a concurrent ConfirmEnroll for the same
+// subject cannot overwrite the just-confirmed enrollment — SavePending refuses
+// once the record is confirmed and returns ErrAlreadyEnrolled here.
 func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*Enrollment, error) {
 	if subject == "" {
 		return nil, errors.New("totp: empty subject")
@@ -137,13 +133,6 @@ func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*En
 	tenant, err := m.tenant(ctx)
 	if err != nil {
 		return nil, err
-	}
-	existing, err := m.store.Get(ctx, tenant, subject)
-	switch {
-	case err == nil && existing.Confirmed:
-		return nil, ErrAlreadyEnrolled
-	case err != nil && !errors.Is(err, ErrNotFound):
-		return nil, fmt.Errorf("totp: store get: %w", err)
 	}
 	plain, err := m.t.GenerateSecret()
 	if err != nil {
@@ -153,8 +142,12 @@ func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*En
 	if err != nil {
 		return nil, fmt.Errorf("totp: seal secret: %w", err)
 	}
-	if err := m.store.Save(ctx, tenant, subject, &Record{Secret: sealed}); err != nil {
-		return nil, fmt.Errorf("totp: store save: %w", err)
+	ok, err := m.store.SavePending(ctx, tenant, subject, &Record{Secret: sealed})
+	if err != nil {
+		return nil, fmt.Errorf("totp: store save pending: %w", err)
+	}
+	if !ok {
+		return nil, ErrAlreadyEnrolled
 	}
 	return &Enrollment{Secret: plain, URI: m.t.ProvisioningURI(plain, account)}, nil
 }
@@ -163,6 +156,13 @@ func (m *Manager) BeginEnroll(ctx context.Context, subject, account string) (*En
 // first code, activates the record, and returns the one-time backup codes —
 // the only time they exist in plaintext. ErrNotEnrolled without a pending
 // record; ErrInvalidCode leaves the record pending for another attempt.
+//
+// Activation is the atomic Store.Confirm write, gated on the enrollment still
+// being pending with the same secret. So concurrent double-submits of the same
+// first code resolve to exactly one winner — only that call stores and returns
+// backup codes; the losers get ErrAlreadyEnrolled — and a confirm racing a
+// BeginEnroll that swapped the secret never activates a secret the user did
+// not prove.
 func (m *Manager) ConfirmEnroll(ctx context.Context, subject, code string) ([]string, error) {
 	tenant, err := m.tenant(ctx)
 	if err != nil {
@@ -187,11 +187,25 @@ func (m *Manager) ConfirmEnroll(ctx context.Context, subject, code string) ([]st
 	if err != nil {
 		return nil, err
 	}
-	rec.Confirmed = true
-	rec.LastUsedAt = matchedAt
-	rec.BackupHashes = hashes
-	if err := m.store.Save(ctx, tenant, subject, rec); err != nil {
-		return nil, fmt.Errorf("totp: store save: %w", err)
+	ok, err := m.store.Confirm(ctx, tenant, subject, rec.Secret, matchedAt, hashes)
+	if err != nil {
+		return nil, fmt.Errorf("totp: store confirm: %w", err)
+	}
+	if !ok {
+		// Lost the race: a concurrent confirm won, the enrollment was disabled,
+		// or a concurrent BeginEnroll replaced the pending secret. Disambiguate
+		// so the caller sees a truthful terminal error instead of our codes.
+		cur, gerr := m.store.Get(ctx, tenant, subject)
+		switch {
+		case errors.Is(gerr, ErrNotFound):
+			return nil, ErrNotEnrolled
+		case gerr != nil:
+			return nil, fmt.Errorf("totp: store get: %w", gerr)
+		case cur.Confirmed:
+			return nil, ErrAlreadyEnrolled
+		default:
+			return nil, ErrNotEnrolled
+		}
 	}
 	return codes, nil
 }

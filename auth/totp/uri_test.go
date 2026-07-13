@@ -63,3 +63,17 @@ func TestProvisioningURI_EscapesLabel(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Ac/me:Corp", u.Query().Get("issuer"))
 }
+
+func TestProvisioningURI_EscapesColonInLabelParts(t *testing.T) {
+	t.Parallel()
+	tp, err := totp.New(totp.WithIssuer("Foo:Bar"))
+	require.NoError(t, err)
+	uri := tp.ProvisioningURI("JBSWY3DPEHPK3PXP", "user:name@x.io")
+	label := strings.TrimPrefix(uri[:strings.Index(uri, "?")], "otpauth://totp/")
+	// Colons inside the issuer and account are escaped, so the label carries
+	// exactly one literal colon — the Issuer:account separator apps split on.
+	assert.Equal(t, 1, strings.Count(label, ":"), "label = %q", label)
+	u, err := url.Parse(uri)
+	require.NoError(t, err)
+	assert.Equal(t, "Foo:Bar", u.Query().Get("issuer"), "raw issuer stays authoritative in the query param")
+}

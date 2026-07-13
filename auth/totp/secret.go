@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/random"
@@ -27,15 +28,24 @@ func (t *TOTP) GenerateSecret() (string, error) {
 // is empty); issuer, algorithm, digits, and period ride as query params so
 // the app enrolls with exactly the parameters Verify checks.
 func (t *TOTP) ProvisioningURI(secret, account string) string {
-	label := url.PathEscape(account)
+	label := escapeLabelPart(account)
 	q := url.Values{}
 	q.Set("secret", secret)
 	if t.cfg.issuer != "" {
-		label = url.PathEscape(t.cfg.issuer) + ":" + label
+		label = escapeLabelPart(t.cfg.issuer) + ":" + label
 		q.Set("issuer", t.cfg.issuer)
 	}
 	q.Set("algorithm", t.cfg.algorithm.String())
 	q.Set("digits", strconv.Itoa(t.cfg.digits))
 	q.Set("period", strconv.FormatInt(int64(t.cfg.period/time.Second), 10))
 	return "otpauth://totp/" + label + "?" + q.Encode()
+}
+
+// escapeLabelPart path-escapes an otpauth label component and, unlike
+// url.PathEscape, also escapes the colon: a colon inside the issuer or account
+// would otherwise be indistinguishable from the Issuer:account separator that
+// authenticator apps split on. The authoritative issuer= query param still
+// carries the raw value.
+func escapeLabelPart(s string) string {
+	return strings.ReplaceAll(url.PathEscape(s), ":", "%3A")
 }

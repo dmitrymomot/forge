@@ -108,9 +108,24 @@
 //
 // # Custom stores
 //
-// A Store implementation is four CRUD-ish methods plus two atomic gates.
-// All correctness lives in the gates:
+// A Store implementation is four CRUD-ish methods (Get, Save, Delete,
+// DeleteTenant) plus four atomic gates. All concurrency correctness lives in
+// the gates — each is a single conditional statement that reports, via its
+// bool, whether it won:
 //
+//   - SavePending(tenant, subject, r) must upsert a fresh pending record but
+//     refuse to overwrite a confirmed one, so a BeginEnroll cannot revert an
+//     enrollment a concurrent Confirm just activated. Reference SQL:
+//     INSERT INTO forge_totp (tenant,subject,secret,confirmed,backup_hashes)
+//     VALUES ($1,$2,$3,false,'{}') ON CONFLICT (tenant,subject) DO UPDATE
+//     SET secret=EXCLUDED.secret, confirmed=false, last_used_at=NULL,
+//     backup_hashes='{}' WHERE forge_totp.confirmed=false
+//   - Confirm(tenant, subject, expectedSecret, usedAt, hashes) must activate a
+//     pending record only if it is still pending and its secret is unchanged,
+//     so concurrent confirms resolve to one winner and a confirm never
+//     activates a swapped secret. Reference SQL:
+//     UPDATE forge_totp SET confirmed=true, last_used_at=$3, backup_hashes=$4
+//     WHERE tenant=$1 AND subject=$2 AND confirmed=false AND secret=$5
 //   - MarkUsed(tenant, subject, usedAt) must atomically set LastUsedAt =
 //     usedAt only if the stored value is earlier (or zero), reporting
 //     whether it did. Reference SQL:
@@ -121,7 +136,7 @@
 //     UPDATE forge_totp SET backup_hashes=array_remove(backup_hashes,$3)
 //     WHERE tenant=$1 AND subject=$2 AND $3 = ANY(backup_hashes)
 //
-// Both report false (not an error) when the condition fails, including for
+// All four report false (not an error) when the condition fails, including for
 // absent records. Tenant is compared only by equality; "" is the unscoped
 // namespace.
 //
