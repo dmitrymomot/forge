@@ -133,3 +133,47 @@ func TestMemoryStore_CloneIsolation(t *testing.T) {
 	assert.Equal(t, "v", got2.Meta["k"])
 	assert.Equal(t, "read", got2.Scopes[0])
 }
+
+// TestMemoryStore_NilScopesMetaNormalized pins parity with the pgstore
+// driver: nil Scopes/Meta are stored and returned as non-nil empties, and a
+// List with no matches returns a non-nil empty slice — so callers see
+// identical shapes whichever Store backs the Manager.
+func TestMemoryStore_NilScopesMetaNormalized(t *testing.T) {
+	t.Parallel()
+	s := apikey.NewMemoryStore()
+	ctx := context.Background()
+	k := apikey.Key{
+		ID:        id.UUID{15: 1},
+		Hash:      "h1",
+		Preview:   "key_preview1",
+		Subject:   "u1",
+		Scopes:    nil, // caller passed nil …
+		Meta:      nil, // … for both reference fields
+		CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, s.Create(ctx, k))
+
+	got, err := s.Get(ctx, k.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, got.Scopes)
+	assert.Empty(t, got.Scopes)
+	assert.NotNil(t, got.Meta)
+	assert.Empty(t, got.Meta)
+
+	byHash, err := s.GetByHash(ctx, "h1")
+	require.NoError(t, err)
+	assert.NotNil(t, byHash.Scopes)
+	assert.NotNil(t, byHash.Meta)
+
+	listed, err := s.List(ctx, apikey.Filter{Subject: "u1"})
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.NotNil(t, listed[0].Scopes)
+	assert.NotNil(t, listed[0].Meta)
+
+	// No matches → non-nil empty slice, never nil.
+	none, err := s.List(ctx, apikey.Filter{Subject: "nobody"})
+	require.NoError(t, err)
+	assert.NotNil(t, none)
+	assert.Empty(t, none)
+}

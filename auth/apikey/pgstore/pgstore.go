@@ -93,7 +93,9 @@ func (s *Store) List(ctx context.Context, f apikey.Filter) ([]apikey.Key, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []apikey.Key
+	// Non-nil empty (not nil) on zero rows, matching the memory store so
+	// callers see identical List results whichever Store backs the Manager.
+	out := []apikey.Key{}
 	for rows.Next() {
 		k, err := scanKey(rows)
 		if err != nil {

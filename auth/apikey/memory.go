@@ -26,10 +26,19 @@ func NewMemoryStore() Store {
 }
 
 // cloneKey copies the record's reference fields so callers cannot mutate
-// stored state through shared slices/maps (and vice versa).
+// stored state through shared slices/maps (and vice versa). Nil Scopes and
+// Meta are normalized to non-nil empty values so this store matches the
+// pgstore driver, which persists them as empty text[]/jsonb: callers see the
+// same non-nil empties whichever Store backs the Manager.
 func cloneKey(k Key) Key {
 	k.Scopes = slices.Clone(k.Scopes)
+	if k.Scopes == nil {
+		k.Scopes = []string{}
+	}
 	k.Meta = maps.Clone(k.Meta)
+	if k.Meta == nil {
+		k.Meta = map[string]string{}
+	}
 	return k
 }
 

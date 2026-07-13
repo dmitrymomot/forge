@@ -90,6 +90,16 @@ func TestPg_NotFound(t *testing.T) {
 	assert.ErrorIs(t, s.Touch(ctx, id.NewUUID(), time.Now()), apikey.ErrNotFound)
 }
 
+// TestPg_ListEmptyNonNil pins parity with the memory store: a List with no
+// matches returns a non-nil empty slice, never nil.
+func TestPg_ListEmptyNonNil(t *testing.T) {
+	s := newStore(t)
+	none, err := s.List(context.Background(), apikey.Filter{Tenant: "tenant-" + id.NewUUID().String()})
+	require.NoError(t, err)
+	assert.NotNil(t, none)
+	assert.Empty(t, none)
+}
+
 func TestPg_DuplicateHash(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
