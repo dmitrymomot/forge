@@ -237,3 +237,11 @@ func TestCommitment(t *testing.T) {
 	other[0] ^= 1
 	assert.False(t, rng.VerifyCommitment(other, c))
 }
+
+func TestStreamDraws_ZeroAlloc(t *testing.T) {
+	s, err := rng.New(testSeed(), "alloc", 0)
+	require.NoError(t, err)
+	assert.Zero(t, testing.AllocsPerRun(1000, func() { _ = s.Uint64() }), "Uint64")
+	assert.Zero(t, testing.AllocsPerRun(1000, func() { _ = s.IntN(100) }), "IntN")
+	assert.Zero(t, testing.AllocsPerRun(1000, func() { _ = s.Float64() }), "Float64")
+}

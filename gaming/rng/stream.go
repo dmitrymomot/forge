@@ -97,22 +97,16 @@ func (s *Stream) refill() {
 	s.off = 0
 }
 
-func (s *Stream) read(p []byte) {
-	for len(p) > 0 {
-		if s.off == sha256.Size {
-			s.refill()
-		}
-		n := copy(p, s.block[s.off:])
-		s.off += n
-		p = p[n:]
-	}
-}
-
 // Uint64 returns the next 8 stream bytes as a big-endian unsigned integer.
+// The block size (32) is a multiple of 8, so a draw never needs to splice
+// across a refill boundary — read straight out of s.block.
 func (s *Stream) Uint64() uint64 {
-	var b [8]byte
-	s.read(b[:])
-	return binary.BigEndian.Uint64(b[:])
+	if s.off == sha256.Size {
+		s.refill()
+	}
+	v := binary.BigEndian.Uint64(s.block[s.off:])
+	s.off += 8
+	return v
 }
 
 // IntN returns a uniform int in [0, n) via rejection sampling (rng/v1:
