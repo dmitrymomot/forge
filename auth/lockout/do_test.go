@@ -57,9 +57,9 @@ func TestDoCrossingThresholdReturnsLockedError(t *testing.T) {
 
 	var le *lockout.LockedError
 	require.ErrorAs(t, err, &le)
-	require.True(t, le.Result.Locked)
-	require.Equal(t, time.Minute, le.Result.RetryAfter)
-	require.EqualValues(t, 2, le.Result.Failures)
+	require.True(t, le.Result.Locked)                   //nolint:nilaway // le is guaranteed non-nil by require.ErrorAs above
+	require.Equal(t, time.Minute, le.Result.RetryAfter) //nolint:nilaway // le is guaranteed non-nil by require.ErrorAs above
+	require.EqualValues(t, 2, le.Result.Failures)       //nolint:nilaway // le is guaranteed non-nil by require.ErrorAs above
 }
 
 func TestDoLockedOnEntry(t *testing.T) {
@@ -79,7 +79,7 @@ func TestDoLockedOnEntry(t *testing.T) {
 
 	var le *lockout.LockedError
 	require.ErrorAs(t, err, &le)
-	require.Positive(t, le.Result.RetryAfter)
+	require.Positive(t, le.Result.RetryAfter) //nolint:nilaway // le is guaranteed non-nil by require.ErrorAs above
 }
 
 func TestDoInfraErrorPassthroughUncounted(t *testing.T) {
