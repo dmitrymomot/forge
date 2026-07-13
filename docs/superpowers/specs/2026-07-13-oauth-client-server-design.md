@@ -243,12 +243,14 @@ fleet error contract. Internal Go error text never reaches response bodies.
 
 ### Authorize endpoint — `srv.AuthorizeHandler()`, GET
 
-First-party user flow (mirrors/trusted apps). Both seams are optional at
-`New` (an M2M-only server needs neither); fail-closed at use instead:
-`AuthorizeHandler() (http.Handler, error)` errors unless both
-`WithAuthenticator` and `WithCodeStore` are set, and the token endpoint
-rejects `authorization_code` with `unsupported_grant_type` when no code
-store is configured.
+First-party user flow (mirrors/trusted apps). The three auth-code inputs —
+`WithAuthenticator`, `WithCodeStore`, and `WithCodeKeyset` (the
+`crypto/token` keyset that seals codes; the jwt.Signer's key material is
+not accessible for HMAC sealing) — are optional at `New` (an M2M-only
+server needs none); fail-closed at use instead:
+`AuthorizeHandler() (http.Handler, error)` errors unless all three are
+set, and the token endpoint rejects `authorization_code` with
+`unsupported_grant_type` when the code store or code keyset is missing.
 
 1. Validate `response_type=code`, client exists + grant allowed,
    `redirect_uri` exactly ∈ allowlist, `code_challenge` present with
