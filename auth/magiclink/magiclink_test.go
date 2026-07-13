@@ -424,3 +424,31 @@ func TestURLOptionValidation(t *testing.T) {
 	_, err = magiclink.New[loginClaims](testKey, "login", magiclink.WithBaseURL("://bad"))
 	require.Error(t, err, "unparsable base URL must be rejected")
 }
+
+func TestIssueURLBadBaseErrors(t *testing.T) {
+	m, err := magiclink.New[loginClaims](testKey, "login")
+	require.NoError(t, err)
+
+	// An unparsable per-call base is used directly (no fallback) and must
+	// surface the url.Parse failure.
+	_, err = m.IssueURL(context.Background(), "://bad", loginClaims{UserID: "u_1"})
+	require.Error(t, err)
+}
+
+func TestIssueURLScopeHookError(t *testing.T) {
+	hookErr := errors.New("no tenant in ctx")
+	m, err := magiclink.New[loginClaims](testKey, "login",
+		magiclink.WithScope(func(ctx context.Context) (string, error) {
+			if v, ok := ctx.Value(tenantKey{}).(string); ok {
+				return v, nil
+			}
+			return "", hookErr
+		}))
+	require.NoError(t, err)
+
+	// IssueURL delegates issuance to Issue, so the scope-hook error must
+	// propagate through IssueURL -> Issue -> resolveScope.
+	_, err = m.IssueURL(context.Background(), "https://app.example.com/verify",
+		loginClaims{UserID: "u_1"})
+	assert.ErrorIs(t, err, hookErr)
+}
