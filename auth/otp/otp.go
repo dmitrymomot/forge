@@ -2,6 +2,7 @@ package otp
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -106,4 +107,66 @@ func (o *OTP) storageKey(scope, identifier string) string {
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(identifier)))
 	buf = append(buf, identifier...)
 	return "otp:" + o.cfg.purpose + ":" + hex.EncodeToString(digest.SHA256(buf))
+}
+
+// Verify checks code against the active record for identifier. It is
+// single-use: a successful verification deletes the record. A mismatch
+// consumes one attempt; consuming the last attempt (or meeting an already
+// consumed limit) invalidates the code. Callers should map ErrNotFound and
+// ErrCodeMismatch to one user-facing message ("invalid or expired code") so
+// responses reveal nothing about code existence.
+func (o *OTP) Verify(ctx context.Context, identifier, code string) error {
+	scope, err := o.resolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	key := o.storageKey(scope, identifier)
+
+	raw, err := o.store.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, cache.ErrNotFound) {
+			return ErrNotFound
+		}
+		return errors.Join(ErrStore, err)
+	}
+	rec, ok := decodeRecord(raw)
+	if !ok {
+		// Unknown version or corrupt payload: treat as revoked. Best-effort
+		// cleanup — the entry also dies by store TTL.
+		_ = o.store.Delete(ctx, key)
+		return ErrNotFound
+	}
+	now := o.cfg.clock.Now()
+	remaining := time.Unix(rec.expiresAt, 0).Sub(now)
+	if remaining <= 0 {
+		// Defense-in-depth for stores that ignore TTL; also closes the
+		// cache seam's TTL<=0-means-eternal edge on the rewrite below.
+		_ = o.store.Delete(ctx, key)
+		return ErrNotFound
+	}
+	if int(rec.attempts) >= o.cfg.maxAttempts {
+		// Only reachable when a concurrent mismatch raced the rewrite;
+		// deletion already happened or happens here.
+		_ = o.store.Delete(ctx, key)
+		return ErrTooManyAttempts
+	}
+	if !hmac.Equal(digest.HMACSHA256(o.secret, []byte(code)), rec.codeHash[:]) {
+		rec.attempts++
+		if int(rec.attempts) >= o.cfg.maxAttempts {
+			if err := o.store.Delete(ctx, key); err != nil {
+				return errors.Join(ErrStore, err)
+			}
+			return ErrTooManyAttempts
+		}
+		if err := o.store.Set(ctx, key, encodeRecord(rec), cache.WithTTL(remaining)); err != nil {
+			return errors.Join(ErrStore, err)
+		}
+		return ErrCodeMismatch
+	}
+	// Single-use: the delete must succeed before success is reported, or a
+	// live code would outlive a "verified" response.
+	if err := o.store.Delete(ctx, key); err != nil {
+		return errors.Join(ErrStore, err)
+	}
+	return nil
 }
