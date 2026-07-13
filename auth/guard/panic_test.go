@@ -27,3 +27,15 @@ func TestWithExtractors_EmptyPanics(t *testing.T) {
 		guard.New(okVerifier(), guard.WithExtractors())
 	})
 }
+
+func TestBasicAuth_EmptyUsersPanics(t *testing.T) {
+	t.Parallel()
+	mustPanic(t, "BasicAuth(nil)", func() { guard.BasicAuth(nil) })
+	mustPanic(t, "BasicAuth(empty)", func() { guard.BasicAuth(map[string]string{}) })
+}
+
+func TestWithRealm_InvalidPanics(t *testing.T) {
+	t.Parallel()
+	mustPanic(t, `WithRealm(quote)`, func() { guard.WithRealm(`sta"ging`) })
+	mustPanic(t, "WithRealm(control)", func() { guard.WithRealm("sta\nging") })
+}
