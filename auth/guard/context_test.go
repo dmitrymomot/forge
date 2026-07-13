@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/auth/guard"
@@ -59,11 +62,45 @@ func TestLogExtractor_NoIdentity(t *testing.T) {
 	}
 }
 
-func TestLogExtractor_SubjectOnly(t *testing.T) {
+func TestLogExtractor_ThroughMiddleware(t *testing.T) {
 	t.Parallel()
-	// There is no exported setter (only the middleware stores identities), so
-	// this test goes through the middleware in Task 3. For now assert only the
-	// empty-context contract above; this test body is extended in Task 3.
-	t.Skip("extended in Task 3 once New can store an Identity")
-	_ = slog.Attr{}
+	tests := []struct {
+		name   string
+		id     guard.Identity
+		tenant bool
+	}{
+		{"subject only", guard.Identity{Subject: "u1", Method: "test"}, false},
+		{"subject and tenant", guard.Identity{Subject: "u1", Tenant: "t1", Method: "test"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			v := guard.VerifierFunc(func(context.Context, string) (guard.Identity, error) {
+				return tt.id, nil
+			})
+			var attr slog.Attr
+			var ok bool
+			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attr, ok = guard.LogExtractor(r.Context())
+			})
+			h := guard.New(v)(inner)
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Authorization", "Bearer tok")
+			h.ServeHTTP(httptest.NewRecorder(), r)
+
+			if !ok {
+				t.Fatal("LogExtractor: ok = false behind the guard")
+			}
+			if attr.Key != "auth" {
+				t.Fatalf("attr key = %q, want auth", attr.Key)
+			}
+			s := attr.Value.String()
+			if !strings.Contains(s, "u1") {
+				t.Fatalf("attr %q does not contain subject", s)
+			}
+			if tt.tenant != strings.Contains(s, "t1") {
+				t.Fatalf("attr %q tenant presence, want %v", s, tt.tenant)
+			}
+		})
+	}
 }
