@@ -27,8 +27,22 @@ func newKey(prefix string) string {
 	b.WriteString(prefix)
 	b.WriteByte('_')
 	b.WriteString(payload)
-	b.WriteString(encodeChecksum(crc32.ChecksumIEEE([]byte(payload))))
+	b.WriteString(encodeChecksum(crc32String(payload)))
 	return b.String()
+}
+
+// crc32String computes the IEEE CRC32 of s without allocating. The
+// []byte(s) conversion crc32.ChecksumIEEE requires escapes to the heap
+// through the hardware-accelerated path, so validKey — the DoS-relevant
+// reject surface — computes the checksum over the string bytes directly
+// via the standard table-driven update. The result is identical to
+// crc32.ChecksumIEEE (same IEEE polynomial).
+func crc32String(s string) uint32 {
+	crc := ^uint32(0)
+	for i := range len(s) {
+		crc = crc32.IEEETable[byte(crc)^s[i]] ^ (crc >> 8)
+	}
+	return ^crc
 }
 
 // encodeChecksum renders v as fixed-width base62, most significant first.
@@ -44,10 +58,11 @@ func encodeChecksum(v uint32) string {
 // validKey reports whether credential is structurally valid for prefix:
 // exact length, prefix match, and payload CRC32 matching the checksum
 // suffix. CRC32 detects any burst error up to 32 bits, so every
-// single-character corruption is caught. The checksum is compared in
-// place (no encodeChecksum string) to keep this reject path
-// allocation-free — it is the DoS-relevant surface that shields the
-// store from credential-stuffing garbage.
+// single-character corruption is caught. The checksum is computed over the
+// string bytes directly (crc32String) and compared in place (no
+// encodeChecksum string) to keep this reject path allocation-free — it is
+// the DoS-relevant surface that shields the store from credential-stuffing
+// garbage.
 func validKey(prefix, credential string) bool {
 	wantLen := len(prefix) + 1 + payloadLen + checksumLen
 	if len(credential) != wantLen {
@@ -57,7 +72,7 @@ func validKey(prefix, credential string) bool {
 		return false
 	}
 	payload := credential[len(prefix)+1 : wantLen-checksumLen]
-	sum := crc32.ChecksumIEEE([]byte(payload))
+	sum := crc32String(payload)
 	suffix := credential[wantLen-checksumLen:]
 	for i := checksumLen - 1; i >= 0; i-- {
 		if suffix[i] != base62[sum%62] {
