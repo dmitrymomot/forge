@@ -483,3 +483,53 @@ func TestVerify_WrongVersionByte(t *testing.T) {
 		t.Fatalf("wrong-version record: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestRevoke(t *testing.T) {
+	t.Parallel()
+	o, err := otp.New(testSecret, newStore(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := o.Generate(t.Context(), "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Revoke(t.Context(), "user@example.com"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if err := o.Verify(t.Context(), "user@example.com", code); !errors.Is(err, otp.ErrNotFound) {
+		t.Fatalf("revoked code: err = %v, want ErrNotFound", err)
+	}
+	// Revoking with nothing outstanding is a no-op, not an error.
+	if err := o.Revoke(t.Context(), "user@example.com"); err != nil {
+		t.Fatalf("idempotent Revoke: %v", err)
+	}
+}
+
+// TestVerify_ConcurrentWrongGuesses exercises the documented read-modify-write
+// attempt counter under the race detector. The limit may be overshot by the
+// in-flight count (documented caveat), but a wrong code must NEVER verify.
+func TestVerify_ConcurrentWrongGuesses(t *testing.T) {
+	t.Parallel()
+	o, err := otp.New(testSecret, newStore(t), otp.WithMaxAttempts(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := o.Generate(t.Context(), "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := wrongCode(code)
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := o.Verify(t.Context(), "user@example.com", bad); err == nil {
+				t.Error("wrong code verified")
+			}
+		}()
+	}
+	wg.Wait()
+}

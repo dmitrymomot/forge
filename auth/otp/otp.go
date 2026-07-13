@@ -170,3 +170,17 @@ func (o *OTP) Verify(ctx context.Context, identifier, code string) error {
 	}
 	return nil
 }
+
+// Revoke deletes any outstanding code for identifier — cancel a pending
+// flow, or invalidate after an account-state change. Revoking when nothing
+// is outstanding is a no-op.
+func (o *OTP) Revoke(ctx context.Context, identifier string) error {
+	scope, err := o.resolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	if err := o.store.Delete(ctx, o.storageKey(scope, identifier)); err != nil {
+		return errors.Join(ErrStore, err)
+	}
+	return nil
+}
