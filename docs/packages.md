@@ -620,49 +620,6 @@ Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
 
 ---
 
-**auth/totp**
-
-The complete 2FA package: RFC 6238/4226 TOTP/HOTP secret generation,
-skew-window verify, otpauth:// provisioning URI, and one-time backup codes
-(generate/hash/verify-and-consume, constant-time). QR image rendering
-lights up via `core/qrcode`. Persistence is consumer DB.
-
-Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
-
----
-
-**auth/magiclink**
-
-Signed, TTL'd, single-use links over `crypto/token`: passwordless login,
-team invites (role/tenant claims as a documented example), verify and
-unsubscribe links. Stateless by default; `WithStore` for single-use
-redemption. Does not send email.
-
-Deps: `crypto/token`, `resilience/cache`.
-
----
-
-**auth/oauthclient**
-
-OAuth2/OIDC client: auth-code + PKCE, state, token exchange,
-id_token/userinfo verification via `auth/jwt` (alg-pinned), provider
-presets. On net/http over `httpclient` — no x/oauth2.
-
-Deps: `auth/jwt`, `web/httpclient`.
-
----
-
-**auth/oauthserver**
-
-Machine-to-machine OAuth2 provider for partner-facing APIs:
-client-credentials grant, token endpoint issuing short-lived JWTs via
-`auth/jwt`, JWKS endpoint, client registry behind a storage-agnostic
-Store. No auth-code-for-third-parties, no consent screens, no JWE.
-
-Deps: `auth/jwt`.
-
----
-
 **auth/scim**
 
 SCIM 2.0 provisioning server for enterprise directory sync (Okta/Entra):
