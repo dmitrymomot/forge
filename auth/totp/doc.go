@@ -34,7 +34,7 @@
 //	case errors.Is(err, totp.ErrReplayed), errors.Is(err, totp.ErrInvalidCode):
 //		// reject
 //	case err != nil:
-//		// operator problem (store down, wrong key material)
+//		// not enrolled, or an operator problem (store down, wrong key material)
 //	case res.UsedBackupCode && res.BackupRemaining <= 2:
 //		// warn: few backup codes left — offer RegenerateBackupCodes
 //	}
@@ -108,7 +108,7 @@
 //
 // # Custom stores
 //
-// A Store implementation is five CRUD-ish methods plus two atomic gates.
+// A Store implementation is four CRUD-ish methods plus two atomic gates.
 // All correctness lives in the gates:
 //
 //   - MarkUsed(tenant, subject, usedAt) must atomically set LastUsedAt =
