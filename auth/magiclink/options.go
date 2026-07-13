@@ -3,8 +3,6 @@ package magiclink
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/clock"
@@ -126,13 +124,8 @@ func WithBaseURL(u string) Option {
 			c.errs = append(c.errs, errors.New("magiclink: empty base URL"))
 			return
 		}
-		parsed, err := url.Parse(u)
-		if err != nil {
-			c.errs = append(c.errs, fmt.Errorf("magiclink: invalid base URL: %w", err))
-			return
-		}
-		if parsed.Scheme == "" || parsed.Host == "" {
-			c.errs = append(c.errs, fmt.Errorf("magiclink: base URL must be absolute (scheme and host): %q", u))
+		if _, err := parseAbsoluteURL(u); err != nil {
+			c.errs = append(c.errs, err)
 			return
 		}
 		c.baseURL = u

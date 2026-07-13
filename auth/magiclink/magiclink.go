@@ -85,6 +85,22 @@ func (m *Manager[T]) Issue(ctx context.Context, payload T) (string, error) {
 	return m.codec.Issue(envelope[T]{Payload: payload, Scope: scope})
 }
 
+// parseAbsoluteURL parses u and requires an absolute URL (both scheme and
+// host present), so a scheme-less base such as "app.example.com/verify" is
+// rejected rather than silently yielding a broken relative link. Shared by
+// WithBaseURL (construction) and IssueURL (per-call base) so the two paths
+// cannot drift apart.
+func parseAbsoluteURL(u string) (*url.URL, error) {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return nil, fmt.Errorf("magiclink: invalid base URL: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("magiclink: base URL must be absolute (scheme and host): %q", u)
+	}
+	return parsed, nil
+}
+
 // IssueURL issues a link token and appends it as a query parameter to base
 // (multi-tenant/white-label callers pass the tenant's base per call). An
 // empty base falls back to WithBaseURL; both empty is an error. Existing
@@ -96,12 +112,9 @@ func (m *Manager[T]) IssueURL(ctx context.Context, base string, payload T) (stri
 	if base == "" {
 		return "", errors.New("magiclink: no base URL")
 	}
-	u, err := url.Parse(base)
+	u, err := parseAbsoluteURL(base)
 	if err != nil {
-		return "", fmt.Errorf("magiclink: invalid base URL: %w", err)
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("magiclink: base URL must be absolute (scheme and host): %q", base)
+		return "", err
 	}
 	link, err := m.Issue(ctx, payload)
 	if err != nil {
