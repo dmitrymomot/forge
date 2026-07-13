@@ -641,17 +641,6 @@ Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
 
 ---
 
-**auth/magiclink**
-
-Signed, TTL'd, single-use links over `crypto/token`: passwordless login,
-team invites (role/tenant claims as a documented example), verify and
-unsubscribe links. Stateless by default; `WithStore` for single-use
-redemption. Does not send email.
-
-Deps: `crypto/token`, `resilience/cache`.
-
----
-
 **auth/oauthclient**
 
 OAuth2/OIDC client: auth-code + PKCE, state, token exchange,
