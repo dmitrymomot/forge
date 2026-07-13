@@ -45,15 +45,12 @@ type ProviderConfig struct {
 
 // reservedParams are authorize-URL parameters owned by the flow; AuthParams
 // may not override them.
-//
-//nolint:unused // consumed by Client.AuthURL/Begin, added in a later task of this bundle
 var reservedParams = map[string]bool{
 	"client_id": true, "redirect_uri": true, "response_type": true,
 	"scope": true, "state": true, "nonce": true,
 	"code_challenge": true, "code_challenge_method": true,
 }
 
-//nolint:unused // consumed by Client.AuthURL/Begin, added in a later task of this bundle
 func (p Provider) validate() error {
 	if p.ClientID == "" || p.AuthURL == "" || p.TokenURL == "" {
 		return fmt.Errorf("%w: provider needs ClientID, AuthURL and TokenURL", ErrInvalidConfig)
