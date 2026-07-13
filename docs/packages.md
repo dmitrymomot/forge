@@ -641,19 +641,6 @@ Deps: `core/qrcode`, `core/random`, `crypto/consttime`.
 
 ---
 
-**auth/apikey**
-
-The full API-key product for tenant- or user-owned keys: Stripe-style
-prefixed keys (`sk_live_…`) with checksum for cheap rejection, hash stored,
-plaintext shown once — plus management (create/list/revoke/rotate, per-key
-scopes, optional expiry, last-used-at tracking) behind a storage-agnostic
-Store, and request verification as a `guard.Verifier` (constant-time, key →
-identity/tenant resolution).
-
-Deps: `core/random`, `crypto/consttime`, `auth/guard`.
-
----
-
 **auth/magiclink**
 
 Signed, TTL'd, single-use links over `crypto/token`: passwordless login,
