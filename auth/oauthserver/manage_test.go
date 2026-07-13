@@ -113,6 +113,46 @@ func TestManagementTenancyScoping(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestManagementEmptyTenantFailsClosed covers a configured scope hook that
+// returns an empty tenant with a nil error (e.g. a ctx lookup yielding the
+// zero value for an unrecognized tenant) — this must fail closed rather than
+// hitting Store.List(ctx, "")'s "every tenant" sentinel and leaking every
+// client across every tenant.
+func TestManagementEmptyTenantFailsClosed(t *testing.T) {
+	store := oauthserver.NewMemoryStore()
+	// Seed a client directly (bypassing CreateClient, which itself rejects
+	// the empty-tenant hook below) so GetClient has a real row to reach the
+	// scope check with.
+	require.NoError(t, store.Create(context.Background(), oauthserver.Client{
+		ID: "client_seed", Name: "seed", TenantID: "real-tenant",
+	}))
+
+	cfg := oauthserver.DefaultConfig()
+	cfg.Issuer = "https://auth.example.com"
+	cfg.Audience = "https://api.example.com"
+	srv, err := oauthserver.New(testSigner(t), store,
+		oauthserver.WithConfig(cfg),
+		oauthserver.WithScope(func(ctx context.Context) (string, error) {
+			return "", nil
+		}),
+	)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = srv.CreateClient(ctx, oauthserver.CreateClientInput{
+		Name: "m1", Grants: []string{oauthserver.GrantClientCredentials},
+	})
+	require.ErrorIs(t, err, oauthserver.ErrInvalidConfig)
+
+	_, err = srv.ListClients(ctx)
+	require.Error(t, err)
+	require.ErrorIs(t, err, oauthserver.ErrInvalidConfig, "must not fall through to Store.List(ctx, \"\") and leak all tenants")
+
+	_, err = srv.GetClient(ctx, "client_seed")
+	require.Error(t, err)
+	require.ErrorIs(t, err, oauthserver.ErrInvalidConfig)
+}
+
 func TestNewValidation(t *testing.T) {
 	_, err := oauthserver.New(nil, oauthserver.NewMemoryStore())
 	require.ErrorIs(t, err, oauthserver.ErrInvalidConfig)

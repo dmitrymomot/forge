@@ -58,13 +58,9 @@ func (s *Server) CreateClient(ctx context.Context, in CreateClientInput) (*Clien
 			}
 		}
 	}
-	var tenant string
-	if s.scope != nil {
-		t, err := s.scope(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("oauthserver: scope hook: %w", err)
-		}
-		tenant = t
+	tenant, err := s.scopeTenant(ctx)
+	if err != nil {
+		return nil, err
 	}
 	secret := secretPrefix + random.URLSafe(32)
 	cl := Client{
@@ -124,12 +120,9 @@ func (s *Server) GetClient(ctx context.Context, clientID string) (Client, error)
 
 // ListClients returns the tenant's clients (all clients without WithScope).
 func (s *Server) ListClients(ctx context.Context) ([]Client, error) {
-	if s.scope == nil {
-		return s.store.List(ctx, "")
-	}
-	t, err := s.scope(ctx)
+	t, err := s.scopeTenant(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("oauthserver: scope hook: %w", err)
+		return nil, err
 	}
 	return s.store.List(ctx, t)
 }
@@ -142,13 +135,33 @@ func (s *Server) getScoped(ctx context.Context, clientID string) (Client, error)
 		return Client{}, err
 	}
 	if s.scope != nil {
-		t, err := s.scope(ctx)
+		t, err := s.scopeTenant(ctx)
 		if err != nil {
-			return Client{}, fmt.Errorf("oauthserver: scope hook: %w", err)
+			return Client{}, err
 		}
 		if cl.TenantID != t {
 			return Client{}, ErrClientNotFound
 		}
 	}
 	return cl, nil
+}
+
+// scopeTenant resolves the tenancy scope for the management methods. With no
+// scope hook it returns ("", nil) — single-tenant, every client is the
+// caller's. With a hook configured it must yield a non-empty tenant; an empty
+// string is rejected fail-closed, because Store.List treats "" as the
+// "every tenant" sentinel and an empty tenant would otherwise leak all
+// clients across tenants.
+func (s *Server) scopeTenant(ctx context.Context) (string, error) {
+	if s.scope == nil {
+		return "", nil
+	}
+	t, err := s.scope(ctx)
+	if err != nil {
+		return "", fmt.Errorf("oauthserver: scope hook: %w", err)
+	}
+	if t == "" {
+		return "", fmt.Errorf("%w: scope hook returned an empty tenant", ErrInvalidConfig)
+	}
+	return t, nil
 }

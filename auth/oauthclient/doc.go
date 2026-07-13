@@ -44,7 +44,10 @@
 // Enterprise/per-tenant IdPs: Discover(ctx, issuer, cfg) fills a Provider
 // from OIDC discovery at onboarding time; serve per-tenant providers via
 // WithProviderSource, and pin flows to a tenant with WithScope (the value
-// is sealed at Begin and must match at Complete — fail-closed).
+// is sealed at Begin and must match at Complete — fail-closed). The
+// id_token verifier cache is keyed per (issuer, jwks, clientID) and retained
+// for the process lifetime, so a WithProviderSource fleet accumulates one
+// entry per distinct tenant provider seen.
 //
 // Forge's own oauthserver is just another provider: hand-build
 // Provider{AuthURL, TokenURL, JWKSURL, Issuer, ClientID, ClientSecret,

@@ -112,7 +112,11 @@ func (c *Client) resolve(ctx context.Context, name string) (Provider, error) {
 	return Provider{}, fmt.Errorf("%w: %q", ErrUnknownProvider, name)
 }
 
-// verifierFor returns a cached alg-pinned verifier for p's id_tokens.
+// verifierFor returns a cached alg-pinned verifier for p's id_tokens. The
+// cache is unbounded and never evicts: fine for a static provider registry,
+// but with WithProviderSource resolving a distinct Provider per tenant it
+// grows one entry per distinct (issuer, jwks, clientID) for the process
+// lifetime — a consideration for large or rotating tenant fleets.
 func (c *Client) verifierFor(p Provider) (*jwt.Verifier, error) {
 	key := p.Issuer + "\x00" + p.JWKSURL + "\x00" + p.ClientID
 	if v, ok := c.verifiers.Load(key); ok {
