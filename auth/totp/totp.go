@@ -197,7 +197,9 @@ func (t *TOTP) Code(secret string, at time.Time) (string, error) {
 // rejects any match at or before lastUsed's step (ErrReplayed). On success
 // it returns the matched step-start time (UTC, whole seconds): persist it
 // and pass it back as lastUsed on the next call. Zero lastUsed = never
-// verified. ErrInvalidCode when no window matches.
+// verified; callers pass back only step-times from prior Verify results,
+// which are always after the Unix epoch. ErrInvalidCode when no window
+// matches.
 func (t *TOTP) Verify(secret, code string, lastUsed time.Time) (time.Time, error) {
 	key, err := decodeSecret(secret)
 	if err != nil {

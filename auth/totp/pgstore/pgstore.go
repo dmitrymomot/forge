@@ -148,6 +148,9 @@ func (s *Store) MarkUsed(ctx context.Context, tenant, subject string, usedAt tim
 
 // ConsumeBackup atomically removes hash if present; the ANY guard makes
 // concurrent consumes of the same code resolve to exactly one winner.
+// array_remove strips every occurrence, but backup hashes are SHA-256 of
+// distinct random codes and so are unique — it removes exactly one, matching
+// the memory store's remove-first-match.
 func (s *Store) ConsumeBackup(ctx context.Context, tenant, subject string, hash []byte) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE forge_totp SET backup_hashes = array_remove(backup_hashes, $3), updated_at = now()

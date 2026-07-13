@@ -19,6 +19,20 @@ func newVerifier(t *testing.T, at time.Time, opts ...totp.Option) *totp.TOTP {
 	return tp
 }
 
+// TestWithClock_NilKeepsDefault exercises the WithClock nil-guard: a nil clock
+// must leave the default (system) clock in place, and Verify must still work
+// against it — a code generated for "now" verifies within the default skew.
+func TestWithClock_NilKeepsDefault(t *testing.T) {
+	t.Parallel()
+	tp, err := totp.New(totp.WithClock(nil))
+	require.NoError(t, err)
+	secret := b32(rfc4226Raw)
+	code, err := tp.Code(secret, time.Now())
+	require.NoError(t, err)
+	_, err = tp.Verify(secret, code, time.Time{})
+	require.NoError(t, err, "default system clock drives Verify when WithClock(nil)")
+}
+
 func TestVerify_CurrentStep(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1_111_111_111, 0).UTC()

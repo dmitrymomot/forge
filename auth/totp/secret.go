@@ -22,7 +22,7 @@ func (t *TOTP) GenerateSecret() (string, error) {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf), nil
 }
 
-// ProvisioningURI renders the otpauth:// Key Uri for authenticator-app
+// ProvisioningURI renders the otpauth:// Key URI for authenticator-app
 // enrollment (render it as a QR with core/qrcode's DataURI, or show it for
 // manual entry). The label is Issuer:account (account only when the issuer
 // is empty); issuer, algorithm, digits, and period ride as query params so

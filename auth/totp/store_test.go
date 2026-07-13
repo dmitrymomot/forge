@@ -56,11 +56,11 @@ func TestMemoryStore_DeepCopies(t *testing.T) {
 
 	// Mutating the caller's record after Save must not affect the store.
 	r.Secret[0] = 'X'
-	r.BackupHashes[0][0] = 99 //nolint:nilaway // rec() always seeds non-empty BackupHashes
+	r.BackupHashes[0][0] = 99
 	got, err := s.Get(ctx, "", "alice")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("ciphertext"), got.Secret)
-	assert.Equal(t, byte(1), got.BackupHashes[0][0]) //nolint:nilaway // rec() always seeds non-empty BackupHashes
+	assert.Equal(t, byte(1), got.BackupHashes[0][0])
 
 	// Mutating a Get result must not affect the store either.
 	got.Secret[0] = 'Y'
