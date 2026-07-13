@@ -126,7 +126,7 @@ func (s *Stream) IntN(n int) int {
 }
 
 // Ints returns count sequential IntN(n) draws — e.g. slot reel stops. It
-// panics if count < 0 or n <= 0.
+// panics if count < 0, or if count > 0 and n <= 0.
 func (s *Stream) Ints(count, n int) []int {
 	if count < 0 {
 		panic("rng: Ints count must be >= 0")
