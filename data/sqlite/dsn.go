@@ -45,9 +45,16 @@ func basePragmas(cfg Config) []pragma {
 
 // buildDSN assembles the modernc DSN for one pool. The writer sets journal_mode(WAL)
 // (file DBs only) and _txlock=immediate; the reader omits journal_mode, uses
-// _txlock=deferred, and applies query_only(1) as the final pragma. extra holds
-// WithPragma additions, applied after the base set (later pragmas win) and before
-// query_only on the reader.
+// _txlock=deferred, and applies query_only(1) so it stays read-only. extra holds
+// WithPragma additions, appended after the base set so they take precedence over the
+// Config-derived pragma of the same name (see dedupePragmas).
+//
+// modernc.org/sqlite re-sorts every _pragma param (busy_timeout first, then ascending
+// by the full "name(value)" string) before applying it per connection, so DSN order
+// does not decide which value wins — including query_only, whose position here is
+// irrelevant to the driver. dedupePragmas collapses the slice to one entry per name
+// (last value wins) before rendering, so only one _pragma param per name ever reaches
+// the driver and its re-sort has nothing left to reorder.
 func buildDSN(cfg Config, extra []pragma, memory bool, memName string, write bool) string {
 	var pragmas []pragma
 	if write && !memory && cfg.JournalMode != "" {
@@ -56,8 +63,9 @@ func buildDSN(cfg Config, extra []pragma, memory bool, memName string, write boo
 	pragmas = append(pragmas, basePragmas(cfg)...)
 	pragmas = append(pragmas, extra...)
 	if !write {
-		pragmas = append(pragmas, pragma{"query_only", "1"}) // must remain last
+		pragmas = append(pragmas, pragma{"query_only", "1"})
 	}
+	pragmas = dedupePragmas(pragmas)
 
 	params := make([]string, 0, len(pragmas)+3)
 	if memory {
@@ -92,6 +100,25 @@ func buildDSN(cfg Config, extra []pragma, memory bool, memName string, write boo
 		}
 	}
 	return base + "?" + strings.Join(params, "&")
+}
+
+// dedupePragmas collapses pragmas to one entry per name, keeping the last-appended
+// value. modernc.org/sqlite re-sorts _pragma params before applying them, so DSN
+// position cannot express override precedence; collapsing to a single entry per name
+// here (before rendering) is what makes an extra/WithPragma value deterministically
+// override the Config-derived one of the same name.
+func dedupePragmas(pragmas []pragma) []pragma {
+	seen := make(map[string]int, len(pragmas))
+	deduped := make([]pragma, 0, len(pragmas))
+	for _, p := range pragmas {
+		if i, ok := seen[p.name]; ok {
+			deduped[i].value = p.value
+			continue
+		}
+		seen[p.name] = len(deduped)
+		deduped = append(deduped, p)
+	}
+	return deduped
 }
 
 // pathToURI renders an OS file path as the path portion of a file: URI, percent-

@@ -136,13 +136,32 @@ func TestMemory_IsolatedBetweenOpens(t *testing.T) {
 }
 
 func TestWithPragma_Overrides(t *testing.T) {
-	db := openFile(t, sqlite.WithPragma("cache_size", "-2000"))
+	// The default cache_size is -16000 (see config.go). The override value below
+	// ("-1") is lexicographically LESS than "-16000" (')' < '6' at the first
+	// differing byte), so modernc's _pragma re-sort — busy_timeout first, then
+	// ascending by "name(value)" — would apply the Config-derived default AFTER
+	// this override if both reached the driver as separate params, silently
+	// discarding it. That makes this case a real regression guard for the
+	// dedupe-by-name fix in buildDSN, unlike an override that happens to sort
+	// after the default (which would pass even without dedupe).
+	db := openFile(t, sqlite.WithPragma("cache_size", "-1"))
 	var n int
 	if err := db.Writer().QueryRow(`PRAGMA cache_size`).Scan(&n); err != nil {
 		t.Fatalf("pragma: %v", err)
 	}
-	if n != -2000 {
-		t.Fatalf("cache_size=%d, want -2000", n)
+	if n != -1 {
+		t.Fatalf("cache_size=%d, want -1", n)
+	}
+}
+
+func TestOpen_PingFailureWrapsErrConnect(t *testing.T) {
+	// A directory cannot be opened as a SQLite DB file, so the writer's PingContext
+	// fails deterministically and Open must clean up both pools and wrap ErrConnect.
+	cfg := sqlite.DefaultConfig()
+	cfg.Path = t.TempDir()
+	_, err := sqlite.Open(context.Background(), sqlite.WithConfig(cfg))
+	if !errors.Is(err, sqlite.ErrConnect) {
+		t.Fatalf("want ErrConnect, got %v", err)
 	}
 }
 

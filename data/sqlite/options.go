@@ -38,10 +38,13 @@ func WithLogger(l *slog.Logger) Option {
 	}
 }
 
-// WithPragma appends an extra PRAGMA applied per connection to both pools (after the
-// Config-derived pragmas, so it overrides them; before the reader's query_only). Use
-// it for anything Config does not cover. An empty name is rejected (ErrInvalidConfig).
-// Values must be simple pragma tokens (they are not escaped).
+// WithPragma appends an extra PRAGMA applied per connection to both pools. For a
+// pragma name Config already sets (e.g. cache_size), the value given here replaces
+// it (buildDSN dedupes by name, last value wins — DSN order plays no part, since
+// modernc.org/sqlite re-sorts _pragma params before applying them). For a new pragma
+// name, it is simply added. Use it for anything Config does not cover. An empty name
+// is rejected (ErrInvalidConfig). Values must be simple pragma tokens (they are not
+// escaped).
 func WithPragma(name, value string) Option {
 	return func(c *config) {
 		if name == "" {

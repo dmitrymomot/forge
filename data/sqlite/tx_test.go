@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,101 @@ func TestWithTx_RollsBackAndRepanics(t *testing.T) {
 		_, _ = tx.Exec(`INSERT INTO t(id) VALUES (1)`)
 		panic("boom")
 	})
+}
+
+// holdWriteLock opens an independent connection with busy_timeout=0, begins an
+// immediate transaction that takes the write lock, and returns a release func. Any
+// writer that also has busy_timeout=0 busies out immediately while the lock is held.
+func holdWriteLock(t *testing.T, path string) (release func()) {
+	t.Helper()
+	blocker, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatalf("blocker open: %v", err)
+	}
+	held, err := blocker.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("blocker begin: %v", err)
+	}
+	if _, err := held.Exec(`INSERT INTO t(id) VALUES (999)`); err != nil {
+		t.Fatalf("blocker write: %v", err)
+	}
+	return func() {
+		_ = held.Rollback()
+		_ = blocker.Close()
+	}
+}
+
+// fastWriter opens db against path with BusyTimeout=0, so any writer contention
+// busies out immediately instead of waiting.
+func fastWriter(t *testing.T, path string) *sqlite.DB {
+	t.Helper()
+	cfg := sqlite.DefaultConfig()
+	cfg.Path = path
+	cfg.BusyTimeout = 0
+	fast, err := sqlite.Open(context.Background(), sqlite.WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("fast open: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close(fast, nil) })
+	return fast
+}
+
+func TestWithRetryAttempts_BelowOneClampsToOneAttempt(t *testing.T) {
+	// With busy_timeout=0 and the write lock held, BeginTx itself fails immediately
+	// with SQLITE_BUSY, so fn is never invoked (WithTx only calls fn once BeginTx
+	// succeeds) — attempt count is not observable via fn. It IS observable via
+	// timing: a single attempt returns immediately (no backoff wait), while 2+
+	// attempts wait ~50ms (the default interval) between them. So a clamp to 1
+	// attempt is the only value of n that returns near-instantly here.
+	for _, n := range []int{0, -5} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			_, path := txDB(t)
+			release := holdWriteLock(t, path)
+			defer release()
+			fast := fastWriter(t, path)
+
+			start := time.Now()
+			err := sqlite.WithTxRetry(context.Background(), fast, func(tx *sql.Tx) error {
+				_, e := tx.Exec(`INSERT INTO t(id) VALUES (2)`)
+				return e
+			}, sqlite.WithRetryAttempts(n))
+			elapsed := time.Since(start)
+			if err == nil || !sqlite.IsBusy(err) {
+				t.Fatalf("want busy error, got %v", err)
+			}
+			if elapsed >= 30*time.Millisecond {
+				t.Fatalf("WithRetryAttempts(%d): want clamp to 1 attempt (no backoff wait), elapsed=%v", n, elapsed)
+			}
+		})
+	}
+}
+
+func TestWithRetryInterval_NonPositiveIgnoredKeepsDefault(t *testing.T) {
+	for _, d := range []time.Duration{0, -5 * time.Millisecond} {
+		t.Run(d.String(), func(t *testing.T) {
+			_, path := txDB(t)
+			release := holdWriteLock(t, path)
+			defer release()
+			fast := fastWriter(t, path)
+
+			// Default interval is 50ms (defaultRetryConfig); with attempts=2 there is
+			// exactly one backoff wait of ~50ms between attempts. If a non-positive
+			// interval were NOT ignored, that wait would collapse to ~0 and this call
+			// would return well under the threshold below.
+			start := time.Now()
+			err := sqlite.WithTxRetry(context.Background(), fast, func(tx *sql.Tx) error {
+				_, e := tx.Exec(`INSERT INTO t(id) VALUES (2)`)
+				return e
+			}, sqlite.WithRetryAttempts(2), sqlite.WithRetryInterval(d))
+			elapsed := time.Since(start)
+			if err == nil || !sqlite.IsBusy(err) {
+				t.Fatalf("want busy error, got %v", err)
+			}
+			if elapsed < 30*time.Millisecond {
+				t.Fatalf("WithRetryInterval(%v): want default ~50ms backoff retained, elapsed=%v", d, elapsed)
+			}
+		})
+	}
 }
 
 func TestWithTxRetry_GivesUpOnHeldWriteLock(t *testing.T) {

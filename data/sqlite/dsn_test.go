@@ -40,10 +40,13 @@ func TestBuildDSN_ReaderIsQueryOnlyDeferredNoJournalMode(t *testing.T) {
 	if strings.Contains(dsn, "journal_mode") {
 		t.Errorf("reader DSN must not set journal_mode: %s", dsn)
 	}
-	// query_only must be the LAST _pragma entry.
+	// query_only is applied per connection regardless of its position in the DSN
+	// (modernc re-sorts _pragma params before applying them), so this only pins
+	// buildDSN's stable append order, not a correctness requirement; the reader is
+	// query_only either way.
 	last := strings.LastIndex(dsn, "_pragma=")
 	if !strings.HasPrefix(dsn[last:], "_pragma=query_only(1)") {
-		t.Errorf("query_only must be the final pragma: %s", dsn)
+		t.Errorf("query_only pragma param missing or not in expected position: %s", dsn)
 	}
 }
 
@@ -62,14 +65,21 @@ func TestBuildDSN_MemorySkipsWALUsesSharedCache(t *testing.T) {
 	}
 }
 
-func TestBuildDSN_ExtraPragmaOverrideAppendedAfterBase(t *testing.T) {
+func TestBuildDSN_ExtraPragmaOverrideDedupesToOneEntry(t *testing.T) {
+	// modernc re-sorts _pragma params before applying them, so DSN position cannot
+	// express override precedence. buildDSN must instead emit exactly one cache_size
+	// _pragma param (the override), never the Config-derived default alongside it.
 	cfg := DefaultConfig()
 	cfg.Path = "app.db"
 	dsn := buildDSN(cfg, []pragma{{"cache_size", "-2000"}}, false, "", true)
-	base := strings.Index(dsn, "cache_size(-16000)")
-	over := strings.Index(dsn, "cache_size(-2000)")
-	if base < 0 || over < 0 || over < base {
-		t.Errorf("override cache_size must appear after the default: %s", dsn)
+	if strings.Contains(dsn, "cache_size(-16000)") {
+		t.Errorf("default cache_size must not survive an override: %s", dsn)
+	}
+	if !strings.Contains(dsn, "cache_size(-2000)") {
+		t.Errorf("override cache_size missing: %s", dsn)
+	}
+	if n := strings.Count(dsn, "_pragma=cache_size("); n != 1 {
+		t.Errorf("want exactly one cache_size _pragma param, got %d: %s", n, dsn)
 	}
 }
 
