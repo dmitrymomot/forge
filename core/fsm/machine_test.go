@@ -244,3 +244,74 @@ func TestFire_GuardInspectsEntity(t *testing.T) {
 	require.Error(t, m.Fire(context.Background(), &task{openSubtasks: 2}, statusReview, statusDone))
 	require.NoError(t, m.Fire(context.Background(), &task{}, statusReview, statusDone))
 }
+
+// newAdminBoard: done -> open guarded by admin-only; cancel from anywhere.
+func newAdminBoard(t *testing.T) *fsm.Machine[status, *task] {
+	t.Helper()
+	var d fsm.Define[status, *task]
+	m, err := fsm.New(statusOpen,
+		d.Edge(statusOpen, statusDone),
+		d.Edge(statusDone, statusOpen, d.Guard(func(ctx context.Context, v *task, from, to status) error {
+			if !v.admin {
+				return errors.New("only admins may reopen")
+			}
+			return nil
+		})),
+		d.EdgeFromAny(statusCancelled),
+	)
+	require.NoError(t, err)
+	return m
+}
+
+func TestAllowed_FiltersByGuards(t *testing.T) {
+	m := newAdminBoard(t)
+
+	got, err := m.Allowed(context.Background(), &task{admin: false}, statusDone)
+	require.NoError(t, err)
+	assert.Equal(t, []status{statusCancelled}, got, "non-admin cannot reopen")
+
+	got, err = m.Allowed(context.Background(), &task{admin: true}, statusDone)
+	require.NoError(t, err)
+	assert.Equal(t, []status{statusOpen, statusCancelled}, got, "admin sees reopen, declaration order")
+}
+
+func TestAllowed_UnknownState(t *testing.T) {
+	m := newAdminBoard(t)
+	_, err := m.Allowed(context.Background(), &task{}, status("nope"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrUnknownState))
+}
+
+func TestAllowed_CancelledContextIsAnError(t *testing.T) {
+	m := newAdminBoard(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := m.Allowed(ctx, &task{admin: true}, statusDone)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.Nil(t, got, "a dead context must not read as 'no moves possible'")
+}
+
+func TestAllowed_EmptyResultIsNotAnError(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusDone, d.Guard(func(ctx context.Context, v *task, from, to status) error {
+			return errors.New("always denied")
+		})),
+	)
+	got, err := m.Allowed(context.Background(), &task{}, statusOpen)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestAllowed_RunsNoHooks(t *testing.T) {
+	var log []string
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusDone, d.Hook(record(&log, "edge-hook", ""))),
+		d.OnEnter(statusDone, d.Hook(record(&log, "enter-hook", ""))),
+	)
+	_, err := m.Allowed(context.Background(), &task{}, statusOpen)
+	require.NoError(t, err)
+	assert.Empty(t, log, "Allowed evaluates guards only")
+}

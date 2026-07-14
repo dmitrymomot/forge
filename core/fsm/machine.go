@@ -83,6 +83,41 @@ func (m *Machine[S, V]) Next(from S) []S {
 	return out
 }
 
+// Allowed returns the targets whose guards all pass for v now, in
+// declaration order. Hooks never run. A guard error excludes its target —
+// filtering, not failure — so keep I/O out of guards. It returns
+// ErrUnknownState for an undeclared from, and ctx.Err() when the context
+// is done, so a transient timeout never reads as "no moves possible".
+func (m *Machine[S, V]) Allowed(ctx context.Context, v V, from S) ([]S, error) {
+	if _, ok := m.stateSet[from]; !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownState, from)
+	}
+	targets := m.next[from]
+	out := make([]S, 0, len(targets))
+	for _, to := range targets {
+		if m.guardsPass(ctx, v, from, to) {
+			out = append(out, to)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (m *Machine[S, V]) guardsPass(ctx context.Context, v V, from, to S) bool {
+	edge := m.edges[edgeKey[S]{from: from, to: to}]
+	exit, enter := m.exit[from], m.enter[to]
+	for _, guards := range [3][]Func[S, V]{exit.guards, edge.guards, enter.guards} {
+		for _, guard := range guards {
+			if guard(ctx, v, from, to) != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Initial returns the machine's declared initial state.
 func (m *Machine[S, V]) Initial() S { return m.initial }
 
