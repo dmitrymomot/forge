@@ -73,13 +73,13 @@ func (s *Store) Assign(ctx context.Context, tenant, subject string, roles []stri
 			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, tenant, subject, role)
 	}
 	br := s.pool.SendBatch(ctx, batch)
-	defer br.Close()
 	for range roles {
 		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
 			return err
 		}
 	}
-	return nil
+	return br.Close()
 }
 
 // Unassign revokes roles from subject within tenant.
