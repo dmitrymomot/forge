@@ -12,8 +12,10 @@ import (
 	"github.com/dmitrymomot/forge/core/ctxkey"
 )
 
-// withIdentity injects a guard.Identity the way guard's middleware would, so
-// access's default subject resolver (guard.From) can read it.
+// identityKey is a test-local context key (NOT guard's — ctxkey keys never
+// collide across New calls). Tests seed a Subject through WithSubject +
+// subjectFromContextIdentity below; the real guard.From default path is
+// covered separately by TestRequirePermissionDefaultSubjectFromGuard.
 var identityKey = ctxkey.New[guard.Identity]("guard")
 
 func reqWithIdentity(id guard.Identity) *http.Request {
@@ -158,5 +160,34 @@ func TestWithExplainStashesTrace(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), reqWithIdentity(guard.Identity{Subject: "u1", Scopes: []string{"documents:read"}}))
 	if len(seen.Trace) == 0 {
 		t.Fatalf("want trace stashed under WithExplain, got %+v", seen)
+	}
+}
+
+func TestRequirePermissionDefaultSubjectFromGuard(t *testing.T) {
+	verifier := guard.VerifierFunc(func(_ context.Context, cred string) (guard.Identity, error) {
+		if cred == "good" {
+			return guard.Identity{Subject: "u1", Scopes: []string{"documents:read"}}, nil
+		}
+		return guard.Identity{}, errors.New("bad token")
+	})
+	called := false
+	var seen access.Decision
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		seen, _ = access.DecisionFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	h := guard.New(verifier)(
+		access.RequirePermission(access.ScopeDecider(), "documents:read")(next),
+	)
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer good")
+	h.ServeHTTP(rr, r)
+	if !called || rr.Code != http.StatusOK {
+		t.Fatalf("want next+200, got called=%v code=%d", called, rr.Code)
+	}
+	if seen.Effect != access.Allow {
+		t.Fatalf("want Allow decision, got %+v", seen)
 	}
 }
