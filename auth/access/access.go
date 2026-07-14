@@ -14,6 +14,7 @@ type Subject struct {
 	ID     string         // principal id
 	Tenant string         // optional tenant scope
 	Scopes []string       // token scopes; ScopeDecider reads these
+	Roles  []string       // role names; rbac.FromSubject reads these
 }
 
 // Action is a verb-on-noun permission string, e.g. "documents:read".
@@ -102,13 +103,13 @@ func Named(name string, d Decider) Decider {
 }
 
 // SubjectFromIdentity adapts a guard.Identity into a Subject. It is zero-alloc:
-// it copies ID, Tenant, and the Scopes slice header (shared, read-only) and
-// leaves Attrs nil. guard.Identity.Meta is NOT promoted into Attrs — that
-// would allocate a map on every request and the common scope/tenant checks
-// never read it. Consumers needing identity metadata in predicates populate
-// Attrs themselves via a WithSubject resolver.
+// it copies ID, Tenant, and the Scopes and Roles slice headers (shared,
+// read-only) and leaves Attrs nil. guard.Identity.Meta is NOT promoted into
+// Attrs — that would allocate a map on every request and the common
+// scope/tenant checks never read it. Consumers needing identity metadata in
+// predicates populate Attrs themselves via a WithSubject resolver.
 func SubjectFromIdentity(id guard.Identity) Subject {
-	return Subject{ID: id.Subject, Tenant: id.Tenant, Scopes: id.Scopes}
+	return Subject{ID: id.Subject, Tenant: id.Tenant, Scopes: id.Scopes, Roles: id.Roles}
 }
 
 // Authorize runs d.Decide and closes it fail-closed: Abstain becomes a Deny
