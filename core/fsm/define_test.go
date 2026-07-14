@@ -1,6 +1,7 @@
 package fsm_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -64,4 +65,25 @@ func TestMustNew_ReturnsMachine(t *testing.T) {
 	var d fsm.Define[status, *task]
 	m := fsm.MustNew(statusOpen, d.Edge(statusOpen, statusDone))
 	assert.True(t, m.Can(statusOpen, statusDone))
+}
+
+func TestOnEnter_MultiplePartsAppendInOrder(t *testing.T) {
+	var log []string
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusReview,
+		d.Edge(statusReview, statusDone),
+		d.OnEnter(statusDone, d.Hook(record(&log, "first", ""))),
+		d.OnEnter(statusDone, d.Hook(record(&log, "second", ""))),
+	)
+	require.NoError(t, m.Fire(context.Background(), &task{}, statusReview, statusDone))
+	assert.Equal(t, []string{"first", "second"}, log)
+}
+
+func TestOnEnterOnExit_DeclareTheirState(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusDone),
+		d.OnExit(statusCancelled), // mentions a state with no edges
+	)
+	assert.Contains(t, m.States(), statusCancelled)
 }

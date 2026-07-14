@@ -22,6 +22,8 @@ type partKind uint8
 
 const (
 	partEdge partKind = iota
+	partOnEnter
+	partOnExit
 )
 
 // Part is one construction element consumed by New.
@@ -49,6 +51,37 @@ func split[S ~string, V any](atts []Attachment[S, V]) (guards, hooks []Func[S, V
 func (Define[S, V]) Edge(from, to S, atts ...Attachment[S, V]) Part[S, V] {
 	guards, hooks := split(atts)
 	return Part[S, V]{kind: partEdge, from: from, to: to, guards: guards, hooks: hooks}
+}
+
+// Guard wraps fn as a guard attachment: a side-effect-free check over
+// preloaded data on v that denies the transition by returning an error.
+// Keep I/O out of guards so ErrGuardDenied always means a domain denial.
+func (Define[S, V]) Guard(fn Func[S, V]) Attachment[S, V] {
+	return Attachment[S, V]{fn: fn, isGuard: true}
+}
+
+// Hook wraps fn as a hook attachment: it may mutate v; an error aborts the
+// transition. Hooks run only after every guard passed and must confine
+// themselves to entity mutation — external effects belong after the
+// caller persists.
+func (Define[S, V]) Hook(fn Func[S, V]) Attachment[S, V] {
+	return Attachment[S, V]{fn: fn}
+}
+
+// OnEnter attaches guards/hooks that run on every transition into state,
+// regardless of source edge. Multiple OnEnter parts for one state append
+// in declaration order.
+func (Define[S, V]) OnEnter(state S, atts ...Attachment[S, V]) Part[S, V] {
+	guards, hooks := split(atts)
+	return Part[S, V]{kind: partOnEnter, from: state, guards: guards, hooks: hooks}
+}
+
+// OnExit attaches guards/hooks that run on every transition out of state,
+// regardless of target edge. Multiple OnExit parts for one state append
+// in declaration order.
+func (Define[S, V]) OnExit(state S, atts ...Attachment[S, V]) Part[S, V] {
+	guards, hooks := split(atts)
+	return Part[S, V]{kind: partOnExit, from: state, guards: guards, hooks: hooks}
 }
 
 // New compiles a typed machine. States are inferred: every state mentioned
@@ -117,34 +150,50 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 	// Pass 1: declare every mentioned state in first-mention order.
 	b.declare(initial)
 	for _, p := range parts {
-		if p.kind == partEdge {
+		switch p.kind {
+		case partEdge:
 			b.declare(p.from)
 			b.declare(p.to)
+		case partOnEnter, partOnExit:
+			b.declare(p.from)
 		}
 	}
 
 	// Pass 2: duplicate detection over literal (from, to) pairs.
 	explicit := make(map[edgeKey[S]]struct{}, len(parts))
 	for _, p := range parts {
-		if p.kind == partEdge {
+		switch p.kind {
+		case partEdge:
 			key := edgeKey[S]{from: p.from, to: p.to}
 			if _, dup := explicit[key]; dup {
 				b.issues = append(b.issues, fmt.Sprintf("duplicate edge %s -> %s", p.from, p.to))
 				continue
 			}
 			explicit[key] = struct{}{}
+		case partOnEnter, partOnExit:
 		}
 	}
 
 	// Pass 3: materialize edges in declaration order.
 	for _, p := range parts {
-		if p.kind == partEdge {
+		switch p.kind {
+		case partEdge:
 			key := edgeKey[S]{from: p.from, to: p.to}
 			if _, exists := b.edges[key]; exists {
 				continue // duplicate, reported in pass 2
 			}
 			b.edges[key] = callbacks[S, V]{guards: p.guards, hooks: p.hooks}
 			b.nextOrder = append(b.nextOrder, key)
+		case partOnEnter:
+			cbs := b.enter[p.from]
+			cbs.guards = append(cbs.guards, p.guards...)
+			cbs.hooks = append(cbs.hooks, p.hooks...)
+			b.enter[p.from] = cbs
+		case partOnExit:
+			cbs := b.exit[p.from]
+			cbs.guards = append(cbs.guards, p.guards...)
+			cbs.hooks = append(cbs.hooks, p.hooks...)
+			b.exit[p.from] = cbs
 		}
 	}
 

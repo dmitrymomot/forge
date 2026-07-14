@@ -112,3 +112,135 @@ func TestStatesAndInitial(t *testing.T) {
 	states[0] = "mutated"
 	assert.Equal(t, statusOpen, m.States()[0], "States() returns an independent copy")
 }
+
+// record returns a Func that logs its name; it fails when name == failOn.
+func record(log *[]string, name string, failOn string) fsm.Func[status, *task] {
+	return func(ctx context.Context, v *task, from, to status) error {
+		*log = append(*log, name)
+		if name == failOn {
+			return errors.New(name + " says no")
+		}
+		return nil
+	}
+}
+
+// newOrderMachine wires one guard and one hook onto every surface of the
+// review -> done edge so ordering is observable.
+func newOrderMachine(t *testing.T, log *[]string, failOn string) *fsm.Machine[status, *task] {
+	t.Helper()
+	var d fsm.Define[status, *task]
+	m, err := fsm.New(statusReview,
+		d.Edge(statusReview, statusDone,
+			d.Guard(record(log, "edge-guard", failOn)),
+			d.Hook(record(log, "edge-hook", failOn)),
+		),
+		d.OnEnter(statusDone,
+			d.Guard(record(log, "enter-guard", failOn)),
+			d.Hook(record(log, "enter-hook", failOn)),
+		),
+		d.OnExit(statusReview,
+			d.Guard(record(log, "exit-guard", failOn)),
+			d.Hook(record(log, "exit-hook", failOn)),
+		),
+	)
+	require.NoError(t, err)
+	return m
+}
+
+func TestFire_GuardHookOrdering(t *testing.T) {
+	var log []string
+	m := newOrderMachine(t, &log, "")
+	require.NoError(t, m.Fire(context.Background(), &task{}, statusReview, statusDone))
+	assert.Equal(t, []string{
+		"exit-guard", "edge-guard", "enter-guard",
+		"exit-hook", "edge-hook", "enter-hook",
+	}, log, "guards exit->edge->enter, then hooks exit->edge->enter")
+}
+
+func TestFire_GuardDenialAbortsBeforeAnyHook(t *testing.T) {
+	var log []string
+	m := newOrderMachine(t, &log, "enter-guard")
+	err := m.Fire(context.Background(), &task{}, statusReview, statusDone)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrGuardDenied))
+	assert.Equal(t, []string{"exit-guard", "edge-guard", "enter-guard"}, log, "zero hooks ran")
+}
+
+func TestFire_FirstGuardFailureShortCircuits(t *testing.T) {
+	var log []string
+	m := newOrderMachine(t, &log, "exit-guard")
+	err := m.Fire(context.Background(), &task{}, statusReview, statusDone)
+	require.Error(t, err)
+	assert.Equal(t, []string{"exit-guard"}, log)
+}
+
+func TestFire_HookFailureAborts(t *testing.T) {
+	var log []string
+	m := newOrderMachine(t, &log, "edge-hook")
+	err := m.Fire(context.Background(), &task{}, statusReview, statusDone)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrHookFailed))
+	assert.Equal(t, []string{
+		"exit-guard", "edge-guard", "enter-guard",
+		"exit-hook", "edge-hook",
+	}, log, "enter-hook never ran")
+}
+
+var errDomainDenied = errors.New("3 subtasks still open")
+
+func TestFire_GuardErrorSurvivesDoubleWrap(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusReview,
+		d.Edge(statusReview, statusDone, d.Guard(func(ctx context.Context, v *task, from, to status) error {
+			return errDomainDenied
+		})),
+	)
+	err := m.Fire(context.Background(), &task{}, statusReview, statusDone)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrGuardDenied), "sentinel matches")
+	assert.True(t, errors.Is(err, errDomainDenied), "domain error survives")
+	assert.Contains(t, err.Error(), "3 subtasks still open")
+	assert.NotContains(t, err.Error(), "\n", "single-line error")
+}
+
+func TestFire_HookErrorSurvivesDoubleWrap(t *testing.T) {
+	errBoom := errors.New("stamp exploded")
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusReview,
+		d.Edge(statusReview, statusDone, d.Hook(func(ctx context.Context, v *task, from, to status) error {
+			return errBoom
+		})),
+	)
+	err := m.Fire(context.Background(), &task{}, statusReview, statusDone)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrHookFailed))
+	assert.True(t, errors.Is(err, errBoom))
+}
+
+func TestFire_HookMutatesEntity(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusReview,
+		d.Edge(statusReview, statusDone),
+		d.OnEnter(statusDone, d.Hook(func(ctx context.Context, v *task, from, to status) error {
+			v.completedAt = "2026-07-14"
+			return nil
+		})),
+	)
+	v := &task{}
+	require.NoError(t, m.Fire(context.Background(), v, statusReview, statusDone))
+	assert.Equal(t, "2026-07-14", v.completedAt)
+}
+
+func TestFire_GuardInspectsEntity(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusReview,
+		d.Edge(statusReview, statusDone, d.Guard(func(ctx context.Context, v *task, from, to status) error {
+			if v.openSubtasks > 0 {
+				return errors.New("subtasks open")
+			}
+			return nil
+		})),
+	)
+	require.Error(t, m.Fire(context.Background(), &task{openSubtasks: 2}, statusReview, statusDone))
+	require.NoError(t, m.Fire(context.Background(), &task{}, statusReview, statusDone))
+}
