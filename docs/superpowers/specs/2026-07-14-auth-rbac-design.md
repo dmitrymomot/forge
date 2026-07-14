@@ -9,7 +9,7 @@ Role-based access control: predefined roles with permission grants, role inherit
 - A **hybrid** role source: a zero-I/O fast path (roles carried on the `Subject`) and a Store-backed path (roles assigned as pure runtime data).
 - Single-tenant and multi-tenant from one package: tenancy enters via the mandated construction-time `WithScope` hook, fails closed, and single-tenant use pays zero ceremony.
 
-**Deps:** `auth/access` (Layer 2 adapter only), `resilience/cache` (documented read-through recipe, not a hard dep), `data/postgres`/`data/migration` (the `rbac/pgstore` driver leaf). Layer 1's API surface imports nothing forge-internal.
+**Deps:** `auth/access` (Layer 2 adapter only), `web/middleware` + `web/problem` (the `RequireRole` gate — already transitive via `access`), `resilience/cache` (documented read-through recipe, not a hard dep), `data/postgres`/`data/migration` (the `rbac/pgstore` driver leaf). Layer 1's API surface imports nothing forge-internal.
 
 **Anti-scope:** per-subject/per-resource grants and deny-overrides are `acl`'s job; relationship/attribute predicates are `abac`'s job; `rbac` only *grants*, never denies, and never inspects `Resource`. Role definitions changing while serving (mutable registry) is out — definitions are predefined; the runtime-changing part is *assignments*, which live in the Store. External policy engines (casbin/OPA) plug in behind the `access` seam, not here.
 
@@ -89,6 +89,7 @@ func (p *permSet) Allows(action string) bool {
 - `func (rs *RoleSet) Can(roleNames []string, action string) bool` — the hot-path answer. Iterates the role names, short-circuits on the first role whose pre-expanded `permSet.Allows(action)` is true. **Zero-alloc** — no union map is built; it reads the stored per-role sets directly.
 - `func (rs *RoleSet) Resolve(roleNames ...string) PermissionSet` — the "give me the whole effective set" view for listing/debugging/admin UIs. *May* allocate (not the hot path).
 - `type PermissionSet` with `Allows(action string) bool` and `List() []string`.
+- `func (rs *RoleSet) HasRole(roleNames []string, required string) bool` — **inheritance-aware role membership**: reports whether `required` is in the inheritance closure of `roleNames` (holding `editor`, which inherits `viewer`, satisfies `HasRole(…, "viewer")`). Exact-name match when no edges are defined. Access-free; backs the `RequireRole` middleware and any non-HTTP role gate. Zero-alloc (reads the pre-expanded ancestor closure, no set built).
 
 **Unknown role names** (a name absent from the `RoleSet`) contribute nothing and are skipped silently in resolution — roles get renamed and retired, and authz must not wedge. Optionally surfaced in the Decision trace at Layer 2 under `WithExplain`.
 
@@ -120,6 +121,33 @@ decider := access.FirstDecisive(
 )
 read := access.RequirePermission(decider, "documents:read")
 mux.Handle("GET /docs/{id}", authn(read(getDoc)))
+```
+
+## Layer 2b — RequireRole middleware (lightweight role gate)
+
+The "I have a static `RoleSet` and a role field on the user/member row — just gate the route on the role" path. No `access.Subject`, no `Decider` chain: a caller-supplied extractor pulls the subject's role names straight from the request (context, session, or a loaded user row).
+
+```go
+type Extractor func(r *http.Request) ([]string, error)
+
+func RequireRole(rs *RoleSet, extract Extractor, anyOf ...string) middleware.Middleware
+```
+
+- **Any-of semantics** — passes when the subject holds *at least one* of `anyOf`, evaluated through `RoleSet.HasRole` (**inheritance-aware**: an `editor` passes a `RequireRole("viewer")` gate). Exact-name match when no inheritance is defined.
+- **Fail closed → 403** — a miss *or* an extractor error rejects with a `problem` 403; customizable via `WithResponder(problem.Responder)`. The extractor is where the app reads its own `role` column (typically already loaded into context by its auth middleware).
+- Single-role tables return a one-element slice; the extractor is the whole integration seam.
+
+Permission-based gating is deliberately **not** here — that stays on the `Decider` / `access.RequirePermission` path. `RequireRole` is role membership only.
+
+```go
+extractRoles := func(r *http.Request) ([]string, error) {
+    m, ok := member.From(r.Context()) // consumer's loaded row
+    if !ok {
+        return nil, member.ErrNoMember
+    }
+    return []string{m.Role}, nil
+}
+mux.Handle("GET /admin", rbac.RequireRole(rs, extractRoles, "admin")(adminHandler))
 ```
 
 ## The assignment Store (runtime subject→role data)
@@ -168,6 +196,7 @@ Proposed files:
 - `roleset.go` — `Role`, `RoleInherits`, `WithRoles`, `WithRoleInheritance`, `NewRoleSet`, `RoleSet`, `PermissionSet`, `permSet`, graph resolution, wildcard matching.
 - `options.go` — option types + `WithScope`.
 - `decider.go` — `Decider`, `RoleSource`, `FromSubject`, `FromStore` (imports `access`).
+- `middleware.go` — `Extractor`, `RequireRole`, `WithResponder` (imports `web/middleware`, `web/problem`).
 - `store.go` — `Store`, `Manager`, `NewManager`, `Assign`/`Unassign`/`RolesFor`.
 - `memory.go` — `NewMemoryStore`.
 - `errors.go` — sentinels.
@@ -178,10 +207,11 @@ Single Go module; two levels max (`rbac/pgstore` is the sole third-level driver 
 
 ## Testing & benchmarks
 
-- **Black-box tests:** graph validation (dup/unknown/cycle errors), inheritance expansion (single, multi-parent, diamond dedupe, deep chains), wildcard matching (exact/segment/super, non-match, colon-less action), unknown-role skip, standalone roles.
+- **Black-box tests:** graph validation (dup/unknown/cycle errors), inheritance expansion (single, multi-parent, diamond dedupe, deep chains), wildcard matching (exact/segment/super, non-match, colon-less action), unknown-role skip, standalone roles, `HasRole` inheritance closure (held ancestor satisfies gate; sibling/descendant does not).
+- **Middleware tests:** `RequireRole` any-of pass/miss, inheritance-aware pass, extractor error → fail-closed 403, `WithResponder` override, single-role extractor.
 - **Decider tests:** `FromSubject` Allow/Abstain, `FromStore` Allow/Abstain, `RoleSource` error → fail-closed `Deny` via `Authorize`, chain composition with `TenantMatch`/`acl`-style layers, `WithExplain` trace.
 - **Store/Manager tests:** idempotent `Assign`, `Unassign`, `RolesFor`; `WithScope` fail-closed (`ErrScope`); single-tenant zero-scope path; per-tenant isolation. `pgstore` covered against live Postgres (dbtest-style).
-- **Benchmarks (required):** `BenchmarkCan` (wildcard match), `BenchmarkDecider_FromSubject` (**target: 0 allocs/op**), `BenchmarkResolve`, `BenchmarkNewRoleSet`. Post-benchmark optimization pass with before/after numbers in the PR.
+- **Benchmarks (required):** `BenchmarkCan` (wildcard match), `BenchmarkDecider_FromSubject` (**target: 0 allocs/op**), `BenchmarkHasRole` (**target: 0 allocs/op**), `BenchmarkResolve`, `BenchmarkNewRoleSet`. Post-benchmark optimization pass with before/after numbers in the PR.
 
 ## Open questions
 
