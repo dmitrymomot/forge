@@ -70,7 +70,7 @@ var InvoiceFSM = fsm.MustNew(StatusDraft,
 )
 ```
 
-`Define[S, V]` is stateless — not a builder; its methods construct parts that flow into `New(initial S, parts ...) (*Machine[S, V], error)`. `MustNew` panics, for `var`-init (the `regexp.MustCompile` precedent). `d.Guard`/`d.Hook` produce attachments accepted by `Edge`, `EdgeFromAny`, `OnEnter`, `OnExit`. States are inferred in typed mode: every state mentioned (initial, edge endpoints, wildcard targets, OnEnter/OnExit subjects) is declared; Go constants make an explicit list redundant.
+`Define[S, V]` is stateless — not a builder; its methods construct parts that flow into `New(initial S, parts ...Part[S, V]) (*Machine[S, V], error)`. `MustNew` panics, for `var`-init (the `regexp.MustCompile` precedent). `d.Guard`/`d.Hook` produce attachments accepted by `Edge`, `EdgeFromAny`, `OnEnter`, `OnExit`. States are inferred in typed mode: every state mentioned (initial, edge endpoints, wildcard targets, OnEnter/OnExit subjects) is declared; Go constants make an explicit list redundant.
 
 ## Runtime construction (tenant-defined flows)
 
@@ -114,7 +114,7 @@ Expansion happens at construction, after the full state set is known: a wildcard
 
 ## Validation (construction-time, fail closed)
 
-`New` and `Compile` collect all issues via `errors.Join`, wrapped under `ErrInvalidDefinition`, so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate explicit edge for a `(from, to)` pair; (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
+`New` and `Compile` collect all issues via `errors.Join`, wrapped under `ErrInvalidDefinition`, so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate edge for a literal `(from, to)` pair (the wildcard `"*"` counts as a literal source here, so two wildcard edges to one target are duplicates); (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
 
 ## Errors
 
