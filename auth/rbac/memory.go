@@ -47,9 +47,13 @@ func (s *memoryStore) Assign(_ context.Context, tenant, subject string, roles []
 func (s *memoryStore) Unassign(_ context.Context, tenant, subject string, roles []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	set := s.m[memKey(tenant, subject)]
+	k := memKey(tenant, subject)
+	set := s.m[k]
 	for _, r := range roles {
 		delete(set, r)
+	}
+	if len(set) == 0 {
+		delete(s.m, k) // reclaim the key once the subject holds no roles
 	}
 	return nil
 }
