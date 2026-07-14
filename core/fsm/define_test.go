@@ -87,3 +87,76 @@ func TestOnEnterOnExit_DeclareTheirState(t *testing.T) {
 	)
 	assert.Contains(t, m.States(), statusCancelled)
 }
+
+// newWildcardBoard: open -> in_progress -> review -> done, plus cancel-from-anywhere;
+// done -> cancelled is explicitly replaced with an extra guard.
+func newWildcardBoard(t *testing.T, log *[]string) *fsm.Machine[status, *task] {
+	t.Helper()
+	var d fsm.Define[status, *task]
+	m, err := fsm.New(statusOpen,
+		d.Edge(statusOpen, statusInProgress),
+		d.Edge(statusInProgress, statusReview),
+		d.Edge(statusReview, statusDone),
+		d.EdgeFromAny(statusCancelled, d.Guard(record(log, "wildcard-guard", ""))),
+		d.Edge(statusDone, statusCancelled, d.Guard(record(log, "explicit-guard", ""))),
+	)
+	require.NoError(t, err)
+	return m
+}
+
+func TestEdgeFromAny_ExpandsToAllStates(t *testing.T) {
+	m := newWildcardBoard(t, new([]string))
+	for _, from := range []status{statusOpen, statusInProgress, statusReview, statusDone} {
+		assert.True(t, m.Can(from, statusCancelled), "from %s", from)
+	}
+}
+
+func TestEdgeFromAny_NoSelfLoop(t *testing.T) {
+	m := newWildcardBoard(t, new([]string))
+	assert.False(t, m.Can(statusCancelled, statusCancelled))
+}
+
+func TestEdgeFromAny_WildcardGuardAppliesToExpandedEdges(t *testing.T) {
+	var log []string
+	m := newWildcardBoard(t, &log)
+	require.NoError(t, m.Fire(context.Background(), &task{}, statusOpen, statusCancelled))
+	assert.Equal(t, []string{"wildcard-guard"}, log)
+}
+
+func TestEdgeFromAny_ExplicitEdgeReplacesExpanded(t *testing.T) {
+	var log []string
+	m := newWildcardBoard(t, &log)
+	require.NoError(t, m.Fire(context.Background(), &task{}, statusDone, statusCancelled))
+	assert.Equal(t, []string{"explicit-guard"}, log, "wildcard guard must NOT run on the replaced pair")
+}
+
+func TestEdgeFromAny_DuplicateWildcard(t *testing.T) {
+	var d fsm.Define[status, *task]
+	_, err := fsm.New(statusOpen,
+		d.Edge(statusOpen, statusDone),
+		d.EdgeFromAny(statusCancelled),
+		d.EdgeFromAny(statusCancelled),
+	)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fsm.ErrInvalidDefinition))
+	assert.Contains(t, err.Error(), "duplicate edge * -> cancelled")
+}
+
+func TestEdgeFromAny_NextKeepsDeclarationPosition(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusInProgress),
+		d.EdgeFromAny(statusCancelled),
+		d.Edge(statusOpen, statusReview),
+	)
+	assert.Equal(t, []status{statusInProgress, statusCancelled, statusReview}, m.Next(statusOpen), "wildcard expands at its declaration position")
+}
+
+func TestEdgeFromAny_DeclaresItsTarget(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusDone),
+		d.EdgeFromAny(statusCancelled),
+	)
+	assert.Contains(t, m.States(), statusCancelled)
+}

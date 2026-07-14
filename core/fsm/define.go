@@ -24,6 +24,7 @@ const (
 	partEdge partKind = iota
 	partOnEnter
 	partOnExit
+	partEdgeFromAny
 )
 
 // Part is one construction element consumed by New.
@@ -51,6 +52,16 @@ func split[S ~string, V any](atts []Attachment[S, V]) (guards, hooks []Func[S, V
 func (Define[S, V]) Edge(from, to S, atts ...Attachment[S, V]) Part[S, V] {
 	guards, hooks := split(atts)
 	return Part[S, V]{kind: partEdge, from: from, to: to, guards: guards, hooks: hooks}
+}
+
+// EdgeFromAny declares a wildcard edge into to from every other declared
+// state. It expands at construction into concrete edges — pure sugar, no
+// runtime wildcard logic. An explicit Edge for a pair fully replaces the
+// expanded one; no self-loop is generated (a self-transition needs an
+// explicit Edge(s, s)).
+func (Define[S, V]) EdgeFromAny(to S, atts ...Attachment[S, V]) Part[S, V] {
+	guards, hooks := split(atts)
+	return Part[S, V]{kind: partEdgeFromAny, to: to, guards: guards, hooks: hooks}
 }
 
 // Guard wraps fn as a guard attachment: a side-effect-free check over
@@ -156,11 +167,14 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 			b.declare(p.to)
 		case partOnEnter, partOnExit:
 			b.declare(p.from)
+		case partEdgeFromAny:
+			b.declare(p.to)
 		}
 	}
 
 	// Pass 2: duplicate detection over literal (from, to) pairs.
 	explicit := make(map[edgeKey[S]]struct{}, len(parts))
+	wildcardSeen := make(map[S]struct{})
 	for _, p := range parts {
 		switch p.kind {
 		case partEdge:
@@ -170,11 +184,18 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 				continue
 			}
 			explicit[key] = struct{}{}
+		case partEdgeFromAny:
+			if _, dup := wildcardSeen[p.to]; dup {
+				b.issues = append(b.issues, fmt.Sprintf("duplicate edge * -> %s", p.to))
+				continue
+			}
+			wildcardSeen[p.to] = struct{}{}
 		case partOnEnter, partOnExit:
 		}
 	}
 
 	// Pass 3: materialize edges in declaration order.
+	wildcardDone := make(map[S]struct{})
 	for _, p := range parts {
 		switch p.kind {
 		case partEdge:
@@ -184,6 +205,22 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 			}
 			b.edges[key] = callbacks[S, V]{guards: p.guards, hooks: p.hooks}
 			b.nextOrder = append(b.nextOrder, key)
+		case partEdgeFromAny:
+			if _, dup := wildcardDone[p.to]; dup {
+				continue // duplicate, reported in pass 2
+			}
+			wildcardDone[p.to] = struct{}{}
+			for _, from := range b.states {
+				if from == p.to {
+					continue // wildcards never generate self-loops
+				}
+				key := edgeKey[S]{from: from, to: p.to}
+				if _, isExplicit := explicit[key]; isExplicit {
+					continue // an explicit edge fully replaces the expanded one
+				}
+				b.edges[key] = callbacks[S, V]{guards: p.guards, hooks: p.hooks}
+				b.nextOrder = append(b.nextOrder, key)
+			}
 		case partOnEnter:
 			cbs := b.enter[p.from]
 			cbs.guards = append(cbs.guards, p.guards...)
