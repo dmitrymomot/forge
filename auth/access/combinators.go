@@ -42,9 +42,12 @@ func FirstDecisive(deciders ...Decider) Decider {
 	})
 }
 
-// DenyOverrides evaluates every decider: any Deny vetoes regardless of order;
-// otherwise the first Allow wins; otherwise Abstain. A decider error stops
-// evaluation and returns a fail-closed Deny plus the wrapped error.
+// DenyOverrides evaluates deciders until a Deny vetoes: any Deny wins
+// regardless of order, so evaluation continues past an Allow to catch a later
+// Deny, and stops at the first Deny (the outcome is sealed). With no Deny, the
+// first Allow wins; with neither, Abstain. A decider error stops evaluation and
+// returns a fail-closed Deny plus the wrapped error. Under WithExplain the trace
+// therefore ends at the vetoing Deny.
 func DenyOverrides(deciders ...Decider) Decider {
 	return DeciderFunc(func(ctx context.Context, s Subject, a Action, r Resource) (Decision, error) {
 		trace := explaining(ctx)

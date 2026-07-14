@@ -113,3 +113,25 @@ func TestNoTraceWithoutExplain(t *testing.T) {
 		t.Fatalf("trace must be nil without WithExplain, got %+v", got)
 	}
 }
+
+func TestDenyOverridesTraceEndsAtVeto(t *testing.T) {
+	d := access.DenyOverrides(
+		constDecider("a", access.Allow),
+		constDecider("b", access.Deny),
+		constDecider("c", access.Allow),
+	)
+	ctx := access.WithExplain(context.Background())
+	got, err := d.Decide(ctx, access.Subject{}, "act", access.Resource{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got.Effect != access.Deny || got.Decider != "b" {
+		t.Fatalf("want deny by b, got %+v", got)
+	}
+	if len(got.Trace) != 2 {
+		t.Fatalf("trace must end at the veto (a,b), got %d: %+v", len(got.Trace), got.Trace)
+	}
+	if got.Trace[0].Decider != "a" || got.Trace[1].Decider != "b" {
+		t.Fatalf("trace order wrong: %+v", got.Trace)
+	}
+}
