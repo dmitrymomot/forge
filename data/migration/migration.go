@@ -36,7 +36,7 @@ func New(fsys fs.FS, opts ...Option) *Migrator {
 }
 
 // Up applies all pending migrations against db. It builds a fresh goose Provider
-// (dialect Postgres, the configured version table) and runs provider.Up. An fsys
+// (the configured dialect and version table) and runs provider.Up. An fsys
 // with no migration files is treated as a successful no-op. The db is owned by the
 // caller and is never closed here. Errors wrap ErrMigrate and are single-line.
 func (m *Migrator) Up(ctx context.Context, db *sql.DB) error {
