@@ -44,11 +44,13 @@ type Machine[S ~string, V any] struct{ /* immutable after construction */ }
 
 Everything inside `Fire` happens before persistence. On any error the caller discards the loaded entity — nothing was written, so nothing rolls back; earlier hooks may have mutated the in-memory `v`, which the caller simply drops. Post-persist effects (notifications, outbox events) are explicitly out of scope: consumers run them after their own DB write. A hook must not fire another transition (no cascades).
 
+**Guard and hook discipline.** Guards read preloaded data on `V` and stay free of I/O — then `ErrGuardDenied` always means a domain denial, never "the risk service was down", and consumers can safely map it to a user-facing 4xx. A consumer that insists on an I/O guard must wrap its own infrastructure sentinel into the returned error (the multi-`%w` chain preserves it) and check that sentinel before `ErrGuardDenied`. Hooks confine themselves to mutating `v` and work that commits in the caller's own DB transaction; a hook that calls an external system (PSP, email) leaves an un-rollbackable side effect when a later hook aborts — external effects belong after persistence.
+
 ## Read API
 
 - `Can(from, to S) bool` — structural: edge exists.
 - `Next(from S) []S` — structural targets in first-declaration order; nil for an unknown state (mirrors `Can`'s false).
-- `Allowed(ctx context.Context, v V, from S) ([]S, error)` — targets whose guards all pass for this entity now; hooks never run; a guard error excludes that target (it is filtering, not failure); error only for an unknown `from` (`ErrUnknownState`).
+- `Allowed(ctx context.Context, v V, from S) ([]S, error)` — targets whose guards all pass for this entity now; hooks never run; a guard error excludes that target (it is filtering, not failure); errors: unknown `from` (`ErrUnknownState`), or `ctx.Err()` when the context was cancelled or expired during evaluation — without that check a transient timeout would fail every guard and render as a legitimate "no moves possible" empty list.
 - `Initial() S`, `States() []S` — declaration order; returned slices are copies.
 
 `Next` renders the generic status dropdown; `Allowed` renders it per-user/per-entity (e.g. a done task offers `open` to admins only, because the `done → open` edge is guarded by `admin_only`). The design idiom: "X is impossible except for role Y" is an existing edge with a guard, never a missing edge.
@@ -114,7 +116,7 @@ Expansion happens at construction, after the full state set is known: a wildcard
 
 ## Validation (construction-time, fail closed)
 
-`New` and `Compile` collect all issues via `errors.Join`, wrapped under `ErrInvalidDefinition`, so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate edge for a literal `(from, to)` pair (the wildcard `"*"` counts as a literal source here, so two wildcard edges to one target are duplicates); (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
+`New` and `Compile` collect all issues via `errors.Join`, wrapped under `ErrInvalidDefinition`, so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state name with leading or trailing whitespace (a tenant typing `"done "` compiles fine and then never matches `"done"` from the UI; internal spaces like `"In Progress"` stay legal); state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate edge for a literal `(from, to)` pair (the wildcard `"*"` counts as a literal source here, so two wildcard edges to one target are duplicates); (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
 
 ## Errors
 
@@ -132,6 +134,12 @@ Single-line sentinels in `errors.go`, all `errors.Is`-matchable:
 
 No storage, no seam: multi-tenancy is which machine you compiled. The doc example shows the pattern — cache compiled machines keyed by `(tenant, flow, version)`, recompile on flow edit; machines are immutable so the cache needs no invalidation beyond the version key. Single-tenant typed use pays zero ceremony (`var InvoiceFSM = fsm.MustNew(...)`). This satisfies the repo tenancy rule by construction: there is no key composition or scoped storage to fail open.
 
+## Consumer patterns (pinned in doc.go)
+
+- **Conditional persist against lost updates.** `Fire` validates against the `from` the caller loaded; a concurrent writer can move the row between load and write. Persist with a conditional write — `UPDATE tasks SET status = $to WHERE id = $id AND status = $from` — and treat 0 affected rows as a stale-board conflict (409). Without this, the last write wins and a transition (with its hook enrichments and audit trail) is silently swallowed.
+- **Timer-driven transitions are a sweep, not a feature.** "Solved → closed after 72h", bonus expiry, cool-off ending: a consumer cron/jobqueue job selects due rows and calls `Fire` with a system actor. The machine stays timer-free.
+- **Definition size trust boundary.** Definitions arrive from the consumer's own flow-save API, not raw wire input; that API is where size limits belong. The package imposes no hidden caps.
+
 ## Performance
 
 `Fire` on a bare edge (no guards/hooks) is the hot path: target 0 allocs/op via a `struct{ from, to S }` map key for edge lookup. `Next`/`States`/`Allowed` allocate (they return copies). Benchmarks: bare `Fire`, `Fire` with guards+hooks, `Allowed` over a fan-out state, `Compile` of a realistic ~10-state/25-edge definition. Post-benchmark optimization pass with before/after numbers in the PR, per repo policy.
@@ -143,11 +151,11 @@ No storage, no seam: multi-tenancy is which machine you compiled. The doc exampl
 - Hook mutation on success; abort mid-hooks leaves caller free to discard (documented semantics).
 - Wildcard expansion and explicit-edge-replaces-wildcard precedence, including wildcard guards applying to expanded edges.
 - Validation matrix: one test per issue class, multi-issue accumulation via `errors.Join`, `errors.Is` matching for every sentinel, guard/hook domain errors surviving the double-wrap.
-- `Definition` JSON round-trip; `Allowed` filtering (admin vs non-admin case); concurrent `Fire` on a shared machine under `-race`.
+- `Definition` JSON round-trip; `Allowed` filtering (admin vs non-admin case); `Allowed` under a cancelled context returns `ctx.Err()`, not an empty list; concurrent `Fire` on a shared machine under `-race`.
 
 ## Anti-scope (restated in doc.go)
 
-No timers, no auto/cascade transitions, no per-instance state or persistence, no flow versioning/migration (recompile per version; migrating in-flight entities is consumer domain), no assignment/roles/SLA semantics, no event labels (additive later), no definition storage, no post-persist effect execution.
+No timers, no auto/cascade transitions, no per-instance state or persistence, no flow versioning/migration (recompile per version; migrating in-flight entities is consumer domain), no assignment/roles/SLA semantics, no event labels (additive later), no definition storage, no post-persist effect execution, no parallel/composite/hierarchical states — an entity that is simultaneously "interview scheduled" and "reference check pending" has two status columns, one machine each; orthogonal aspects compose, they don't nest.
 
 ## Ship checklist
 
