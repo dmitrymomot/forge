@@ -22,6 +22,7 @@ type Option func(*config)
 
 // WithResource sets how RequirePermission builds the Resource from the request
 // (default: the zero Resource — a type-level check). Resolvers stay I/O-free.
+// Ignored by Model.Handle, which derives the Resource from its Describe func.
 func WithResource(fn func(r *http.Request) Resource) Option {
 	return func(c *config) {
 		if fn != nil {
