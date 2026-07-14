@@ -293,16 +293,6 @@ batch-insert seam — the "import your data" onboarding flow. (Named
 
 Deps: `core/validate`.
 
----
-
-**data/clickhouse**
-
-ClickHouse connection factory in the `data/postgres` mold: DSN config with
-Validate, pooling, health ping. Connection only — query building and
-schema stay consumer-side.
-
-Deps: none forge-internal (driver external).
-
 ## finance/
 
 ---
