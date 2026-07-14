@@ -97,7 +97,7 @@ func TestWithExplainPopulatesTrace(t *testing.T) {
 		constDecider("acl", access.Abstain),
 		constDecider("rbac", access.Allow),
 	)
-	ctx := access.WithExplain(context.Background())
+	ctx := access.ExplainContext(context.Background())
 	got, _ := d.Decide(ctx, access.Subject{}, "a", access.Resource{})
 	if len(got.Trace) != 2 {
 		t.Fatalf("want trace of 2, got %d: %+v", len(got.Trace), got.Trace)
@@ -120,7 +120,7 @@ func TestDenyOverridesTraceEndsAtVeto(t *testing.T) {
 		constDecider("b", access.Deny),
 		constDecider("c", access.Allow),
 	)
-	ctx := access.WithExplain(context.Background())
+	ctx := access.ExplainContext(context.Background())
 	got, err := d.Decide(ctx, access.Subject{}, "act", access.Resource{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)

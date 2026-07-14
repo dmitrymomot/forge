@@ -4,11 +4,11 @@ import "context"
 
 type explainKey struct{}
 
-// WithExplain marks ctx so combinators accumulate the full per-layer trace
+// ExplainContext marks ctx so combinators accumulate the full per-layer trace
 // into Decision.Trace. Off by default so the hot path allocates no trace slice.
 // RequirePermission/Model expose WithExplain() to enable it for a debug request
 // or an "explain" endpoint.
-func WithExplain(ctx context.Context) context.Context {
+func ExplainContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, explainKey{}, true)
 }
 
