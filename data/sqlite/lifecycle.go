@@ -8,11 +8,19 @@ import (
 
 // Close logs a single line and closes both pools. It is the resource counterpart to
 // Open, meant as `defer Close(db, logger)` in main so it runs after the supervisor
-// drains every service. A nil db or nil logger is tolerated. It takes no ctx because
-// *sql.DB.Close is synchronous.
+// drains every service. A nil db is tolerated. It takes no ctx because *sql.DB.Close
+// is synchronous.
+//
+// The log parameter selects the logger: an explicit non-nil log overrides the
+// configured one; passing nil falls back to the logger from WithLogger (or
+// slog.Default(), which Open installs when WithLogger is absent). The line is emitted
+// only if the effective logger is non-nil.
 func Close(db *DB, log *slog.Logger) {
 	if db == nil {
 		return
+	}
+	if log == nil {
+		log = db.logger
 	}
 	if log != nil {
 		log.Info("closing sqlite database")
