@@ -1,0 +1,162 @@
+package access_test
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/dmitrymomot/forge/auth/access"
+	"github.com/dmitrymomot/forge/auth/guard"
+	"github.com/dmitrymomot/forge/core/ctxkey"
+)
+
+// withIdentity injects a guard.Identity the way guard's middleware would, so
+// access's default subject resolver (guard.From) can read it.
+var identityKey = ctxkey.New[guard.Identity]("guard")
+
+func reqWithIdentity(id guard.Identity) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	return r.WithContext(identityKey.With(r.Context(), id))
+}
+
+func subjectFromContextIdentity(r *http.Request) (access.Subject, bool) {
+	id, ok := identityKey.From(r.Context())
+	if !ok {
+		return access.Subject{}, false
+	}
+	return access.SubjectFromIdentity(id), true
+}
+
+func TestRequirePermissionAllowCallsNext(t *testing.T) {
+	called := false
+	var seen access.Decision
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		seen, _ = access.DecisionFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	h := access.RequirePermission(
+		access.ScopeDecider(),
+		"documents:read",
+		access.WithSubject(subjectFromContextIdentity),
+	)(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1", Scopes: []string{"documents:read"}}))
+
+	if !called || rr.Code != http.StatusOK {
+		t.Fatalf("want next+200, got called=%v code=%d", called, rr.Code)
+	}
+	if seen.Effect != access.Allow {
+		t.Fatalf("decision not stashed: %+v", seen)
+	}
+}
+
+func TestRequirePermissionDenyGives403(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.RequirePermission(
+		access.ScopeDecider(),
+		"documents:write",
+		access.WithSubject(subjectFromContextIdentity),
+	)(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1", Scopes: []string{"documents:read"}}))
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", rr.Code)
+	}
+}
+
+func TestRequirePermissionMissingIdentityGives403WithoutNext(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true })
+	h := access.RequirePermission(access.AllowAll(), "x")(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil)) // no identity
+
+	if called || rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403 + no next, got called=%v code=%d", called, rr.Code)
+	}
+}
+
+func TestRequirePermissionDeciderErrorGives403(t *testing.T) {
+	boom := access.DeciderFunc(func(_ context.Context, _ access.Subject, _ access.Action, _ access.Resource) (access.Decision, error) {
+		return access.Decision{}, errors.New("store down")
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.RequirePermission(
+		boom,
+		"x",
+		access.WithSubject(subjectFromContextIdentity),
+	)(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("want fail-closed 403, got %d", rr.Code)
+	}
+}
+
+func TestWithResourceIsPassedToDecider(t *testing.T) {
+	var gotRes access.Resource
+	spy := access.DeciderFunc(func(_ context.Context, _ access.Subject, _ access.Action, r access.Resource) (access.Decision, error) {
+		gotRes = r
+		return access.Allow.Because("ok"), nil
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.RequirePermission(spy, "documents:read",
+		access.WithSubject(subjectFromContextIdentity),
+		access.WithResource(func(_ *http.Request) access.Resource {
+			return access.Resource{Type: "document", ID: "42"}
+		}),
+	)(next)
+
+	h.ServeHTTP(httptest.NewRecorder(), reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if gotRes.Type != "document" || gotRes.ID != "42" {
+		t.Fatalf("resource not resolved: %+v", gotRes)
+	}
+}
+
+func TestRequireDynamicAction(t *testing.T) {
+	var gotAction access.Action
+	spy := access.DeciderFunc(func(_ context.Context, _ access.Subject, a access.Action, _ access.Resource) (access.Decision, error) {
+		gotAction = a
+		return access.Allow.Because("ok"), nil
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.Require(
+		spy,
+		func(_ *http.Request) (access.Action, access.Resource) {
+			return "custom:action", access.Resource{Type: "doc"}
+		},
+		access.WithSubject(subjectFromContextIdentity),
+	)(next)
+
+	h.ServeHTTP(httptest.NewRecorder(), reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if gotAction != "custom:action" {
+		t.Fatalf("dynamic action not used: %q", gotAction)
+	}
+}
+
+func TestWithExplainStashesTrace(t *testing.T) {
+	d := access.FirstDecisive(access.TenantMatch(), access.ScopeDecider())
+	var seen access.Decision
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = access.DecisionFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	h := access.RequirePermission(
+		d,
+		"documents:read",
+		access.WithSubject(subjectFromContextIdentity),
+		access.WithExplain(),
+	)(next)
+	h.ServeHTTP(httptest.NewRecorder(), reqWithIdentity(guard.Identity{Subject: "u1", Scopes: []string{"documents:read"}}))
+	if len(seen.Trace) == 0 {
+		t.Fatalf("want trace stashed under WithExplain, got %+v", seen)
+	}
+}
