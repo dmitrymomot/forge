@@ -60,6 +60,11 @@ func (e Effect) Because(reason string) Decision {
 // names the layer that spoke; Reason says why. Trace holds every consulted
 // layer's decision and is populated only when the context enables it
 // (WithExplain); it is nil on the hot path.
+//
+// Security: Reason (and Trace reasons) may carry internal detail — a decider's
+// raw error text lands in Reason on the fail-closed path. It is safe for
+// server-side auditlog, but a custom WithResponder/WithLoadError must not echo
+// it verbatim to clients; the built-in responders send generic sentinels.
 type Decision struct {
 	Decider string
 	Reason  string

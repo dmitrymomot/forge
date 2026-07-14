@@ -24,10 +24,14 @@ func NewModel[T any](load func(r *http.Request) (T, error), describe func(obj T)
 // resource existence and the underlying error text; see WithLoadError to opt
 // into the raw error), Describes the object, authorizes the action (deny →
 // 403; decider error → 403 + logged), stashes the Decision, then calls fn
-// with the already-loaded object. WithResource has no effect here — Describe
-// supplies the Resource.
+// with the already-loaded object. Describe supplies the Resource, so passing
+// WithResource here panics — a wiring bug caught at startup (Handle runs at
+// route-registration time) rather than a silent no-op.
 func (m Model[T]) Handle(d Decider, action Action, fn func(w http.ResponseWriter, r *http.Request, obj T), opts ...Option) http.Handler {
 	cfg := newConfig(opts...)
+	if cfg.resource != nil {
+		panic("access: WithResource has no effect on Model.Handle — Describe supplies the Resource")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		if cfg.explain {

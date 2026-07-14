@@ -110,3 +110,16 @@ func TestNewModelPanicsOnNilDescribe(t *testing.T) {
 	}()
 	access.NewModel(func(_ *http.Request) (doc, error) { return doc{}, nil }, nil)
 }
+
+func TestModelHandlePanicsOnWithResource(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic when WithResource is passed to Model.Handle")
+		}
+	}()
+	m := docModel(func(_ *http.Request) (doc, error) { return doc{ID: "1"}, nil })
+	m.Handle(access.AllowAll(), "documents:read",
+		func(http.ResponseWriter, *http.Request, doc) {},
+		access.WithResource(func(*http.Request) access.Resource { return access.Resource{} }),
+	)
+}
