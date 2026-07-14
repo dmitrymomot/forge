@@ -30,6 +30,8 @@ func TestValidate_RejectsBadValues(t *testing.T) {
 		"negative busy":       func(c *sqlite.Config) { c.BusyTimeout = -time.Second },
 		"unknown journal":     func(c *sqlite.Config) { c.JournalMode = "BOGUS" },
 		"unknown synchronous": func(c *sqlite.Config) { c.Synchronous = "SOMETIMES" },
+		"empty journal":       func(c *sqlite.Config) { c.JournalMode = "" },
+		"empty synchronous":   func(c *sqlite.Config) { c.Synchronous = "" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

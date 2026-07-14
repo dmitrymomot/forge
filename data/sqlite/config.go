@@ -69,11 +69,15 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%w: %s must be >= 0", ErrInvalidConfig, f.name))
 		}
 	}
-	if c.JournalMode != "" && !validJournalModes[strings.ToUpper(c.JournalMode)] {
-		errs = append(errs, fmt.Errorf("%w: JournalMode %q is not recognized", ErrInvalidConfig, c.JournalMode))
+	// JournalMode and Synchronous must be set to a recognized value: an empty
+	// string is rejected rather than silently skipped, so a hand-built Config
+	// cannot open without WAL and the advertised concurrency guarantees. Seed
+	// from DefaultConfig to get them.
+	if !validJournalModes[strings.ToUpper(c.JournalMode)] {
+		errs = append(errs, fmt.Errorf("%w: JournalMode %q is not a recognized mode (WAL, DELETE, TRUNCATE, PERSIST, MEMORY, OFF)", ErrInvalidConfig, c.JournalMode))
 	}
-	if c.Synchronous != "" && !validSynchronous[strings.ToUpper(c.Synchronous)] {
-		errs = append(errs, fmt.Errorf("%w: Synchronous %q is not recognized", ErrInvalidConfig, c.Synchronous))
+	if !validSynchronous[strings.ToUpper(c.Synchronous)] {
+		errs = append(errs, fmt.Errorf("%w: Synchronous %q is not a recognized level (OFF, NORMAL, FULL, EXTRA)", ErrInvalidConfig, c.Synchronous))
 	}
 	return errors.Join(errs...)
 }
