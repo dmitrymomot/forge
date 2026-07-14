@@ -14,8 +14,9 @@ import (
 // goose's instance-based Provider API (no global mutable state). It is up-only:
 // there is no Down/Version/Status. The zero value is not usable; build one with New.
 //
-// *Migrator structurally satisfies the postgres.Migrator interface, so it can be
-// passed straight to postgres.WithMigrator.
+// *Migrator structurally satisfies the postgres.Migrator and sqlite.Migrator
+// interfaces, so it can be passed straight to postgres.WithMigrator or
+// sqlite.WithMigrator.
 type Migrator struct {
 	fsys fs.FS
 	cfg  config
