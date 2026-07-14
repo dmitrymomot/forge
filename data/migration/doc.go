@@ -6,9 +6,9 @@
 // band.
 //
 // New stores configuration only; the goose Provider is built per Up call, which
-// takes the *sql.DB the caller already owns. The dialect is fixed to PostgreSQL,
-// the framework's declared database. Migrations live at the root of fsys; embed a
-// subdirectory with fs.Sub if needed.
+// takes the *sql.DB the caller already owns. The dialect defaults to PostgreSQL,
+// the framework's primary database; WithDialect selects SQLite for data/sqlite.
+// Migrations live at the root of fsys; embed a subdirectory with fs.Sub if needed.
 //
 // # Usage
 //
@@ -42,6 +42,7 @@
 // migrations directory still boots cleanly.
 //
 // Options: WithTable sets the goose version table (default "schema_migrations");
-// WithLogger routes goose progress through an *slog.Logger. Errors wrap the
-// single-line sentinel ErrMigrate and are matchable with errors.Is.
+// WithLogger routes goose progress through an *slog.Logger; WithDialect selects the
+// SQL dialect (Postgres or SQLite). Errors wrap the single-line sentinel ErrMigrate
+// and are matchable with errors.Is.
 package migration

@@ -22,9 +22,10 @@ type Migrator struct {
 }
 
 // New returns a Migrator that applies the migrations rooted at fsys. Migrations live
-// at the root of fsys; embed a subdirectory with fs.Sub if needed. The dialect is
-// fixed to PostgreSQL. New never returns an error and never contacts a database — it
-// only stores configuration; the goose provider is built per call to Up.
+// at the root of fsys; embed a subdirectory with fs.Sub if needed. The dialect
+// defaults to PostgreSQL; select another with WithDialect. New never returns an error
+// and never contacts a database — it only stores configuration; the goose provider is
+// built per call to Up.
 func New(fsys fs.FS, opts ...Option) *Migrator {
 	cfg := config{table: DefaultTable}
 	for _, opt := range opts {
@@ -44,7 +45,12 @@ func (m *Migrator) Up(ctx context.Context, db *sql.DB) error {
 		opts = append(opts, goose.WithSlog(m.cfg.logger))
 	}
 
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, m.fsys, opts...)
+	dialect := goose.DialectPostgres
+	if m.cfg.dialect == SQLite {
+		dialect = goose.DialectSQLite3
+	}
+
+	provider, err := goose.NewProvider(dialect, db, m.fsys, opts...)
 	if err != nil {
 		// An empty fs.FS is a no-op, not a failure: an app that embeds an empty
 		// migrations directory should still boot cleanly.
