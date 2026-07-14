@@ -8,8 +8,9 @@ const DefaultTable = "schema_migrations"
 // config holds the resolved Migrator settings. table always carries DefaultTable
 // unless WithTable overrides it; logger is optional.
 type config struct {
-	logger *slog.Logger
-	table  string
+	logger  *slog.Logger
+	table   string
+	dialect Dialect
 }
 
 // Option configures a Migrator built by New.
@@ -33,4 +34,19 @@ func WithLogger(l *slog.Logger) Option {
 			c.logger = l
 		}
 	}
+}
+
+// Dialect selects the SQL dialect goose targets.
+type Dialect uint8
+
+const (
+	// Postgres is the default dialect (goose DialectPostgres).
+	Postgres Dialect = iota
+	// SQLite targets SQLite (goose DialectSQLite3) — used by data/sqlite.
+	SQLite
+)
+
+// WithDialect selects the migration dialect. The default is Postgres.
+func WithDialect(d Dialect) Option {
+	return func(c *config) { c.dialect = d }
 }

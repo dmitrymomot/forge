@@ -19,17 +19,6 @@ External module deps stay in the entry prose. Composition partners
 
 ---
 
-**core/fsm**
-
-Typed finite state machine: declared states and transitions with guards,
-on-transition hooks, and illegal-transition errors; pure generics, zero
-deps. Persistence is caller-owned — apply it to a status column. The
-lifecycle brick under order/subscription/verification/payout flows.
-
-Deps: none (stdlib only).
-
----
-
 **core/country**
 
 Curated ISO-3166 static data: alpha-2/alpha-3 codes, English names,
@@ -293,28 +282,6 @@ batch-insert seam — the "import your data" onboarding flow. (Named
 
 Deps: `core/validate`.
 
----
-
-**data/clickhouse**
-
-ClickHouse connection factory in the `data/postgres` mold: DSN config with
-Validate, pooling, health ping. Connection only — query building and
-schema stay consumer-side.
-
-Deps: none forge-internal (driver external).
-
----
-
-**data/sqlite**
-
-SQLite connection factory in the `data/postgres` mold, owning the pragma
-discipline — WAL, `busy_timeout`, `synchronous`, foreign keys — and
-single-writer pool sizing; cgo-free `modernc.org/sqlite` isolated here.
-The zero-infra single-node story under `jobqueue/sqlite` and dev/test
-setups.
-
-Deps: none forge-internal (modernc.org/sqlite external).
-
 ## finance/
 
 ---
@@ -437,7 +404,7 @@ determined; rendering stays out (HTML is a `render` recipe, PDF
 consumer-side); no dunning, no e-invoicing formats, no subscription or
 pricing logic (the billing anti-scope stands).
 
-Deps: `core/money`; `core/fsm` (planned).
+Deps: `core/money`; `core/fsm`.
 
 ## async/
 

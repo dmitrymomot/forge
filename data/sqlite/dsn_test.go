@@ -1,0 +1,152 @@
+package sqlite
+
+import (
+	"net/url"
+	"strings"
+	"testing"
+)
+
+func TestBuildDSN_WriterHasImmediateWALNoQueryOnly(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Path = "app.db"
+	dsn := buildDSN(cfg, nil, false, "", true)
+
+	for _, want := range []string{
+		"file:app.db?",
+		"_txlock=immediate",
+		"_pragma=journal_mode(WAL)",
+		"_pragma=busy_timeout(5000)",
+		"_pragma=synchronous(NORMAL)",
+		"_pragma=foreign_keys(1)",
+		"_pragma=temp_store(MEMORY)",
+	} {
+		if !strings.Contains(dsn, want) {
+			t.Errorf("writer DSN missing %q\n got: %s", want, dsn)
+		}
+	}
+	if strings.Contains(dsn, "query_only") {
+		t.Errorf("writer DSN must not set query_only: %s", dsn)
+	}
+}
+
+func TestBuildDSN_ReaderIsQueryOnlyDeferredNoJournalMode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Path = "app.db"
+	dsn := buildDSN(cfg, nil, false, "", false)
+
+	if !strings.Contains(dsn, "_txlock=deferred") {
+		t.Errorf("reader DSN must be deferred: %s", dsn)
+	}
+	if strings.Contains(dsn, "journal_mode") {
+		t.Errorf("reader DSN must not set journal_mode: %s", dsn)
+	}
+	// query_only is applied per connection regardless of its position in the DSN
+	// (modernc re-sorts _pragma params before applying them), so this only pins
+	// buildDSN's stable append order, not a correctness requirement; the reader is
+	// query_only either way.
+	last := strings.LastIndex(dsn, "_pragma=")
+	if !strings.HasPrefix(dsn[last:], "_pragma=query_only(1)") {
+		t.Errorf("query_only pragma param missing or not in expected position: %s", dsn)
+	}
+}
+
+func TestBuildDSN_MemorySkipsWALUsesSharedCache(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Path = ":memory:"
+	dsn := buildDSN(cfg, nil, true, "memdb-7", true)
+
+	for _, want := range []string{"file:memdb-7", "mode=memory", "cache=shared"} {
+		if !strings.Contains(dsn, want) {
+			t.Errorf("memory DSN missing %q: %s", want, dsn)
+		}
+	}
+	if strings.Contains(dsn, "journal_mode") {
+		t.Errorf("memory DSN must not set journal_mode: %s", dsn)
+	}
+}
+
+func TestBuildDSN_ExtraPragmaOverrideDedupesToOneEntry(t *testing.T) {
+	// modernc re-sorts _pragma params before applying them, so DSN position cannot
+	// express override precedence. buildDSN must instead emit exactly one cache_size
+	// _pragma param (the override), never the Config-derived default alongside it.
+	cfg := DefaultConfig()
+	cfg.Path = "app.db"
+	dsn := buildDSN(cfg, []pragma{{"cache_size", "-2000"}}, false, "", true)
+	if strings.Contains(dsn, "cache_size(-16000)") {
+		t.Errorf("default cache_size must not survive an override: %s", dsn)
+	}
+	if !strings.Contains(dsn, "cache_size(-2000)") {
+		t.Errorf("override cache_size missing: %s", dsn)
+	}
+	if n := strings.Count(dsn, "_pragma=cache_size("); n != 1 {
+		t.Errorf("want exactly one cache_size _pragma param, got %d: %s", n, dsn)
+	}
+}
+
+func TestPathToURI_EscapesReservedChars(t *testing.T) {
+	got := pathToURI("my data/app?.db")
+	if strings.ContainsAny(got, " ?") {
+		t.Errorf("path not escaped: %q", got)
+	}
+	if _, err := url.Parse("file:" + got + "?x=1"); err != nil {
+		t.Errorf("escaped path not URL-parseable: %v", err)
+	}
+}
+
+func TestBuildDSN_DoubleSlashPathStaysParseable(t *testing.T) {
+	// Paths whose encoded form begins with "//" (UNC-style paths, or paths that
+	// percent-encode to a leading "//") are ambiguous with the file:// authority
+	// separator. buildDSN must still emit a DSN that url.Parse accepts and whose
+	// path round-trips back to the original cfg.Path.
+	for _, path := range []string{"//server/share/app.db", "// "} {
+		cfg := DefaultConfig()
+		cfg.Path = path
+		dsn := buildDSN(cfg, nil, false, "", true)
+		u, err := url.Parse(dsn)
+		if err != nil {
+			t.Errorf("path %q: unparseable DSN %q: %v", path, dsn, err)
+			continue
+		}
+		if u.Path != path {
+			t.Errorf("path %q: round-trip mismatch, got decoded path %q from %q", path, u.Path, dsn)
+		}
+		if u.Host != "" {
+			t.Errorf("path %q: unexpected authority %q in %q", path, u.Host, dsn)
+		}
+	}
+}
+
+func TestIsMemory(t *testing.T) {
+	for _, p := range []string{":memory:", "file:x?mode=memory&cache=shared"} {
+		if !isMemory(p) {
+			t.Errorf("isMemory(%q) = false, want true", p)
+		}
+	}
+	if isMemory("/var/db/app.db") {
+		t.Errorf("isMemory(file path) = true, want false")
+	}
+}
+
+func TestNextMemName_Unique(t *testing.T) {
+	a, b := nextMemName(), nextMemName()
+	if a == b {
+		t.Errorf("nextMemName not unique: %q == %q", a, b)
+	}
+}
+
+func FuzzBuildDSN_AlwaysParseable(f *testing.F) {
+	f.Add("app.db")
+	f.Add("/var/db/my app.db")
+	f.Add("weird?#name.db")
+	f.Fuzz(func(t *testing.T, path string) {
+		if path == "" || isMemory(path) {
+			t.Skip()
+		}
+		cfg := DefaultConfig()
+		cfg.Path = path
+		dsn := buildDSN(cfg, nil, false, "", true)
+		if _, err := url.Parse(dsn); err != nil {
+			t.Errorf("unparseable DSN for path %q: %v", path, err)
+		}
+	})
+}
