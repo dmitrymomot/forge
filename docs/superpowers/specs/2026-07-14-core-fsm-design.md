@@ -13,7 +13,7 @@ Typed finite state machine brick: an immutable compiled transition table with gu
 3. **Typed subject.** `Machine[S ~string, V any]` — `V` is the entity (or entity+actor composite) that guards inspect and hooks mutate. No context smuggling, no `any` assertions.
 4. **Guards return `error`, not `bool`** — a denial carries a human-readable reason the UI can show, wrapped so sentinels still match.
 5. **Full symmetric attachment surfaces.** Guards and hooks attach to edges and to states (on-enter, on-exit). State-level attachment is what tenant-drawn graphs require: the app declares "entering `done` runs `subtasks_closed`" without knowing which edges the tenant drew into `done`.
-6. **Strict construction-time resolution.** `Compile`/`New` fail closed with all issues joined; `Fire` never discovers a definition problem at runtime.
+6. **Strict construction-time resolution.** `Compile`/`New` fail closed with all issues aggregated into one error; `Fire` never discovers a definition problem at runtime.
 7. **Source-side wildcard.** `"*" → X` (typed: `EdgeFromAny(X)`) expands at construction into concrete edges; pure sugar, zero runtime wildcard logic.
 
 ## Package shape
@@ -116,7 +116,7 @@ Expansion happens at construction, after the full state set is known: a wildcard
 
 ## Validation (construction-time, fail closed)
 
-`New` and `Compile` collect all issues via `errors.Join`, wrapped under `ErrInvalidDefinition`, so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state name with leading or trailing whitespace (a tenant typing `"done "` compiles fine and then never matches `"done"` from the UI; internal spaces like `"In Progress"` stay legal); state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate edge for a literal `(from, to)` pair (the wildcard `"*"` counts as a literal source here, so two wildcard edges to one target are duplicates); (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
+`New` and `Compile` collect all issues into one single-line `"; "`-joined message wrapped under `ErrInvalidDefinition` (the repo's single-line-error rule rules out `errors.Join`'s newline rendering; issue classes are display strings, not sentinels, so nothing is lost), so a flow-builder shows every problem in one save attempt. Issue classes: empty state set; empty or duplicate state name; state name with leading or trailing whitespace (a tenant typing `"done "` compiles fine and then never matches `"done"` from the UI; internal spaces like `"In Progress"` stay legal); state named `"*"`; initial missing or undeclared; edge referencing an undeclared state; duplicate edge for a literal `(from, to)` pair (the wildcard `"*"` counts as a literal source here, so two wildcard edges to one target are duplicates); (`Compile` only) guard/hook name absent from the registry. Reachability is deliberately not enforced: a state with no inbound edges is still usable (bulk imports, admin overrides set status outside the FSM); it is a lint concern, not an integrity one.
 
 ## Errors
 
@@ -150,7 +150,7 @@ No storage, no seam: multi-tenancy is which machine you compiled. The doc exampl
 - Ordering: a recording spy proves exit → edge → enter order for guards then hooks, guards-before-any-hook, first-error abort (failing enter-guard ⇒ zero hooks ran).
 - Hook mutation on success; abort mid-hooks leaves caller free to discard (documented semantics).
 - Wildcard expansion and explicit-edge-replaces-wildcard precedence, including wildcard guards applying to expanded edges.
-- Validation matrix: one test per issue class, multi-issue accumulation via `errors.Join`, `errors.Is` matching for every sentinel, guard/hook domain errors surviving the double-wrap.
+- Validation matrix: one test per issue class, multi-issue accumulation in one single-line message, `errors.Is` matching for every sentinel, guard/hook domain errors surviving the double-wrap.
 - `Definition` JSON round-trip; `Allowed` filtering (admin vs non-admin case); `Allowed` under a cancelled context returns `ctx.Err()`, not an empty list; concurrent `Fire` on a shared machine under `-race`.
 
 ## Anti-scope (restated in doc.go)
