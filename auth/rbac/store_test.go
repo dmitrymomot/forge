@@ -28,6 +28,18 @@ func TestManagerAssignRolesForUnassign(t *testing.T) {
 	assert.ElementsMatch(t, []string{"editor"}, roles)
 }
 
+func TestManagerUnassignAllReclaims(t *testing.T) {
+	m := rbac.NewManager(rbac.NewMemoryStore())
+	ctx := context.Background()
+
+	require.NoError(t, m.Assign(ctx, "u1", "editor"))
+	require.NoError(t, m.Unassign(ctx, "u1", "editor")) // empties the role set
+
+	roles, err := m.RolesFor(ctx, "u1")
+	require.NoError(t, err)
+	assert.Empty(t, roles)
+}
+
 func TestManagerScopeIsolation(t *testing.T) {
 	store := rbac.NewMemoryStore()
 	tenant := "acme"
