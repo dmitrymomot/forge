@@ -11,15 +11,17 @@ import (
 )
 
 // Identity is the authenticated principal a Verifier resolved. Subject is
-// never empty on a successful verification; Tenant, Scopes, and Meta are
-// optional. Scopes is carried for the future authorization decision seam
-// (401-vs-403 split) — guard itself never reads it.
+// never empty on a successful verification; Tenant, Scopes, Roles, and Meta are
+// optional. Scopes and Roles are carried for the authorization decision seam
+// (access.ScopeDecider / access.Subject.Roles → rbac) — guard itself never
+// reads them.
 type Identity struct {
 	Meta    map[string]string // verifier-specific extras (email, key id, …)
 	Subject string            // principal id — never empty on success
 	Tenant  string            // optional tenant id
 	Method  Method            // how the request authenticated; see the Method* constants
-	Scopes  []string          // permissions/scopes for the future authz seam
+	Scopes  []string          // permissions/scopes for the authz seam (access.ScopeDecider)
+	Roles   []string          // role names for the authz seam (access.Subject.Roles → rbac)
 }
 
 // Method names how a request authenticated. The constants below cover the

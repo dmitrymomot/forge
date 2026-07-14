@@ -11,6 +11,7 @@ import (
 type config struct {
 	resource  func(*http.Request) Resource
 	subject   func(*http.Request) (Subject, bool)
+	forbidden func(http.ResponseWriter, *http.Request)
 	responder problem.Responder
 	loadError func(http.ResponseWriter, *http.Request, error)
 	logger    *slog.Logger
@@ -38,6 +39,18 @@ func WithSubject(fn func(r *http.Request) (Subject, bool)) Option {
 	return func(c *config) {
 		if fn != nil {
 			c.subject = fn
+		}
+	}
+}
+
+// WithForbidden overrides the deny response with a custom renderer — an HTML
+// 403 page or a redirect for server-rendered apps (default: problem.JSON 403).
+// The denied Decision is on the request context (DecisionFrom) for the reason.
+// Takes precedence over WithResponder on the deny path.
+func WithForbidden(fn func(w http.ResponseWriter, r *http.Request)) Option {
+	return func(c *config) {
+		if fn != nil {
+			c.forbidden = fn
 		}
 	}
 }
@@ -111,6 +124,10 @@ func newConfig(opts ...Option) config {
 func (c config) reject(w http.ResponseWriter, r *http.Request, cause error) {
 	if cause != nil && c.logger != nil {
 		c.logger.WarnContext(r.Context(), "access decider error", slog.Any("error", cause))
+	}
+	if c.forbidden != nil {
+		c.forbidden(w, r)
+		return
 	}
 	c.responder(w, r, errDenied)
 }
