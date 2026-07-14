@@ -51,3 +51,17 @@ func WithPragma(name, value string) Option {
 		c.pragmas = append(c.pragmas, pragma{name: name, value: value})
 	}
 }
+
+// WithMigrator registers a Migrator that Open runs against the writer pool after both
+// pools are live and pinged, before Open returns. A failed migration fails Open. A nil
+// Migrator is rejected (ErrInvalidConfig). Pass migration.New(fsys,
+// migration.WithDialect(migration.SQLite)) — *migration.Migrator satisfies Migrator.
+func WithMigrator(m Migrator) Option {
+	return func(c *config) {
+		if m == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithMigrator received a nil Migrator", ErrInvalidConfig))
+			return
+		}
+		c.migrator = m
+	}
+}
