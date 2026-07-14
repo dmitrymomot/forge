@@ -303,18 +303,6 @@ schema stay consumer-side.
 
 Deps: none forge-internal (driver external).
 
----
-
-**data/sqlite**
-
-SQLite connection factory in the `data/postgres` mold, owning the pragma
-discipline — WAL, `busy_timeout`, `synchronous`, foreign keys — and
-single-writer pool sizing; cgo-free `modernc.org/sqlite` isolated here.
-The zero-infra single-node story under `jobqueue/sqlite` and dev/test
-setups.
-
-Deps: none forge-internal (modernc.org/sqlite external).
-
 ## finance/
 
 ---
