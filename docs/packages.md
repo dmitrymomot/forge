@@ -613,10 +613,11 @@ Deps: `resilience/cache`, `data/postgres`; `web/fingerprint`.
 Support-agent "log in as": time-boxed impersonation sessions with a
 required reason, a context flag views render as a banner, `auditlog`
 events on start/end and every action, optional `ops/approval` gate.
-Composes `session` and the authorization decision seam — the hand-rolled
+Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/session`, `ops/auditlog`, `ops/approval` (all planned).
+Deps: `auth/session`, `auth/access`, `ops/auditlog`, `ops/approval` (all
+planned).
 
 ---
 
@@ -633,16 +634,24 @@ Deps: `auth/guard`.
 
 ---
 
+**auth/access**
+
+The authorization decision seam: owns the question vocabulary (`Subject`, `Action`, `Resource` — identities plus caller-supplied attributes) and the `Decider` interface answering "can this actor do this action on this resource", with combinators composing decision layers under explicit fixed precedence — acl deny wins → acl grant → abac predicates → rbac roles → default deny; fail-closed when no layer speaks. Every decision carries an explanation record — which layer decided and why (matched deny, granting role, failed predicate) — the `fxrate`/`formula` record-the-evaluation philosophy applied to authorization: feeds `auditlog`, answers the "why can't this user do X" ticket. Ships the `RequirePermission` middleware over `guard`'s context identity (guard authenticates → 401; access authorizes → 403). Anti-scope: no policy DSL, no policy storage (each layer keeps its own Store), no resource fetching — resource attributes are caller-supplied, never queried; not a Zanzibar/OPA clone.
+
+Deps: `core/ctxkey`, `auth/guard`, `web/middleware`, `web/problem` — all middleware-side (guard identity in, problem+json 403 out, decision in context); the decision seam and combinators are stdlib-only.
+
+---
+
 **auth/rbac**
 
 Role-based access control: predefined roles, role nesting/inheritance (a
 role inherits another role's permissions and adds its own),
 out-of-hierarchy standalone roles, wildcard grants; resolves subject →
-effective permission set. Feeds the shared authorization decision seam
-consumed by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
+effective permission set. Implements the `access` decision seam consumed
+by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
 assignment behind a storage-agnostic Store.
 
-Deps: none (stdlib only).
+Deps: `auth/access` (planned).
 
 ---
 
@@ -651,20 +660,20 @@ Deps: none (stdlib only).
 Per-subject / per-resource grant and deny overrides (deny wins) layered
 onto rbac decisions — "this manager sees exactly these assigned agents".
 The runtime-data authorization layer: storage-agnostic Store with drivers;
-composes into the same decision seam.
+composes into the `access` decision seam.
 
-Deps: none (stdlib only).
+Deps: `auth/access` (planned).
 
 ---
 
 **auth/abac**
 
 Attribute/relationship predicates as registered Go functions — "agent sees
-own subtree but not subagents' player details" — evaluated in the shared
-decision seam alongside rbac/acl. The relationship data (trees,
+own subtree but not subagents' player details" — evaluated in the
+`access` decision seam alongside rbac/acl. The relationship data (trees,
 assignments) stays consumer code feeding the predicate; no policy DSL.
 
-Deps: none (stdlib only).
+Deps: `auth/access` (planned).
 
 ---
 
@@ -845,11 +854,11 @@ Deps: `ops/logger`, `data/postgres`; `data/pagination` (planned).
 
 Maker-checker dual control: typed approval requests (action + payload) a
 second person approves or rejects over a storage-agnostic Store; decisions
-emit `auditlog` events and approver eligibility rides the authorization
+emit `auditlog` events and approver eligibility rides the `auth/access`
 decision seam. The two-person rule for payouts, limit overrides, and
 config changes.
 
-Deps: `ops/auditlog` (planned).
+Deps: `ops/auditlog`, `auth/access` (both planned).
 
 ---
 
