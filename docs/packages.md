@@ -19,17 +19,6 @@ External module deps stay in the entry prose. Composition partners
 
 ---
 
-**core/fsm**
-
-Typed finite state machine: declared states and transitions with guards,
-on-transition hooks, and illegal-transition errors; pure generics, zero
-deps. Persistence is caller-owned — apply it to a status column. The
-lifecycle brick under order/subscription/verification/payout flows.
-
-Deps: none (stdlib only).
-
----
-
 **core/country**
 
 Curated ISO-3166 static data: alpha-2/alpha-3 codes, English names,
@@ -437,7 +426,7 @@ determined; rendering stays out (HTML is a `render` recipe, PDF
 consumer-side); no dunning, no e-invoicing formats, no subscription or
 pricing logic (the billing anti-scope stands).
 
-Deps: `core/money`; `core/fsm` (planned).
+Deps: `core/money`; `core/fsm`.
 
 ## async/
 

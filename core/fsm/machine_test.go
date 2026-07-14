@@ -3,6 +3,7 @@ package fsm_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -314,4 +315,43 @@ func TestAllowed_RunsNoHooks(t *testing.T) {
 	_, err := m.Allowed(context.Background(), &task{}, statusOpen)
 	require.NoError(t, err)
 	assert.Empty(t, log, "Allowed evaluates guards only")
+}
+
+func TestFire_ZeroAllocsOnBareEdge(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen, d.Edge(statusOpen, statusDone))
+	v := &task{}
+	ctx := context.Background()
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := m.Fire(ctx, v, statusOpen, statusDone); err != nil {
+			t.Fatal(err)
+		}
+	})
+	assert.Zero(t, allocs, "bare Fire is the hot path: 0 allocs/op")
+}
+
+func TestMachine_ConcurrentUse(t *testing.T) {
+	var d fsm.Define[status, *task]
+	m := fsm.MustNew(statusOpen,
+		d.Edge(statusOpen, statusDone, d.Guard(func(ctx context.Context, v *task, from, to status) error {
+			if v.openSubtasks > 0 {
+				return errors.New("subtasks open")
+			}
+			return nil
+		})),
+		d.EdgeFromAny(statusCancelled),
+	)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			v := &task{}
+			for range 100 {
+				_ = m.Fire(context.Background(), v, statusOpen, statusDone)
+				_, _ = m.Allowed(context.Background(), v, statusOpen)
+				_ = m.Next(statusOpen)
+				_ = m.States()
+			}
+		})
+	}
+	wg.Wait()
 }
