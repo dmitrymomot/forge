@@ -25,6 +25,7 @@ const (
 	partOnEnter
 	partOnExit
 	partEdgeFromAny
+	partState
 )
 
 // Part is one construction element consumed by New.
@@ -62,6 +63,13 @@ func (Define[S, V]) Edge(from, to S, atts ...Attachment[S, V]) Part[S, V] {
 func (Define[S, V]) EdgeFromAny(to S, atts ...Attachment[S, V]) Part[S, V] {
 	guards, hooks := split(atts)
 	return Part[S, V]{kind: partEdgeFromAny, to: to, guards: guards, hooks: hooks}
+}
+
+// declareState declares a state without edges or attachments. Compile uses
+// it so every explicitly listed StateDef exists in the machine even when
+// nothing references it.
+func declareState[S ~string, V any](name S) Part[S, V] {
+	return Part[S, V]{kind: partState, from: name}
 }
 
 // Guard wraps fn as a guard attachment: a side-effect-free check over
@@ -165,7 +173,7 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 		case partEdge:
 			b.declare(p.from)
 			b.declare(p.to)
-		case partOnEnter, partOnExit:
+		case partOnEnter, partOnExit, partState:
 			b.declare(p.from)
 		case partEdgeFromAny:
 			b.declare(p.to)
@@ -190,7 +198,7 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 				continue
 			}
 			wildcardSeen[p.to] = struct{}{}
-		case partOnEnter, partOnExit:
+		case partOnEnter, partOnExit, partState:
 		}
 	}
 
@@ -231,6 +239,7 @@ func build[S ~string, V any](initial S, parts []Part[S, V], preIssues []string) 
 			cbs.guards = append(cbs.guards, p.guards...)
 			cbs.hooks = append(cbs.hooks, p.hooks...)
 			b.exit[p.from] = cbs
+		case partState:
 		}
 	}
 
