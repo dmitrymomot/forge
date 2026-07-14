@@ -9,7 +9,7 @@ Role-based access control: predefined roles with permission grants, role inherit
 - A **hybrid** role source: a zero-I/O fast path (roles carried on the `Subject`) and a Store-backed path (roles assigned as pure runtime data).
 - Single-tenant and multi-tenant from one package: tenancy enters via the mandated construction-time `WithScope` hook, fails closed, and single-tenant use pays zero ceremony.
 
-**Deps:** `auth/access` (Layer 2 adapter only), `web/middleware` + `web/problem` (the `RequireRole` gate — already transitive via `access`), `resilience/cache` (documented read-through recipe, not a hard dep), `data/postgres`/`data/migration` (the `rbac/pgstore` driver leaf). Layer 1's API surface imports nothing forge-internal.
+**Deps:** `auth/access` (Layer 2 Decider adapter only), `web/middleware` + `web/problem` (the `Require` gate — already transitive via `access`), `core/ctxkey` (the `Checker` context carrier), `resilience/cache` (documented read-through recipe, not a hard dep), `data/postgres`/`data/migration` (the `rbac/pgstore` driver leaf). Layer 1's API surface imports nothing forge-internal.
 
 **Anti-scope:** per-subject/per-resource grants and deny-overrides are `acl`'s job; relationship/attribute predicates are `abac`'s job; `rbac` only *grants*, never denies, and never inspects `Resource`. Role definitions changing while serving (mutable registry) is out — definitions are predefined; the runtime-changing part is *assignments*, which live in the Store. External policy engines (casbin/OPA) plug in behind the `access` seam, not here.
 
@@ -89,7 +89,7 @@ func (p *permSet) Allows(action string) bool {
 - `func (rs *RoleSet) Can(roleNames []string, action string) bool` — the hot-path answer. Iterates the role names, short-circuits on the first role whose pre-expanded `permSet.Allows(action)` is true. **Zero-alloc** — no union map is built; it reads the stored per-role sets directly.
 - `func (rs *RoleSet) Resolve(roleNames ...string) PermissionSet` — the "give me the whole effective set" view for listing/debugging/admin UIs. *May* allocate (not the hot path).
 - `type PermissionSet` with `Allows(action string) bool` and `List() []string`.
-- `func (rs *RoleSet) HasRole(roleNames []string, required string) bool` — **inheritance-aware role membership**: reports whether `required` is in the inheritance closure of `roleNames` (holding `editor`, which inherits `viewer`, satisfies `HasRole(…, "viewer")`). Exact-name match when no edges are defined. Access-free; backs the `RequireRole` middleware and any non-HTTP role gate. Zero-alloc (reads the pre-expanded ancestor closure, no set built).
+- `func (rs *RoleSet) HasRole(roleNames []string, required string) bool` — **inheritance-aware role membership**: reports whether `required` is in the inheritance closure of `roleNames` (holding `editor`, which inherits `viewer`, satisfies `HasRole(…, "viewer")`). Exact-name match when no edges are defined. Access-free; backs `WithAnyRole` in the `Require` gate and any non-HTTP role check. Zero-alloc (reads the pre-expanded ancestor closure, no set built).
 
 **Unknown role names** (a name absent from the `RoleSet`) contribute nothing and are skipped silently in resolution — roles get renamed and retired, and authz must not wedge. Optionally surfaced in the Decision trace at Layer 2 under `WithExplain`.
 
@@ -123,21 +123,15 @@ read := access.RequirePermission(decider, "documents:read")
 mux.Handle("GET /docs/{id}", authn(read(getDoc)))
 ```
 
-## Layer 2b — RequireRole middleware (lightweight role gate)
+## Layer 2c — the lightweight full-stack path (Require gate + templ Checker)
 
-The "I have a static `RoleSet` and a role field on the user/member row — just gate the route on the role" path. No `access.Subject`, no `Decider` chain: a caller-supplied extractor pulls the subject's role names straight from the request (context, session, or a loaded user row).
+The "I have a static `RoleSet` and a `role` field on the user/member row — just gate the route and toggle UI" path for server-rendered (templ) apps. No `access.Subject`, no `Decider` chain: a caller-supplied extractor pulls the subject's role names straight from the request.
 
 ```go
 type Extractor func(r *http.Request) ([]string, error)
-
-func RequireRole(rs *RoleSet, extract Extractor, anyOf ...string) middleware.Middleware
 ```
 
-- **Any-of semantics** — passes when the subject holds *at least one* of `anyOf`, evaluated through `RoleSet.HasRole` (**inheritance-aware**: an `editor` passes a `RequireRole("viewer")` gate). Exact-name match when no inheritance is defined.
-- **Fail closed → 403** — a miss *or* an extractor error rejects with a `problem` 403; customizable via `WithResponder(problem.Responder)`. The extractor is where the app reads its own `role` column (typically already loaded into context by its auth middleware).
-- Single-role tables return a one-element slice; the extractor is the whole integration seam.
-
-Permission-based gating is deliberately **not** here — that stays on the `Decider` / `access.RequirePermission` path. `RequireRole` is role membership only.
+The `Extractor` is the whole integration seam — it reads the app's own `role` column (typically already loaded into context by the auth middleware). Single-role tables return a one-element slice.
 
 ```go
 extractRoles := func(r *http.Request) ([]string, error) {
@@ -147,8 +141,73 @@ extractRoles := func(r *http.Request) ([]string, error) {
     }
     return []string{m.Role}, nil
 }
-mux.Handle("GET /admin", rbac.RequireRole(rs, extractRoles, "admin")(adminHandler))
 ```
+
+### The Require gate
+
+One generic middleware gates on roles, permissions, or both:
+
+```go
+func Require(rs *RoleSet, extract Extractor, opts ...GateOption) middleware.Middleware
+
+func WithAnyRole(roles ...string)       GateOption // any-of: holds ≥1 (inheritance-aware, via HasRole)
+func WithPermissions(actions ...string) GateOption // all-of: holds every listed permission (via Can)
+func WithForbidden(fn func(w http.ResponseWriter, r *http.Request)) GateOption
+```
+
+- **All provided constraints must pass (AND).** A gate usually carries one, but both compose: `WithAnyRole("admin") + WithPermissions("billing:read")` → admin *and* holds `billing:read`.
+- `WithAnyRole` is **any-of** (inheritance-aware — an `editor` passes a `WithAnyRole("viewer")` gate). `WithPermissions` is **all-of** (every listed capability). Any-of permissions is a future `WithAnyPermission` if ever needed (YAGNI now).
+- Roles/permissions ride options (not variadic params) because Go forbids two variadic params alongside `opts`, and it lets callers pass a computed slice via spread: `WithAnyRole(allowed...)`.
+- A `Require` with **neither** a role nor a permission option is a programming error → **panic at construction** (boot-time, mirroring `access.Model`'s panic-on-misuse), so an "option" gate can't silently gate nothing.
+- **Fail closed.** A constraint miss *or* an extractor error rejects. Default is a `problem` 403 (works for JSON APIs too); `WithForbidden` overrides it to render an **HTML 403 page or a redirect** — the gate imports neither `templ` nor `render`, it just calls the supplied function.
+
+```go
+// full-stack HTML routes
+admin := rbac.Require(rs, extractRoles,
+    rbac.WithAnyRole("admin"),
+    rbac.WithForbidden(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusForbidden)
+        _ = views.Forbidden().Render(r.Context(), w) // your templ 403 component
+    }),
+)
+mux.Handle("GET /admin", authn(admin(adminPage)))
+
+// or gate on capability, or redirect instead of a page
+rbac.Require(rs, extractRoles, rbac.WithPermissions("documents:delete"),
+    rbac.WithForbidden(func(w http.ResponseWriter, r *http.Request) {
+        http.Redirect(w, r, "/", http.StatusSeeOther)
+    }))
+```
+
+Unauthenticated users are `guard`'s upstream 401/login-redirect job; by the time `Require` runs the user is authenticated and this is a genuine "you don't have access" 403.
+
+### In-template checks (Checker + context carrier)
+
+templ components receive a `context.Context`, so conditional rendering (`show the Delete button only if allowed`) reads a context-carried checker — no `RoleSet`/roles threaded through every component:
+
+```go
+// tiny value binding *RoleSet + the subject's role names (access-free, Layer 1)
+type Checker struct{ /* rs + roles */ }
+func (rs *RoleSet) CheckerFor(roleNames ...string) Checker
+func (c Checker) Can(action string) bool
+func (c Checker) HasRole(required string) bool
+
+// context carrier (ctxkey seam) + middleware that reuses the SAME Extractor as Require
+func WithChecker(rs *RoleSet, extract Extractor) middleware.Middleware
+func FromContext(ctx context.Context) (Checker, bool)
+```
+
+```templ
+templ DocActions(id string) {
+	if chk, ok := rbac.FromContext(ctx); ok && chk.Can("documents:delete") {
+		<button hx-delete={ "/docs/" + id }>Delete</button>
+	}
+}
+```
+
+`WithChecker` stashes the `Checker` once per request; every downstream component (and `web/render`/`web/htmx` view) reads it with zero param-threading. `WithChecker` and `Require` share one `Extractor`, so there is a single integration point for the app's `role` column. Route gating (`Require`) and view toggling (`Checker`) split cleanly.
+
+**The overall split:** full-stack HTML routes use `Require` (roles or permissions, HTML 403 via `WithForbidden`) and `WithChecker` (view toggles); the `access.Decider` chain stays the JSON-API / multi-layer (`acl`/`abac`) path.
 
 ## The assignment Store (runtime subject→role data)
 
@@ -188,15 +247,16 @@ Rationale: `Subject` is already the shared carrier of every input the built-in d
 
 ## Package anatomy
 
-Per design.md: `doc.go` (runnable example) · `options.go` (`RoleSetOption` for `WithRoles`/`WithRoleInheritance`; `Option` for `WithScope` — `type … func(*config)`, never builders) · `errors.go` (`errors.Is`-matchable single-line sentinels: `ErrDuplicateRole`, `ErrUnknownRole`, `ErrCycle`, `ErrScope`) · impl. `Decider` takes no options in v1 (explanation is driven by `access.WithExplain`/`ExplainContext`, not an rbac option).
+Per design.md: `doc.go` (runnable example) · `options.go` (three option families — `RoleSetOption` for `WithRoles`/`WithRoleInheritance`; `Option` for `WithScope`; `GateOption` for `WithAnyRole`/`WithPermissions`/`WithForbidden` — all `type … func(*config)`, never builders) · `errors.go` (`errors.Is`-matchable single-line sentinels: `ErrDuplicateRole`, `ErrUnknownRole`, `ErrCycle`, `ErrScope`) · impl. `Decider` takes no options in v1 (explanation is driven by `access.WithExplain`/`ExplainContext`, not an rbac option).
 
 Proposed files:
 
-- `doc.go` — package doc + runnable example (engine standalone + Decider wiring).
-- `roleset.go` — `Role`, `RoleInherits`, `WithRoles`, `WithRoleInheritance`, `NewRoleSet`, `RoleSet`, `PermissionSet`, `permSet`, graph resolution, wildcard matching.
-- `options.go` — option types + `WithScope`.
+- `doc.go` — package doc + runnable example (engine standalone + Decider wiring + templ `Require`/`Checker`).
+- `roleset.go` — `Role`, `RoleInherits`, `WithRoles`, `WithRoleInheritance`, `NewRoleSet`, `RoleSet`, `PermissionSet`, `permSet`, `Can`, `HasRole`, graph resolution, wildcard matching.
+- `options.go` — the three option families + `WithScope`.
 - `decider.go` — `Decider`, `RoleSource`, `FromSubject`, `FromStore` (imports `access`).
-- `middleware.go` — `Extractor`, `RequireRole`, `WithResponder` (imports `web/middleware`, `web/problem`).
+- `middleware.go` — `Extractor`, `Require`, `WithAnyRole`, `WithPermissions`, `WithForbidden` (imports `web/middleware`, `web/problem`).
+- `checker.go` — `Checker`, `CheckerFor`, `WithChecker`, `FromContext` (imports `core/ctxkey`, `web/middleware`).
 - `store.go` — `Store`, `Manager`, `NewManager`, `Assign`/`Unassign`/`RolesFor`.
 - `memory.go` — `NewMemoryStore`.
 - `errors.go` — sentinels.
@@ -208,7 +268,7 @@ Single Go module; two levels max (`rbac/pgstore` is the sole third-level driver 
 ## Testing & benchmarks
 
 - **Black-box tests:** graph validation (dup/unknown/cycle errors), inheritance expansion (single, multi-parent, diamond dedupe, deep chains), wildcard matching (exact/segment/super, non-match, colon-less action), unknown-role skip, standalone roles, `HasRole` inheritance closure (held ancestor satisfies gate; sibling/descendant does not).
-- **Middleware tests:** `RequireRole` any-of pass/miss, inheritance-aware pass, extractor error → fail-closed 403, `WithResponder` override, single-role extractor.
+- **Middleware tests:** `Require` — `WithAnyRole` any-of pass/miss, inheritance-aware pass, `WithPermissions` all-of pass/miss (one missing → deny), role+permission AND composition, extractor error → fail-closed, default problem+json 403, `WithForbidden` renders custom body/redirect, panic on empty gate (no role/permission option). `Checker`/`WithChecker`/`FromContext` — `Can`/`HasRole` true/false, context round-trip, missing checker → `ok == false`.
 - **Decider tests:** `FromSubject` Allow/Abstain, `FromStore` Allow/Abstain, `RoleSource` error → fail-closed `Deny` via `Authorize`, chain composition with `TenantMatch`/`acl`-style layers, `WithExplain` trace.
 - **Store/Manager tests:** idempotent `Assign`, `Unassign`, `RolesFor`; `WithScope` fail-closed (`ErrScope`); single-tenant zero-scope path; per-tenant isolation. `pgstore` covered against live Postgres (dbtest-style).
 - **Benchmarks (required):** `BenchmarkCan` (wildcard match), `BenchmarkDecider_FromSubject` (**target: 0 allocs/op**), `BenchmarkHasRole` (**target: 0 allocs/op**), `BenchmarkResolve`, `BenchmarkNewRoleSet`. Post-benchmark optimization pass with before/after numbers in the PR.
