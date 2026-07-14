@@ -50,7 +50,8 @@ func WithResponder(p problem.Responder) Option {
 }
 
 // WithLoadError overrides the Model load-failure response (default
-// problem.JSON 404, which cloaks resource existence).
+// problem.JSON 404 with a generic body that cloaks both resource existence
+// and the underlying error text; use this to surface the real error).
 func WithLoadError(fn func(w http.ResponseWriter, r *http.Request, err error)) Option {
 	return func(c *config) {
 		if fn != nil {
@@ -87,11 +88,17 @@ func defaultSubject(r *http.Request) (Subject, bool) {
 	return SubjectFromIdentity(id), true
 }
 
+// defaultLoadError discards the raw Load error and responds with the generic
+// errNotFound sentinel, so a raw DB/internal error never reaches the client.
+func defaultLoadError(w http.ResponseWriter, r *http.Request, _ error) {
+	notFoundResponder(w, r, errNotFound)
+}
+
 func newConfig(opts ...Option) config {
 	c := config{
 		subject:   defaultSubject,
 		responder: forbiddenResponder,
-		loadError: notFoundResponder,
+		loadError: defaultLoadError,
 	}
 	for _, o := range opts {
 		o(&c)

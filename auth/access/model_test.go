@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/auth/access"
@@ -53,12 +54,16 @@ func TestModelHandleDenyGives403(t *testing.T) {
 
 func TestModelHandleLoadErrorGives404(t *testing.T) {
 	loaded := false
-	m := docModel(func(_ *http.Request) (doc, error) { loaded = true; return doc{}, errors.New("not found") })
+	secret := errors.New("sql: dial tcp 10.0.0.1 refused SEKRET")
+	m := docModel(func(_ *http.Request) (doc, error) { loaded = true; return doc{}, secret })
 	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, _ *http.Request, _ doc) {}, access.WithSubject(subjectFromContextIdentity))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
 	if !loaded || rr.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got loaded=%v code=%d", loaded, rr.Code)
+	}
+	if body := rr.Body.String(); strings.Contains(body, "SEKRET") {
+		t.Fatalf("default load-error response leaked raw error text: %s", body)
 	}
 }
 

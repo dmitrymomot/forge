@@ -17,6 +17,12 @@ func explaining(ctx context.Context) bool {
 	return v
 }
 
+// failClosed builds the fail-closed Deny returned when a decider errors:
+// the client gets a generic deny, the caller gets the wrapped error.
+func failClosed(dec Decision, err error, acc []Decision) (Decision, error) {
+	return Decision{Effect: Deny, Decider: firstNonEmpty(dec.Decider, "access"), Reason: err.Error(), Trace: acc}, err
+}
+
 // FirstDecisive returns the first decider's Allow or Deny; Abstain falls
 // through. All-abstain returns Abstain. Passing [TenantMatch(), acl, abac,
 // rbac] reproduces the documented precedence exactly. A decider error stops
@@ -31,7 +37,7 @@ func FirstDecisive(deciders ...Decider) Decider {
 				acc = append(acc, dec)
 			}
 			if err != nil {
-				return Decision{Effect: Deny, Decider: firstNonEmpty(dec.Decider, "access"), Reason: err.Error(), Trace: acc}, err
+				return failClosed(dec, err, acc)
 			}
 			if dec.Effect != Abstain {
 				dec.Trace = acc
@@ -60,7 +66,7 @@ func DenyOverrides(deciders ...Decider) Decider {
 				acc = append(acc, dec)
 			}
 			if err != nil {
-				return Decision{Effect: Deny, Decider: firstNonEmpty(dec.Decider, "access"), Reason: err.Error(), Trace: acc}, err
+				return failClosed(dec, err, acc)
 			}
 			switch dec.Effect {
 			case Deny:

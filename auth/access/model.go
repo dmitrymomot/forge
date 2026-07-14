@@ -20,10 +20,12 @@ func NewModel[T any](load func(r *http.Request) (T, error), describe func(obj T)
 }
 
 // Handle returns an http.Handler that resolves the Subject (else 403, without
-// loading), calls Load (error → 404, cloaks existence), Describes the object,
-// authorizes the action (deny → 403; decider error → 403 + logged), stashes the
-// Decision, then calls fn with the already-loaded object. WithResource has no
-// effect here — Describe supplies the Resource.
+// loading), calls Load (error → 404 with a generic body that cloaks both
+// resource existence and the underlying error text; see WithLoadError to opt
+// into the raw error), Describes the object, authorizes the action (deny →
+// 403; decider error → 403 + logged), stashes the Decision, then calls fn
+// with the already-loaded object. WithResource has no effect here — Describe
+// supplies the Resource.
 func (m Model[T]) Handle(d Decider, action Action, fn func(w http.ResponseWriter, r *http.Request, obj T), opts ...Option) http.Handler {
 	cfg := newConfig(opts...)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -55,6 +55,10 @@ func TestTenantMatchAbstainsWhenEitherEmpty(t *testing.T) {
 	if got := run(t, access.TenantMatch(), access.Subject{Tenant: "t1"}, "a", access.Resource{}); got.Effect != access.Abstain {
 		t.Fatalf("resource empty: got %+v", got)
 	}
+	// subject not tenant-scoped -> abstain
+	if got := run(t, access.TenantMatch(), access.Subject{}, "a", access.Resource{Tenant: "t1"}); got.Effect != access.Abstain {
+		t.Fatalf("subject empty: got %+v", got)
+	}
 }
 
 func TestTerminals(t *testing.T) {

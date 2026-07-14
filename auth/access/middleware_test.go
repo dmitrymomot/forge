@@ -1,15 +1,19 @@
 package access_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/auth/access"
 	"github.com/dmitrymomot/forge/auth/guard"
 	"github.com/dmitrymomot/forge/core/ctxkey"
+	"github.com/dmitrymomot/forge/web/problem"
 )
 
 // identityKey is a test-local context key (NOT guard's — ctxkey keys never
@@ -189,5 +193,48 @@ func TestRequirePermissionDefaultSubjectFromGuard(t *testing.T) {
 	}
 	if seen.Effect != access.Allow {
 		t.Fatalf("want Allow decision, got %+v", seen)
+	}
+}
+
+func TestWithResponderIsUsed(t *testing.T) {
+	custom := problem.Responder(func(w http.ResponseWriter, _ *http.Request, _ error) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.RequirePermission(
+		access.DenyAll("no"),
+		"documents:read",
+		access.WithSubject(subjectFromContextIdentity),
+		access.WithResponder(custom),
+	)(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if rr.Code != http.StatusTeapot {
+		t.Fatalf("want custom responder's 418, got %d", rr.Code)
+	}
+}
+
+func TestWithLoggerLogsDeciderError(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	boom := access.DeciderFunc(func(_ context.Context, _ access.Subject, _ access.Action, _ access.Resource) (access.Decision, error) {
+		return access.Decision{}, errors.New("store down")
+	})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := access.RequirePermission(
+		boom,
+		"documents:read",
+		access.WithSubject(subjectFromContextIdentity),
+		access.WithLogger(logger),
+	)(next)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", rr.Code)
+	}
+	if !strings.Contains(buf.String(), "access decider error") {
+		t.Fatalf("want decider error logged, got: %s", buf.String())
 	}
 }

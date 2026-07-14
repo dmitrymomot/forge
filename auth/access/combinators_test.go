@@ -71,6 +71,19 @@ func TestFirstDecisiveErrorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestDenyOverridesErrorFailsClosed(t *testing.T) {
+	sentinel := errors.New("boom")
+	d := access.DenyOverrides(
+		constDecider("acl", access.Abstain),
+		errDecider("rbac", sentinel),
+		constDecider("late", access.Allow),
+	)
+	got, err := d.Decide(context.Background(), access.Subject{}, "a", access.Resource{})
+	if !errors.Is(err, sentinel) || got.Effect != access.Deny {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
 func TestDenyOverridesVetoRegardlessOfOrder(t *testing.T) {
 	d := access.DenyOverrides(
 		constDecider("rbac", access.Allow),
