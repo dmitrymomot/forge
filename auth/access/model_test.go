@@ -1,6 +1,7 @@
 package access_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,10 @@ func docModel(load func(*http.Request) (doc, error)) access.Model[doc] {
 func TestModelHandleAllowInjectsObject(t *testing.T) {
 	m := docModel(func(_ *http.Request) (doc, error) { return doc{ID: "1", OwnerID: "u1"}, nil })
 	var got doc
-	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, _ *http.Request, d doc) {
+	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, r *http.Request, d doc) {
+		if dec, ok := access.DecisionFrom(r.Context()); !ok || dec.Effect != access.Allow {
+			t.Errorf("decision not stashed for Model.Handle: ok=%v dec=%+v", ok, dec)
+		}
 		got = d
 		w.WriteHeader(http.StatusOK)
 	}, access.WithSubject(subjectFromContextIdentity))
@@ -69,6 +73,21 @@ func TestModelHandleMissingSubjectSkipsLoad(t *testing.T) {
 	}
 }
 
+func TestModelHandleDeciderErrorGives403(t *testing.T) {
+	m := docModel(func(_ *http.Request) (doc, error) { return doc{ID: "1"}, nil })
+	called := false
+	boom := access.DeciderFunc(func(_ context.Context, _ access.Subject, _ access.Action, _ access.Resource) (access.Decision, error) {
+		return access.Decision{}, errors.New("store down")
+	})
+	h := m.Handle(boom, "documents:read", func(_ http.ResponseWriter, _ *http.Request, _ doc) { called = true },
+		access.WithSubject(subjectFromContextIdentity))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if called || rr.Code != http.StatusForbidden {
+		t.Fatalf("want fail-closed 403 + no fn, got called=%v code=%d", called, rr.Code)
+	}
+}
+
 func TestNewModelPanicsOnNilFuncs(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -76,4 +95,13 @@ func TestNewModelPanicsOnNilFuncs(t *testing.T) {
 		}
 	}()
 	access.NewModel[doc](nil, func(d doc) access.Resource { return access.Resource{} })
+}
+
+func TestNewModelPanicsOnNilDescribe(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic on nil describe")
+		}
+	}()
+	access.NewModel(func(_ *http.Request) (doc, error) { return doc{}, nil }, nil)
 }
