@@ -42,6 +42,18 @@ func TestValidate_RejectsBadValues(t *testing.T) {
 	}
 }
 
+func TestValidate_MultipleViolationsStillMatchSentinel(t *testing.T) {
+	cfg := sqlite.DefaultConfig() // empty Path
+	cfg.ReadPoolSize = -1
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("want error for two violations, got nil")
+	}
+	if !errors.Is(err, sqlite.ErrInvalidConfig) {
+		t.Fatalf("want ErrInvalidConfig, got %v", err)
+	}
+}
+
 func TestValidate_AcceptsZeroMmapAndCaseInsensitiveModes(t *testing.T) {
 	cfg := sqlite.DefaultConfig()
 	cfg.Path = "app.db"

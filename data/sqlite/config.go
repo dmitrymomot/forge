@@ -44,8 +44,8 @@ var (
 )
 
 // Validate reports whether the field values are usable, returning an
-// ErrInvalidConfig-wrapped, single-line joined error otherwise. Open also calls it
-// defensively.
+// ErrInvalidConfig-wrapped error (one wrapped cause per invalid field, joined)
+// otherwise. Open also calls it defensively.
 func (c Config) Validate() error {
 	var errs []error
 	if c.Path == "" {
