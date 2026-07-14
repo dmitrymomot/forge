@@ -583,7 +583,7 @@ events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/session`, `auth/access`, `ops/auditlog`, `ops/approval` (all
+Deps: `auth/access`; `auth/session`, `ops/auditlog`, `ops/approval` (all
 planned).
 
 ---
@@ -601,14 +601,6 @@ Deps: `auth/guard`.
 
 ---
 
-**auth/access**
-
-The authorization decision seam: owns the question vocabulary (`Subject`, `Action`, `Resource` — identities plus caller-supplied attributes) and the `Decider` interface answering "can this actor do this action on this resource", with combinators composing decision layers under explicit fixed precedence — acl deny wins → acl grant → abac predicates → rbac roles → default deny; fail-closed when no layer speaks. Every decision carries an explanation record — which layer decided and why (matched deny, granting role, failed predicate) — the `fxrate`/`formula` record-the-evaluation philosophy applied to authorization: feeds `auditlog`, answers the "why can't this user do X" ticket. Ships the `RequirePermission` middleware over `guard`'s context identity (guard authenticates → 401; access authorizes → 403). Anti-scope: no policy DSL, no policy storage (each layer keeps its own Store), no resource fetching — resource attributes are caller-supplied, never queried; not a Zanzibar/OPA clone.
-
-Deps: `core/ctxkey`, `auth/guard`, `web/middleware`, `web/problem` — all middleware-side (guard identity in, problem+json 403 out, decision in context); the decision seam and combinators are stdlib-only.
-
----
-
 **auth/rbac**
 
 Role-based access control: predefined roles, role nesting/inheritance (a
@@ -618,7 +610,7 @@ effective permission set. Implements the `access` decision seam consumed
 by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
 assignment behind a storage-agnostic Store.
 
-Deps: `auth/access` (planned).
+Deps: `auth/access`.
 
 ---
 
@@ -629,7 +621,7 @@ onto rbac decisions — "this manager sees exactly these assigned agents".
 The runtime-data authorization layer: storage-agnostic Store with drivers;
 composes into the `access` decision seam.
 
-Deps: `auth/access` (planned).
+Deps: `auth/access`.
 
 ---
 
@@ -640,7 +632,7 @@ own subtree but not subagents' player details" — evaluated in the
 `access` decision seam alongside rbac/acl. The relationship data (trees,
 assignments) stays consumer code feeding the predicate; no policy DSL.
 
-Deps: `auth/access` (planned).
+Deps: `auth/access`.
 
 ---
 
@@ -825,7 +817,7 @@ emit `auditlog` events and approver eligibility rides the `auth/access`
 decision seam. The two-person rule for payouts, limit overrides, and
 config changes.
 
-Deps: `ops/auditlog`, `auth/access` (both planned).
+Deps: `auth/access`; `ops/auditlog` (planned).
 
 ---
 

@@ -1,8 +1,3 @@
-// Package access is the authorization decision seam: it answers "can this
-// subject do this action on this resource?" behind a three-valued Decider
-// interface that rbac/acl/abac implement and guard's RequirePermission
-// middleware consumes (the 403 half of the 401-vs-403 split). access owns no
-// storage and never queries anything; resource attributes are caller-supplied.
 package access
 
 import (
