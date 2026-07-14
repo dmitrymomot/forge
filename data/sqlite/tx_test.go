@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,7 +91,7 @@ func TestWithTxRetry_GivesUpOnHeldWriteLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("blocker open: %v", err)
 	}
-	defer blocker.Close()
+	defer func() { _ = blocker.Close() }()
 	held, err := blocker.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("blocker begin: %v", err)
@@ -98,7 +99,7 @@ func TestWithTxRetry_GivesUpOnHeldWriteLock(t *testing.T) {
 	if _, err := held.Exec(`INSERT INTO t(id) VALUES (999)`); err != nil {
 		t.Fatalf("blocker write: %v", err)
 	}
-	defer held.Rollback()
+	defer func() { _ = held.Rollback() }()
 
 	// Force our writer to busy out fast: reopen with busy_timeout 0.
 	cfg := sqlite.DefaultConfig()
@@ -126,5 +127,57 @@ func TestWithTxRetry_HonorsContextCancel(t *testing.T) {
 	err := sqlite.WithTxRetry(ctx, db, func(tx *sql.Tx) error { return nil })
 	if err == nil {
 		t.Fatal("want error on cancelled ctx")
+	}
+}
+
+func TestWithTxRetry_ContextCancelErrorIsSingleLineAndBusy(t *testing.T) {
+	_, path := txDB(t)
+	// Hold the write lock from an independent connection with busy_timeout=0.
+	blocker, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatalf("blocker open: %v", err)
+	}
+	defer func() { _ = blocker.Close() }()
+	held, err := blocker.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("blocker begin: %v", err)
+	}
+	if _, err := held.Exec(`INSERT INTO t(id) VALUES (999)`); err != nil {
+		t.Fatalf("blocker write: %v", err)
+	}
+	defer func() { _ = held.Rollback() }()
+
+	// Force our writer to busy out fast: reopen with busy_timeout 0.
+	cfg := sqlite.DefaultConfig()
+	cfg.Path = path
+	cfg.BusyTimeout = 0
+	fast, err := sqlite.Open(context.Background(), sqlite.WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("fast open: %v", err)
+	}
+	defer sqlite.Close(fast, nil)
+
+	// First attempt busies out immediately; the 200ms backoff outlives the 20ms
+	// cancel timer, so cancellation fires during the backoff wait. Use WithCancel +
+	// AfterFunc (not WithTimeout) so ctx.Err() is context.Canceled, not
+	// DeadlineExceeded.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Millisecond, cancel)
+	err = sqlite.WithTxRetry(ctx, fast, func(tx *sql.Tx) error {
+		_, e := tx.Exec(`INSERT INTO t(id) VALUES (2)`)
+		return e
+	}, sqlite.WithRetryAttempts(5), sqlite.WithRetryInterval(200*time.Millisecond))
+	if err == nil {
+		t.Fatal("want error on cancelled ctx during backoff")
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Fatalf("error message must be single line, got %q", err.Error())
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled cause, got %v", err)
+	}
+	if !sqlite.IsBusy(err) {
+		t.Fatalf("want busy cause preserved, got %v", err)
 	}
 }

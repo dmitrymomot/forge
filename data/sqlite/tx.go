@@ -3,7 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"fmt"
 	"time"
 )
 
@@ -99,7 +99,7 @@ func WithTxRetry(ctx context.Context, db *DB, fn func(*sql.Tx) error, opts ...Re
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return errors.Join(lastErr, ctx.Err())
+			return fmt.Errorf("%w: %w", lastErr, ctx.Err())
 		case <-timer.C:
 		}
 	}
