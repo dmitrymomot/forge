@@ -1,0 +1,79 @@
+package access_test
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/dmitrymomot/forge/auth/access"
+	"github.com/dmitrymomot/forge/auth/guard"
+)
+
+type doc struct {
+	ID      string
+	Tenant  string
+	OwnerID string
+}
+
+func docModel(load func(*http.Request) (doc, error)) access.Model[doc] {
+	return access.NewModel(load, func(d doc) access.Resource {
+		return access.Resource{Type: "document", ID: d.ID, Tenant: d.Tenant, Attrs: map[string]any{"owner_id": d.OwnerID}}
+	})
+}
+
+func TestModelHandleAllowInjectsObject(t *testing.T) {
+	m := docModel(func(_ *http.Request) (doc, error) { return doc{ID: "1", OwnerID: "u1"}, nil })
+	var got doc
+	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, _ *http.Request, d doc) {
+		got = d
+		w.WriteHeader(http.StatusOK)
+	}, access.WithSubject(subjectFromContextIdentity))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if rr.Code != http.StatusOK || got.ID != "1" {
+		t.Fatalf("want injected doc + 200, got code=%d doc=%+v", rr.Code, got)
+	}
+}
+
+func TestModelHandleDenyGives403(t *testing.T) {
+	m := docModel(func(_ *http.Request) (doc, error) { return doc{ID: "1"}, nil })
+	called := false
+	h := m.Handle(access.DenyAll("no"), "documents:write", func(w http.ResponseWriter, _ *http.Request, _ doc) { called = true }, access.WithSubject(subjectFromContextIdentity))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if called || rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403 + no fn, got called=%v code=%d", called, rr.Code)
+	}
+}
+
+func TestModelHandleLoadErrorGives404(t *testing.T) {
+	loaded := false
+	m := docModel(func(_ *http.Request) (doc, error) { loaded = true; return doc{}, errors.New("not found") })
+	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, _ *http.Request, _ doc) {}, access.WithSubject(subjectFromContextIdentity))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, reqWithIdentity(guard.Identity{Subject: "u1"}))
+	if !loaded || rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got loaded=%v code=%d", loaded, rr.Code)
+	}
+}
+
+func TestModelHandleMissingSubjectSkipsLoad(t *testing.T) {
+	loaded := false
+	m := docModel(func(_ *http.Request) (doc, error) { loaded = true; return doc{}, nil })
+	h := m.Handle(access.AllowAll(), "documents:read", func(w http.ResponseWriter, _ *http.Request, _ doc) {})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil)) // no identity
+	if loaded || rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403 without loading, got loaded=%v code=%d", loaded, rr.Code)
+	}
+}
+
+func TestNewModelPanicsOnNilFuncs(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic on nil load")
+		}
+	}()
+	access.NewModel[doc](nil, func(d doc) access.Resource { return access.Resource{} })
+}
