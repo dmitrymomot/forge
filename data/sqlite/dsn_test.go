@@ -83,6 +83,29 @@ func TestPathToURI_EscapesReservedChars(t *testing.T) {
 	}
 }
 
+func TestBuildDSN_DoubleSlashPathStaysParseable(t *testing.T) {
+	// Paths whose encoded form begins with "//" (UNC-style paths, or paths that
+	// percent-encode to a leading "//") are ambiguous with the file:// authority
+	// separator. buildDSN must still emit a DSN that url.Parse accepts and whose
+	// path round-trips back to the original cfg.Path.
+	for _, path := range []string{"//server/share/app.db", "// "} {
+		cfg := DefaultConfig()
+		cfg.Path = path
+		dsn := buildDSN(cfg, nil, false, "", true)
+		u, err := url.Parse(dsn)
+		if err != nil {
+			t.Errorf("path %q: unparseable DSN %q: %v", path, dsn, err)
+			continue
+		}
+		if u.Path != path {
+			t.Errorf("path %q: round-trip mismatch, got decoded path %q from %q", path, u.Path, dsn)
+		}
+		if u.Host != "" {
+			t.Errorf("path %q: unexpected authority %q in %q", path, u.Host, dsn)
+		}
+	}
+}
+
 func TestIsMemory(t *testing.T) {
 	for _, p := range []string{":memory:", "file:x?mode=memory&cache=shared"} {
 		if !isMemory(p) {

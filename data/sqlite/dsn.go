@@ -81,8 +81,11 @@ func buildDSN(cfg Config, extra []pragma, memory bool, memName string, write boo
 	} else {
 		pathEncoded := pathToURI(cfg.Path)
 		if strings.HasPrefix(pathEncoded, "//") {
-			// Paths starting with // are ambiguous with file:// authority separator
-			// Use three slashes to ensure proper parsing
+			// An encoded path starting with "//" is ambiguous with the file://
+			// authority separator (url.Parse would read the next segment as a host).
+			// pathEncoded already begins with "//", so prefixing "file:///" yields
+			// "file:////…": an empty authority, after which url.Parse/SQLite treat
+			// the remaining "//…" as the path, round-tripping back to cfg.Path.
 			base = "file:///" + pathEncoded[1:]
 		} else {
 			base = "file:" + pathEncoded
