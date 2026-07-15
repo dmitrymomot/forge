@@ -2,6 +2,7 @@ package phone
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/dmitrymomot/forge/core/country"
 )
@@ -55,10 +56,5 @@ func gatePass(set country.Set, ph Phone) bool {
 	if c, ok := ph.Country(); ok {
 		return set.Contains(c)
 	}
-	for _, c := range ph.Candidates() {
-		if set.Contains(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(ph.Candidates(), set.Contains)
 }
