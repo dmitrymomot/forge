@@ -2,6 +2,7 @@ package logger
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -24,6 +25,9 @@ func New(opts ...Option) (*slog.Logger, error) {
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
+	}
+	if c.asyncBufferSize != 0 {
+		return nil, fmt.Errorf("%w: WithAsyncBufferSize is only valid with NewAsync", ErrInvalidConfig)
 	}
 
 	base, err := buildBase(c)
