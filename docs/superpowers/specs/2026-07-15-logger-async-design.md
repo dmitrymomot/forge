@@ -82,7 +82,7 @@ Worker goroutine (exactly one): dequeues items, reports accumulated drops (see b
 
 Buffer full → the new record is dropped and an `atomic.Int64` counter increments; `Handle` returns nil. Logging never blocks and never surfaces an error.
 
-When the worker next dequeues an item (and once more before exiting at close), it swaps the counter to zero and, if it was positive, first emits a synthetic record — level `Warn`, message `"logger: dropped log records"`, attr `dropped=N` — to the root base handler (all destinations, each gated by its own level; warn-level sinks like sentry see drop incidents).
+When the worker next dequeues an item (and once more before exiting at close), it swaps the counter to zero and, if it was positive, first emits a synthetic record — level `Warn`, message `"logger: dropped log records"`, attr `dropped=N` — to every destination directly, bypassing each destination's level gate. A dropped-records warning is a system-health signal, so it stays visible even when every destination (e.g. an error-level sink) sits above `Warn`. (Refined during implementation: the first cut routed the report through the composed base handler, where `slog.MultiHandler.Handle` re-gates each child by level and would suppress the warning whenever all destinations sat above `Warn`.)
 
 ## Shutdown
 
