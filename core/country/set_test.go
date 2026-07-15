@@ -44,3 +44,20 @@ func TestSet_ZeroValueFailsClosed(t *testing.T) {
 	assert.False(t, s.ContainsCode("US"))
 	assert.Empty(t, s.All())
 }
+
+func TestNewSet_CanonicalizesAndStaysConsistent(t *testing.T) {
+	// A partially-filled recognized country is stored canonically, so All()
+	// yields full data.
+	s := country.NewSet(country.Country{Alpha2: "US"})
+	all := s.All()
+	require.Len(t, all, 1)
+	assert.Equal(t, "United States", all[0].Name)
+	assert.Equal(t, "USD", all[0].Currency)
+
+	// An unrecognized-but-nonempty alpha-2 stays consistent across Contains,
+	// Len, and All (no silent drop from All).
+	x := country.NewSet(country.Country{Alpha2: "ZZ"})
+	assert.Equal(t, 1, x.Len())
+	assert.True(t, x.ContainsCode("ZZ"))
+	assert.Len(t, x.All(), 1)
+}

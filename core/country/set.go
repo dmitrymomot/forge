@@ -15,10 +15,19 @@ type Set struct {
 }
 
 // NewSet builds a Set from Country values. Zero-value countries are ignored.
+// A recognized alpha-2 is stored in canonical form (re-derived from the bundled
+// table), so a partially-filled Country still yields full data from All; an
+// unrecognized alpha-2 is stored as given, keeping Contains, Len, and All
+// mutually consistent.
 func NewSet(cs ...Country) Set {
 	s := Set{m: make(map[string]Country, len(cs))}
 	for _, c := range cs {
-		if c.Alpha2 != "" {
+		if c.Alpha2 == "" {
+			continue
+		}
+		if canon, ok := ByAlpha2(c.Alpha2); ok {
+			s.m[canon.Alpha2] = canon
+		} else {
 			s.m[c.Alpha2] = c
 		}
 	}
