@@ -79,6 +79,19 @@ func WithHandler(h slog.Handler) Option {
 	}
 }
 
+// WithLeveledHandler adds an extra parallel destination that only receives records at min
+// and above, independent of the primary destination's level. A nil handler is rejected.
+// Valid for both New and NewAsync.
+func WithLeveledHandler(min slog.Level, h slog.Handler) Option {
+	return func(c *config) {
+		if h == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithLeveledHandler received a nil slog.Handler", ErrInvalidConfig))
+			return
+		}
+		c.extraHandlers = append(c.extraHandlers, &leveledHandler{next: h, min: min})
+	}
+}
+
 // WithContextExtractors registers ContextExtractor funcs applied on every log call.
 // Nil entries are filtered; order is preserved.
 func WithContextExtractors(ex ...ContextExtractor) Option {
