@@ -16,6 +16,10 @@ test-integration path='./...':
 bench path='./...':
     go clean -testcache && go test -bench=. -benchmem {{ path }}
 
+# Run integration-tier benchmarks (e.g. async/queue/{postgres,redis}; needs Docker)
+bench-integration path='./...':
+    go clean -testcache && go test -tags=integration -bench=. -benchmem {{ path }}
+
 # Run code linters
 lint:
     go vet ./...
