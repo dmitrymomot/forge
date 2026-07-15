@@ -30,7 +30,7 @@
   pluggable `Store`/`Broker`/`Sender` interfaces.
 - Single-responsibility packages (~250–850 LOC); black-box tests only.
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
-  store, jobqueue's in-memory broker) — there is no central fakes package.
+  store, queue's in-memory broker) — there is no central fakes package.
 - **Env prefixes are baked into tags:** every env-loadable `Config` carries
   its package prefix in the tag (`COOKIE_KEYS`, `SERVER_ADDR`, `DB_URL`).
   Nest untagged to keep default names; nest tagged (`env:"APP"`) to
@@ -79,7 +79,7 @@ Forge optimizes for a small, auditable dependency surface — not stdlib purism:
 - **Build or vendor** anything small that shapes forge's own API (`id`,
   `validate`, `request`, the job engine).
 - **Always isolate** a real dependency in a driver subpackage
-  (`logger/sentry`, `cache/redis`, `jobqueue/nats`) so it stays a swappable
+  (`logger/sentry`, `cache/redis`, `queue/nats`) so it stays a swappable
   leaf.
 
 Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch
@@ -89,8 +89,8 @@ for the roadmap: aws-sdk-go-v2 (`objectstore/s3`), `coder/websocket`
 (password/kdf/autocert), goldmark (`email/markdown`), the official MCP
 go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
 (`metrics/prometheus`), OTel SDK (`tracing/otel`), goquery (`htmltest`,
-test-only), `nats.go` (`jobqueue/nats`), a Kafka client (`jobqueue/kafka`),
-a cgo-free SQLite driver (`jobqueue/sqlite`). **Postgres is the primary
+test-only), `nats.go` (`queue/nats`), a Kafka client (`queue/kafka`),
+a cgo-free SQLite driver (`queue/sqlite`). **Postgres is the primary
 database**; the async engine is storage-agnostic with first-class drivers
 (postgres, sqlite, redis, nats, kafka); everything else outside `data/*`
 and the driver leaves stays stdlib.
@@ -104,7 +104,7 @@ and the driver leaves stays stdlib.
 - **Group by purpose, not by layer, tier, or build phase.** Folder names are
   domain nouns (`crypto`, `web`, `data`, `async`).
 - **Two levels max** (`domain/package`); a third level only for driver
-  isolators (`resilience/cache/redis`, `async/jobqueue/postgres`) and
+  isolators (`resilience/cache/redis`, `async/queue/postgres`) and
   colocated codegen (`web/useragent/gen`).
 - **Leaf directory = package name**, unique across all domains (no forced
   import aliasing). No packages at the repository root.
@@ -140,7 +140,7 @@ and the driver leaves stays stdlib.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.
-- **Broker seam** — `jobqueue.Broker` (`Push/Claim/Ack/Nack` + optional
+- **Broker seam** — `queue.Broker` (`Push/Claim/Ack/Nack` + optional
   capability discovery, e.g. native delay) is the cross-backend messaging
   seam; `scheduler`, `eventbus`, and `outbox` ride it unchanged. The
   **engine, not the driver, owns the hard semantics** — retry/backoff,
@@ -213,7 +213,7 @@ and the driver leaves stays stdlib.
 - **Long-poll transport** — SSE reconnect covers it; hand-roll over fanout if
   truly needed.
 - **Sync command bus** — a command with one handler is a function call.
-  Async commands are a jobqueue kind with one registered handler.
+  Async commands are a queue kind with one registered handler.
 - **Logger adapters** (zap/zerolog bridges) — forge is slog-only.
 - **Scaffolding / code generators** — value lives in consumer-owned
   templates.
