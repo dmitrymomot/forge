@@ -19,10 +19,9 @@
 - Single-line structured log attrs; errors as attrs, no stacks/blobs.
 - No manual line-wrapping in any prose/markdown/commit body.
 - Commit after every task (conventional commits, no Claude attribution lines).
-- Live driver tests skip without env: `FORGE_TEST_POSTGRES_DSN`, `FORGE_TEST_REDIS_URL`. Start ephemeral containers when executing those tasks:
-  - `docker run --rm -d --name forge-queue-pg -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=forge -p 5439:5432 postgres:16-alpine` then `export FORGE_TEST_POSTGRES_DSN='postgres://postgres:pass@localhost:5439/forge?sslmode=disable'`
-  - `docker run --rm -d --name forge-queue-redis -p 6382:6379 redis:7-alpine` then `export FORGE_TEST_REDIS_URL='localhost:6382'`
-  - Stop after: `docker stop forge-queue-pg forge-queue-redis`
+- Driver tests need NO Docker by default: `redisqueue` runs against an in-process `miniredis`, `pgqueue` against an embedded PostgreSQL 18 (`fergusstrange/embedded-postgres`, downloaded once then cached, run natively — no container-VM clock skew). Both fall back to a real server when its env var is set, to run the same conformance suite against production backends:
+  - `export FORGE_TEST_POSTGRES_DSN='postgres://…'` (e.g. `postgres:18-alpine`)
+  - `export FORGE_TEST_REDIS_URL='host:port'` (e.g. `redis:8-alpine`)
 - Engine-owned semantics: drivers NEVER decide retry/delay/dead-letter; they only execute `Push/Claim/Extend/Ack/Nack/Kill/ListDead/Requeue/Purge/Stats`.
 - `Claim` is non-blocking and atomically sets the lease AND increments the attempt counter.
 - Every package ships `doc.go` and `bench_test.go`; post-benchmark optimization pass with before/after numbers recorded for the PR.

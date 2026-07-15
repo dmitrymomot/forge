@@ -3,7 +3,6 @@ package pgqueue_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -24,14 +23,12 @@ var (
 	_ queue.TxPusher = (*pgqueue.Broker)(nil)
 )
 
+// openPool connects to the suite's Postgres (embedded by default; see TestMain)
+// and applies the queue migration.
 func openPool(tb testing.TB) *pgxpool.Pool {
 	tb.Helper()
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		tb.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
 	cfg := postgres.DefaultConfig()
-	cfg.URL = dsn
+	cfg.URL = testDSN
 	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))
 	require.NoError(tb, err)
 	tb.Cleanup(pool.Close)

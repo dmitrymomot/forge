@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,18 +20,37 @@ import (
 )
 
 // runID makes every prefix unique per test process so re-runs against a
-// persistent container (keys leak by design) never collide with prior state.
+// persistent server (keys leak by design) never collide with prior state.
 var runID = id.NewULID().String()
 
 var _ queue.Broker = (*redisqueue.Broker)(nil)
 
+// redisAddr returns the address of the redis to test against. By default it
+// starts one process-shared in-memory miniredis (no Docker required) — its
+// streams, consumer groups, XAUTOCLAIM idle timing, and Lua EVAL are faithful
+// enough to run the full broker conformance suite. Set FORGE_TEST_REDIS_URL to
+// point the same suite at a real server (e.g. CI's redis service) instead.
+var (
+	sharedRedisOnce sync.Once
+	sharedRedisAddr string
+)
+
+func redisAddr(tb testing.TB) string {
+	tb.Helper()
+	if addr := os.Getenv("FORGE_TEST_REDIS_URL"); addr != "" {
+		return addr
+	}
+	sharedRedisOnce.Do(func() {
+		mr, err := miniredis.Run() // never closed: lives for the test process
+		require.NoError(tb, err)
+		sharedRedisAddr = mr.Addr()
+	})
+	return sharedRedisAddr
+}
+
 func dial(tb testing.TB) redis.UniversalClient {
 	tb.Helper()
-	addr := os.Getenv("FORGE_TEST_REDIS_URL")
-	if addr == "" {
-		tb.Skip("set FORGE_TEST_REDIS_URL (host:port)")
-	}
-	c := redis.NewClient(&redis.Options{Addr: addr})
+	c := redis.NewClient(&redis.Options{Addr: redisAddr(tb)})
 	tb.Cleanup(func() { _ = c.Close() })
 	return c
 }
@@ -37,7 +58,7 @@ func dial(tb testing.TB) redis.UniversalClient {
 var prefixSeq int
 
 // newBroker namespaces each subtest under a unique prefix; keys leak into the
-// ephemeral test container, which is acceptable.
+// ephemeral test server (miniredis or a shared real redis), which is acceptable.
 func newBroker(tb testing.TB) *redisqueue.Broker {
 	tb.Helper()
 	prefixSeq++
