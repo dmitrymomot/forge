@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/core/country"
 )
@@ -55,4 +56,22 @@ func TestAll_SortedByName(t *testing.T) {
 func TestVars_Populated(t *testing.T) {
 	assert.Equal(t, "GB", country.GB.Alpha2)
 	assert.Equal(t, "\U0001F1E9\U0001F1EA", country.DE.Emoji) // 🇩🇪 filled at init
+}
+
+func TestByDialCode_ReturnsFreshCopy(t *testing.T) {
+	// Mutating the returned slice must not corrupt shared package state.
+	a := country.ByDialCode("1")
+	require.NotEmpty(t, a)
+	orig := a[0]
+	a[0] = country.Country{Alpha2: "ZZ"} // scribble on the caller's copy
+	b := country.ByDialCode("1")
+	require.NotEmpty(t, b)
+	assert.Equal(t, orig, b[0], "second call must be unaffected by mutation of the first")
+	assert.Nil(t, country.ByDialCode("999"))
+}
+
+func TestHasDialCode(t *testing.T) {
+	assert.True(t, country.HasDialCode("1"))
+	assert.True(t, country.HasDialCode("380"))
+	assert.False(t, country.HasDialCode("999"))
 }

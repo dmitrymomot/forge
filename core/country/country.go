@@ -78,11 +78,24 @@ func ByNumeric(code string) (Country, bool) {
 	return c, ok
 }
 
-// ByDialCode returns every country sharing an E.164 dial code (many share "1").
-// The returned slice is shared internal state sorted by Name and must not be
-// modified; it is nil when no country uses the code.
+// ByDialCode returns every country sharing an E.164 dial code (many share "1"),
+// sorted by Name. The returned slice is a fresh copy the caller may sort or
+// modify; it is nil when no country uses the code. Use HasDialCode for a
+// zero-allocation existence check.
 func ByDialCode(code string) []Country {
-	return byDial[code]
+	s := byDial[code]
+	if len(s) == 0 {
+		return nil
+	}
+	out := make([]Country, len(s))
+	copy(out, s)
+	return out
+}
+
+// HasDialCode reports whether any country uses the given E.164 dial code. It
+// allocates nothing, unlike ByDialCode, and backs prefix matching on hot paths.
+func HasDialCode(code string) bool {
+	return len(byDial[code]) > 0
 }
 
 // All returns every bundled country sorted by Name. The returned slice is a

@@ -82,7 +82,7 @@ func matchDial(digits string) (string, bool) {
 			continue
 		}
 		p := digits[:n]
-		if len(country.ByDialCode(p)) > 0 {
+		if country.HasDialCode(p) {
 			return p, true
 		}
 	}
