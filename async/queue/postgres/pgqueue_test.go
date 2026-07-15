@@ -1,3 +1,5 @@
+//go:build integration
+
 package pgqueue_test
 
 import (
@@ -16,6 +18,7 @@ import (
 	pgqueue "github.com/dmitrymomot/forge/async/queue/postgres"
 	"github.com/dmitrymomot/forge/data/migration"
 	"github.com/dmitrymomot/forge/data/postgres"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 var (
@@ -23,12 +26,12 @@ var (
 	_ queue.TxPusher = (*pgqueue.Broker)(nil)
 )
 
-// openPool connects to the suite's Postgres (embedded by default; see TestMain)
-// and applies the queue migration.
+// openPool connects to the suite's Postgres (via pgtest.DSN) and applies the
+// queue migration.
 func openPool(tb testing.TB) *pgxpool.Pool {
 	tb.Helper()
 	cfg := postgres.DefaultConfig()
-	cfg.URL = testDSN
+	cfg.URL = pgtest.DSN(tb)
 	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))
 	require.NoError(tb, err)
 	tb.Cleanup(pool.Close)
@@ -45,6 +48,28 @@ func newBroker(tb testing.TB, pool *pgxpool.Pool) *pgqueue.Broker {
 	b, err := pgqueue.New(pool)
 	require.NoError(tb, err)
 	return b
+}
+
+// claimOne polls Claim until the queue yields a job or a deadline passes. Jobs
+// pushed via the client carry a RunAt stamped from the test-process clock, but
+// visibility is decided by the Postgres clock; polling tolerates a containerised
+// database whose clock lags the test process (e.g. a Docker VM under load).
+func claimOne(t *testing.T, b queue.Broker, q string) queue.Job {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got, err := b.Claim(ctx, q, 10, time.Minute)
+		require.NoError(t, err)
+		if len(got) >= 1 {
+			return got[0]
+		}
+		if time.Now().After(deadline) {
+			require.Len(t, got, 1, "expected 1 claimable job within deadline")
+			return queue.Job{}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func TestPgQueue_Conformance(t *testing.T) {
@@ -73,10 +98,8 @@ func TestPgQueue_PushTx(t *testing.T) {
 		assert.Empty(t, got, "job must be invisible before commit")
 
 		require.NoError(t, tx.Commit(ctx))
-		got, err = b.Claim(ctx, "default", 10, time.Minute)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		require.NoError(t, b.Ack(ctx, got[0].ID))
+		job := claimOne(t, b, "default")
+		require.NoError(t, b.Ack(ctx, job.ID))
 	})
 
 	t.Run("rollback discards the job", func(t *testing.T) {
@@ -101,11 +124,10 @@ func TestPgQueue_PushTx(t *testing.T) {
 }
 
 func TestPgQueue_WithTableValidation(t *testing.T) {
-	t.Parallel()
-	_, err := pgqueue.New(nil)
-	require.Error(t, err, "nil pool rejected")
-	pool := openPool(t) // skips without env
-	_, err = pgqueue.New(pool, pgqueue.WithTable("bad;name"))
+	// The nil-pool rejection is a pure-unit check in validate_test.go; this one
+	// needs a real pool to reach the table-name guard.
+	pool := openPool(t)
+	_, err := pgqueue.New(pool, pgqueue.WithTable("bad;name"))
 	require.Error(t, err, "unsafe table name rejected")
 }
 
@@ -115,8 +137,6 @@ func TestPgQueue_PayloadIsJSONB(t *testing.T) {
 	ctx := context.Background()
 	c := queue.NewClient(b)
 	require.NoError(t, c.PushRaw(ctx, "raw.kind", json.RawMessage(`{"deep":{"x":[1,2,3]}}`)))
-	got, err := b.Claim(ctx, "default", 1, time.Minute)
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	assert.JSONEq(t, `{"deep":{"x":[1,2,3]}}`, string(got[0].Payload))
+	job := claimOne(t, b, "default")
+	assert.JSONEq(t, `{"deep":{"x":[1,2,3]}}`, string(job.Payload))
 }

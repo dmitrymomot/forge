@@ -108,8 +108,11 @@
 //
 // # Testing
 //
-// Unit tests run with no server under `just test`. Integration tests are env-gated
-// and skip when their variable is unset: FORGE_TEST_MONGO_URI (lifecycle, indexes),
-// FORGE_TEST_MONGO_RS_URI (WithTransaction — replica set), and
-// FORGE_TEST_MONGO_SHARDED_URI (EnableSharding/ShardCollection — mongos).
+// Unit tests run with no server under `just test`. Integration tests carry the
+// `integration` build tag and run under `just test-integration`, which starts a
+// MongoDB container via testkit/mongotest — a single-node replica set, so
+// WithTransaction works out of the box (lifecycle, indexes, transactions). Set
+// FORGE_TEST_MONGO_URI to point them at an existing server instead. The sharding
+// tests (EnableSharding/ShardCollection) still need a mongos and stay skipped
+// unless FORGE_TEST_MONGO_SHARDED_URI is set.
 package mongo

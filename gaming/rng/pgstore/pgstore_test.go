@@ -1,8 +1,9 @@
+//go:build integration
+
 package pgstore_test
 
 import (
 	"context"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -16,18 +17,15 @@ import (
 	"github.com/dmitrymomot/forge/data/postgres"
 	"github.com/dmitrymomot/forge/gaming/rng"
 	"github.com/dmitrymomot/forge/gaming/rng/pgstore"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 var _ rng.Store = (*pgstore.Store)(nil)
 
 func newStore(t *testing.T) *pgstore.Store {
 	t.Helper()
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
 	cfg := postgres.DefaultConfig()
-	cfg.URL = dsn
+	cfg.URL = pgtest.DSN(t)
 	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)

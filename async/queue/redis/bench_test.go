@@ -1,3 +1,5 @@
+//go:build integration
+
 package redisqueue_test
 
 import (

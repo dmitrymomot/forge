@@ -18,13 +18,19 @@ jobs:
         with:
           go-version: "1.26"
       - uses: extractions/setup-just@v3
-      # Cache the embedded-postgres binary (async/queue/postgres tests download
-      # it once from the Maven mirror). Keyed on the pinned major version.
-      - uses: actions/cache@v4
-        with:
-          path: ~/.embedded-postgres-go
-          key: embedded-postgres-${{ runner.os }}-v18
       - run: just test
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: extractions/setup-just@v3
+      # ubuntu-latest ships a working Docker daemon; testcontainers provisions
+      # the real Postgres/Redis/Mongo/ClickHouse/OpenSearch servers per package.
+      - run: just test-integration
 
   lint:
     runs-on: ubuntu-latest

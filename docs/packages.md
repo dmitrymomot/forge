@@ -855,9 +855,21 @@ Deps: none forge-internal (goquery external, test-only).
 **testkit/dbtest**
 
 pgx test helpers: per-test tx-rollback isolation, ephemeral schema,
-Postgres template-DB clone. No testcontainers.
+Postgres template-DB clone. Layered on `testkit/pgtest` provisioning.
 
-Deps: `data/postgres`.
+Deps: `data/postgres`, `testkit/pgtest`.
+
+---
+
+**testkit/pgtest · redistest · mongotest · clickhousetest · opensearchtest** (shipped)
+
+Integration-tier provisioning helpers: each returns a DSN/addr/URI for a real
+backend, spun once per test process via testcontainers (Ryuk-reaped) or taken
+from a `FORGE_TEST_<BACKEND>_*` env override. Built only under the `integration`
+build tag. Consumed by every `//go:build integration` test across `data/*`,
+`auth/*/pgstore`, `resilience/*`, `gaming/rng/pgstore`, and `async/queue/*`.
+
+Deps: none forge-internal (testcontainers external, test-only).
 
 ---
 
