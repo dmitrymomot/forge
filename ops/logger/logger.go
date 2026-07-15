@@ -13,8 +13,8 @@ import (
 // becomes that file instead of stdout; the file is opened once and held for the lifetime
 // of the process (never closed, like os.Stdout), so call New once at startup rather than
 // per request. Handlers added via WithHandler run as parallel destinations beneath
-// context extraction. Returns ErrInvalidConfig for bad values and ErrOpenFile if the file
-// cannot be opened.
+// context extraction; WithLeveledHandler does the same with a per-destination minimum level.
+// Returns ErrInvalidConfig for bad values and ErrOpenFile if the file cannot be opened.
 func New(opts ...Option) (*slog.Logger, error) {
 	c := defaultConfig()
 	for _, opt := range opts {
@@ -30,30 +30,21 @@ func New(opts ...Option) (*slog.Logger, error) {
 		return nil, fmt.Errorf("%w: WithAsyncBufferSize is only valid with NewAsync", ErrInvalidConfig)
 	}
 
-	base, err := buildBase(c)
+	dests, err := buildDests(c)
 	if err != nil {
 		return nil, err
 	}
+	base := combine(dests)
 	if len(c.extractors) > 0 {
 		return slog.New(newContextHandler(base, c.extractors...)), nil
 	}
 	return slog.New(base), nil
 }
 
-// buildBase resolves the writer and builds the handler stack beneath context extraction:
-// the primary destination plus any extra parallel handlers. Shared by New and NewAsync.
-func buildBase(c config) (slog.Handler, error) {
-	dests, err := buildDests(c)
-	if err != nil {
-		return nil, err
-	}
-	return combine(dests), nil
-}
-
 // buildDests resolves the writer and returns the flat destination list beneath context
-// extraction: the primary destination first, then any extra parallel handlers. The primary is
-// built once, so Config.File opens at most once. NewAsync keeps this flat list so its drop-tally
-// report can reach every destination directly, bypassing MultiHandler level gating.
+// extraction: the primary destination first, then any extra parallel handlers, built once so
+// Config.File opens at most once. New wraps it with combine; NewAsync keeps the flat list too,
+// so its drop-tally report can reach every destination directly, bypassing MultiHandler gating.
 func buildDests(c config) ([]slog.Handler, error) {
 	level := parseLevel(c.Level)
 	if c.levelOverride != nil {
