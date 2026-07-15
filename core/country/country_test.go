@@ -34,6 +34,11 @@ func TestByAlpha3AndNumeric(t *testing.T) {
 	c, ok = country.ByNumeric("826")
 	assert.True(t, ok)
 	assert.Equal(t, "GB", c.Alpha2)
+
+	_, ok = country.ByAlpha3("ZZZ")
+	assert.False(t, ok)
+	_, ok = country.ByNumeric("000")
+	assert.False(t, ok)
 }
 
 func TestByDialCode_Shared(t *testing.T) {
