@@ -58,7 +58,7 @@ var (
 	CR = Country{Alpha2: "CR", Alpha3: "CRI", Numeric: "188", Name: "Costa Rica", Currency: "CRC", DialCode: "506"}
 	CU = Country{Alpha2: "CU", Alpha3: "CUB", Numeric: "192", Name: "Cuba", Currency: "CUP", DialCode: "53"}
 	CV = Country{Alpha2: "CV", Alpha3: "CPV", Numeric: "132", Name: "Cabo Verde", Currency: "CVE", DialCode: "238"}
-	CW = Country{Alpha2: "CW", Alpha3: "CUW", Numeric: "531", Name: "Curaçao", Currency: "ANG", DialCode: "599"}
+	CW = Country{Alpha2: "CW", Alpha3: "CUW", Numeric: "531", Name: "Curaçao", Currency: "XCG", DialCode: "599"}
 	CX = Country{Alpha2: "CX", Alpha3: "CXR", Numeric: "162", Name: "Christmas Island", Currency: "AUD", DialCode: "61"}
 	CY = Country{Alpha2: "CY", Alpha3: "CYP", Numeric: "196", Name: "Cyprus", Currency: "EUR", DialCode: "357"}
 	CZ = Country{Alpha2: "CZ", Alpha3: "CZE", Numeric: "203", Name: "Czechia", Currency: "CZK", DialCode: "420"}
@@ -216,7 +216,7 @@ var (
 	SS = Country{Alpha2: "SS", Alpha3: "SSD", Numeric: "728", Name: "South Sudan", Currency: "SSP", DialCode: "211"}
 	ST = Country{Alpha2: "ST", Alpha3: "STP", Numeric: "678", Name: "Sao Tome and Principe", Currency: "STN", DialCode: "239"}
 	SV = Country{Alpha2: "SV", Alpha3: "SLV", Numeric: "222", Name: "El Salvador", Currency: "USD", DialCode: "503"}
-	SX = Country{Alpha2: "SX", Alpha3: "SXM", Numeric: "534", Name: "Sint Maarten (Dutch part)", Currency: "ANG", DialCode: "1"}
+	SX = Country{Alpha2: "SX", Alpha3: "SXM", Numeric: "534", Name: "Sint Maarten (Dutch part)", Currency: "XCG", DialCode: "1"}
 	SY = Country{Alpha2: "SY", Alpha3: "SYR", Numeric: "760", Name: "Syria", Currency: "SYP", DialCode: "963"}
 	SZ = Country{Alpha2: "SZ", Alpha3: "SWZ", Numeric: "748", Name: "Eswatini", Currency: "SZL", DialCode: "268"}
 	TC = Country{Alpha2: "TC", Alpha3: "TCA", Numeric: "796", Name: "Turks and Caicos Islands", Currency: "USD", DialCode: "1"}
