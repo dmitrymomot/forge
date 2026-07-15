@@ -171,7 +171,7 @@ The multi-tenancy package: `Resolver` chain with shipped resolvers —
 subdomain (against a base domain), custom domain (via a storage-agnostic
 `DomainLookup` seam), header, cookie, path prefix, API-key-derived —
 precedence-ordered middleware putting `TenantID` in context, a
-transport-agnostic carrier (jobqueue handlers set/read tenant without
+transport-agnostic carrier (queue handlers set/read tenant without
 HTTP), and explicit parameterized `ScopeClause` SQL fragments — visible at
 every query, never auto-injected.
 
@@ -231,11 +231,11 @@ Deps: `core/clock`.
 **data/retention**
 
 Named retention policies run as batched delete/anonymize sweeps via
-`scheduler` + `jobqueue`: per-policy dry-run, progress checkpoints, and
+`scheduler` + `queue`: per-policy dry-run, progress checkpoints, and
 audit events. Handles the two-sided GDPR constraint — minimum retention
 and erasure deadlines — as declared policy, not cron scripts.
 
-Deps: `async/scheduler`, `async/jobqueue`, `ops/auditlog` (all planned).
+Deps: `async/scheduler` (planned), `async/queue`, `ops/auditlog` (planned).
 
 ---
 
@@ -386,23 +386,19 @@ Deps: `core/money`; `core/fsm`.
 
 ---
 
-**async/jobqueue**
+**async/queue/sqlite · async/queue/nats · async/queue/kafka**
 
-THE durable background-work engine: supervised worker pool (bounded
-concurrency, per-job retry/backoff, graceful drain), claim-with-lease
-at-least-once delivery, max-attempts → dead-letter, typed handlers over
-JSON, producer `Client` separate from the worker `Service`, delayed jobs.
-Storage-agnostic `Broker` seam (`Push/Claim/Ack/Nack` + capability
-discovery, e.g. native delay); the engine — not the driver — owns
-retry/delay/dead-letter semantics so behavior is identical across
-backends. In-memory broker built in; drivers: `jobqueue/postgres` (SKIP
-LOCKED + LISTEN/NOTIFY), `jobqueue/sqlite` (zero-infra single-node and
-dev/test), `jobqueue/redis`, `jobqueue/nats`, `jobqueue/kafka`. SQL
-drivers support transactional enqueue (`PushTx(ctx, tx, …)`); non-SQL
-brokers get it via `async/outbox`.
+Additional `queue.Broker` drivers for the shipped `async/queue` engine
+(engine, in-memory broker, `queue/postgres`, and `queue/redis` already
+ship — see their godoc): `queue/sqlite` (zero-infra single-node and
+dev/test), `queue/nats`, `queue/kafka`. The engine — not the driver —
+owns retry/backoff, delay, and max-attempts → dead-letter, so behavior is
+identical across backends; each driver only moves bytes behind the
+strictly-pull `Broker` seam. Non-SQL brokers get transactional enqueue
+via `async/outbox` (SQL drivers implement `TxPusher` natively).
 
-Deps: `ops/supervisor`; drivers: `data/postgres`, `data/redis`,
-`data/sqlite` (planned).
+Deps: `async/queue`; drivers: `data/sqlite` (planned), `data/nats`
+(planned), `data/kafka` (planned).
 
 ---
 
@@ -412,7 +408,7 @@ Cron/interval `supervisor.Service` that *enqueues* into the engine when
 due; fires once per fleet via a `unique(name, scheduled_for)` insert race
 on SQL drivers; small local cron parser, no robfig/cron.
 
-Deps: `ops/supervisor`; `async/jobqueue` (planned).
+Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
@@ -425,7 +421,7 @@ consumers within one, at-least-once. Transactional publish on SQL drivers;
 exports the `Seen(ctx, tx, id)` idempotency inbox. Handlers must be
 idempotent.
 
-Deps: `async/jobqueue` (planned).
+Deps: `async/queue`.
 
 ---
 
@@ -454,7 +450,7 @@ transaction plus a relay `supervisor.Service` that forwards committed rows
 into any `Broker` — the bridge from a Postgres/SQLite transaction to
 redis/nats/kafka delivery.
 
-Deps: `ops/supervisor`; `async/jobqueue` (planned).
+Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
@@ -482,7 +478,7 @@ per-step compensation — on failure, completed steps' compensations run in
 reverse order (a payout pipeline that must undo its ledger debit). No DAG,
 no DSL, no timers — not a Temporal clone.
 
-Deps: `async/jobqueue` (planned).
+Deps: `async/queue`.
 
 ## realtime/
 
@@ -652,14 +648,14 @@ Deps: none forge-internal (goldmark external, isolated).
 
 The complete webhooks/postbacks package, both directions: outbound
 HMAC-signed deliveries (Stripe-style `t=,v1=`) with timeout, bounded
-retry, and idempotency keys — durable delivery rides `async/jobqueue` —
+retry, and idempotency keys — durable delivery rides `async/queue` —
 and inbound signature-verification middleware (Stripe/GitHub/Slack HMAC
 schemes, constant-time, timestamp tolerance, reads and restores
 `r.Body`). Signing and verifying share one scheme implementation behind a
 pluggable `Scheme` seam, so bespoke partner schemes register without
 forking the package.
 
-Deps: `web/httpclient`, `crypto/sign`; `async/jobqueue` (planned).
+Deps: `web/httpclient`, `crypto/sign`; `async/queue`.
 
 ---
 
@@ -690,9 +686,9 @@ Sender seams, or any consumer-registered channel (in-app inbox stays
 consumer-side per the anti-scope recipe). Fallback chains trigger on send
 failure or missing binding (no push token → email), never on "unread" —
 read tracking is a product, not a brick. Durable delivery rides
-`jobqueue`.
+`async/queue`.
 
-Deps: `data/settings`, `async/jobqueue` (both planned).
+Deps: `data/settings` (planned), `async/queue`.
 
 ## ai/
 
