@@ -42,6 +42,13 @@ func TestParse_Errors(t *testing.T) {
 	assert.ErrorIs(t, err, phone.ErrInvalidNumber) // > 15 digits
 }
 
+func TestParse_ThreeDigitDialCode(t *testing.T) {
+	p, err := phone.Parse("+380 44 123 4567")
+	require.NoError(t, err)
+	assert.Equal(t, "380", p.DialCode())
+	assert.Equal(t, "441234567", p.NationalNumber())
+}
+
 func TestParse_ZeroValue(t *testing.T) {
 	var p phone.Phone
 	assert.True(t, p.IsZero())

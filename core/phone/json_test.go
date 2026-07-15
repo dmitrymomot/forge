@@ -36,3 +36,9 @@ func TestUnmarshalJSON_Garbage(t *testing.T) {
 	var p phone.Phone
 	assert.ErrorIs(t, json.Unmarshal([]byte(`"nope"`), &p), phone.ErrMissingCountryCode)
 }
+
+func TestUnmarshalJSON_EmptyStringIsZero(t *testing.T) {
+	var p phone.Phone
+	require.NoError(t, json.Unmarshal([]byte(`""`), &p))
+	assert.True(t, p.IsZero())
+}

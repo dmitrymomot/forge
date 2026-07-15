@@ -3,6 +3,7 @@ package phone
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/dmitrymomot/forge/core/country"
 )
@@ -35,7 +36,8 @@ func (p *Parser) Parse(input string) (Phone, error) {
 		ph  Phone
 		err error
 	)
-	if p.cfg.defaultRegion != "" {
+	s := strings.TrimSpace(input)
+	if p.cfg.defaultRegion != "" && !strings.HasPrefix(s, "+") && !strings.HasPrefix(s, "00") {
 		ph, err = ParseRegion(input, p.cfg.defaultRegion)
 	} else {
 		ph, err = Parse(input)

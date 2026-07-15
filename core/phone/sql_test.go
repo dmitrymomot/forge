@@ -21,6 +21,9 @@ func TestValueAndScan_RoundTrip(t *testing.T) {
 
 	require.NoError(t, got.Scan([]byte("+442079460018")))
 	assert.Equal(t, "+442079460018", got.E164())
+
+	require.NoError(t, got.Scan("  +14155552671  "))
+	assert.Equal(t, "+14155552671", got.E164())
 }
 
 func TestValueAndScan_ZeroAndNull(t *testing.T) {

@@ -1,7 +1,6 @@
 package country_test
 
 import (
-	"errors"
 	"sort"
 	"testing"
 
@@ -44,5 +43,4 @@ func TestSet_ZeroValueFailsClosed(t *testing.T) {
 	assert.False(t, s.Contains(country.US))
 	assert.False(t, s.ContainsCode("US"))
 	assert.Empty(t, s.All())
-	_ = errors.Is
 }
