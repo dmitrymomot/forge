@@ -33,7 +33,7 @@ func sentryOption(cfg Config) sentryslog.Option {
 	return sentryslog.Option{
 		EventLevel: []slog.Level{},                       // disable deprecated log->Issue conversion
 		LogLevel:   levelsFrom(parseLevel(cfg.MinLevel)), // MinLevel..error → Sentry Logs
-		AddSource:  cfg.AddSource,                        // mirror the primary's AddSource
+		AddSource:  cfg.AddSource,                        // include source file:line in Sentry Logs
 	}
 }
 

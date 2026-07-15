@@ -2,6 +2,7 @@ package logger
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -12,8 +13,8 @@ import (
 // becomes that file instead of stdout; the file is opened once and held for the lifetime
 // of the process (never closed, like os.Stdout), so call New once at startup rather than
 // per request. Handlers added via WithHandler run as parallel destinations beneath
-// context extraction. Returns ErrInvalidConfig for bad values and ErrOpenFile if the file
-// cannot be opened.
+// context extraction; WithLeveledHandler does the same with a per-destination minimum level.
+// Returns ErrInvalidConfig for bad values and ErrOpenFile if the file cannot be opened.
 func New(opts ...Option) (*slog.Logger, error) {
 	c := defaultConfig()
 	for _, opt := range opts {
@@ -25,7 +26,26 @@ func New(opts ...Option) (*slog.Logger, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
+	if c.asyncBufferSize != 0 {
+		return nil, fmt.Errorf("%w: WithAsyncBufferSize is only valid with NewAsync", ErrInvalidConfig)
+	}
 
+	dests, err := buildDests(c)
+	if err != nil {
+		return nil, err
+	}
+	base := combine(dests)
+	if len(c.extractors) > 0 {
+		return slog.New(newContextHandler(base, c.extractors...)), nil
+	}
+	return slog.New(base), nil
+}
+
+// buildDests resolves the writer and returns the flat destination list beneath context
+// extraction: the primary destination first, then any extra parallel handlers, built once so
+// Config.File opens at most once. New wraps it with combine; NewAsync keeps the flat list too,
+// so its drop-tally report can reach every destination directly, bypassing MultiHandler gating.
+func buildDests(c config) ([]slog.Handler, error) {
 	level := parseLevel(c.Level)
 	if c.levelOverride != nil {
 		level = *c.levelOverride
@@ -41,16 +61,16 @@ func New(opts ...Option) (*slog.Logger, error) {
 	}
 
 	primary := newHandler(format, w, level, c.AddSource)
-	var base slog.Handler
-	if len(c.extraHandlers) > 0 {
-		base = slog.NewMultiHandler(append([]slog.Handler{primary}, c.extraHandlers...)...)
-	} else {
-		base = primary
+	return append([]slog.Handler{primary}, c.extraHandlers...), nil
+}
+
+// combine returns a single handler for the destinations: the lone handler when there is one,
+// otherwise a slog.MultiHandler fanning out to all of them.
+func combine(dests []slog.Handler) slog.Handler {
+	if len(dests) == 1 {
+		return dests[0]
 	}
-	if len(c.extractors) > 0 {
-		base = newContextHandler(base, c.extractors...)
-	}
-	return slog.New(base), nil
+	return slog.NewMultiHandler(dests...)
 }
 
 // resolveWriter picks the single primary writer: WithOutput override, else the file,

@@ -164,3 +164,58 @@ func BenchmarkGroupPath_5Ops(b *testing.B) {
 		log.InfoContext(ctx, "hello", "k", "v")
 	}
 }
+
+// blockedWriter blocks every Write until unblock is closed — a wedged sink for the drop
+// path. After unblock it returns instantly so Close can drain.
+type blockedWriter struct{ unblock chan struct{} }
+
+func (w blockedWriter) Write(p []byte) (int, error) {
+	<-w.unblock
+	return len(p), nil
+}
+
+// BenchmarkAsync_HotPath measures the caller-side cost of a log call in async mode:
+// context check, record clone, channel send. The worker drains to io.Discard.
+func BenchmarkAsync_HotPath(b *testing.B) {
+	log, closeLog, err := NewAsync(WithOutput(io.Discard), WithFormat("json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		log.Info("hello", "k", "v")
+	}
+	b.StopTimer()
+	_ = closeLog(context.Background())
+}
+
+// BenchmarkAsync_DisabledLevel proves below-level calls never clone or enqueue (0 allocs).
+func BenchmarkAsync_DisabledLevel(b *testing.B) {
+	log, closeLog, err := NewAsync(WithOutput(io.Discard)) // default level: info
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		log.Debug("skip", "k", "v")
+	}
+	b.StopTimer()
+	_ = closeLog(context.Background())
+}
+
+// BenchmarkAsync_DropPath measures the caller-side cost when the buffer is full and every
+// record is dropped — the never-block guarantee under a wedged sink.
+func BenchmarkAsync_DropPath(b *testing.B) {
+	w := blockedWriter{unblock: make(chan struct{})}
+	log, closeLog, err := NewAsync(WithOutput(w), WithAsyncBufferSize(8))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		log.Info("dropped", "k", "v")
+	}
+	b.StopTimer()
+	close(w.unblock)
+	_ = closeLog(context.Background())
+}

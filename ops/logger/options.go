@@ -13,12 +13,13 @@ type Option func(*config)
 // serializable data; the remaining fields are non-serializable code values.
 type config struct {
 	Config
-	outputOverride io.Writer // WithOutput; nil means use Config.File or stdout
-	levelOverride  *slog.Level
-	formatOverride *Format
-	extractors     []ContextExtractor
-	extraHandlers  []slog.Handler
-	errs           []error
+	outputOverride  io.Writer // WithOutput; nil means use Config.File or stdout
+	levelOverride   *slog.Level
+	formatOverride  *Format
+	extractors      []ContextExtractor
+	extraHandlers   []slog.Handler
+	errs            []error
+	asyncBufferSize int // WithAsyncBufferSize; 0 means unset (NewAsync uses the default)
 }
 
 func defaultConfig() config {
@@ -79,6 +80,19 @@ func WithHandler(h slog.Handler) Option {
 	}
 }
 
+// WithLeveledHandler adds an extra parallel destination that only receives records at min
+// and above, independent of the primary destination's level. A nil handler is rejected.
+// Valid for both New and NewAsync.
+func WithLeveledHandler(min slog.Level, h slog.Handler) Option {
+	return func(c *config) {
+		if h == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithLeveledHandler received a nil slog.Handler", ErrInvalidConfig))
+			return
+		}
+		c.extraHandlers = append(c.extraHandlers, &leveledHandler{next: h, min: min})
+	}
+}
+
 // WithContextExtractors registers ContextExtractor funcs applied on every log call.
 // Nil entries are filtered; order is preserved.
 func WithContextExtractors(ex ...ContextExtractor) Option {
@@ -88,5 +102,17 @@ func WithContextExtractors(ex ...ContextExtractor) Option {
 				c.extractors = append(c.extractors, e)
 			}
 		}
+	}
+}
+
+// WithAsyncBufferSize sets the async record buffer capacity (default 8192). n < 1 is
+// rejected. Only valid with NewAsync; New returns ErrInvalidConfig if it is set.
+func WithAsyncBufferSize(n int) Option {
+	return func(c *config) {
+		if n < 1 {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithAsyncBufferSize requires n >= 1, got %d", ErrInvalidConfig, n))
+			return
+		}
+		c.asyncBufferSize = n
 	}
 }

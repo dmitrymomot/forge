@@ -1,25 +1,26 @@
-// Package sentry builds a logger.New-style *slog.Logger that also reports to Sentry in
-// parallel, at its own MinLevel, while keeping the Sentry SDK out of the core logger's
-// import graph.
+// Package sentry provides a Sentry slog.Handler for logger.WithHandler, keeping the
+// Sentry SDK out of the core logger's import graph.
 //
 // # Usage
 //
-//	log, flush, err := sentry.New(
-//		sentry.WithConfig(sentry.Config{
-//			Config:   logger.Config{Level: "info", Format: "json"},
-//			DSN:      os.Getenv("SENTRY_DSN"), // empty → plain logger
-//			MinLevel: "warn",
-//		}),
-//		sentry.WithContextExtractors(reqIDExtractor),
-//	)
-//	defer flush(context.Background()) // flushes buffered events; no-op when Sentry is inactive
+//	sentryHandler, flush, err := sentry.NewHandler(sentry.WithConfig(sentry.Config{
+//		DSN:      os.Getenv("SENTRY_DSN"), // empty → disabled handler, no error
+//		MinLevel: "warn",
+//	}))
+//	if err != nil {
+//		// non-fatal: sentryHandler is disabled but safe to use — keep going
+//	}
+//	log, err := logger.New(logger.WithHandler(sentryHandler)) // or logger.NewAsync
+//	defer flush(context.Background()) // ships buffered events; no-op when inactive
 //
 // Error-level (and above) records are reported to Sentry as Issues via
-// sentry.CaptureException; the MinLevel..error range is sent as Sentry Logs when EnableLogs
-// is set. (The SDK's deprecated log-to-event conversion is not used.)
+// sentry.CaptureException; the MinLevel..error range is sent as Sentry Logs when
+// EnableLogs is set. (The SDK's deprecated log-to-event conversion is not used.)
 //
-// Config embeds logger.Config so primary-logger and Sentry settings env-load together.
-// An empty DSN returns a plain logger and a no-op Flush; a Sentry init failure returns a
-// usable logger plus an ErrSentryInit-wrapped error. Flush is always non-nil, so deferring
-// it is safe regardless of the error. Call New once per process.
+// NewHandler ALWAYS returns a usable handler and a non-nil Flush: an empty DSN yields a
+// disabled handler (Enabled reports false) and no error; an invalid config or SDK init
+// failure yields a disabled handler plus the error. Sentry being down never takes logging
+// down with it. With logger.NewAsync, call the logger's CloseFunc before flush so buffered
+// records reach the handler before events ship. Call NewHandler once per process (it
+// initializes the global Sentry hub).
 package sentry

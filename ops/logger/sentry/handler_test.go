@@ -23,7 +23,7 @@ func TestSentryOptionMapping(t *testing.T) {
 	opt := sentryOption(warn)
 	assert.Equal(t, []slog.Level{slog.LevelWarn, slog.LevelError}, opt.LogLevel,
 		"LogLevel must be MinLevel..error")
-	assert.True(t, opt.AddSource, "AddSource must mirror the embedded logger.Config")
+	assert.True(t, opt.AddSource, "AddSource must mirror Config.AddSource")
 
 	debug := DefaultConfig()
 	debug.MinLevel = "debug"

@@ -10,14 +10,14 @@ import (
 // Flush flushes buffered Sentry events; call it before the program exits. The wait honors
 // ctx's cancellation and deadline (fallback defaultFlushTimeout). Returns the context's
 // error if ctx is done, or ErrSentryFlushTimeout if events remain unsent. A no-op when
-// Sentry is not active. New always returns a non-nil Flush, so `defer flush(ctx)` is safe
-// even when New returns an error.
+// Sentry is not active. NewHandler always returns a non-nil Flush, so `defer flush(ctx)` is
+// safe even when NewHandler returns an error.
 type Flush func(ctx context.Context) error
 
 const defaultFlushTimeout = 2 * time.Second
 
-// noopFlush is returned whenever Sentry is inactive (empty DSN, init failure, or a New that
-// errored before activating Sentry). Keeping it non-nil makes deferring Flush always safe.
+// noopFlush is returned whenever Sentry is inactive (empty DSN, init failure, or an invalid
+// config). Keeping it non-nil makes deferring Flush always safe.
 func noopFlush(context.Context) error { return nil }
 
 // flush flushes the global Sentry client, honoring ctx's cancellation and deadline. When
