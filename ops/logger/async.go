@@ -129,14 +129,12 @@ func (c *asyncCore) run() {
 	for {
 		select {
 		case item := <-c.ch:
-			c.reportDrops()
-			_ = item.target.Handle(item.ctx, item.rec)
+			c.process(item)
 		case <-c.stop:
 			for {
 				select {
 				case item := <-c.ch:
-					c.reportDrops()
-					_ = item.target.Handle(item.ctx, item.rec)
+					c.process(item)
 				default:
 					c.reportDrops()
 					return
@@ -144,6 +142,13 @@ func (c *asyncCore) run() {
 			}
 		}
 	}
+}
+
+// process reports any pending drop tally, then writes one dequeued item to its target. Called
+// only from the worker goroutine (run), so reportDrops stays single-threaded.
+func (c *asyncCore) process(item asyncItem) {
+	c.reportDrops()
+	_ = item.target.Handle(item.ctx, item.rec)
 }
 
 // reportDrops emits the accumulated drop tally as a Warn record to every construction-time
