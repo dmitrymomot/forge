@@ -40,7 +40,7 @@ type Broker interface {
     Claim(ctx context.Context, queue string, n int, lease time.Duration) ([]Job, error) // non-blocking
     Extend(ctx context.Context, id string, lease time.Duration) error                  // heartbeat
     Ack(ctx context.Context, id string) error                                          // done: delete
-    Nack(ctx context.Context, id string, retryAt time.Time) error                      // back to pending at retryAt
+    Nack(ctx context.Context, id string, retryAt time.Time, reason string) error       // back to pending at retryAt; reason recorded as LastError
     Kill(ctx context.Context, id string, reason string) error                          // → dead
     ListDead(ctx context.Context, queue string, limit int) ([]Job, error)
     Requeue(ctx context.Context, id string) error                                      // dead → pending, attempts reset
