@@ -57,7 +57,7 @@ func NewHandler(opts ...Option) (slog.Handler, Flush, error)
 ```
 
 - `sentry.New` (the facade returning a full `*slog.Logger`) is deleted. Pre-v1, breaking is accepted.
-- `Config` drops the embedded `logger.Config`; it keeps `DSN`, `Environment`, `MinLevel`, `EnableLogs`. Env blocks split naturally into `LOG_*` (logger) and `SENTRY_*` (sentry).
+- `Config` drops the embedded `logger.Config`; it keeps `DSN`, `Environment`, `MinLevel`, `EnableLogs`, and gains its own `AddSource` (`SENTRY_ADD_SOURCE`) — previously inherited from the embedded logger config and read by the handler builder. Env blocks split naturally into `LOG_*` (logger) and `SENTRY_*` (sentry).
 - `WithContextExtractors` and `WithOutput` are deleted from the sentry package — they existed only to forward to `logger.New`. `WithConfig(cfg Config)` remains.
 - `Flush` keeps its type `func(ctx context.Context) error`; it ships buffered Sentry events.
 - The `newWith` test seam (fake handler builder) is preserved.
@@ -86,7 +86,7 @@ When the worker next dequeues an item (and once more before exiting at close), i
 
 ## Shutdown
 
-`CloseFunc` is idempotent via `sync.Once`; every call waits for the same completion. Sequence: set atomic closed flag (subsequent `Handle` calls silently drop — no count, no panic, no block; logging after Close is a caller bug that must stay harmless), then enqueue a sentinel with a blocking send (guaranteed to land — the worker is draining ahead of it), worker drains all items up to the sentinel, emits any final drop tally, signals done, exits. `Close` waits on done or `ctx.Done()`, returning nil or `ctx.Err()`. The channel is never `close()`d — no send-on-closed-channel race and no mutex on the hot path.
+`CloseFunc` is idempotent via `sync.Once`; every call waits for the same completion. Sequence: set atomic closed flag (subsequent `Handle` calls silently drop — no count, no panic, no block; logging after Close is a caller bug that must stay harmless), then `close()` a dedicated stop channel. The worker selects between the data channel and the stop channel; once stop is closed it drains every remaining item non-blockingly, emits any final drop tally, signals done, exits. `Close` waits on done or `ctx.Done()`, returning nil or `ctx.Err()`. The data channel is never `close()`d — no send-on-closed-channel race and no mutex on the hot path. (A sentinel-item design was rejected: with a full buffer and a wedged sink, the blocking sentinel send would hang `Close` beyond its ctx.) Records enqueued by racing `Handle` calls after the drain's final pass are abandoned — covered by the post-Close silent-drop contract.
 
 Loss contract: buffer-full → dropped and counted; after Close → silently dropped; crash/`os.Exit` → buffer lost.
 
