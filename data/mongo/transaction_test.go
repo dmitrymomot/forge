@@ -1,9 +1,10 @@
+//go:build integration
+
 package mongo_test
 
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,17 +14,14 @@ import (
 	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
 
 	forgemongo "github.com/dmitrymomot/forge/data/mongo"
+	"github.com/dmitrymomot/forge/testkit/mongotest"
 )
 
-// WithTransaction needs a replica set / mongos. Gate on a dedicated env var so a
-// standalone FORGE_TEST_MONGO_URI does not fail the suite.
+// WithTransaction needs a replica set. mongotest provisions a single-node
+// replica set, so its URI works for transactions.
 func replicaSetURI(t *testing.T) string {
 	t.Helper()
-	uri := os.Getenv("FORGE_TEST_MONGO_RS_URI")
-	if uri == "" {
-		t.Skip("FORGE_TEST_MONGO_RS_URI not set; WithTransaction needs a replica set")
-	}
-	return uri
+	return mongotest.URI(t)
 }
 
 func openRSDB(t *testing.T) *mongodriver.Database {

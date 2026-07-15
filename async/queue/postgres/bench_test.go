@@ -1,3 +1,5 @@
+//go:build integration
+
 package pgqueue_test
 
 import (

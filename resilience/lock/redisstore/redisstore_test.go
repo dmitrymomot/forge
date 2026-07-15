@@ -1,8 +1,9 @@
+//go:build integration
+
 package redisstore_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -12,16 +13,13 @@ import (
 
 	"github.com/dmitrymomot/forge/resilience/lock"
 	"github.com/dmitrymomot/forge/resilience/lock/redisstore"
+	"github.com/dmitrymomot/forge/testkit/redistest"
 )
 
 var _ lock.Store = (*redisstore.Store)(nil)
 
 func dial(t *testing.T) redis.UniversalClient {
-	addr := os.Getenv("FORGE_TEST_REDIS_URL")
-	if addr == "" {
-		t.Skip("set FORGE_TEST_REDIS_URL (host:port)")
-	}
-	c := redis.NewClient(&redis.Options{Addr: addr})
+	c := redis.NewClient(&redis.Options{Addr: redistest.Addr(t)})
 	t.Cleanup(func() { _ = c.Close() })
 	return c
 }

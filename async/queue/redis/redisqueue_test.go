@@ -1,14 +1,13 @@
+//go:build integration
+
 package redisqueue_test
 
 import (
 	"context"
 	"fmt"
-	"os"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +16,7 @@ import (
 	"github.com/dmitrymomot/forge/async/queue/brokertest"
 	redisqueue "github.com/dmitrymomot/forge/async/queue/redis"
 	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/testkit/redistest"
 )
 
 // runID makes every prefix unique per test process so re-runs against a
@@ -25,32 +25,12 @@ var runID = id.NewULID().String()
 
 var _ queue.Broker = (*redisqueue.Broker)(nil)
 
-// redisAddr returns the address of the redis to test against. By default it
-// starts one process-shared in-memory miniredis (no Docker required) — its
-// streams, consumer groups, XAUTOCLAIM idle timing, and Lua EVAL are faithful
-// enough to run the full broker conformance suite. Set FORGE_TEST_REDIS_URL to
-// point the same suite at a real server (e.g. CI's redis service) instead.
-var (
-	sharedRedisOnce sync.Once
-	sharedRedisAddr string
-)
-
+// redisAddr returns the address of the redis to test against: redistest.Addr
+// honors FORGE_TEST_REDIS_URL if set, else starts a throwaway container shared
+// across the test process.
 func redisAddr(tb testing.TB) string {
 	tb.Helper()
-	if addr := os.Getenv("FORGE_TEST_REDIS_URL"); addr != "" {
-		return addr
-	}
-	sharedRedisOnce.Do(func() {
-		mr, err := miniredis.Run() // never closed: lives for the test process
-		if err != nil {
-			// Panic rather than tb.FailNow: a Goexit inside sync.Once still
-			// marks it done, which would leave sharedRedisAddr empty and make
-			// every later test silently dial "". This essentially never fires.
-			panic(fmt.Sprintf("redisqueue test: start miniredis: %v", err))
-		}
-		sharedRedisAddr = mr.Addr()
-	})
-	return sharedRedisAddr
+	return redistest.Addr(tb)
 }
 
 func dial(tb testing.TB) redis.UniversalClient {
@@ -63,7 +43,8 @@ func dial(tb testing.TB) redis.UniversalClient {
 var prefixSeq int
 
 // newBroker namespaces each subtest under a unique prefix; keys leak into the
-// ephemeral test server (miniredis or a shared real redis), which is acceptable.
+// ephemeral test server (the redistest container or a shared real redis), which
+// is acceptable.
 func newBroker(tb testing.TB) *redisqueue.Broker {
 	tb.Helper()
 	prefixSeq++
@@ -155,10 +136,4 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	assert.Equal(t, 3, retried[0].Attempt, "post-nack claim must continue from the crash-redelivered attempt, not reset")
 	assert.Equal(t, "still failing", retried[0].LastError)
 	require.NoError(t, b2.Ack(ctx, retried[0].ID))
-}
-
-func TestRedisQueue_ValidatesConstruction(t *testing.T) {
-	t.Parallel()
-	_, err := redisqueue.New(nil)
-	require.Error(t, err)
 }

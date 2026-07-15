@@ -1,10 +1,11 @@
+//go:build integration
+
 package migration_test
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"testing/fstest"
 
@@ -14,15 +15,13 @@ import (
 
 	"github.com/dmitrymomot/forge/data/migration"
 	"github.com/dmitrymomot/forge/data/postgres"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 // openPoolDB opens a *sql.DB backed by a postgres.Open pool, matching how
 // GroupMigrator is wired in production (via postgres.WithMigrator).
 func openPoolDB(t *testing.T) *sql.DB {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
+	dsn := pgtest.DSN(t)
 	cfg := postgres.DefaultConfig()
 	cfg.URL = dsn
 	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))

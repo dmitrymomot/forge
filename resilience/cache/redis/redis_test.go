@@ -1,8 +1,9 @@
+//go:build integration
+
 package redis_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -12,17 +13,12 @@ import (
 
 	"github.com/dmitrymomot/forge/resilience/cache"
 	cacheredis "github.com/dmitrymomot/forge/resilience/cache/redis"
+	"github.com/dmitrymomot/forge/testkit/redistest"
 )
 
 func testClient(t *testing.T) goredis.UniversalClient {
 	t.Helper()
-	url := os.Getenv("TEST_REDIS_URL")
-	if url == "" {
-		t.Skip("TEST_REDIS_URL not set")
-	}
-	opt, err := goredis.ParseURL(url)
-	require.NoError(t, err)
-	c := goredis.NewClient(opt)
+	c := goredis.NewClient(&goredis.Options{Addr: redistest.Addr(t)})
 	require.NoError(t, c.Ping(context.Background()).Err())
 	t.Cleanup(func() { _ = c.Close() })
 	return c
@@ -52,7 +48,7 @@ func TestRedisStoreRoundTripAndScopedClear(t *testing.T) {
 }
 
 func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
-	client := testClient(t) // SKIPs without TEST_REDIS_URL
+	client := testClient(t)
 	store := cacheredis.NewStore(client)
 
 	// The prefix contains a glob metacharacter '['. DeletePrefix must match it
@@ -75,7 +71,7 @@ func TestRedisStoreDeletePrefixMatchesLiterally(t *testing.T) {
 }
 
 func TestRedisStoreSetNonExistClaimsOnce(t *testing.T) {
-	store := cacheredis.NewStore(testClient(t)) // SKIPs without TEST_REDIS_URL
+	store := cacheredis.NewStore(testClient(t))
 
 	key := "test:cache:nx:claim"
 	t.Cleanup(func() { _ = store.Delete(context.Background(), key) })
@@ -94,7 +90,7 @@ func TestRedisStoreSetNonExistClaimsOnce(t *testing.T) {
 }
 
 func TestRedisStoreSetNonExistWithoutTTLPersists(t *testing.T) {
-	client := testClient(t) // SKIPs without TEST_REDIS_URL
+	client := testClient(t)
 	store := cacheredis.NewStore(client)
 
 	key := "test:cache:nx:nottl"

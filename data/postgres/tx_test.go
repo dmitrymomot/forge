@@ -1,9 +1,10 @@
+//go:build integration
+
 package postgres_test
 
 import (
 	"context"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/data/postgres"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 func TestRetryOption_Defaults(t *testing.T) {
@@ -26,11 +28,7 @@ func TestRetryOption_Defaults(t *testing.T) {
 }
 
 func TestWithTx_Integration(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
-	pool := openTestPool(t, dsn)
+	pool := openTestPool(t, pgtest.DSN(t))
 	ctx := context.Background()
 
 	_, err := pool.Exec(ctx, `CREATE TEMP TABLE tx_test (id int PRIMARY KEY)`)
@@ -58,11 +56,7 @@ func TestWithTx_Integration(t *testing.T) {
 }
 
 func TestWithTx_PanicRollsBackAndRepanics(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
-	pool := openTestPool(t, dsn)
+	pool := openTestPool(t, pgtest.DSN(t))
 	ctx := context.Background()
 
 	assert.PanicsWithValue(t, "kaboom", func() {
@@ -73,11 +67,7 @@ func TestWithTx_PanicRollsBackAndRepanics(t *testing.T) {
 }
 
 func TestWithTxRetry_RetriesOnSerializationFailure(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
-	pool := openTestPool(t, dsn)
+	pool := openTestPool(t, pgtest.DSN(t))
 	ctx := context.Background()
 
 	_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS txr_test (id int PRIMARY KEY, n int)`)

@@ -1,21 +1,20 @@
+//go:build integration
+
 package clickhouse_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/dmitrymomot/forge/data/clickhouse"
+	"github.com/dmitrymomot/forge/testkit/clickhousetest"
 )
 
-// TestIntegration exercises a real ClickHouse when CLICKHOUSE_DSN is set (e.g. an
-// ephemeral clickhouse/clickhouse-server container in CI); it is skipped otherwise.
+// TestIntegration exercises a real ClickHouse: clickhousetest.DSN returns
+// FORGE_TEST_CLICKHOUSE_DSN if set, else spins up an ephemeral container.
 func TestIntegration(t *testing.T) {
-	dsn := os.Getenv("CLICKHOUSE_DSN")
-	if dsn == "" {
-		t.Skip("set CLICKHOUSE_DSN to run the live integration test")
-	}
+	dsn := clickhousetest.DSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

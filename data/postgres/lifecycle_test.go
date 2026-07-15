@@ -1,8 +1,9 @@
+//go:build integration
+
 package postgres_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/data/postgres"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 func TestClose_NilLoggerTolerated(t *testing.T) {
@@ -28,10 +30,7 @@ func TestClose_NilLoggerTolerated(t *testing.T) {
 }
 
 func TestHealthcheck_Integration(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
+	dsn := pgtest.DSN(t)
 	cfg := postgres.DefaultConfig()
 	cfg.URL = dsn
 	pool, err := postgres.Open(context.Background(), postgres.WithConfig(cfg))

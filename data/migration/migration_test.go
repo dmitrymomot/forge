@@ -1,9 +1,10 @@
+//go:build integration
+
 package migration_test
 
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"testing/fstest"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/data/migration"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 // oneMigration is a minimal goose SQL migration creating a table.
@@ -34,11 +36,7 @@ func TestNew_ReturnsMigrator(t *testing.T) {
 }
 
 func TestUp_EmptyFS_IsNoop(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
-	db := openDB(t, dsn)
+	db := openDB(t, pgtest.DSN(t))
 
 	// An fsys with no migration files must succeed as a no-op, not error out, so an
 	// app that embeds an empty migrations dir still boots.
@@ -47,11 +45,7 @@ func TestUp_EmptyFS_IsNoop(t *testing.T) {
 }
 
 func TestUp_AppliesMigration_Integration(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
-	db := openDB(t, dsn)
+	db := openDB(t, pgtest.DSN(t))
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DROP TABLE IF EXISTS widgets`)
 		_, _ = db.Exec(`DROP TABLE IF EXISTS schema_migrations`)

@@ -1,10 +1,11 @@
+//go:build integration
+
 package postgres_test
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/data/postgres"
+	"github.com/dmitrymomot/forge/testkit/pgtest"
 )
 
 // fakeMigrator records whether Up was called and returns a fixed error.
@@ -55,10 +57,7 @@ func TestWithMigrator_NotRunWhenConnectFails(t *testing.T) {
 }
 
 func TestWithMigrator_RunsAfterConnect_Integration(t *testing.T) {
-	dsn := os.Getenv("FORGE_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set FORGE_TEST_POSTGRES_DSN")
-	}
+	dsn := pgtest.DSN(t)
 	cfg := postgres.DefaultConfig()
 	cfg.URL = dsn
 
