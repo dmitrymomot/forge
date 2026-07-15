@@ -8,27 +8,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/forge/ops/logger"
 	"github.com/dmitrymomot/forge/ops/logger/sentry"
 )
 
-func TestNewEmptyDSNReturnsPlainLogger(t *testing.T) {
-	var buf bytes.Buffer
-	log, flush, err := sentry.New(sentry.WithOutput(&buf)) // DefaultConfig has empty DSN
+func TestNewHandlerComposesWithLogger(t *testing.T) {
+	h, fl, err := sentry.NewHandler() // empty DSN → disabled handler, no error
 	require.NoError(t, err)
-	require.NotNil(t, log)
+
+	var buf bytes.Buffer
+	log, err := logger.New(logger.WithOutput(&buf), logger.WithHandler(h))
+	require.NoError(t, err)
 
 	log.Info("hello")
-	assert.Contains(t, buf.String(), "hello")
-	require.NoError(t, flush(context.Background())) // no-op flush
+	assert.Contains(t, buf.String(), "hello") // primary unaffected by the disabled extra
+	require.NoError(t, fl(context.Background()))
 }
 
-func TestNewInvalidConfigSurfacesError(t *testing.T) {
+func TestNewHandlerInvalidConfigFlushSafe(t *testing.T) {
 	bad := sentry.DefaultConfig()
 	bad.MinLevel = "loud"
-	_, flush, err := sentry.New(sentry.WithConfig(bad))
+	_, fl, err := sentry.NewHandler(sentry.WithConfig(bad))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, sentry.ErrInvalidConfig)
-	// Flush is always non-nil, so `defer flush(ctx)` is safe even on a fatal config error.
-	require.NotNil(t, flush)
-	require.NoError(t, flush(context.Background()))
+	// Flush is always non-nil, so `defer fl(ctx)` is safe even on a config error.
+	require.NotNil(t, fl)
+	require.NoError(t, fl(context.Background()))
 }

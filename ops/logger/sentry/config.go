@@ -4,40 +4,36 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
-	"github.com/dmitrymomot/forge/ops/logger"
 )
 
-// Config carries both the primary-logger settings (embedded logger.Config) and the
-// Sentry-specific settings, so the whole thing env-loads in one shot. The env struct
-// tags are inert strings — this package imports no config loader.
+// Config carries the Sentry-specific settings. The env struct tags are inert strings —
+// this package imports no config loader. Logger settings live in logger.Config; the two
+// env blocks (LOG_*, SENTRY_*) load independently.
 type Config struct {
 	DSN         string `env:"SENTRY_DSN"`
 	Environment string `env:"SENTRY_ENVIRONMENT"`
-	// MinLevel is Sentry's OWN minimum level — the lowest level forwarded to Sentry,
-	// independent of the primary destination's level. "debug"|"info"|"warn"/"warning"|"error".
+	// MinLevel is the lowest level forwarded to Sentry Logs, independent of any logger
+	// destination's level. "debug"|"info"|"warn"/"warning"|"error".
 	MinLevel string `env:"SENTRY_MIN_LEVEL"`
-	logger.Config
-
+	// EnableLogs opts in to Sentry Logs for the MinLevel..error range; Issues for Error
+	// and above are reported regardless.
 	EnableLogs bool `env:"SENTRY_ENABLE_LOGS"`
+	// AddSource includes the source file:line in records sent to Sentry Logs.
+	AddSource bool `env:"SENTRY_ADD_SOURCE"`
 }
 
-// DefaultConfig returns the optimal defaults, including the embedded logger defaults.
+// DefaultConfig returns the optimal defaults and is the single source of truth for them.
 func DefaultConfig() Config {
 	return Config{
-		Config:      logger.DefaultConfig(),
 		Environment: "production",
 		MinLevel:    "warn",
 	}
 }
 
-// Validate validates the embedded logger.Config and the MinLevel. It wraps with
-// double-%w so a bad primary Level/Format matches both sentry.ErrInvalidConfig and
-// logger.ErrInvalidConfig. An empty DSN is valid (Sentry is then disabled in New).
+// Validate reports whether the field values are usable, returning an
+// ErrInvalidConfig-wrapped error otherwise. An empty DSN is valid (Sentry is then
+// disabled in NewHandler).
 func (c Config) Validate() error {
-	if err := c.Config.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
-	}
 	if _, ok := levelByName(c.MinLevel); !ok {
 		return fmt.Errorf("%w: unknown MinLevel %q", ErrInvalidConfig, c.MinLevel)
 	}
