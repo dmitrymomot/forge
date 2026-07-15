@@ -243,6 +243,43 @@ func (h ctxAwareHandler) Handle(ctx context.Context, rec slog.Record) error {
 func (h ctxAwareHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h ctxAwareHandler) WithGroup(string) slog.Handler      { return h }
 
+// TestAsyncDropTallyReachesErrorGatedDestinations proves the drop report stays visible even
+// when every destination is gated above Warn — a dropped-records warning bypasses per-
+// destination level gating because it is a system-health signal.
+func TestAsyncDropTallyReachesErrorGatedDestinations(t *testing.T) {
+	w := newGatedWriter()
+	rl, rec := logger.NewRecorder()
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(w),
+		logger.WithLevel(slog.LevelError),                        // primary gated at error
+		logger.WithLeveledHandler(slog.LevelError, rl.Handler()), // extra gated at error
+		logger.WithAsyncBufferSize(1),
+	)
+	require.NoError(t, err)
+
+	log.Error("first")  // worker dequeues it and blocks inside Write
+	<-w.entered         // worker committed to "first"; the queue is empty
+	log.Error("second") // fills the single buffer slot
+	log.Error("third")  // dropped
+	log.Error("fourth") // dropped
+
+	w.open()
+	require.NoError(t, closeLog(closeCtx(t)))
+
+	// Primary (text, error-gated) received the Warn drop report directly.
+	assert.Contains(t, w.String(), "logger: dropped log records")
+	assert.Contains(t, w.String(), "dropped=2")
+	// The error-gated extra destination received it too — not suppressed by its min level.
+	var found bool
+	for _, r := range rec.Records() {
+		if r.Message == "logger: dropped log records" {
+			found = true
+			assert.Equal(t, int64(2), r.Attrs["dropped"])
+		}
+	}
+	assert.True(t, found, "error-gated extra destination must still receive the drop report")
+}
+
 func TestAsyncExtractorValuesCapturedAtCallTime(t *testing.T) {
 	w := newGatedWriter()
 	extractor := func(ctx context.Context) (slog.Attr, bool) {

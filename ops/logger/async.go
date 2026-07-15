@@ -36,7 +36,7 @@ func NewAsync(opts ...Option) (*slog.Logger, CloseFunc, error) {
 		return nil, nil, err
 	}
 
-	base, err := buildBase(c)
+	dests, err := buildDests(c)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -44,7 +44,7 @@ func NewAsync(opts ...Option) (*slog.Logger, CloseFunc, error) {
 	if bufSize == 0 {
 		bufSize = defaultAsyncBufferSize
 	}
-	ah := newAsyncHandler(base, bufSize)
+	ah := newAsyncHandler(combine(dests), dests, bufSize)
 	var top slog.Handler = ah
 	if len(c.extractors) > 0 {
 		top = newContextHandler(top, c.extractors...)
@@ -66,7 +66,7 @@ type asyncCore struct {
 	ch      chan asyncItem
 	stop    chan struct{}
 	done    chan struct{}
-	root    slog.Handler // construction-time base; receives drop reports
+	dests   []slog.Handler // construction-time destinations; each receives drop reports
 	dropped atomic.Int64
 	closed  atomic.Bool
 	once    sync.Once
@@ -80,12 +80,12 @@ type asyncHandler struct {
 }
 
 // newAsyncHandler builds the handler and starts the single worker goroutine.
-func newAsyncHandler(base slog.Handler, bufSize int) *asyncHandler {
+func newAsyncHandler(base slog.Handler, dests []slog.Handler, bufSize int) *asyncHandler {
 	core := &asyncCore{
-		ch:   make(chan asyncItem, bufSize),
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
-		root: base,
+		ch:    make(chan asyncItem, bufSize),
+		stop:  make(chan struct{}),
+		done:  make(chan struct{}),
+		dests: dests,
 	}
 	go core.run()
 	return &asyncHandler{core: core, base: base}
@@ -146,8 +146,10 @@ func (c *asyncCore) run() {
 	}
 }
 
-// reportDrops emits the accumulated drop tally as a Warn record to the construction-time
-// base handler, so every destination (gated by its own level) sees drop incidents.
+// reportDrops emits the accumulated drop tally as a Warn record to every construction-time
+// destination directly, bypassing per-destination level gating: a dropped-records warning is a
+// system-health signal, so it stays visible even when every destination is configured above
+// Warn. Runs on the worker goroutine when it catches up.
 func (c *asyncCore) reportDrops() {
 	n := c.dropped.Swap(0)
 	if n == 0 {
@@ -155,7 +157,9 @@ func (c *asyncCore) reportDrops() {
 	}
 	rec := slog.NewRecord(time.Now(), slog.LevelWarn, "logger: dropped log records", 0)
 	rec.AddAttrs(slog.Int64("dropped", n))
-	_ = c.root.Handle(context.Background(), rec)
+	for _, d := range c.dests {
+		_ = d.Handle(context.Background(), rec.Clone())
+	}
 }
 
 // close implements CloseFunc; NewAsync hands it out as a method value. Records enqueued by

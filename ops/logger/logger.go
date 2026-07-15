@@ -43,6 +43,18 @@ func New(opts ...Option) (*slog.Logger, error) {
 // buildBase resolves the writer and builds the handler stack beneath context extraction:
 // the primary destination plus any extra parallel handlers. Shared by New and NewAsync.
 func buildBase(c config) (slog.Handler, error) {
+	dests, err := buildDests(c)
+	if err != nil {
+		return nil, err
+	}
+	return combine(dests), nil
+}
+
+// buildDests resolves the writer and returns the flat destination list beneath context
+// extraction: the primary destination first, then any extra parallel handlers. The primary is
+// built once, so Config.File opens at most once. NewAsync keeps this flat list so its drop-tally
+// report can reach every destination directly, bypassing MultiHandler level gating.
+func buildDests(c config) ([]slog.Handler, error) {
 	level := parseLevel(c.Level)
 	if c.levelOverride != nil {
 		level = *c.levelOverride
@@ -58,10 +70,16 @@ func buildBase(c config) (slog.Handler, error) {
 	}
 
 	primary := newHandler(format, w, level, c.AddSource)
-	if len(c.extraHandlers) > 0 {
-		return slog.NewMultiHandler(append([]slog.Handler{primary}, c.extraHandlers...)...), nil
+	return append([]slog.Handler{primary}, c.extraHandlers...), nil
+}
+
+// combine returns a single handler for the destinations: the lone handler when there is one,
+// otherwise a slog.MultiHandler fanning out to all of them.
+func combine(dests []slog.Handler) slog.Handler {
+	if len(dests) == 1 {
+		return dests[0]
 	}
-	return primary, nil
+	return slog.NewMultiHandler(dests...)
 }
 
 // resolveWriter picks the single primary writer: WithOutput override, else the file,
