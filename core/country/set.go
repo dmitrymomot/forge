@@ -11,15 +11,15 @@ import (
 // parse gate. The zero Set is a valid empty set: it contains nothing, so a
 // gate configured with it fails closed.
 type Set struct {
-	m map[string]struct{} // uppercase alpha-2 keys
+	m map[string]Country // keyed by uppercase alpha-2, valued by the Country
 }
 
 // NewSet builds a Set from Country values. Zero-value countries are ignored.
 func NewSet(cs ...Country) Set {
-	s := Set{m: make(map[string]struct{}, len(cs))}
+	s := Set{m: make(map[string]Country, len(cs))}
 	for _, c := range cs {
 		if c.Alpha2 != "" {
-			s.m[c.Alpha2] = struct{}{}
+			s.m[c.Alpha2] = c
 		}
 	}
 	return s
@@ -29,13 +29,13 @@ func NewSet(cs ...Country) Set {
 // supplies). It fails closed: an unknown code returns the zero Set wrapping
 // ErrUnknownCode.
 func NewSetFromCodes(codes ...string) (Set, error) {
-	s := Set{m: make(map[string]struct{}, len(codes))}
+	s := Set{m: make(map[string]Country, len(codes))}
 	for _, code := range codes {
 		c, ok := ByAlpha2(code)
 		if !ok {
 			return Set{}, fmt.Errorf("country: %q: %w", code, ErrUnknownCode)
 		}
-		s.m[c.Alpha2] = struct{}{}
+		s.m[c.Alpha2] = c
 	}
 	return s, nil
 }
@@ -55,10 +55,8 @@ func (s Set) ContainsCode(code string) bool {
 // All returns the set's countries sorted by Name — the filtered dropdown source.
 func (s Set) All() []Country {
 	out := make([]Country, 0, len(s.m))
-	for code := range s.m {
-		if c, ok := ByAlpha2(code); ok {
-			out = append(out, c)
-		}
+	for _, c := range s.m {
+		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

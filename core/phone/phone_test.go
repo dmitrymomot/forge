@@ -40,6 +40,12 @@ func TestParse_Errors(t *testing.T) {
 
 	_, err = phone.Parse("+1 1234567890123456")
 	assert.ErrorIs(t, err, phone.ErrInvalidNumber) // > 15 digits
+
+	// An over-length number is rejected as invalid before dial-code matching,
+	// so an unknown prefix past the E.164 length cap reports ErrInvalidNumber
+	// rather than ErrUnknownDialCode.
+	_, err = phone.Parse("+9991234567890123456")
+	assert.ErrorIs(t, err, phone.ErrInvalidNumber)
 }
 
 func TestParse_ThreeDigitDialCode(t *testing.T) {
