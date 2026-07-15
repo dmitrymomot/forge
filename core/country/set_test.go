@@ -55,9 +55,14 @@ func TestNewSet_CanonicalizesAndStaysConsistent(t *testing.T) {
 	assert.Equal(t, "USD", all[0].Currency)
 
 	// An unrecognized-but-nonempty alpha-2 stays consistent across Contains,
-	// Len, and All (no silent drop from All).
-	x := country.NewSet(country.Country{Alpha2: "ZZ"})
+	// Len, and All (no silent drop from All), including when it is built from a
+	// lowercase code — the key is normalized to uppercase, so both Contains and
+	// the case-insensitive ContainsCode find it in any casing.
+	x := country.NewSet(country.Country{Alpha2: "zz"})
 	assert.Equal(t, 1, x.Len())
+	assert.True(t, x.ContainsCode("zz"))
 	assert.True(t, x.ContainsCode("ZZ"))
+	assert.True(t, x.Contains(country.Country{Alpha2: "zz"}))
+	assert.True(t, x.Contains(country.Country{Alpha2: "ZZ"}))
 	assert.Len(t, x.All(), 1)
 }

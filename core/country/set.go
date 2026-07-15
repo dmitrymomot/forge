@@ -28,7 +28,7 @@ func NewSet(cs ...Country) Set {
 		if canon, ok := ByAlpha2(c.Alpha2); ok {
 			s.m[canon.Alpha2] = canon
 		} else {
-			s.m[c.Alpha2] = c
+			s.m[strings.ToUpper(c.Alpha2)] = c
 		}
 	}
 	return s
@@ -49,9 +49,10 @@ func NewSetFromCodes(codes ...string) (Set, error) {
 	return s, nil
 }
 
-// Contains reports whether c is in the set.
+// Contains reports whether c is in the set, matching on its alpha-2 code
+// case-insensitively (consistent with ContainsCode and how members are keyed).
 func (s Set) Contains(c Country) bool {
-	_, ok := s.m[c.Alpha2]
+	_, ok := s.m[strings.ToUpper(c.Alpha2)]
 	return ok
 }
 
