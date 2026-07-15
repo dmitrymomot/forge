@@ -128,3 +128,80 @@ func (p Phone) NationalNumber() string {
 
 // IsZero reports whether p is the zero Phone.
 func (p Phone) IsZero() bool { return p.e164 == "" }
+
+// ParseRegion parses a number using a region hint (an alpha-2 code). Bare
+// national input has one leading trunk 0 stripped and the region's dial code
+// prepended; input that already carries a + or 00 is parsed as-is, and the
+// region, when it is among the dial code's candidates, resolves the country.
+// An unknown region yields ErrMissingCountryCode.
+//
+// Known limitation: the single-leading-0 trunk-prefix rule is near-universal but
+// not absolute (NANP uses no trunk 0; some plans keep a significant leading 0) —
+// callers in those regions pass fully-qualified + input to Parse.
+func ParseRegion(input, alpha2 string) (Phone, error) {
+	c, ok := country.ByAlpha2(alpha2)
+	if !ok {
+		return Phone{}, ErrMissingCountryCode
+	}
+	s := strings.TrimSpace(input)
+	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "00") {
+		p, err := Parse(s)
+		if err != nil {
+			return Phone{}, err
+		}
+		for _, cand := range p.Candidates() {
+			if cand.Alpha2 == c.Alpha2 {
+				p.resolved = c.Alpha2
+				break
+			}
+		}
+		return p, nil
+	}
+	digits, err := toDigits(s, false)
+	if err != nil {
+		return Phone{}, err
+	}
+	digits = strings.TrimPrefix(digits, "0")
+	if digits == "" {
+		return Phone{}, ErrInvalidNumber
+	}
+	return build(c.DialCode+digits, c.Alpha2)
+}
+
+// Candidates returns every country sharing this number's dial code (nil for the
+// zero Phone). It is the escape hatch for the shared-dial-code case Country
+// cannot disambiguate.
+func (p Phone) Candidates() []country.Country {
+	if p.e164 == "" {
+		return nil
+	}
+	return country.ByDialCode(p.DialCode())
+}
+
+// Country returns the number's country. The bool is true when the country is
+// certain — a dial code used by exactly one country, or a region hint that
+// pinned it — and false when the dial code is shared and unresolved, in which
+// case a stable primary is still returned (use Candidates for all options).
+func (p Phone) Country() (country.Country, bool) {
+	if p.e164 == "" {
+		return country.Country{}, false
+	}
+	if p.resolved != "" {
+		c, ok := country.ByAlpha2(p.resolved)
+		return c, ok
+	}
+	cs := p.Candidates()
+	switch len(cs) {
+	case 0:
+		return country.Country{}, false
+	case 1:
+		return cs[0], true
+	default:
+		if a, ok := primaryDial[p.DialCode()]; ok {
+			if c, ok2 := country.ByAlpha2(a); ok2 {
+				return c, false
+			}
+		}
+		return cs[0], false
+	}
+}
