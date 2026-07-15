@@ -153,16 +153,16 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 		free = s.cfg.ClaimBatch
 	}
 	total := 0
-	for _, qname := range s.claimOrder() {
-		if free <= 0 || ctx.Err() != nil {
-			break
+	claim := func(qname string, n int) {
+		if n <= 0 || ctx.Err() != nil {
+			return
 		}
-		jobs, err := s.broker.Claim(ctx, qname, free, s.cfg.Lease)
+		jobs, err := s.broker.Claim(ctx, qname, n, s.cfg.Lease)
 		if err != nil {
 			if ctx.Err() == nil {
 				s.log.ErrorContext(ctx, "queue claim failed", slog.String("queue", qname), slog.Any("error", err))
 			}
-			continue
+			return
 		}
 		for _, job := range jobs {
 			sem <- struct{}{}
@@ -174,18 +174,53 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 		free -= len(jobs)
 		total += len(jobs)
 	}
+
+	if s.strict {
+		for _, q := range s.queues { // static weight-desc order
+			claim(q.name, free)
+		}
+		return total
+	}
+	order, quota := s.claimPlan(free)
+	for _, qname := range order {
+		claim(qname, min(quota[qname], free))
+	}
+	for _, q := range s.queues { // leftover sweep: unfilled quotas roll to any queue with work
+		claim(q.name, free)
+	}
 	return total
 }
 
-// claimOrder returns queue names in claim order. Both modes use static
-// weight-desc order in this revision; Task 6 gives the weighted mode smooth
-// weighted round-robin so light queues cannot starve.
-func (s *Service) claimOrder() []string {
-	order := make([]string, len(s.queues))
-	for i, q := range s.queues {
-		order[i] = q.name
+// pickNext advances the smooth weighted round-robin state one step and
+// returns the picked queue. Only Run's poll goroutine touches this state.
+func (s *Service) pickNext() string {
+	total := 0
+	best := -1
+	for i := range s.queues {
+		s.queues[i].current += s.queues[i].weight
+		total += s.queues[i].weight
+		if best == -1 || s.queues[i].current > s.queues[best].current {
+			best = i
+		}
 	}
-	return order
+	s.queues[best].current -= total
+	return s.queues[best].name
+}
+
+// claimPlan distributes free slots across queues by SWRR: free picks become
+// per-queue quotas. With free=1 the pick rotates proportionally across polls,
+// which is what keeps light queues alive under sustained heavy backlog.
+func (s *Service) claimPlan(free int) ([]string, map[string]int) {
+	quota := make(map[string]int, len(s.queues))
+	order := make([]string, 0, len(s.queues))
+	for range free {
+		n := s.pickNext()
+		if quota[n] == 0 {
+			order = append(order, n)
+		}
+		quota[n]++
+	}
+	return order, quota
 }
 
 // process runs one claimed job to a terminal broker state. opCtx is never
