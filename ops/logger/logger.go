@@ -26,6 +26,19 @@ func New(opts ...Option) (*slog.Logger, error) {
 		return nil, err
 	}
 
+	base, err := buildBase(c)
+	if err != nil {
+		return nil, err
+	}
+	if len(c.extractors) > 0 {
+		return slog.New(newContextHandler(base, c.extractors...)), nil
+	}
+	return slog.New(base), nil
+}
+
+// buildBase resolves the writer and builds the handler stack beneath context extraction:
+// the primary destination plus any extra parallel handlers. Shared by New and NewAsync.
+func buildBase(c config) (slog.Handler, error) {
 	level := parseLevel(c.Level)
 	if c.levelOverride != nil {
 		level = *c.levelOverride
@@ -41,16 +54,10 @@ func New(opts ...Option) (*slog.Logger, error) {
 	}
 
 	primary := newHandler(format, w, level, c.AddSource)
-	var base slog.Handler
 	if len(c.extraHandlers) > 0 {
-		base = slog.NewMultiHandler(append([]slog.Handler{primary}, c.extraHandlers...)...)
-	} else {
-		base = primary
+		return slog.NewMultiHandler(append([]slog.Handler{primary}, c.extraHandlers...)...), nil
 	}
-	if len(c.extractors) > 0 {
-		base = newContextHandler(base, c.extractors...)
-	}
-	return slog.New(base), nil
+	return primary, nil
 }
 
 // resolveWriter picks the single primary writer: WithOutput override, else the file,
