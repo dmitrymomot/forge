@@ -16,10 +16,11 @@
 // extract context attributes, clone the record, and enqueue; a single worker goroutine
 // formats and writes to every destination. When the buffer (default 8192 records,
 // WithAsyncBufferSize) is full, new records are dropped, counted, and later reported as
-// a Warn record ("logger: dropped log records", dropped=N). The returned CloseFunc
-// drains the buffer and must run on shutdown, before flushing downstream sinks; records
-// logged after Close are silently dropped, and records buffered at crash/os.Exit are
-// lost. Keep the sync New wherever those trade-offs are unacceptable.
+// a Warn record ("logger: dropped log records", dropped=N). The single worker goroutine
+// runs until the returned CloseFunc is called; CloseFunc drains the buffer and must run on
+// shutdown, before flushing downstream sinks, or the goroutine leaks. Records logged after
+// Close are silently dropped, and records buffered at crash/os.Exit are lost. Keep the
+// sync New wherever those trade-offs are unacceptable.
 //
 //	log, closeLog, err := logger.NewAsync(logger.WithFormat(logger.FormatJSON))
 //	defer closeLog(ctx)
