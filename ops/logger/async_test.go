@@ -176,3 +176,105 @@ func TestAsyncDropNeverBlocksCaller(t *testing.T) {
 	w.open()
 	require.NoError(t, closeLog(closeCtx(t)))
 }
+
+type asyncCtxKey struct{}
+
+func TestAsyncCloseHonorsContextAndIsIdempotent(t *testing.T) {
+	w := newGatedWriter()
+	log, closeLog, err := logger.NewAsync(logger.WithOutput(w))
+	require.NoError(t, err)
+
+	log.Info("stuck")
+	<-w.entered // worker blocked inside Write
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	assert.ErrorIs(t, closeLog(ctx), context.DeadlineExceeded)
+
+	w.open()                                  // release the worker; the background drain completes
+	require.NoError(t, closeLog(closeCtx(t))) // second call waits for the same drain
+	assert.Contains(t, w.String(), "stuck")
+}
+
+func TestAsyncLogAfterCloseIsSilentNoOp(t *testing.T) {
+	var buf bytes.Buffer
+	log, closeLog, err := logger.NewAsync(logger.WithOutput(&buf))
+	require.NoError(t, err)
+	require.NoError(t, closeLog(closeCtx(t)))
+
+	log.Info("after close") // must not panic, block, or write
+	assert.NotContains(t, buf.String(), "after close")
+}
+
+func TestAsyncCloseConcurrentWithLogging(t *testing.T) {
+	log, closeLog, err := logger.NewAsync(logger.WithOutput(io.Discard))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 1000 {
+			log.Info("racing", "i", i)
+		}
+	})
+	require.NoError(t, closeLog(closeCtx(t)))
+	wg.Wait() // no panic, no race (verified under -race)
+}
+
+// ctxAwareHandler writes the record message to sink only if the context is not canceled at
+// Handle time — so a worker that received a live (i.e. raw, still-cancelable) ctx would skip
+// the write once the caller cancels it, while WithoutCancel lets it through regardless.
+type ctxAwareHandler struct {
+	mu   *sync.Mutex
+	sink *strings.Builder
+}
+
+func (h ctxAwareHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h ctxAwareHandler) Handle(ctx context.Context, rec slog.Record) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sink.WriteString(rec.Message)
+	return nil
+}
+
+func (h ctxAwareHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h ctxAwareHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestAsyncExtractorValuesCapturedAtCallTime(t *testing.T) {
+	w := newGatedWriter()
+	extractor := func(ctx context.Context) (slog.Attr, bool) {
+		if v, ok := ctx.Value(asyncCtxKey{}).(string); ok {
+			return slog.String("request_id", v), true
+		}
+		return slog.Attr{}, false
+	}
+	var sinkMu sync.Mutex
+	var sink strings.Builder
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(w),
+		logger.WithHandler(ctxAwareHandler{mu: &sinkMu, sink: &sink}),
+		logger.WithContextExtractors(extractor),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), asyncCtxKey{}, "abc-123"))
+	log.InfoContext(ctx, "req done")
+	cancel() // the request ends before the worker ever writes
+
+	w.open()
+	require.NoError(t, closeLog(closeCtx(t)))
+	// Extraction ran on the caller's goroutine at log time, and WithoutCancel kept the
+	// canceled request from suppressing the write.
+	assert.Contains(t, w.String(), "request_id=abc-123")
+
+	// ctxAwareHandler only writes when the ctx it receives is not canceled. cancel() above
+	// fires before the worker ever calls Handle, so a naive implementation that forwarded the
+	// raw (still-cancelable) ctx into the worker would leave sink empty here; WithoutCancel is
+	// what lets this write through, proving async.go actually strips cancellation.
+	sinkMu.Lock()
+	defer sinkMu.Unlock()
+	assert.Contains(t, sink.String(), "req done")
+}
