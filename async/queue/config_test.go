@@ -41,8 +41,7 @@ func TestConfig_ValidateRejects(t *testing.T) {
 func TestConfig_EveryFieldHasEnvTag(t *testing.T) {
 	t.Parallel()
 	typ := reflect.TypeFor[queue.Config]()
-	for i := range typ.NumField() {
-		f := typ.Field(i)
+	for f := range typ.Fields() {
 		assert.NotEmpty(t, f.Tag.Get("env"), "field %s missing env tag", f.Name)
 	}
 }

@@ -21,7 +21,10 @@ var (
 )
 
 // Cancel is a handler verdict: the job became moot; discard it as done
-// without retrying and without dead-lettering.
+// without retrying and without dead-lettering. Named as a verdict value
+// (handlers `return queue.Cancel`), not a conventional ErrFoo sentinel.
+//
+//nolint:staticcheck // ST1012: verdict value, not an error condition to match
 var Cancel error = errors.New("queue: job cancelled")
 
 type skipRetryError struct{ err error }

@@ -54,7 +54,7 @@ func (b *MemoryBroker) Claim(_ context.Context, queueName string, n int, lease t
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.clk.Now()
-	var due []*memJob
+	due := make([]*memJob, 0, len(b.jobs)) // upper bound: avoids regrowth while scanning
 	for _, m := range b.jobs {
 		if !m.dead && m.job.Queue == queueName && !m.job.RunAt.After(now) && m.claimedUntil.Before(now) {
 			due = append(due, m)

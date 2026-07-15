@@ -127,6 +127,7 @@ func TestService_MaxAttemptsDeadLetters(t *testing.T) {
 	assert.EqualValues(t, 2, calls.Load(), "push-level WithMaxAttempts(2) bounds the attempts")
 	dead, err := b.ListDead(context.Background(), "default", 10)
 	require.NoError(t, err)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "always fails")
 }
 
@@ -179,6 +180,7 @@ func TestService_SkipRetryVerdict(t *testing.T) {
 	}, "SkipRetry must dead-letter immediately")
 	assert.EqualValues(t, 1, calls.Load(), "no retries after SkipRetry")
 	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "poison")
 }
 
@@ -230,6 +232,7 @@ func TestService_PanicIsFailure(t *testing.T) {
 		return len(dead) == 1
 	}, "panicking job must retry then dead-letter")
 	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "panic")
 }
 
@@ -277,6 +280,7 @@ func TestService_UnregisteredKindDeadLetters(t *testing.T) {
 		return len(dead) == 1
 	}, "unregistered kind must dead-letter")
 	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "no handler")
 }
 
@@ -309,6 +313,7 @@ func TestService_HandlerTimeout(t *testing.T) {
 	}, "timed-out job must retry then dead-letter")
 	assert.EqualValues(t, 2, calls.Load())
 	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "context deadline exceeded")
 }
 
@@ -371,6 +376,7 @@ func TestService_ScopeMissingFailsClosed(t *testing.T) {
 	}, "unscoped job on a scoped worker must dead-letter")
 	assert.Zero(t, calls.Load())
 	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
 	assert.Contains(t, dead[0].LastError, "scope missing")
 }
 
