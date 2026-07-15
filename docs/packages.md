@@ -19,17 +19,6 @@ External module deps stay in the entry prose. Composition partners
 
 ---
 
-**core/country**
-
-Curated ISO-3166 static data: alpha-2/alpha-3 codes, English names,
-default currency, and dial prefix per country — the `money` ISO-4217
-precedent applied to countries. Zero deps; consumers: registration/KYC
-forms, `geoip` enrichment, `i18n`, `core/phone`.
-
-Deps: none (stdlib only).
-
----
-
 **core/phone**
 
 E.164 phone normalization: parse/format/validate over `core/country`'s
