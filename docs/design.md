@@ -31,6 +31,13 @@
 - Single-responsibility packages (~250–850 LOC); black-box tests only.
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
   store, queue's in-memory broker) — there is no central fakes package.
+- **Two test tiers.** The default `go test ./...` is unit-only: fast, no
+  Docker, no network. DB-backed tests carry `//go:build integration` and run
+  via `just test-integration` (a dedicated CI job). They provision real
+  Postgres/Redis/Mongo/ClickHouse/OpenSearch through the `testkit/*test`
+  helpers (testcontainers, one container per package process, Ryuk-reaped); a
+  `FORGE_TEST_<BACKEND>_*` env var overrides the container to target an existing
+  server. ClickHouse and OpenSearch are integration-only (no in-process option).
 - **Env prefixes are baked into tags:** every env-loadable `Config` carries
   its package prefix in the tag (`COOKIE_KEYS`, `SERVER_ADDR`, `DB_URL`).
   Nest untagged to keep default names; nest tagged (`env:"APP"`) to
@@ -217,7 +224,9 @@ and the driver leaves stays stdlib.
 - **Logger adapters** (zap/zerolog bridges) — forge is slog-only.
 - **Scaffolding / code generators** — value lives in consumer-owned
   templates.
-- **Testcontainers** — CI services/local Postgres suffice.
+- **Testcontainers as a consumer concern** — adopted in-repo instead: the
+  integration test tier provisions real backends via the `testkit/*test`
+  helpers (see Testing rules above).
 - **Error-monad Result/Option types** — Go's multi-return idiom; ptr/null/
   errorsx cover the real needs.
 - **Shared service base** — deferred until 2–3 services show real
