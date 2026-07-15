@@ -11,7 +11,7 @@ import (
 )
 
 func BenchmarkPgPushClaimAck(b *testing.B) {
-	broker := newBroker(b, openPool(b)) // helpers take testing.TB; skips without env
+	broker := newBroker(b, openPool(b)) // helpers take testing.TB (via pgtest.DSN)
 	ctx := context.Background()
 	c := queue.NewClient(broker)
 	kind := queue.NewKind[struct {

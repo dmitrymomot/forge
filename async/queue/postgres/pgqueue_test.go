@@ -124,11 +124,10 @@ func TestPgQueue_PushTx(t *testing.T) {
 }
 
 func TestPgQueue_WithTableValidation(t *testing.T) {
-	t.Parallel()
-	_, err := pgqueue.New(nil)
-	require.Error(t, err, "nil pool rejected")
+	// The nil-pool rejection is a pure-unit check in validate_test.go; this one
+	// needs a real pool to reach the table-name guard.
 	pool := openPool(t)
-	_, err = pgqueue.New(pool, pgqueue.WithTable("bad;name"))
+	_, err := pgqueue.New(pool, pgqueue.WithTable("bad;name"))
 	require.Error(t, err, "unsafe table name rejected")
 }
 

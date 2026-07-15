@@ -56,12 +56,12 @@ func dueNow() time.Time { return time.Now().Add(-2 * time.Second) }
 // claimWithin polls Claim until it returns at least want jobs or the deadline
 // passes, tolerating clock skew and slow containers. It returns the claimed
 // batch; on timeout it makes a final assertion so the failure names the queue.
-func claimWithin(t *testing.T, b queue.Broker, q string, max int, lease time.Duration, want int) []queue.Job {
+func claimWithin(t *testing.T, b queue.Broker, q string, limit int, lease time.Duration, want int) []queue.Job {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		got, err := b.Claim(ctx, q, max, lease)
+		got, err := b.Claim(ctx, q, limit, lease)
 		require.NoError(t, err)
 		if len(got) >= want {
 			return got

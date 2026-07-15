@@ -7,36 +7,19 @@ import (
 	"errors"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
-
 	forgemongo "github.com/dmitrymomot/forge/data/mongo"
-	"github.com/dmitrymomot/forge/testkit/mongotest"
 )
 
-// WithTransaction needs a replica set. mongotest provisions a single-node
-// replica set, so its URI works for transactions.
-func replicaSetURI(t *testing.T) string {
-	t.Helper()
-	return mongotest.URI(t)
-}
-
-func openRSDB(t *testing.T) *mongodriver.Database {
-	t.Helper()
-	cfg := forgemongo.DefaultConfig()
-	cfg.URI = replicaSetURI(t)
-	cfg.Database = "forge_test"
-	db, err := forgemongo.Open(t.Context(), forgemongo.WithConfig(cfg))
-	require.NoError(t, err)
-	t.Cleanup(func() { forgemongo.Close(db, nil) })
-	return db
-}
+// WithTransaction needs a replica set; mongotest provisions a single-node one,
+// so openTestDB (shared with the lifecycle suite) already yields a usable db.
 
 func TestWithTransaction_CommitsOnSuccess(t *testing.T) {
-	db := openRSDB(t)
+	db := openTestDB(t)
 	coll := db.Collection("txn_commit")
 	t.Cleanup(func() { _ = coll.Drop(context.Background()) })
 	require.NoError(t, coll.Drop(t.Context()))
@@ -53,7 +36,7 @@ func TestWithTransaction_CommitsOnSuccess(t *testing.T) {
 }
 
 func TestWithTransaction_AbortsOnError(t *testing.T) {
-	db := openRSDB(t)
+	db := openTestDB(t)
 	coll := db.Collection("txn_abort")
 	t.Cleanup(func() { _ = coll.Drop(context.Background()) })
 	require.NoError(t, coll.Drop(t.Context()))

@@ -25,17 +25,12 @@ var runID = id.NewULID().String()
 
 var _ queue.Broker = (*redisqueue.Broker)(nil)
 
-// redisAddr returns the address of the redis to test against: redistest.Addr
-// honors FORGE_TEST_REDIS_URL if set, else starts a throwaway container shared
-// across the test process.
-func redisAddr(tb testing.TB) string {
-	tb.Helper()
-	return redistest.Addr(tb)
-}
-
+// dial connects to the redis under test: redistest.Addr honors
+// FORGE_TEST_REDIS_URL if set, else starts a throwaway container shared across
+// the test process.
 func dial(tb testing.TB) redis.UniversalClient {
 	tb.Helper()
-	c := redis.NewClient(&redis.Options{Addr: redisAddr(tb)})
+	c := redis.NewClient(&redis.Options{Addr: redistest.Addr(tb)})
 	tb.Cleanup(func() { _ = c.Close() })
 	return c
 }
