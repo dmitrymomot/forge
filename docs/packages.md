@@ -15,19 +15,6 @@ tagged `(planned)` are elsewhere in this file and define build order.
 External module deps stay in the entry prose. Composition partners
 (packages a consumer wires alongside) are not deps and are not listed.
 
-## core/
-
----
-
-**core/phone**
-
-E.164 phone normalization: parse/format/validate over `core/country`'s
-dial-prefix table. Consumers: `comms/sms`, `auth/otp`, KYC forms. No
-carrier metadata, no line-type detection — the libphonenumber swamp
-stays out.
-
-Deps: `core/country` (planned).
-
 ## web/
 
 ---
