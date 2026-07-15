@@ -16,7 +16,7 @@
 - Tests use testify (`assert`/`require`), matching `core/money`.
 - Error sentinels are `errors.Is`-matchable, single-line, prefixed `country: ` / `phone: `.
 - Options are `type Option func(*config)` over an unexported `config` — never builders.
-- No manual line-wrapping in prose/comments/commit bodies; one line per paragraph, let it soft-wrap.
+- No manual line-wrapping in prose/markdown/PR/commit bodies; one line per paragraph, let it soft-wrap. (Go source doc comments follow existing house style — wrapped ~80 chars, as in `core/money`; do NOT unwrap them.)
 - After editing files in a package, run `just fmt ./core/<pkg>/...` (single-file `just fmt` trips a spurious betteralign error — always pass the package glob).
 - After each package is complete, `just lint` must pass clean.
 - Every package ships `bench_test.go` plus a measured optimization pass (before/after numbers) — required for the PR.
