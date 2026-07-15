@@ -42,7 +42,12 @@ func redisAddr(tb testing.TB) string {
 	}
 	sharedRedisOnce.Do(func() {
 		mr, err := miniredis.Run() // never closed: lives for the test process
-		require.NoError(tb, err)
+		if err != nil {
+			// Panic rather than tb.FailNow: a Goexit inside sync.Once still
+			// marks it done, which would leave sharedRedisAddr empty and make
+			// every later test silently dial "". This essentially never fires.
+			panic(fmt.Sprintf("redisqueue test: start miniredis: %v", err))
+		}
 		sharedRedisAddr = mr.Addr()
 	})
 	return sharedRedisAddr
