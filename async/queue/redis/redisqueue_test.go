@@ -90,6 +90,47 @@ func TestRedisQueue_AttemptSurvivesCrashRedelivery(t *testing.T) {
 	require.NoError(t, b2.Ack(ctx, got2[0].ID))
 }
 
+func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
+	// A crash-redelivered claim (XAUTOCLAIM, delivered >= 2) that ends in an
+	// explicit Nack must persist the consumed attempt, so the next claim keeps
+	// counting up instead of resetting — otherwise a flaky job outlives its
+	// MaxAttempts budget.
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:nackcrash:%s:", runID)
+	b1, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	c := queue.NewClient(b1)
+	require.NoError(t, c.PushRaw(ctx, "flaky.kind", []byte(`{}`)))
+
+	got, err := b1.Claim(ctx, "default", 1, 200*time.Millisecond)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, got[0].Attempt, "first claim = attempt 1")
+	// b1 "crashes": no Ack/Nack, refs lost.
+
+	b2, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	time.Sleep(300 * time.Millisecond) // lease expires
+
+	crashed, err := b2.Claim(ctx, "default", 1, 200*time.Millisecond)
+	require.NoError(t, err)
+	require.Len(t, crashed, 1)
+	assert.Equal(t, 2, crashed[0].Attempt, "crash redelivery = attempt 2")
+
+	// Handler fails → Nack. The consumed attempt (2) must survive.
+	require.NoError(t, b2.Nack(ctx, crashed[0].ID, time.Now(), "still failing"))
+
+	time.Sleep(20 * time.Millisecond)
+	retried, err := b2.Claim(ctx, "default", 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, retried, 1)
+	assert.Equal(t, 3, retried[0].Attempt, "post-nack claim must continue from the crash-redelivered attempt, not reset")
+	assert.Equal(t, "still failing", retried[0].LastError)
+	require.NoError(t, b2.Ack(ctx, retried[0].ID))
+}
+
 func TestRedisQueue_ValidatesConstruction(t *testing.T) {
 	t.Parallel()
 	_, err := redisqueue.New(nil)

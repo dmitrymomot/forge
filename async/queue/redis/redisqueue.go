@@ -47,7 +47,7 @@ type Broker struct {
 type claimedRef struct {
 	msgID string
 	queue string
-	job   queue.Job // decoded envelope as stored (pre-claim attempt)
+	job   queue.Job // post-claim envelope: Attempt is what the engine saw this round (incl. crash redeliveries)
 }
 
 // Option configures New.
@@ -168,7 +168,7 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 			}
 			claimedJob := j
 			claimedJob.Attempt = j.Attempt + int(delivered)
-			b.remember(claimedJob.ID, claimedRef{job: j, msgID: m.ID, queue: q})
+			b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q})
 			out = append(out, claimedJob)
 		}
 		remaining -= len(msgs)
@@ -191,7 +191,7 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 				}
 				claimedJob := j
 				claimedJob.Attempt = j.Attempt + 1
-				b.remember(claimedJob.ID, claimedRef{job: j, msgID: m.ID, queue: q})
+				b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q})
 				out = append(out, claimedJob)
 			}
 		}
@@ -267,7 +267,8 @@ func (b *Broker) Nack(ctx context.Context, jobID string, retryAt time.Time, reas
 		return queue.ErrJobNotFound
 	}
 	j := ref.job
-	j.Attempt = ref.job.Attempt + 1 // the failed claim consumed one attempt
+	// ref.job.Attempt already reflects the attempt the engine just consumed
+	// (including crash redeliveries via XAUTOCLAIM), so persist it as-is.
 	j.LastError = reason
 	j.RunAt = retryAt.UTC()
 	enc, err := queue.EncodeJob(j)
@@ -290,8 +291,7 @@ func (b *Broker) Kill(ctx context.Context, jobID string, reason string) error {
 	if !ok {
 		return queue.ErrJobNotFound
 	}
-	j := ref.job
-	j.Attempt = ref.job.Attempt + 1
+	j := ref.job // Attempt already reflects the consumed attempt (incl. crash redeliveries)
 	j.LastError = reason
 	enc, err := queue.EncodeJob(j)
 	if err != nil {
