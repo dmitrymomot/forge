@@ -84,10 +84,11 @@ queue.Register(svc, KindSendWelcome, handleFn, handlerOpts...)
 supervisor.Run(ctx, supervisor.WithService(svc), ...)
 ```
 
-- Implements `supervisor.Service` (`Name() = "queue"`, blocking `Run(ctx)`).
+- Implements `supervisor.Service` (blocking `Run(ctx)`; `Name()` defaults to `"queue"`, override via `WithName` when running multiple Service instances under one supervisor).
+- Multiple Service instances over the same broker are first-class — same process or separate deployments (e.g. a dedicated worker draining only a `video` queue with its own concurrency). Claim-with-lease already makes competing workers safe. Rule: the queue is the unit of routing — every kind pushed to a queue must be registered on every service draining that queue; to split kinds across services, split the queues.
 - Handlers are `func(ctx context.Context, p T) error`; `queue.Register` is package-level generic, panics on duplicate kind registration (wiring bug, fail fast at startup).
 - Handler options: `WithHandlerTimeout(d)` (wraps handler ctx; timeout = failure → retry path), `WithHandlerMaxAttempts(n)`, `WithHandlerBackoff(policy)` (per-kind override of the service default).
-- Service options: `WithQueues(map[string]int)` (weighted priorities), `WithStrictPriority()`, `WithConcurrency(n)`, `WithLogger(l)`, `WithScopeContext(fn)`, plus config-backed knobs below.
+- Service options: `WithQueues(map[string]int)` (weighted priorities), `WithStrictPriority()`, `WithConcurrency(n)`, `WithName(s)`, `WithLogger(l)`, `WithScopeContext(fn)`, plus config-backed knobs below.
 - A job claimed for a kind with no registered handler is `Kill`ed to dead with reason `unregistered kind` (it can be `Requeue`d after a deploy that registers it).
 
 ## Delivery semantics & lifecycle
