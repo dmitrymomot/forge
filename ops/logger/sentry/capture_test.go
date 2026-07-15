@@ -57,13 +57,6 @@ func TestCaptureHandlerEnabledBelowThreshold(t *testing.T) {
 	assert.False(t, h.Enabled(context.Background(), slog.LevelInfo))
 }
 
-type disabledHandler struct{}
-
-func (disabledHandler) Enabled(context.Context, slog.Level) bool  { return false }
-func (disabledHandler) Handle(context.Context, slog.Record) error { return nil }
-func (disabledHandler) WithAttrs([]slog.Attr) slog.Handler        { return disabledHandler{} }
-func (disabledHandler) WithGroup(string) slog.Handler             { return disabledHandler{} }
-
 func TestErrorFromRecordWrapsErrorAttr(t *testing.T) {
 	sentinel := errors.New("db down")
 	rec := slog.NewRecord(time.Time{}, slog.LevelError, "query failed", 0)
