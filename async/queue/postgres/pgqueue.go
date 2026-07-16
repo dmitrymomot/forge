@@ -1,9 +1,3 @@
-// Package pgqueue is the Postgres queue.Broker: SKIP LOCKED claiming with
-// fencing tokens over a hot jobs table, a separate cold dead-letter table,
-// bounded stats, and transactional enqueue (queue.TxPusher).
-//
-// Requires PostgreSQL >= 18 (distinct-queue enumeration in Stats leans on
-// B-tree skip scan; earlier servers work but Stats may plan a seq scan).
 package pgqueue
 
 import (

@@ -1,13 +1,30 @@
 // Package redisqueue is the Redis queue.Broker: one stream + consumer group
 // per queue for claim-with-lease (XAUTOCLAIM redelivers entries idle longer
-// than the lease), a sorted-set staging area for delayed and retried jobs
-// (promoted atomically by a Lua script during Claim), and hashes for the
-// dead-letter set. No transactional enqueue — use async/queue/postgres or,
-// once it lands, async/outbox. All keys live under a configurable prefix.
+// than the lease), a sorted set staging delayed and retried jobs (promoted
+// atomically by a Lua script during Claim), and a hash holding dead-letter
+// payloads. No transactional enqueue — use async/queue/postgres or, once it
+// lands, async/outbox.
+//
+// Requires Redis >= 8. This is a tested-floor statement, not a feature
+// dependency: every command this driver uses has existed since Redis 7.0.
+//
+// # Key layout
+//
+// All keys live under a configurable prefix (default "queue:"). Per queue q:
+// "<prefix>q" is the stream, "<prefix>q:delayed" the staging sorted set,
+// "<prefix>q:data" the payload hash backing the staging set, "<prefix>q:dead"
+// the dead-letter payload hash, "<prefix>q:dead:idx" a sorted set keyed by
+// kill time (so ListDead is a plain range read, never O(DLQ)), and
+// "<prefix>q:poison" a list of undecodable stream entries. "<prefix>queues"
+// and "<prefix>index" are prefix-wide registries shared across queues.
 //
 // An undecodable stream entry (a foreign XADD, or a future wire version) is
-// parked to a per-queue poison list instead of failing Claim forever. Broker
-// implements queue.Maintainer: Maintain deletes zero-pending consumers idle
-// past WithConsumerIdleCutoff and prunes queues left fully empty (stream,
-// delayed set, dead store, and poison list all empty) from the registry.
+// parked to its queue's poison list instead of failing Claim forever —
+// nothing decodes or retries poisoned entries automatically, so check the
+// poison list in ops runbooks.
+//
+// Broker implements queue.Maintainer: Maintain deletes consumers that have no
+// pending entries and have been idle past WithConsumerIdleCutoff (default
+// 1h), and prunes queues left fully empty (stream, delayed set, dead store,
+// and poison list all empty) from the registry.
 package redisqueue
