@@ -24,7 +24,7 @@ var (
 // If FORGE_TEST_REDIS_URL is set it points the suite at an existing server (e.g.
 // a CI service); it may be given as "host:port" or as a "redis://host:port" URL,
 // and either way Addr returns the bare host:port. Otherwise a throwaway
-// redis:7-alpine container is started once per test process, shared across every
+// redis:8-alpine container is started once per test process, shared across every
 // test in the package, and removed by the testcontainers Ryuk reaper when the
 // process exits.
 func Addr(tb testing.TB) string {
@@ -52,7 +52,7 @@ func hostPort(addr string) string {
 // sharedAddr empty and make every later caller dial "".
 func startShared() {
 	ctx := context.Background()
-	c, err := redis.Run(ctx, "redis:7-alpine")
+	c, err := redis.Run(ctx, "redis:8-alpine")
 	if err != nil {
 		panic(fmt.Sprintf("redistest: start container: %v", err))
 	}
