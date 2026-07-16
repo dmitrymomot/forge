@@ -202,3 +202,53 @@ func TestClient_DLQPassthrough(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, dead)
 }
+
+func TestPushMany(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("batch claims back in order with unique ids", func(t *testing.T) {
+		t.Parallel()
+		b := queue.NewMemoryBroker()
+		c := queue.NewClient(b)
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "a"}, {UserID: "b"}, {UserID: "c"}}))
+		got, err := b.Claim(ctx, "default", 10, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+		seen := map[string]bool{}
+		for _, j := range got {
+			assert.False(t, seen[j.ID], "ids must be unique")
+			seen[j.ID] = true
+		}
+	})
+	t.Run("scope hook runs once per batch", func(t *testing.T) {
+		t.Parallel()
+		b := queue.NewMemoryBroker()
+		var hookCalls int
+		c := queue.NewClient(b, queue.WithScope(func(context.Context) (string, error) {
+			hookCalls++
+			return "tenant-a", nil
+		}))
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "a"}, {UserID: "b"}}))
+		assert.Equal(t, 1, hookCalls, "one scope resolution per batch, not per job")
+		got, err := b.Claim(ctx, "default", 10, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		assert.Equal(t, "tenant-a", got[0].Scope)
+		assert.Equal(t, "tenant-a", got[1].Scope)
+	})
+	t.Run("empty slice is a no-op", func(t *testing.T) {
+		t.Parallel()
+		c := queue.NewClient(queue.NewMemoryBroker())
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, nil))
+	})
+}
+
+func TestPush_EmptyQueueNameRejected(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c := queue.NewClient(queue.NewMemoryBroker())
+	assert.Error(t, queue.Push(ctx, c, kindWelcome, welcomePayload{UserID: "u"}, queue.WithQueue("")))
+	assert.Error(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "u"}}, queue.WithQueue("")))
+	assert.Error(t, c.PushRaw(ctx, "raw.kind", []byte(`{}`), queue.WithQueue("")))
+}
