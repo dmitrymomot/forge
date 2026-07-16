@@ -225,3 +225,159 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	assert.Equal(t, "still failing", retried[0].LastError)
 	require.NoError(t, b2.Ack(ctx, retried[0].ID, retried[0].Token))
 }
+
+var _ queue.Maintainer = (*redisqueue.Broker)(nil)
+
+func TestRedisQueue_PoisonEntryDoesNotWedgeClaim(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:poison:%s:", runID)
+	b, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	ctx := context.Background()
+	c := queue.NewClient(b)
+
+	// Establish the stream+group, drain it.
+	require.NoError(t, c.PushRaw(ctx, "ok.kind", []byte(`{}`)))
+	got, err := b.Claim(ctx, "default", 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NoError(t, b.Ack(ctx, got[0].ID, got[0].Token))
+
+	// A foreign producer XADDs garbage straight into the stream.
+	require.NoError(t, client.XAdd(ctx, &redis.XAddArgs{
+		Stream: prefix + "default", Values: map[string]any{"j": "not json at all"},
+	}).Err())
+	require.NoError(t, c.PushRaw(ctx, "ok.kind", []byte(`{"n":2}`)))
+
+	// Claim parks the poison entry and still returns the good job.
+	good, err := b.Claim(ctx, "default", 10, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, good, 1)
+	assert.Equal(t, "ok.kind", good[0].Type)
+	require.NoError(t, b.Ack(ctx, good[0].ID, good[0].Token))
+
+	parked, err := client.LRange(ctx, prefix+"default:poison", 0, -1).Result()
+	require.NoError(t, err)
+	require.Len(t, parked, 1)
+	assert.Equal(t, "not json at all", parked[0])
+
+	// The queue is fully drained: subsequent claims stay clean.
+	again, err := b.Claim(ctx, "default", 10, time.Minute)
+	require.NoError(t, err)
+	assert.Empty(t, again)
+}
+
+func TestRedisQueue_MaintainCleansConsumersAndStaleQueues(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:maintain:%s:", runID)
+	ctx := context.Background()
+
+	// b1 processes a job and "retires" (its consumer entry lingers).
+	b1, err := redisqueue.New(client, redisqueue.WithPrefix(prefix), redisqueue.WithConsumerIdleCutoff(time.Millisecond))
+	require.NoError(t, err)
+	c := queue.NewClient(b1)
+	require.NoError(t, c.PushRaw(ctx, "m.kind", []byte(`{}`), queue.WithQueue("tmpq")))
+	got, err := b1.Claim(ctx, "tmpq", 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NoError(t, b1.Ack(ctx, got[0].ID, got[0].Token))
+
+	// b2 maintains: b1's consumer is idle with zero pending → deleted; tmpq is
+	// completely empty → dropped from the queues registry.
+	b2, err := redisqueue.New(client, redisqueue.WithPrefix(prefix), redisqueue.WithConsumerIdleCutoff(time.Millisecond))
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond) // let b1's consumer idle past the cutoff
+	require.NoError(t, b2.Maintain(ctx))
+
+	consumers, err := client.XInfoConsumers(ctx, prefix+"tmpq", "workers").Result()
+	require.NoError(t, err)
+	for _, cons := range consumers {
+		assert.NotZero(t, cons.Pending, "zero-pending idle consumers must be deleted (only b2's own live consumer may remain)")
+	}
+
+	members, err := client.SMembers(ctx, prefix+"queues").Result()
+	require.NoError(t, err)
+	assert.NotContains(t, members, "tmpq", "fully-empty queue must leave the registry")
+
+	// A later push simply re-registers the queue.
+	require.NoError(t, c.PushRaw(ctx, "m.kind", []byte(`{}`), queue.WithQueue("tmpq")))
+	st, err := b2.Stats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, st["tmpq"].Pending)
+}
+
+// TestRedisQueue_MaintainSkipsBusyConsumer covers the guard that
+// TestRedisQueue_MaintainCleansConsumersAndStaleQueues never reaches: a
+// consumer with a pending (claimed but not finalized) entry must survive
+// Maintain even when idle past the cutoff. bBusy claims the job and never
+// finalizes it, so its consumer carries Pending > 0 the whole test; bMaint is
+// a separate instance so bBusy is never Maintain's own caller, isolating the
+// busy guard from the self guard. Without the guard (or with the read-then-
+// delete race from finding 1), Maintain would XGROUP DELCONSUMER bBusy's
+// consumer, discarding its PEL entry outright — the claimed job would then be
+// stuck in the raw stream, invisible to the group, unable to Ack.
+func TestRedisQueue_MaintainSkipsBusyConsumer(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:maintainbusy:%s:", runID)
+	ctx := context.Background()
+
+	bBusy, err := redisqueue.New(client, redisqueue.WithPrefix(prefix), redisqueue.WithConsumerIdleCutoff(time.Millisecond))
+	require.NoError(t, err)
+	c := queue.NewClient(bBusy)
+	require.NoError(t, c.PushRaw(ctx, "busy.kind", []byte(`{}`), queue.WithQueue("busyq")))
+	got, err := bBusy.Claim(ctx, "busyq", 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	// No Ack: the job stays claimed, so bBusy's consumer keeps Pending == 1.
+
+	bMaint, err := redisqueue.New(client, redisqueue.WithPrefix(prefix), redisqueue.WithConsumerIdleCutoff(time.Millisecond))
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond) // bBusy's consumer goes idle past the cutoff too
+	require.NoError(t, bMaint.Maintain(ctx))
+
+	consumers, err := client.XInfoConsumers(ctx, prefix+"busyq", "workers").Result()
+	require.NoError(t, err)
+	var busyStillPresent bool
+	for _, cons := range consumers {
+		if cons.Pending > 0 {
+			busyStillPresent = true
+		}
+	}
+	assert.True(t, busyStillPresent, "a consumer with a pending entry must survive Maintain even when idle past the cutoff")
+
+	// The in-flight job must still be finalizable: Maintain must not have
+	// discarded its PEL entry out from under it.
+	require.NoError(t, bBusy.Ack(ctx, got[0].ID, got[0].Token), "job claimed before Maintain must still be finalizable after it")
+}
+
+// TestRedisQueue_MaintainSkipsSelfConsumer covers the guard that a broker
+// never deletes its own consumer registration, even when it is (by
+// construction, since it just Acked) zero-pending and idle past the cutoff.
+// Without the guard, a long-running worker that calls its own Maintain would
+// wipe its own consumer entry from the group.
+func TestRedisQueue_MaintainSkipsSelfConsumer(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:maintainself:%s:", runID)
+	ctx := context.Background()
+
+	b, err := redisqueue.New(client, redisqueue.WithPrefix(prefix), redisqueue.WithConsumerIdleCutoff(time.Millisecond))
+	require.NoError(t, err)
+	c := queue.NewClient(b)
+	require.NoError(t, c.PushRaw(ctx, "self.kind", []byte(`{}`), queue.WithQueue("selfq")))
+	got, err := b.Claim(ctx, "selfq", 1, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NoError(t, b.Ack(ctx, got[0].ID, got[0].Token)) // zero-pending: only the self guard protects it now
+
+	before, err := client.XInfoConsumers(ctx, prefix+"selfq", "workers").Result()
+	require.NoError(t, err)
+	require.Len(t, before, 1, "only b's own consumer should exist yet")
+
+	time.Sleep(50 * time.Millisecond) // idle past the cutoff
+	require.NoError(t, b.Maintain(ctx))
+
+	after, err := client.XInfoConsumers(ctx, prefix+"selfq", "workers").Result()
+	require.NoError(t, err)
+	require.Len(t, after, 1, "a broker's own live consumer must survive its own Maintain call")
+	assert.Equal(t, before[0].Name, after[0].Name)
+}

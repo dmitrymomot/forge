@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/dmitrymomot/forge/async/queue"
 	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/ops/logger"
 )
 
 const group = "workers"
@@ -98,13 +100,38 @@ end
 return #ids
 `)
 
+// poisonScript parks a raw undecodable entry and removes it from the stream so
+// one bad entry (foreign XADD, future wire version) cannot wedge Claim forever.
+var poisonScript = redis.NewScript(`
+redis.call('RPUSH', KEYS[2], ARGV[3])
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+redis.call('XDEL', KEYS[1], ARGV[2])
+return 1
+`)
+
+// delConsumerScript checks-then-deletes a consumer atomically: XGROUP
+// DELCONSUMER discards the consumer's PEL entries outright rather than
+// reassigning them, so a plain read-then-delete could wipe out an entry
+// delivered in the gap between the pending snapshot and the delete — gone
+// from the group forever, never redelivered, never claimable, never
+// dead-lettered. Folding the pending check into the delete closes that
+// window, matching every other finalize op in this file.
+var delConsumerScript = redis.NewScript(`
+local p = redis.call('XPENDING', KEYS[1], ARGV[1], '-', '+', 1, ARGV[2])
+if #p > 0 then return 0 end
+redis.call('XGROUP', 'DELCONSUMER', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`)
+
 // Broker is the Redis queue.Broker.
 type Broker struct {
-	client   redis.UniversalClient
-	claimed  map[string]claimedRef // job id → ref; only the claiming instance finalizes
-	groups   map[string]bool       // queues with the consumer group ensured
-	prefix   string
-	consumer string
+	client     redis.UniversalClient
+	claimed    map[string]claimedRef // job id → ref; only the claiming instance finalizes
+	groups     map[string]bool       // queues with the consumer group ensured
+	log        *slog.Logger
+	prefix     string
+	consumer   string
+	idleCutoff time.Duration
 
 	mu sync.Mutex
 }
@@ -124,15 +151,29 @@ func WithPrefix(p string) Option {
 	return func(b *Broker) { b.prefix = p }
 }
 
+// WithLogger sets the logger (default logger.NewNope()); used for poison
+// parking and maintenance reporting.
+func WithLogger(l *slog.Logger) Option {
+	return func(b *Broker) { b.log = l }
+}
+
+// WithConsumerIdleCutoff overrides how long a consumer with no pending
+// entries must be idle before Maintain deletes it (default 1h).
+func WithConsumerIdleCutoff(d time.Duration) Option {
+	return func(b *Broker) { b.idleCutoff = d }
+}
+
 // New builds a Broker over client.
 func New(client redis.UniversalClient, opts ...Option) (*Broker, error) {
 	host, _ := os.Hostname()
 	b := &Broker{
-		client:   client,
-		prefix:   "queue:",
-		consumer: fmt.Sprintf("%s-%d-%s", host, os.Getpid(), id.NewULID().String()),
-		claimed:  make(map[string]claimedRef),
-		groups:   make(map[string]bool),
+		client:     client,
+		prefix:     "queue:",
+		consumer:   fmt.Sprintf("%s-%d-%s", host, os.Getpid(), id.NewULID().String()),
+		claimed:    make(map[string]claimedRef),
+		groups:     make(map[string]bool),
+		log:        logger.NewNope(),
+		idleCutoff: time.Hour,
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -150,6 +191,7 @@ func (b *Broker) deadKey(q string) string    { return b.prefix + q + ":dead" }
 func (b *Broker) deadIdxKey(q string) string { return b.prefix + q + ":dead:idx" }
 func (b *Broker) queuesKey() string          { return b.prefix + "queues" }
 func (b *Broker) indexKey() string           { return b.prefix + "index" }
+func (b *Broker) poisonKey(q string) string  { return b.prefix + q + ":poison" }
 
 func (b *Broker) ensureGroup(ctx context.Context, q string) error {
 	b.mu.Lock()
@@ -242,7 +284,8 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 		for _, m := range msgs {
 			j, err := b.decodeMsg(m)
 			if err != nil {
-				return nil, err
+				b.park(ctx, q, m, err)
+				continue
 			}
 			delivered := retries[m.ID]
 			if delivered == 0 {
@@ -269,7 +312,8 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 			for _, m := range st.Messages {
 				j, err := b.decodeMsg(m)
 				if err != nil {
-					return nil, err
+					b.park(ctx, q, m, err)
+					continue
 				}
 				claimedJob := j
 				claimedJob.Attempt = j.Attempt + 1
@@ -291,6 +335,21 @@ func (b *Broker) decodeMsg(m redis.XMessage) (queue.Job, error) {
 		return queue.Job{}, err
 	}
 	return j, nil
+}
+
+// park moves an undecodable stream entry to the queue's poison list. The
+// entry is already in this consumer's PEL (just read or autoclaimed), so the
+// ack inside the script is ours to perform.
+func (b *Broker) park(ctx context.Context, q string, m redis.XMessage, decErr error) {
+	raw, _ := m.Values["j"].(string)
+	if raw == "" {
+		raw = fmt.Sprintf("unparseable stream entry %s: %v", m.ID, m.Values)
+	}
+	if err := poisonScript.Run(ctx, b.client, []string{b.streamKey(q), b.poisonKey(q)}, group, m.ID, raw).Err(); err != nil {
+		b.log.ErrorContext(ctx, "redisqueue: poison park failed", slog.String("queue", q), slog.String("msg_id", m.ID), slog.Any("error", err))
+		return
+	}
+	b.log.ErrorContext(ctx, "redisqueue: undecodable entry parked to poison list", slog.String("queue", q), slog.String("msg_id", m.ID), slog.Any("error", decErr))
 }
 
 func (b *Broker) remember(id string, ref claimedRef) {
@@ -530,4 +589,65 @@ func (b *Broker) Stats(ctx context.Context) (queue.Stats, error) {
 		st[q] = queue.QueueStats{Pending: int(streamLen + delayed), Dead: int(dead)}
 	}
 	return st, nil
+}
+
+// Maintain implements queue.Maintainer: deletes consumers that have no
+// pending entries and have been idle past the cutoff (each process registers
+// a unique consumer name, so restarts accumulate them forever otherwise), and
+// prunes queues whose stream, delayed set, dead store, and poison list are all
+// empty from the queues registry so Stats stops probing them. Safe to run
+// concurrently from every worker instance.
+func (b *Broker) Maintain(ctx context.Context) error {
+	queues, err := b.client.SMembers(ctx, b.queuesKey()).Result()
+	if err != nil {
+		return fmt.Errorf("redisqueue: maintain queues: %w", err)
+	}
+	for _, q := range queues {
+		consumers, err := b.client.XInfoConsumers(ctx, b.streamKey(q), group).Result()
+		if err != nil && !strings.Contains(err.Error(), "NOGROUP") && !strings.Contains(err.Error(), "no such key") {
+			return fmt.Errorf("redisqueue: maintain consumers %q: %w", q, err)
+		}
+		for _, c := range consumers {
+			// c.Pending is a snapshot, not checked here: a stale zero would
+			// race the delete against a fresh delivery (see delConsumerScript).
+			// A stale c.Idle is harmless either way — a zero-pending consumer
+			// that loses its registration simply re-registers on its next read.
+			if c.Name == b.consumer || c.Idle < b.idleCutoff {
+				continue
+			}
+			if err := delConsumerScript.Run(ctx, b.client, []string{b.streamKey(q)}, group, c.Name).Err(); err != nil {
+				return fmt.Errorf("redisqueue: maintain del consumer %q: %w", c.Name, err)
+			}
+		}
+		empty, err := b.queueEmpty(ctx, q)
+		if err != nil {
+			return err
+		}
+		if empty {
+			if err := b.client.SRem(ctx, b.queuesKey(), q).Err(); err != nil {
+				return fmt.Errorf("redisqueue: maintain srem %q: %w", q, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Broker) queueEmpty(ctx context.Context, q string) (bool, error) {
+	streamLen, err := b.client.XLen(ctx, b.streamKey(q)).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return false, fmt.Errorf("redisqueue: maintain xlen %q: %w", q, err)
+	}
+	delayed, err := b.client.ZCard(ctx, b.delayedKey(q)).Result()
+	if err != nil {
+		return false, fmt.Errorf("redisqueue: maintain zcard %q: %w", q, err)
+	}
+	dead, err := b.client.HLen(ctx, b.deadKey(q)).Result()
+	if err != nil {
+		return false, fmt.Errorf("redisqueue: maintain hlen %q: %w", q, err)
+	}
+	poison, err := b.client.LLen(ctx, b.poisonKey(q)).Result()
+	if err != nil {
+		return false, fmt.Errorf("redisqueue: maintain llen %q: %w", q, err)
+	}
+	return streamLen == 0 && delayed == 0 && dead == 0 && poison == 0, nil
 }

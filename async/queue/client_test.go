@@ -136,7 +136,10 @@ type txBroker struct {
 }
 
 func (b *txBroker) PushTx(_ context.Context, tx any, jobs ...queue.Job) error {
-	b.gotTx, b.gotJob = tx, jobs[0]
+	b.gotTx = tx
+	if len(jobs) > 0 {
+		b.gotJob = jobs[0]
+	}
 	return nil
 }
 

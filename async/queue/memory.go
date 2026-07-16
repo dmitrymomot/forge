@@ -117,11 +117,27 @@ func (b *MemoryBroker) fenced(jobID, token string) *memJob {
 	if !ok {
 		return nil
 	}
-	m, ok := b.queues[q].live[jobID]
+	mq, ok := b.queues[q]
+	if !ok {
+		return nil
+	}
+	m, ok := mq.live[jobID]
 	if !ok || token == "" || m.token != token {
 		return nil
 	}
 	return m
+}
+
+// fencedBucket re-derives the queue bucket for a job already proven live by
+// fenced. Checked (not indexed directly) so the invariant — b.index[jobID] ==
+// q implies b.queues[q] != nil — stays provable at every call site instead of
+// assumed across a function boundary.
+func (b *MemoryBroker) fencedBucket(jobID string) (*memQueue, bool) {
+	mq, ok := b.queues[b.index[jobID]]
+	if !ok {
+		return nil, false
+	}
+	return mq, true
 }
 
 func (b *MemoryBroker) Extend(_ context.Context, jobID, token string, lease time.Duration) error {
@@ -142,7 +158,11 @@ func (b *MemoryBroker) Ack(_ context.Context, jobID, token string) error {
 	if m == nil {
 		return ErrLeaseLost
 	}
-	delete(b.queues[b.index[jobID]].live, jobID)
+	mq, ok := b.fencedBucket(jobID)
+	if !ok {
+		return ErrLeaseLost // unreachable: fenced already proved this bucket exists
+	}
+	delete(mq.live, jobID)
 	delete(b.index, jobID)
 	return nil
 }
@@ -168,7 +188,10 @@ func (b *MemoryBroker) Kill(_ context.Context, jobID, token string, reason strin
 	if m == nil {
 		return ErrLeaseLost
 	}
-	mq := b.queues[b.index[jobID]]
+	mq, ok := b.fencedBucket(jobID)
+	if !ok {
+		return ErrLeaseLost // unreachable: fenced already proved this bucket exists
+	}
 	delete(mq.live, jobID)
 	m.job.LastError = reason
 	m.claimedUntil = time.Time{}
@@ -212,7 +235,10 @@ func (b *MemoryBroker) Requeue(_ context.Context, jobID string) error {
 	if !ok {
 		return ErrJobNotFound
 	}
-	mq := b.queues[q]
+	mq, ok := b.queues[q]
+	if !ok {
+		return ErrJobNotFound // unreachable: Push always creates b.queues[q] before indexing, and buckets are never removed
+	}
 	m, ok := mq.dead[jobID]
 	if !ok {
 		return ErrNotDead
@@ -232,7 +258,10 @@ func (b *MemoryBroker) Purge(_ context.Context, jobID string) error {
 	if !ok {
 		return ErrJobNotFound
 	}
-	mq := b.queues[q]
+	mq, ok := b.queues[q]
+	if !ok {
+		return ErrJobNotFound // unreachable: Push always creates b.queues[q] before indexing, and buckets are never removed
+	}
 	if _, ok := mq.dead[jobID]; !ok {
 		return ErrNotDead
 	}
