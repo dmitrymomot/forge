@@ -353,7 +353,11 @@ func (b *Broker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, er
 		n := int(tag.RowsAffected())
 		total += n
 		if n < purgeBatch {
-			return total, nil // short batch: nothing left under the cutoff
+			// Short batch: nothing left under the cutoff, or a concurrently
+			// sweeping instance deleted some of the rows this statement
+			// selected. Either way total is honest about what we removed, and
+			// whoever won those rows keeps draining; the next tick retries.
+			return total, nil
 		}
 		if ctx.Err() != nil {
 			return total, ctx.Err()
