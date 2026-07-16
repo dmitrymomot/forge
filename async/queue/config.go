@@ -8,17 +8,18 @@ import (
 // Config holds the env-loadable worker knobs. ClaimBatch == 0 derives the
 // per-poll claim budget from free worker slots.
 type Config struct {
-	Concurrency  int           `env:"QUEUE_CONCURRENCY"`
-	PollInterval time.Duration `env:"QUEUE_POLL_INTERVAL"`
-	Lease        time.Duration `env:"QUEUE_LEASE"`
-	MaxAttempts  int           `env:"QUEUE_MAX_ATTEMPTS"`
-	ClaimBatch   int           `env:"QUEUE_CLAIM_BATCH"`
+	Concurrency    int           `env:"QUEUE_CONCURRENCY"`
+	PollInterval   time.Duration `env:"QUEUE_POLL_INTERVAL"`
+	Lease          time.Duration `env:"QUEUE_LEASE"`
+	MaxAttempts    int           `env:"QUEUE_MAX_ATTEMPTS"`
+	ClaimBatch     int           `env:"QUEUE_CLAIM_BATCH"`
+	HandlerTimeout time.Duration `env:"QUEUE_HANDLER_TIMEOUT"`
 }
 
 // DefaultConfig returns production defaults: 10 workers, 1s poll, 30s lease,
-// 25 attempts, claim batch derived from free slots.
+// 25 attempts, 10m handler timeout, claim batch derived from free slots.
 func DefaultConfig() Config {
-	return Config{Concurrency: 10, PollInterval: time.Second, Lease: 30 * time.Second, MaxAttempts: 25}
+	return Config{Concurrency: 10, PollInterval: time.Second, Lease: 30 * time.Second, MaxAttempts: 25, HandlerTimeout: 10 * time.Minute}
 }
 
 // Validate checks the configuration invariants.
@@ -37,6 +38,9 @@ func (c Config) Validate() error {
 	}
 	if c.ClaimBatch < 0 {
 		return fmt.Errorf("%w: ClaimBatch must be >= 0, got %d", ErrInvalidConfig, c.ClaimBatch)
+	}
+	if c.HandlerTimeout < 0 {
+		return fmt.Errorf("%w: HandlerTimeout must be >= 0 (0 disables the default), got %v", ErrInvalidConfig, c.HandlerTimeout)
 	}
 	return nil
 }

@@ -522,3 +522,61 @@ func TestRegister_DuplicatePanics(t *testing.T) {
 		queue.Register(svc, queue.NewKind[welcomePayload]("other.kind"), nil)
 	})
 }
+
+func TestService_DefaultHandlerTimeout(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.HandlerTimeout = 30 * time.Millisecond
+	b := queue.NewMemoryBroker()
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		<-ctx.Done() // no per-kind timeout: the Config default must fire
+		return ctx.Err()
+	}, queue.WithHandlerBackoff(backoff.Constant(5*time.Millisecond)))
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}, queue.WithMaxAttempts(1)))
+
+	eventually(t, func() bool {
+		dead, _ := b.ListDead(context.Background(), "default", 10)
+		return len(dead) == 1
+	}, "config-default handler timeout must bound an unconfigured handler")
+	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
+	assert.Contains(t, dead[0].LastError, "context deadline exceeded")
+}
+
+func TestService_HandlerTimeoutZeroOptsOut(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.HandlerTimeout = 20 * time.Millisecond
+	b := queue.NewMemoryBroker()
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var done atomic.Bool
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond): // 7x the config default
+			done.Store(true)
+			return nil
+		}
+	}, queue.WithHandlerTimeout(0)) // explicit opt-out for a long-running kind
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return done.Load() }, "WithHandlerTimeout(0) must disable the config default")
+	dead, _ := b.ListDead(context.Background(), "default", 10)
+	assert.Empty(t, dead)
+}

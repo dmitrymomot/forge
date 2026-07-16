@@ -110,10 +110,12 @@ func WithBackoff(b backoff.Backoff) ServiceOption {
 // HandlerOption configures a single Register call.
 type HandlerOption func(*handler)
 
-// WithHandlerTimeout bounds each invocation; expiry counts as a failure and
-// takes the retry path.
+// WithHandlerTimeout bounds each invocation of this kind; expiry counts as a
+// failure and takes the retry path. Overrides Config.HandlerTimeout;
+// WithHandlerTimeout(0) disables the timeout entirely for kinds that
+// legitimately run long.
 func WithHandlerTimeout(d time.Duration) HandlerOption {
-	return func(h *handler) { h.timeout = d }
+	return func(h *handler) { h.timeout, h.timeoutSet = d, true }
 }
 
 // WithHandlerMaxAttempts sets this kind's attempt budget (overridden by a

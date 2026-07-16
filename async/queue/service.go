@@ -43,6 +43,7 @@ type handler struct {
 	backoff     backoff.Backoff
 	timeout     time.Duration
 	maxAttempts int
+	timeoutSet  bool
 }
 
 // NewService builds a worker over broker. Returns ErrInvalidConfig on nil
@@ -267,9 +268,13 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 	if s.scopeCtx != nil {
 		hctx = s.scopeCtx(hctx, job.Scope)
 	}
+	timeout := s.cfg.HandlerTimeout
+	if h.timeoutSet {
+		timeout = h.timeout
+	}
 	var cancel context.CancelFunc = func() {}
-	if h.timeout > 0 {
-		hctx, cancel = context.WithTimeout(hctx, h.timeout)
+	if timeout > 0 {
+		hctx, cancel = context.WithTimeout(hctx, timeout)
 	}
 	start := time.Now()
 	err := s.invoke(hctx, h, job)
