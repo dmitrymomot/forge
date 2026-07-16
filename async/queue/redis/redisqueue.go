@@ -90,8 +90,18 @@ redis.call('HDEL', KEYS[3], ARGV[1])
 return 1
 `)
 
+// purgeDeadBeforeScript removes ONE bounded slice of expired dead jobs; the
+// caller loops. The LIMIT is load-bearing, not tidiness: redis is
+// single-threaded and a script is one atomic unit, so an unbounded
+// ZRANGEBYSCORE would materialize the whole expired set into a Lua table and
+// then run three commands per id in a single exec. DeadRetention is new, so
+// the first sweep after an upgrade can face an entire never-purged DLQ —
+// millions of ids, millions of commands, one exec. Past
+// busy-reply-threshold redis answers -BUSY to every other client, and a
+// script that has already written refuses SCRIPT KILL: the only way out is
+// SHUTDOWN NOSAVE, which discards the stream. Mirrors promoteScript's shape.
 var purgeDeadBeforeScript = redis.NewScript(`
-local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
 for i = 1, #ids do
   redis.call('ZREM', KEYS[1], ids[i])
   redis.call('HDEL', KEYS[2], ids[i])
@@ -99,6 +109,13 @@ for i = 1, #ids do
 end
 return #ids
 `)
+
+// purgeBatch bounds one purgeDeadBeforeScript exec: 500 ids ≈ 1500 commands,
+// comfortably sub-millisecond, four orders of magnitude under the default 5s
+// busy-reply-threshold. Larger than promoteScript's 128 because retention is a
+// 5-minute background sweep that wants throughput on a backlog, not the
+// per-Claim latency promote is paying for.
+const purgeBatch = 500
 
 // poisonScript parks a raw undecodable entry and removes it from the stream so
 // one bad entry (foreign XADD, future wire version) cannot wedge Claim forever.
@@ -554,15 +571,26 @@ func (b *Broker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, er
 		return 0, fmt.Errorf("redisqueue: purge dead before: %w", err)
 	}
 	total := 0
+	// "(" makes the score bound exclusive: died_at < cutoff, not <=.
+	cutoffArg := fmt.Sprintf("(%d", cutoff.UnixMilli())
 	for _, q := range queues {
-		// "(" makes the score bound exclusive: died_at < cutoff, not <=.
-		n, err := purgeDeadBeforeScript.Run(ctx, b.client,
-			[]string{b.deadIdxKey(q), b.deadKey(q), b.indexKey()},
-			fmt.Sprintf("(%d", cutoff.UnixMilli())).Int()
-		if err != nil {
-			return total, fmt.Errorf("redisqueue: purge dead before %q: %w", q, err)
+		keys := []string{b.deadIdxKey(q), b.deadKey(q), b.indexKey()}
+		// Drain in bounded batches: each exec is short, the sweep stays
+		// interruptible, and a backlog too large for one tick simply
+		// continues on the next.
+		for {
+			n, err := purgeDeadBeforeScript.Run(ctx, b.client, keys, cutoffArg, purgeBatch).Int()
+			if err != nil {
+				return total, fmt.Errorf("redisqueue: purge dead before %q: %w", q, err)
+			}
+			total += n
+			if n < purgeBatch {
+				break // short batch: nothing left under the cutoff
+			}
+			if ctx.Err() != nil {
+				return total, ctx.Err()
+			}
 		}
-		total += n
 	}
 	return total, nil
 }

@@ -226,6 +226,55 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	require.NoError(t, b2.Ack(ctx, retried[0].ID, retried[0].Token))
 }
 
+// TestRedisQueue_PurgeDeadBeforeSpansManyBatches covers the batched drain loop
+// that brokertest's PurgeDeadBefore subtest cannot reach: it purges a single
+// dead job, so one exec always suffices and an off-by-one in the loop — a
+// batch silently left behind, or a miscounted total — would go unnoticed.
+// 1200 dead jobs span three purgeBatch(500) execs with a short final one.
+func TestRedisQueue_PurgeDeadBeforeSpansManyBatches(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:purgebatch:%s:", runID)
+	ctx := context.Background()
+
+	b, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+
+	const dead = 1200 // > 2x the 500 batch: two full batches plus a short one
+	c := queue.NewClient(b)
+	for range dead {
+		require.NoError(t, c.PushRaw(ctx, "purge.kind", []byte(`{}`)))
+	}
+	claimed := claimAllWithin(t, b, "default", dead, time.Minute)
+	require.Len(t, claimed, dead)
+	for _, cj := range claimed {
+		require.NoError(t, b.Kill(ctx, cj.ID, cj.Token, "retention fixture"))
+	}
+
+	// Premise guard: without this, an assertion of "everything is gone" could
+	// pass on a DLQ that was never populated.
+	require.Equal(t, int64(dead), client.HLen(ctx, prefix+"default:dead").Val(), "fixture must fill the dead hash")
+	require.Equal(t, int64(dead), client.ZCard(ctx, prefix+"default:dead:idx").Val(), "fixture must fill the dead index")
+
+	n, err := b.PurgeDeadBefore(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, dead, n, "the batched loop must report every purged job exactly once across all batches")
+
+	// Both structures must be empty: a loop that stops one batch early leaves
+	// entries behind in BOTH, and one that only cleans the index leaves the
+	// hash growing forever.
+	assert.Zero(t, client.HLen(ctx, prefix+"default:dead").Val(), "no dead envelope may survive the sweep")
+	assert.Zero(t, client.ZCard(ctx, prefix+"default:dead:idx").Val(), "no dead index entry may survive the sweep")
+	left, err := b.ListDead(ctx, "default", 10)
+	require.NoError(t, err)
+	assert.Empty(t, left)
+
+	// A second sweep over an already-drained DLQ is a no-op, not an infinite
+	// loop: the first exec returns a short batch and breaks.
+	n, err = b.PurgeDeadBefore(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, n)
+}
+
 var _ queue.Maintainer = (*redisqueue.Broker)(nil)
 
 func TestRedisQueue_PoisonEntryDoesNotWedgeClaim(t *testing.T) {
