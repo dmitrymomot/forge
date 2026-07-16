@@ -66,6 +66,18 @@ func (b *MemoryBroker) bucket(q string) *memQueue {
 	return mq
 }
 
+// prune deletes q's bucket once both live and dead are empty, so pushing to
+// many short-lived, dynamically-named queues (per-tenant, per-request) does
+// not leak a *memQueue for the process lifetime. Only Ack, Purge, and
+// PurgeDeadBefore can empty a bucket — Kill and Requeue relocate a job
+// between live and dead within the same bucket, and Claim never removes from
+// live, so a bucket with an in-flight claimed job is never pruned.
+func (b *MemoryBroker) prune(q string, mq *memQueue) {
+	if len(mq.live) == 0 && len(mq.dead) == 0 {
+		delete(b.queues, q)
+	}
+}
+
 func (b *MemoryBroker) Push(_ context.Context, jobs ...Job) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -164,6 +176,7 @@ func (b *MemoryBroker) Ack(_ context.Context, jobID, token string) error {
 	}
 	delete(mq.live, jobID)
 	delete(b.index, jobID)
+	b.prune(m.job.Queue, mq)
 	return nil
 }
 
@@ -237,7 +250,7 @@ func (b *MemoryBroker) Requeue(_ context.Context, jobID string) error {
 	}
 	mq, ok := b.queues[q]
 	if !ok {
-		return ErrJobNotFound // unreachable: Push always creates b.queues[q] before indexing, and buckets are never removed
+		return ErrJobNotFound // unreachable: an indexed jobID always has a live-or-dead entry in its bucket, so the bucket cannot have been pruned yet
 	}
 	m, ok := mq.dead[jobID]
 	if !ok {
@@ -260,13 +273,14 @@ func (b *MemoryBroker) Purge(_ context.Context, jobID string) error {
 	}
 	mq, ok := b.queues[q]
 	if !ok {
-		return ErrJobNotFound // unreachable: Push always creates b.queues[q] before indexing, and buckets are never removed
+		return ErrJobNotFound // unreachable: an indexed jobID always has a live-or-dead entry in its bucket, so the bucket cannot have been pruned yet
 	}
 	if _, ok := mq.dead[jobID]; !ok {
 		return ErrNotDead
 	}
 	delete(mq.dead, jobID)
 	delete(b.index, jobID)
+	b.prune(q, mq)
 	return nil
 }
 
@@ -274,7 +288,7 @@ func (b *MemoryBroker) PurgeDeadBefore(_ context.Context, cutoff time.Time) (int
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n := 0
-	for _, mq := range b.queues {
+	for q, mq := range b.queues {
 		for jobID, m := range mq.dead {
 			if m.diedAt.Before(cutoff) {
 				delete(mq.dead, jobID)
@@ -282,6 +296,7 @@ func (b *MemoryBroker) PurgeDeadBefore(_ context.Context, cutoff time.Time) (int
 				n++
 			}
 		}
+		b.prune(q, mq) // safe to delete the current key mid-range; Go permits it
 	}
 	return n, nil
 }
