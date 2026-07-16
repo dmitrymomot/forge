@@ -14,6 +14,7 @@ Constraints decided up front:
 - **Bounded Stats**: counts are exact up to a cap (Postgres cap 10,000), never O(table).
 - **DLQ retention**: engine-driven sweep, default **30 days**, `0` = keep forever.
 - **Default handler timeout**: **10 minutes**, per-kind override, explicit opt-out.
+- **Runtime floors: PostgreSQL >= 18, Redis >= 8.** Declared in the driver package docs; testkit images bumped repo-wide (`postgres:18-alpine`, `redis:8-alpine`), which raises the tested floor for every DB-backed package. PG18 relevance: native B-tree skip scan means the Stats queue enumeration can likely be a plain `SELECT DISTINCT queue` instead of a recursive-CTE loose scan (EXPLAIN/benchmark decides — CTE stays the fallback if the plan regresses to seq scan); server-side `uuidv7()` exists for ad-hoc ops inserts, though IDs remain client-generated via `core/id`. Redis 8 needs no command-level changes (everything used exists since 7.0) — the floor is a support statement, not a feature dependency.
 
 ## Issue inventory this design resolves
 
@@ -94,7 +95,7 @@ SQL operations (all statements pre-built in `New` as today):
 - **Requeue** (unfenced, DLQ op): CTE move back with `attempt = 0`, `run_at = now()`, `last_error` preserved; 0 rows → exists-check in hot table → `ErrNotDead` : `ErrJobNotFound`.
 - **Purge** (unfenced): `DELETE FROM queue_jobs_dead WHERE id = $1`; 0 rows → same disambiguation.
 - **Push (batch)**: single `INSERT ... SELECT unnest($1::uuid[], $2::text[], ...)` — atomic, one round trip for any N. `CopyFrom` above a size threshold only if benchmarks justify it.
-- **Stats**: loose index scan (recursive CTE) enumerates distinct queues from `queue_jobs_claim_idx`, then a `LATERAL` bounded count per queue: `(SELECT count(*) FROM (SELECT 1 FROM queue_jobs j WHERE j.queue = q.queue LIMIT 10001) t)` — index-only, O(cap) worst case. Same pattern on the dead table. Cap = 10,000; above it the count reports the cap with the capped flag set.
+- **Stats**: distinct-queue enumeration from `queue_jobs_claim_idx` (plain `SELECT DISTINCT queue` under PG18 skip scan, recursive-CTE loose scan as fallback per the runtime-floors note), then a `LATERAL` bounded count per queue: `(SELECT count(*) FROM (SELECT 1 FROM queue_jobs j WHERE j.queue = q.queue LIMIT 10001) t)` — index-only, O(cap) worst case. Same pattern on the dead table. Cap = 10,000; above it the count reports the cap with the capped flag set.
 - **PurgeDeadBefore**: `DELETE FROM queue_jobs_dead WHERE died_at < $1` (sweep index), returns affected count.
 
 Go-side `Job.ID` and tokens remain `string`; pgx binds them to `uuid` natively.

@@ -1,5 +1,6 @@
 # async/queue benchmark baseline — PRE-rework (design: 2026-07-16-queue-hardening-design.md)
-# Commit: b155bb0 | Apple M3 Max, darwin/arm64, go1.26.5, Docker 29.6.1 (testcontainers pg16/redis7)
+# Commit: b155bb0 (+ testkit bump to pg18/redis8) | Apple M3 Max, darwin/arm64, go1.26.5, Docker 29.6.1
+# Containers: postgres:18-alpine, redis:8-alpine (platform floors: PostgreSQL >= 18, Redis >= 8)
 # Captured: 2026-07-16 via `just bench ./async/queue/` and `just bench-integration ./async/queue/{postgres,redis}/`
 # Note: single-sample (-count=1), indicative only. The rework PR must produce its
 # before/after numbers with `benchstat` at -count>=10 on both sides (baseline side
@@ -20,9 +21,13 @@ BenchmarkPush_Memory-14          	 2281644	       567.9 ns/op	     426 B/op	    
 BenchmarkClaimBatch_Memory-14    	     938	   1152816 ns/op	  100352 B/op	       2 allocs/op
 BenchmarkEndToEnd_Memory-14      	    5000	      3473 ns/op	     596 B/op	       6 allocs/op   (-benchtime=5000x)
 
-## integration tier
+## integration tier (postgres:18-alpine / redis:8-alpine)
 pkg: github.com/dmitrymomot/forge/async/queue/postgres
-BenchmarkPgPushClaimAck-14       	    2232	    537065 ns/op	    2068 B/op	      37 allocs/op
+BenchmarkPgPushClaimAck-14       	    1933	    531362 ns/op	    2071 B/op	      37 allocs/op
 
 pkg: github.com/dmitrymomot/forge/async/queue/redis
-BenchmarkRedisPushClaimAck-14    	    1443	    815209 ns/op	    8011 B/op	     158 allocs/op
+BenchmarkRedisPushClaimAck-14    	    1723	    722056 ns/op	    8003 B/op	     158 allocs/op
+
+# For the record, the same benches on the previous repo-wide images (pg16/redis7):
+# BenchmarkPgPushClaimAck-14       	    2232	    537065 ns/op	    2068 B/op	      37 allocs/op
+# BenchmarkRedisPushClaimAck-14    	    1443	    815209 ns/op	    8011 B/op	     158 allocs/op
