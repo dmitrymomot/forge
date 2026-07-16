@@ -5,6 +5,14 @@
 // payloads. No transactional enqueue — use async/queue/postgres or, once it
 // lands, async/outbox.
 //
+// Claim ownership is tracked in-process, not in redis: Broker keeps a
+// job-id-keyed map of live claims in memory, so a fencing token from Claim is
+// only valid against the same Broker instance — handing it to another
+// instance (or a second Broker over the same redis) always returns
+// ErrLeaseLost, even though the token itself is not expired. pgqueue and
+// queue.MemoryBroker track ownership in shared storage instead and don't have
+// this restriction; see the queue.Broker doc for the portability contract.
+//
 // Requires Redis >= 8. This is a tested-floor statement, not a feature
 // dependency: every command this driver uses has existed since Redis 7.0.
 //

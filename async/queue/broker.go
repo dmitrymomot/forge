@@ -18,6 +18,11 @@ import (
 //   - A token fences a job's claim GENERATION, and one Claim call stamps the
 //     same token on every job in its batch: it is not a per-job secret. Key
 //     any internal state by job id, not by token.
+//   - A token is scoped to the Broker instance that issued it: Extend/Ack/
+//     Nack/Kill must be called against that same instance. Implementations
+//     may track claim ownership in-process rather than in shared storage, so
+//     a token handed to a different instance can fail even though it is
+//     otherwise valid.
 //   - A claimed job is invisible to Claim until its lease expires.
 //   - Extend/Ack/Nack/Kill require the claim token and return ErrLeaseLost
 //     when it no longer owns the job (lease lost to another claim, job already
