@@ -157,7 +157,8 @@ Deps: none (stdlib only).
 **data/pagination**
 
 Opaque cursor codec (base64+JSON, optional HMAC via `sign`), keyset
-WHERE/ORDER fragment builders emitting pgx-compatible `(sql, args)`,
+WHERE/ORDER fragment builders emitting `(sql, args)` with a
+placeholder-dialect option (`$n` pgx default, `?` for ClickHouse),
 `Page[T]` metadata, and the page-window view-model (ellipses, links
 preserving query params) for server-rendered navigation.
 
@@ -241,9 +242,11 @@ Deps: `async/scheduler` (planned), `async/queue`, `ops/auditlog` (planned).
 
 **data/export**
 
-Streaming CSV/JSONL/XML writers with bounded memory and a pgx-rows
-adapter — back-office exports and regulator feeds. Write-only: no XLSX,
-no import/parse side.
+Streaming CSV/JSONL/XML writers with bounded memory over a small
+`RowSource` seam with pgx-rows and `database/sql` rows adapters (the
+latter covers ClickHouse via its `OpenDB` path) — back-office exports,
+regulator feeds, and partner-facing stats reports from one writer.
+Write-only: no XLSX, no import/parse side.
 
 Deps: `data/postgres`.
 
@@ -257,6 +260,28 @@ batch-insert seam — the "import your data" onboarding flow. (Named
 `ingest` because `import` is a Go keyword.)
 
 Deps: `core/validate`.
+
+---
+
+**data/reportspec**
+
+Self-serve report shapes as validated structured data — the
+partner/customer-facing report-builder core, no DSL: the consumer
+registers a catalog of typed dimensions (column expression, groupable or
+not) and metrics (aggregate expression); a `Spec` — selected columns,
+group-by, typed filters (eq/in/range), date range, sort — validates
+fail-closed against the catalog (unknown name, un-groupable dimension,
+type-mismatched filter = error) and compiles to `(sql, args)` SELECT
+fragments with a placeholder-dialect option (`$n` pgx, `?` ClickHouse).
+Column/aggregate expressions are trusted registered strings; spec values
+only ever bind as args — user input never enters SQL text. Tenancy via
+an optional construction-time scope hook appending a scope clause to
+every emitted WHERE; a configured hook yielding no scope is an error,
+never an unscoped query. Composes `data/pagination` for keyset paging
+and `data/export` for streaming; result execution, caching, and saved
+reports stay consumer-side.
+
+Deps: none (stdlib only).
 
 ## finance/
 
@@ -431,15 +456,17 @@ Event egress over `eventbus`: each destination is its own named
 subscription (slow-destination isolation for free), filter/remap as
 registered Go functions — no mapping DSL — and batched delivery with
 size+age flush, batch-level retry, and poison-event handling. Reference
-`Deliverer` adapters: generic JSON-batch HTTP and signed postbacks via
-`comms/webhook`. Destination configs are consumer data; forge ships the
+`Deliverer` adapters: generic JSON-batch HTTP, signed postbacks via
+`comms/webhook`, and tracker macro-URL postbacks via `comms/postback`.
+Destination configs are consumer data; forge ships the
 engine, never a Segment-style connector catalog. Delivery is
 at-least-once and the router never dedups: stable event IDs ride every
 delivery (`Idempotency-Key` header / payload field) and receivers dedup
 — the Stripe contract (in-router suppression would trade duplicates for
 silent loss).
 
-Deps: `web/httpclient`; `async/eventbus`, `comms/webhook` (planned).
+Deps: `web/httpclient`; `async/eventbus`, `comms/webhook`,
+`comms/postback` (all planned).
 
 ---
 
@@ -656,6 +683,27 @@ pluggable `Scheme` seam, so bespoke partner schemes register without
 forking the package.
 
 Deps: `web/httpclient`, `crypto/sign`; `async/queue`.
+
+---
+
+**comms/postback**
+
+Tracker-style server-to-server postbacks — the affiliate/ad-network
+conversion ping: a destination is a URL template over a caller-registered
+macro vocabulary (`{click_id}`, `{payout}`, `{status}`, sub-IDs — the
+vocabulary is consumer data), parsed and validated at registration — an
+unknown macro is a construction error, never an empty substitution at
+fire time. `Send` renders the template against a per-event macro map
+(values URL-escaped), fires GET (or a configured method) via httpclient
+with timeout and bounded retry, and reports outcome by status class.
+Unsigned by design — trackers correlate by click ID, not signatures
+(HMAC-signed deliveries are `comms/webhook`); no dedup — stable event IDs
+ride as macros and receivers dedup. Per-tracker format tables are
+consumer data; durable delivery and per-destination fan-out come from
+`async/queue` / `async/eventrouter`, where this package slots in as a
+`Deliverer`.
+
+Deps: `web/httpclient`.
 
 ---
 
