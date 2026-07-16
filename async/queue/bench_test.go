@@ -43,7 +43,7 @@ func BenchmarkClaimBatch_Memory(b *testing.B) {
 			b.Fatal(err)
 		}
 		for _, j := range jobs {
-			if err := broker.Nack(ctx, j.ID, time.Now(), ""); err != nil { // recycle for the next iteration
+			if err := broker.Nack(ctx, j.ID, j.Token, time.Now(), ""); err != nil { // recycle for the next iteration
 				b.Fatal(err)
 			}
 		}

@@ -99,7 +99,7 @@ func (c *Client) buildJob(ctx context.Context, name string, payload []byte, opts
 		runAt = now.Add(p.delay)
 	}
 	return Job{
-		ID:          id.NewULID().String(),
+		ID:          id.NewUUID().String(),
 		Queue:       p.queue,
 		Type:        name,
 		Payload:     payload,

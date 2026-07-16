@@ -164,11 +164,11 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 			}
 			return
 		}
-		for _, job := range jobs {
+		for _, cj := range jobs {
 			sem <- struct{}{}
 			wg.Go(func() {
 				defer func() { <-sem }()
-				s.process(opCtx, job)
+				s.process(opCtx, cj)
 			})
 		}
 		free -= len(jobs)
@@ -225,7 +225,8 @@ func (s *Service) claimPlan(free int) ([]string, map[string]int) {
 
 // process runs one claimed job to a terminal broker state. opCtx is never
 // cancelled by shutdown: in-flight completions must still commit.
-func (s *Service) process(opCtx context.Context, job Job) {
+func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
+	job := cj.Job
 	logAttrs := []any{
 		slog.String("service", s.name), slog.String("job_id", job.ID),
 		slog.String("kind", job.Type), slog.String("queue", job.Queue), slog.Int("attempt", job.Attempt),
@@ -233,13 +234,13 @@ func (s *Service) process(opCtx context.Context, job Job) {
 	h, ok := s.handlers[job.Type]
 	if !ok {
 		s.finalize(opCtx, "dead", logAttrs, func() error {
-			return s.broker.Kill(opCtx, job.ID, ErrNoHandler.Error()+": "+job.Type)
+			return s.broker.Kill(opCtx, job.ID, cj.Token, ErrNoHandler.Error()+": "+job.Type)
 		})
 		return
 	}
 	if s.scopeCtx != nil && job.Scope == "" {
 		s.finalize(opCtx, "dead", logAttrs, func() error {
-			return s.broker.Kill(opCtx, job.ID, ErrScopeMissing.Error())
+			return s.broker.Kill(opCtx, job.ID, cj.Token, ErrScopeMissing.Error())
 		})
 		return
 	}
@@ -255,7 +256,7 @@ func (s *Service) process(opCtx context.Context, job Job) {
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				if err := s.broker.Extend(hbCtx, job.ID, s.cfg.Lease); err != nil && hbCtx.Err() == nil {
+				if err := s.broker.Extend(hbCtx, job.ID, cj.Token, s.cfg.Lease); err != nil && hbCtx.Err() == nil {
 					s.log.ErrorContext(hbCtx, "queue lease extend failed", append(logAttrs, slog.Any("error", err))...)
 				}
 			}
@@ -279,12 +280,12 @@ func (s *Service) process(opCtx context.Context, job Job) {
 
 	switch {
 	case err == nil:
-		s.finalize(opCtx, "done", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID) })
+		s.finalize(opCtx, "done", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID, cj.Token) })
 	case errors.Is(err, Cancel):
-		s.finalize(opCtx, "cancelled", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID) })
+		s.finalize(opCtx, "cancelled", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID, cj.Token) })
 	case IsSkipRetry(err):
 		logAttrs = append(logAttrs, slog.Any("error", err))
-		s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, err.Error()) })
+		s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, cj.Token, err.Error()) })
 	default:
 		logAttrs = append(logAttrs, slog.Any("error", err))
 		maxAttempts := s.cfg.MaxAttempts
@@ -295,7 +296,7 @@ func (s *Service) process(opCtx context.Context, job Job) {
 			maxAttempts = job.MaxAttempts
 		}
 		if job.Attempt >= maxAttempts {
-			s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, err.Error()) })
+			s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, cj.Token, err.Error()) })
 			return
 		}
 		bo := s.defaultBackoff
@@ -304,7 +305,7 @@ func (s *Service) process(opCtx context.Context, job Job) {
 		}
 		retryAt := time.Now().UTC().Add(bo.Next(job.Attempt))
 		logAttrs = append(logAttrs, slog.Time("retry_at", retryAt))
-		s.finalize(opCtx, "retry", logAttrs, func() error { return s.broker.Nack(opCtx, job.ID, retryAt, err.Error()) })
+		s.finalize(opCtx, "retry", logAttrs, func() error { return s.broker.Nack(opCtx, job.ID, cj.Token, retryAt, err.Error()) })
 	}
 }
 
