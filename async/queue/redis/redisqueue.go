@@ -117,6 +117,24 @@ return #ids
 // per-Claim latency promote is paying for.
 const purgeBatch = 500
 
+// deliveryCountsScript reads the exact PEL delivery counter for each claimed
+// message, in one round trip. A single ranged XPENDING cannot do this job:
+// XAUTOCLAIM skips entries below MinIdle, so the redelivered set is generally
+// NON-CONTIGUOUS in the PEL, while XPENDING walks every consumer's entries in
+// ID order and stops at COUNT. Any interleaved entry — another worker's live
+// job, or this instance's own in-flight one — eats a slot and truncates the
+// tail, which then reads as "no counter" and undercounts the attempt. Asking
+// per message is exact for both cases; the loop is bounded by the claim batch,
+// unlike a whole-PEL scan. KEYS[1]=stream, ARGV[1]=group, ARGV[2..]=msg IDs.
+var deliveryCountsScript = redis.NewScript(`
+local out = {}
+for i = 2, #ARGV do
+  local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[i], ARGV[i], 1)
+  out[#out+1] = (#p > 0) and p[1][4] or 0
+end
+return out
+`)
+
 // poisonScript parks a raw undecodable entry and removes it from the stream so
 // one bad entry (foreign XADD, future wire version) cannot wedge Claim forever.
 var poisonScript = redis.NewScript(`
@@ -287,29 +305,39 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 		return nil, fmt.Errorf("redisqueue: autoclaim: %w", err)
 	}
 	if len(msgs) > 0 {
-		retries := make(map[string]int64, len(msgs))
-		pend, err := b.client.XPendingExt(ctx, &redis.XPendingExtArgs{
-			Stream: b.streamKey(q), Group: group,
-			Start: msgs[0].ID, End: msgs[len(msgs)-1].ID, Count: int64(len(msgs)),
-		}).Result()
+		args := make([]any, 0, len(msgs)+1)
+		args = append(args, group)
+		for _, m := range msgs {
+			args = append(args, m.ID)
+		}
+		counts, err := deliveryCountsScript.Run(ctx, b.client, []string{b.streamKey(q)}, args...).Int64Slice()
 		if err != nil && !errors.Is(err, redis.Nil) {
 			return nil, fmt.Errorf("redisqueue: pending: %w", err)
 		}
-		for _, p := range pend {
-			retries[p.ID] = p.RetryCount
+		if len(counts) != len(msgs) {
+			return nil, fmt.Errorf("redisqueue: pending: got %d delivery counters for %d autoclaimed messages", len(counts), len(msgs))
 		}
-		for _, m := range msgs {
+		for i, m := range msgs {
 			j, err := b.decodeMsg(m)
 			if err != nil {
 				b.park(ctx, q, m, err)
 				continue
 			}
-			delivered := retries[m.ID]
-			if delivered == 0 {
-				delivered = 1
+			// A zero counter means the entry is no longer in the PEL despite
+			// the XAUTOCLAIM above: someone finalized it in the gap. Dispatch
+			// would duplicate work whose finalize is already doomed to
+			// ErrLeaseLost, so skip it — the entry is not ours to run. No job
+			// is lost: an entry that IS still ours redelivers once its lease
+			// lapses again. Never fabricate a count here; that is precisely
+			// what used to make a missing counter indistinguishable from a
+			// first delivery.
+			if counts[i] == 0 {
+				b.log.WarnContext(ctx, "redisqueue: autoclaimed entry vanished from the pending list, skipping",
+					slog.String("queue", q), slog.String("msg_id", m.ID), slog.String("job_id", j.ID))
+				continue
 			}
 			claimedJob := j
-			claimedJob.Attempt = j.Attempt + int(delivered)
+			claimedJob.Attempt = j.Attempt + int(counts[i])
 			b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q, token: token})
 			out = append(out, queue.ClaimedJob{Job: claimedJob, Token: token})
 		}

@@ -226,6 +226,86 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	require.NoError(t, b2.Ack(ctx, retried[0].ID, retried[0].Token))
 }
 
+// TestRedisQueue_AttemptCountSurvivesInterleavedForeignPending covers the
+// attempt counter under the PEL shape every other crash test structurally
+// cannot produce: a fleet where a crashed worker's idle entries are
+// INTERLEAVED with a live worker's freshly-heartbeated ones.
+//
+// XAUTOCLAIM skips entries below MinIdle, so the redelivered set is
+// non-contiguous in the PEL. A range XPENDING over [first, last] does not
+// skip them: it walks every entry of every consumer in ID order and stops at
+// COUNT, so the live worker's entries consume the budget and truncate the tail
+// of our own result. A truncated tail reads as "no delivery counter", and a
+// missing counter is indistinguishable from a first delivery — the job under-
+// counts its attempts and outlives its MaxAttempts budget. A poison job that
+// kills its worker every time would never dead-letter.
+//
+// Single-job crash tests cannot reach this: with no foreign pending entries
+// the truncation is unreachable by construction.
+func TestRedisQueue_AttemptCountSurvivesInterleavedForeignPending(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:interleaved:%s:", runID)
+	stream := prefix + "default"
+	ctx := context.Background()
+
+	const lease = 400 * time.Millisecond
+
+	b1, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	c := queue.NewClient(b1)
+	for range 5 {
+		require.NoError(t, c.PushRaw(ctx, "interleave.kind", []byte(`{}`)))
+	}
+
+	claimed := claimAllWithin(t, b1, "default", 5, lease)
+	require.Len(t, claimed, 5)
+	for _, cj := range claimed {
+		require.Equal(t, 1, cj.Attempt, "first delivery = attempt 1")
+	}
+	// b1 "crashes": no finalize, refs abandoned, all five entries stay pending.
+
+	// Map stream entry ids (push order) to job ids: the fixture below has to
+	// name specific PEL positions, and only the stream knows that order.
+	entries, err := client.XRange(ctx, stream, "-", "+").Result()
+	require.NoError(t, err)
+	require.Len(t, entries, 5)
+	msgIDs := make([]string, len(entries))
+	jobOf := make(map[string]string, len(entries))
+	for i, e := range entries {
+		raw, ok := e.Values["j"].(string)
+		require.True(t, ok, "stream entry %s carries no payload", e.ID)
+		j, err := queue.DecodeJob([]byte(raw))
+		require.NoError(t, err)
+		msgIDs[i] = e.ID
+		jobOf[e.ID] = j.ID
+	}
+
+	time.Sleep(lease + 100*time.Millisecond) // every entry idles past the lease
+
+	// A second worker is alive and holds entries 2 and 4, heartbeating them —
+	// idle resets to ~0, so XAUTOCLAIM skips them while they still sit between
+	// entries 1, 3 and 5 in the PEL's ID order. XCLAIM is the fixture: no
+	// Broker API can target specific PEL positions.
+	require.NoError(t, client.XClaim(ctx, &redis.XClaimArgs{
+		Stream: stream, Group: "workers", Consumer: "worker-b",
+		MinIdle: 0, Messages: []string{msgIDs[1], msgIDs[3]},
+	}).Err())
+
+	b3, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	got, err := b3.Claim(ctx, "default", 5, lease)
+	require.NoError(t, err)
+	require.Len(t, got, 3, "only the three idle entries redeliver; the live worker's two are skipped")
+
+	// Entry 5 is the tail XPENDING's COUNT budget drops once the foreign entry
+	// 2 has eaten a slot: it reports attempt 1 instead of 2.
+	want := map[string]bool{jobOf[msgIDs[0]]: true, jobOf[msgIDs[2]]: true, jobOf[msgIDs[4]]: true}
+	for _, cj := range got {
+		require.True(t, want[cj.ID], "claimed an entry the live worker still holds")
+		assert.Equal(t, 2, cj.Attempt, "crash redelivery must count as a new attempt for EVERY entry, including those a foreign pending entry pushes past XPENDING's COUNT budget")
+	}
+}
+
 // TestRedisQueue_PurgeDeadBeforeSpansManyBatches covers the batched drain loop
 // that brokertest's PurgeDeadBefore subtest cannot reach: it purges a single
 // dead job, so one exec always suffices and an off-by-one in the loop — a
