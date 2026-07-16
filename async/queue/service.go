@@ -246,7 +246,15 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 		return
 	}
 
-	// Heartbeat: extend the lease at lease/3 until the handler returns.
+	hctx := opCtx
+	if s.scopeCtx != nil {
+		hctx = s.scopeCtx(hctx, job.Scope)
+	}
+	hctx, cancelHandler := context.WithCancel(hctx)
+
+	// Heartbeat: extend the lease at lease/3 until the handler returns. A
+	// lost lease means another worker owns the job now — cancel the handler
+	// so the slot stops doing doomed work whose finalize would be rejected.
 	hbCtx, stopHB := context.WithCancel(opCtx)
 	var hbWG sync.WaitGroup
 	hbWG.Go(func() {
@@ -257,17 +265,20 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				if err := s.broker.Extend(hbCtx, job.ID, cj.Token, s.cfg.Lease); err != nil && hbCtx.Err() == nil {
+				err := s.broker.Extend(hbCtx, job.ID, cj.Token, s.cfg.Lease)
+				switch {
+				case err == nil:
+				case errors.Is(err, ErrLeaseLost):
+					s.log.WarnContext(hbCtx, "queue lease lost, cancelling handler", logAttrs...)
+					cancelHandler()
+					return
+				case hbCtx.Err() == nil:
 					s.log.ErrorContext(hbCtx, "queue lease extend failed", append(logAttrs, slog.Any("error", err))...)
 				}
 			}
 		}
 	})
 
-	hctx := opCtx
-	if s.scopeCtx != nil {
-		hctx = s.scopeCtx(hctx, job.Scope)
-	}
 	timeout := s.cfg.HandlerTimeout
 	if h.timeoutSet {
 		timeout = h.timeout
@@ -279,6 +290,7 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 	start := time.Now()
 	err := s.invoke(hctx, h, job)
 	cancel()
+	cancelHandler()
 	stopHB()
 	hbWG.Wait()
 	logAttrs = append(logAttrs, slog.Duration("duration", time.Since(start)))
@@ -328,9 +340,13 @@ func (s *Service) invoke(ctx context.Context, h *handler, job Job) (err error) {
 // logged and dropped: the lease will expire and the job redelivers —
 // at-least-once, never lost.
 func (s *Service) finalize(ctx context.Context, outcome string, logAttrs []any, op func() error) {
-	if err := op(); err != nil {
+	err := op()
+	switch {
+	case errors.Is(err, ErrLeaseLost):
+		s.log.WarnContext(ctx, "queue lease lost, job owned elsewhere", append(logAttrs, slog.String("outcome", outcome))...)
+	case err != nil:
 		s.log.ErrorContext(ctx, "queue broker op failed, job will redeliver after lease expiry", append(logAttrs, slog.String("outcome", outcome), slog.Any("error", err))...)
-		return
+	default:
+		s.log.InfoContext(ctx, "queue job "+outcome, logAttrs...)
 	}
-	s.log.InfoContext(ctx, "queue job "+outcome, logAttrs...)
 }

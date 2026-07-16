@@ -580,3 +580,41 @@ func TestService_HandlerTimeoutZeroOptsOut(t *testing.T) {
 	dead, _ := b.ListDead(context.Background(), "default", 10)
 	assert.Empty(t, dead)
 }
+
+// leaseLostBroker simulates another worker stealing the job: every Extend
+// reports the lease as lost.
+type leaseLostBroker struct {
+	*queue.MemoryBroker
+}
+
+func (b *leaseLostBroker) Extend(context.Context, string, string, time.Duration) error {
+	return queue.ErrLeaseLost
+}
+
+func TestService_LeaseLostCancelsHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.Lease = 60 * time.Millisecond // heartbeat ticks every 20ms
+	b := &leaseLostBroker{MemoryBroker: queue.NewMemoryBroker()}
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var cancelled atomic.Bool
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		select {
+		case <-ctx.Done():
+			cancelled.Store(true)
+			return queue.Cancel // moot: someone else owns it now
+		case <-time.After(5 * time.Second):
+			return nil
+		}
+	})
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return cancelled.Load() }, "heartbeat must cancel the handler context when the lease is lost")
+}
