@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/ops/logger"
 	"github.com/dmitrymomot/forge/resilience/backoff"
 )
@@ -22,6 +24,7 @@ import (
 type Service struct {
 	broker         Broker
 	defaultBackoff backoff.Backoff
+	clk            clock.Clock
 	queueWeights   map[string]int
 	log            *slog.Logger
 	scopeCtx       func(ctx context.Context, scope string) context.Context
@@ -29,6 +32,7 @@ type Service struct {
 	name           string
 	queues         []weightedQueue // weight desc, name asc; built by NewService
 	cfg            Config
+	sweepEvery     time.Duration
 	strict         bool
 }
 
@@ -43,6 +47,7 @@ type handler struct {
 	backoff     backoff.Backoff
 	timeout     time.Duration
 	maxAttempts int
+	timeoutSet  bool
 }
 
 // NewService builds a worker over broker. Returns ErrInvalidConfig on nil
@@ -56,6 +61,8 @@ func NewService(broker Broker, opts ...ServiceOption) (*Service, error) {
 		log:            logger.NewNope(),
 		defaultBackoff: backoff.Exponential(15*time.Second, 6*time.Hour, backoff.WithJitter(0.2)),
 		handlers:       make(map[string]*handler),
+		clk:            clock.System(),
+		sweepEvery:     5 * time.Minute,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -117,21 +124,31 @@ func (s *Service) Run(ctx context.Context) error {
 	sem := make(chan struct{}, s.cfg.Concurrency)
 	var wg sync.WaitGroup
 
-	ticker := time.NewTicker(s.cfg.PollInterval)
-	defer ticker.Stop()
-
 	s.log.InfoContext(ctx, "queue service started", slog.String("service", s.name), slog.Int("concurrency", s.cfg.Concurrency))
+
+	maintainer, hasMaintain := s.broker.(Maintainer)
+	if hasMaintain || s.cfg.DeadRetention > 0 {
+		wg.Go(func() { s.sweepLoop(ctx, maintainer) })
+	}
+
+	maxWait := max(30*time.Second, s.cfg.PollInterval)
+	wait := s.cfg.PollInterval
 	for {
-		claimed := s.pollOnce(ctx, opCtx, sem, &wg)
+		claimed, allErrored := s.pollOnce(ctx, opCtx, sem, &wg)
 		if ctx.Err() != nil {
 			break
 		}
-		if claimed > 0 {
-			continue // backlog: keep claiming without waiting for the tick
+		if allErrored {
+			wait = min(wait*2, maxWait) // broker down: widen instead of hammering
+		} else {
+			wait = s.cfg.PollInterval
+			if claimed > 0 {
+				continue // backlog: keep claiming without waiting
+			}
 		}
 		select {
 		case <-ctx.Done():
-		case <-ticker.C:
+		case <-time.After(wait):
 			continue
 		}
 		break
@@ -142,33 +159,83 @@ func (s *Service) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// sweepLoop runs low-frequency housekeeping: broker Maintain (when
+// implemented) and DLQ retention. The first run is jittered so a fleet
+// restarting together does not sweep in lockstep; both ops are idempotent and
+// cheap, so every instance runs them without leader election.
+func (s *Service) sweepLoop(ctx context.Context, maintainer Maintainer) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(rand.N(s.sweepEvery)):
+	}
+	t := time.NewTicker(s.sweepEvery)
+	defer t.Stop()
+	for {
+		s.sweepOnce(ctx, maintainer)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Service) sweepOnce(ctx context.Context, maintainer Maintainer) {
+	if maintainer != nil {
+		if err := maintainer.Maintain(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "queue maintenance failed", slog.String("service", s.name), slog.Any("error", err))
+		}
+	}
+	if s.cfg.DeadRetention <= 0 {
+		return
+	}
+	n, err := s.broker.PurgeDeadBefore(ctx, s.clk.Now().Add(-s.cfg.DeadRetention))
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "queue dead retention purge failed", slog.String("service", s.name), slog.Any("error", err))
+		}
+		return
+	}
+	if n > 0 {
+		s.log.InfoContext(ctx, "queue dead jobs purged by retention", slog.String("service", s.name), slog.Int("purged", n), slog.Duration("retention", s.cfg.DeadRetention))
+	}
+}
+
 // pollOnce claims up to the free slot budget across queues (in claimOrder)
-// and dispatches each claimed job. Returns the number of jobs claimed.
-func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan struct{}, wg *sync.WaitGroup) int {
+// and dispatches each claimed job. Returns the number of jobs claimed and
+// whether every attempted claim errored (the signal to back off).
+func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan struct{}, wg *sync.WaitGroup) (int, bool) {
 	free := s.cfg.Concurrency - len(sem)
 	if free <= 0 {
-		return 0
+		return 0, false
 	}
 	if s.cfg.ClaimBatch > 0 && free > s.cfg.ClaimBatch {
 		free = s.cfg.ClaimBatch
 	}
-	total := 0
+	total, attempted, errored := 0, 0, 0
+	drained := make(map[string]bool, len(s.queues))
 	claim := func(qname string, n int) {
 		if n <= 0 || ctx.Err() != nil {
 			return
 		}
+		attempted++
 		jobs, err := s.broker.Claim(ctx, qname, n, s.cfg.Lease)
 		if err != nil {
+			errored++
 			if ctx.Err() == nil {
 				s.log.ErrorContext(ctx, "queue claim failed", slog.String("queue", qname), slog.Any("error", err))
 			}
 			return
 		}
-		for _, job := range jobs {
+		if len(jobs) < n {
+			drained[qname] = true // returned less than asked: proven empty
+		}
+		for _, cj := range jobs {
 			sem <- struct{}{}
 			wg.Go(func() {
 				defer func() { <-sem }()
-				s.process(opCtx, job)
+				s.process(opCtx, cj)
 			})
 		}
 		free -= len(jobs)
@@ -179,16 +246,20 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 		for _, q := range s.queues { // static weight-desc order
 			claim(q.name, free)
 		}
-		return total
+		return total, attempted > 0 && errored == attempted
 	}
 	order, quota := s.claimPlan(free)
 	for _, qname := range order {
 		claim(qname, min(quota[qname], free))
 	}
-	for _, q := range s.queues { // leftover sweep: unfilled quotas roll to any queue with work
-		claim(q.name, free)
+	if free > 0 && errored == 0 { // leftover sweep only with capacity to spare and a healthy broker this round
+		for _, q := range s.queues {
+			if !drained[q.name] {
+				claim(q.name, free)
+			}
+		}
 	}
-	return total
+	return total, attempted > 0 && errored == attempted
 }
 
 // pickNext advances the smooth weighted round-robin state one step and
@@ -225,7 +296,8 @@ func (s *Service) claimPlan(free int) ([]string, map[string]int) {
 
 // process runs one claimed job to a terminal broker state. opCtx is never
 // cancelled by shutdown: in-flight completions must still commit.
-func (s *Service) process(opCtx context.Context, job Job) {
+func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
+	job := cj.Job
 	logAttrs := []any{
 		slog.String("service", s.name), slog.String("job_id", job.ID),
 		slog.String("kind", job.Type), slog.String("queue", job.Queue), slog.Int("attempt", job.Attempt),
@@ -233,18 +305,31 @@ func (s *Service) process(opCtx context.Context, job Job) {
 	h, ok := s.handlers[job.Type]
 	if !ok {
 		s.finalize(opCtx, "dead", logAttrs, func() error {
-			return s.broker.Kill(opCtx, job.ID, ErrNoHandler.Error()+": "+job.Type)
+			return s.broker.Kill(opCtx, job.ID, cj.Token, ErrNoHandler.Error()+": "+job.Type)
 		})
 		return
 	}
 	if s.scopeCtx != nil && job.Scope == "" {
 		s.finalize(opCtx, "dead", logAttrs, func() error {
-			return s.broker.Kill(opCtx, job.ID, ErrScopeMissing.Error())
+			return s.broker.Kill(opCtx, job.ID, cj.Token, ErrScopeMissing.Error())
 		})
 		return
 	}
 
-	// Heartbeat: extend the lease at lease/3 until the handler returns.
+	hctx := opCtx
+	if s.scopeCtx != nil {
+		hctx = s.scopeCtx(hctx, job.Scope)
+	}
+	// INVARIANT: no early return between here and hbWG.Wait() below. Cleanup
+	// is straight-line rather than deferred on purpose — deferring would run it
+	// after the logAttrs appends below, reordering the log record and racing
+	// the heartbeat's own writes — so a return added in this window would leak
+	// hctx and orphan the heartbeat goroutine, with no compiler help.
+	hctx, cancelHandler := context.WithCancel(hctx)
+
+	// Heartbeat: extend the lease at lease/3 until the handler returns. A
+	// lost lease means another worker owns the job now — cancel the handler
+	// so the slot stops doing doomed work whose finalize would be rejected.
 	hbCtx, stopHB := context.WithCancel(opCtx)
 	var hbWG sync.WaitGroup
 	hbWG.Go(func() {
@@ -255,36 +340,44 @@ func (s *Service) process(opCtx context.Context, job Job) {
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				if err := s.broker.Extend(hbCtx, job.ID, s.cfg.Lease); err != nil && hbCtx.Err() == nil {
+				err := s.broker.Extend(hbCtx, job.ID, cj.Token, s.cfg.Lease)
+				switch {
+				case err == nil:
+				case errors.Is(err, ErrLeaseLost):
+					s.log.WarnContext(hbCtx, "queue lease lost, cancelling handler", logAttrs...)
+					cancelHandler()
+					return
+				case hbCtx.Err() == nil:
 					s.log.ErrorContext(hbCtx, "queue lease extend failed", append(logAttrs, slog.Any("error", err))...)
 				}
 			}
 		}
 	})
 
-	hctx := opCtx
-	if s.scopeCtx != nil {
-		hctx = s.scopeCtx(hctx, job.Scope)
+	timeout := s.cfg.HandlerTimeout
+	if h.timeoutSet {
+		timeout = h.timeout
 	}
 	var cancel context.CancelFunc = func() {}
-	if h.timeout > 0 {
-		hctx, cancel = context.WithTimeout(hctx, h.timeout)
+	if timeout > 0 {
+		hctx, cancel = context.WithTimeout(hctx, timeout)
 	}
 	start := time.Now()
 	err := s.invoke(hctx, h, job)
 	cancel()
+	cancelHandler()
 	stopHB()
 	hbWG.Wait()
 	logAttrs = append(logAttrs, slog.Duration("duration", time.Since(start)))
 
 	switch {
 	case err == nil:
-		s.finalize(opCtx, "done", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID) })
+		s.finalize(opCtx, "done", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID, cj.Token) })
 	case errors.Is(err, Cancel):
-		s.finalize(opCtx, "cancelled", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID) })
+		s.finalize(opCtx, "cancelled", logAttrs, func() error { return s.broker.Ack(opCtx, job.ID, cj.Token) })
 	case IsSkipRetry(err):
 		logAttrs = append(logAttrs, slog.Any("error", err))
-		s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, err.Error()) })
+		s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, cj.Token, err.Error()) })
 	default:
 		logAttrs = append(logAttrs, slog.Any("error", err))
 		maxAttempts := s.cfg.MaxAttempts
@@ -295,16 +388,16 @@ func (s *Service) process(opCtx context.Context, job Job) {
 			maxAttempts = job.MaxAttempts
 		}
 		if job.Attempt >= maxAttempts {
-			s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, err.Error()) })
+			s.finalize(opCtx, "dead", logAttrs, func() error { return s.broker.Kill(opCtx, job.ID, cj.Token, err.Error()) })
 			return
 		}
 		bo := s.defaultBackoff
 		if h.backoff != nil {
 			bo = h.backoff
 		}
-		retryAt := time.Now().UTC().Add(bo.Next(job.Attempt))
+		retryAt := s.clk.Now().UTC().Add(bo.Next(job.Attempt))
 		logAttrs = append(logAttrs, slog.Time("retry_at", retryAt))
-		s.finalize(opCtx, "retry", logAttrs, func() error { return s.broker.Nack(opCtx, job.ID, retryAt, err.Error()) })
+		s.finalize(opCtx, "retry", logAttrs, func() error { return s.broker.Nack(opCtx, job.ID, cj.Token, retryAt, err.Error()) })
 	}
 }
 
@@ -322,9 +415,13 @@ func (s *Service) invoke(ctx context.Context, h *handler, job Job) (err error) {
 // logged and dropped: the lease will expire and the job redelivers —
 // at-least-once, never lost.
 func (s *Service) finalize(ctx context.Context, outcome string, logAttrs []any, op func() error) {
-	if err := op(); err != nil {
+	err := op()
+	switch {
+	case errors.Is(err, ErrLeaseLost):
+		s.log.WarnContext(ctx, "queue lease lost, job owned elsewhere", append(logAttrs, slog.String("outcome", outcome))...)
+	case err != nil:
 		s.log.ErrorContext(ctx, "queue broker op failed, job will redeliver after lease expiry", append(logAttrs, slog.String("outcome", outcome), slog.Any("error", err))...)
-		return
+	default:
+		s.log.InfoContext(ctx, "queue job "+outcome, logAttrs...)
 	}
-	s.log.InfoContext(ctx, "queue job "+outcome, logAttrs...)
 }

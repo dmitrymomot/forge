@@ -21,7 +21,7 @@ var (
 //
 // If FORGE_TEST_POSTGRES_DSN is set it is returned verbatim, pointing the suite
 // at an existing server (e.g. a CI service). Otherwise a throwaway
-// postgres:16-alpine container is started once per test process, shared across
+// postgres:18-alpine container is started once per test process, shared across
 // every test in the package, and removed by the testcontainers Ryuk reaper when
 // the process exits.
 func DSN(tb testing.TB) string {
@@ -38,7 +38,7 @@ func DSN(tb testing.TB) string {
 // sharedDSN empty and make every later caller dial "".
 func startShared() {
 	ctx := context.Background()
-	c, err := postgres.Run(ctx, "postgres:16-alpine",
+	c, err := postgres.Run(ctx, "postgres:18-alpine",
 		postgres.WithDatabase("forge"),
 		postgres.WithUsername("forge"),
 		postgres.WithPassword("forge"),

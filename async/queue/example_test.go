@@ -43,3 +43,17 @@ func Example() {
 	<-stopped
 	// Output: welcome sent to new@user.dev
 }
+
+func ExamplePushMany() {
+	broker := queue.NewMemoryBroker()
+	client := queue.NewClient(broker)
+
+	batch := []sendWelcome{{Email: "a@user.dev"}, {Email: "b@user.dev"}}
+	if err := queue.PushMany(context.Background(), client, kindSendWelcome, batch); err != nil {
+		panic(err)
+	}
+
+	st, _ := broker.Stats(context.Background())
+	fmt.Println("pending:", st["default"].Pending)
+	// Output: pending: 2
+}

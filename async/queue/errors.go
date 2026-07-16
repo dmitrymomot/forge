@@ -18,6 +18,12 @@ var (
 	ErrNotDead = errors.New("queue: job is not dead")
 	// ErrTxUnsupported is returned by PushTx when the broker does not implement TxPusher.
 	ErrTxUnsupported = errors.New("queue: broker does not support transactional push")
+	// ErrLeaseLost is returned by the token-fenced broker ops (Extend, Ack,
+	// Nack, Kill) when the token no longer owns the job: the lease expired and
+	// another claim took over, or the job was already finalized. Fenced ops
+	// never return ErrJobNotFound — an unknown id is indistinguishable from an
+	// already-finalized one.
+	ErrLeaseLost = errors.New("queue: lease lost")
 )
 
 // Cancel is a handler verdict: the job became moot; discard it as done

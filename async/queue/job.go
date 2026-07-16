@@ -19,10 +19,23 @@ type Job struct {
 	MaxAttempts int
 }
 
-// QueueStats are per-queue counts reported by Broker.Stats.
+// ClaimedJob is a Job plus the opaque fencing token proving ownership of the
+// claim. Pass Token to Extend/Ack/Nack/Kill; once the lease expires and
+// another worker claims the job, ops with the stale token return ErrLeaseLost
+// and leave the new claim undisturbed.
+type ClaimedJob struct {
+	Token string
+	Job
+}
+
+// QueueStats are per-queue counts reported by Broker.Stats. Backends that
+// bound their counting (postgres, cap 10000) report at most the cap and set
+// the corresponding Capped flag; memory and redis counts are exact.
 type QueueStats struct {
-	Pending int
-	Dead    int
+	Pending       int
+	Dead          int
+	PendingCapped bool
+	DeadCapped    bool
 }
 
 // Stats maps queue name to its counts.

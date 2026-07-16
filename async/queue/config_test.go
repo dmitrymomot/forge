@@ -45,3 +45,27 @@ func TestConfig_EveryFieldHasEnvTag(t *testing.T) {
 		assert.NotEmpty(t, f.Tag.Get("env"), "field %s missing env tag", f.Name)
 	}
 }
+
+func TestConfig_HandlerTimeout(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, 10*time.Minute, queue.DefaultConfig().HandlerTimeout, "default handler timeout is 10m")
+
+	cfg := queue.DefaultConfig()
+	cfg.HandlerTimeout = 0
+	assert.NoError(t, cfg.Validate(), "0 disables the default timeout")
+
+	cfg.HandlerTimeout = -time.Second
+	assert.ErrorIs(t, cfg.Validate(), queue.ErrInvalidConfig)
+}
+
+func TestConfig_DeadRetention(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, 720*time.Hour, queue.DefaultConfig().DeadRetention, "default DLQ retention is 30 days")
+
+	cfg := queue.DefaultConfig()
+	cfg.DeadRetention = 0
+	assert.NoError(t, cfg.Validate(), "0 keeps dead jobs forever")
+
+	cfg.DeadRetention = -time.Hour
+	assert.ErrorIs(t, cfg.Validate(), queue.ErrInvalidConfig)
+}

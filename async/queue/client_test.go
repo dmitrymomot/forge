@@ -71,7 +71,7 @@ func TestPush_DelayAndRunAt(t *testing.T) {
 	got, err = b.Claim(ctx, "default", 10, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "only the 5m-delayed job is due")
-	require.NoError(t, b.Ack(ctx, got[0].ID)) // ack so an expired lease cannot double-claim below
+	require.NoError(t, b.Ack(ctx, got[0].ID, got[0].Token)) // ack so an expired lease cannot double-claim below
 
 	mock.Advance(5 * time.Minute)
 	got, err = b.Claim(ctx, "default", 10, time.Minute)
@@ -135,8 +135,11 @@ type txBroker struct {
 	gotJob queue.Job
 }
 
-func (b *txBroker) PushTx(_ context.Context, tx any, job queue.Job) error {
-	b.gotTx, b.gotJob = tx, job
+func (b *txBroker) PushTx(_ context.Context, tx any, jobs ...queue.Job) error {
+	b.gotTx = tx
+	if len(jobs) > 0 {
+		b.gotJob = jobs[0]
+	}
 	return nil
 }
 
@@ -179,7 +182,7 @@ func TestClient_DLQPassthrough(t *testing.T) {
 	got, err := b.Claim(ctx, "default", 1, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	require.NoError(t, b.Kill(ctx, got[0].ID, "poison"))
+	require.NoError(t, b.Kill(ctx, got[0].ID, got[0].Token, "poison"))
 
 	dead, err := c.ListDead(ctx, "default", 10)
 	require.NoError(t, err)
@@ -193,9 +196,59 @@ func TestClient_DLQPassthrough(t *testing.T) {
 	reclaimed, err := b.Claim(ctx, "default", 1, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, reclaimed, 1)
-	require.NoError(t, b.Kill(ctx, reclaimed[0].ID, "again"))
+	require.NoError(t, b.Kill(ctx, reclaimed[0].ID, reclaimed[0].Token, "again"))
 	require.NoError(t, c.Purge(ctx, reclaimed[0].ID))
 	dead, err = c.ListDead(ctx, "default", 10)
 	require.NoError(t, err)
 	assert.Empty(t, dead)
+}
+
+func TestPushMany(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("batch claims back in order with unique ids", func(t *testing.T) {
+		t.Parallel()
+		b := queue.NewMemoryBroker()
+		c := queue.NewClient(b)
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "a"}, {UserID: "b"}, {UserID: "c"}}))
+		got, err := b.Claim(ctx, "default", 10, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+		seen := map[string]bool{}
+		for _, j := range got {
+			assert.False(t, seen[j.ID], "ids must be unique")
+			seen[j.ID] = true
+		}
+	})
+	t.Run("scope hook runs once per batch", func(t *testing.T) {
+		t.Parallel()
+		b := queue.NewMemoryBroker()
+		var hookCalls int
+		c := queue.NewClient(b, queue.WithScope(func(context.Context) (string, error) {
+			hookCalls++
+			return "tenant-a", nil
+		}))
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "a"}, {UserID: "b"}}))
+		assert.Equal(t, 1, hookCalls, "one scope resolution per batch, not per job")
+		got, err := b.Claim(ctx, "default", 10, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		assert.Equal(t, "tenant-a", got[0].Scope)
+		assert.Equal(t, "tenant-a", got[1].Scope)
+	})
+	t.Run("empty slice is a no-op", func(t *testing.T) {
+		t.Parallel()
+		c := queue.NewClient(queue.NewMemoryBroker())
+		require.NoError(t, queue.PushMany(ctx, c, kindWelcome, nil))
+	})
+}
+
+func TestPush_EmptyQueueNameRejected(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c := queue.NewClient(queue.NewMemoryBroker())
+	assert.Error(t, queue.Push(ctx, c, kindWelcome, welcomePayload{UserID: "u"}, queue.WithQueue("")))
+	assert.Error(t, queue.PushMany(ctx, c, kindWelcome, []welcomePayload{{UserID: "u"}}, queue.WithQueue("")))
+	assert.Error(t, c.PushRaw(ctx, "raw.kind", []byte(`{}`), queue.WithQueue("")))
 }

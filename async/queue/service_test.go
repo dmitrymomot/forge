@@ -522,3 +522,194 @@ func TestRegister_DuplicatePanics(t *testing.T) {
 		queue.Register(svc, queue.NewKind[welcomePayload]("other.kind"), nil)
 	})
 }
+
+// TestWithHandlerTimeout_NegativePanics pins the fail-fast-at-wiring idiom for
+// the per-kind timeout. Config.HandlerTimeout < 0 is an ErrInvalidConfig, but
+// the per-kind option is only read through a `timeout > 0` check: without the
+// panic a negative duration would silently mean "disabled", leaving a handler
+// the caller explicitly meant to bound running unbounded forever.
+func TestWithHandlerTimeout_NegativePanics(t *testing.T) {
+	t.Parallel()
+	assert.Panics(t, func() { queue.WithHandlerTimeout(-time.Second) })
+	// The two legal values must stay legal: 0 is the documented opt-out.
+	assert.NotPanics(t, func() { queue.WithHandlerTimeout(0) })
+	assert.NotPanics(t, func() { queue.WithHandlerTimeout(time.Second) })
+}
+
+func TestService_DefaultHandlerTimeout(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.HandlerTimeout = 30 * time.Millisecond
+	b := queue.NewMemoryBroker()
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		<-ctx.Done() // no per-kind timeout: the Config default must fire
+		return ctx.Err()
+	}, queue.WithHandlerBackoff(backoff.Constant(5*time.Millisecond)))
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}, queue.WithMaxAttempts(1)))
+
+	eventually(t, func() bool {
+		dead, _ := b.ListDead(context.Background(), "default", 10)
+		return len(dead) == 1
+	}, "config-default handler timeout must bound an unconfigured handler")
+	dead, _ := b.ListDead(context.Background(), "default", 10)
+	require.Len(t, dead, 1)
+	assert.Contains(t, dead[0].LastError, "context deadline exceeded")
+}
+
+func TestService_HandlerTimeoutZeroOptsOut(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.HandlerTimeout = 20 * time.Millisecond
+	b := queue.NewMemoryBroker()
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var done atomic.Bool
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond): // 7x the config default
+			done.Store(true)
+			return nil
+		}
+	}, queue.WithHandlerTimeout(0)) // explicit opt-out for a long-running kind
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return done.Load() }, "WithHandlerTimeout(0) must disable the config default")
+	dead, _ := b.ListDead(context.Background(), "default", 10)
+	assert.Empty(t, dead)
+}
+
+// leaseLostBroker simulates another worker stealing the job: every Extend
+// reports the lease as lost.
+type leaseLostBroker struct {
+	*queue.MemoryBroker
+}
+
+func (b *leaseLostBroker) Extend(context.Context, string, string, time.Duration) error {
+	return queue.ErrLeaseLost
+}
+
+func TestService_LeaseLostCancelsHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.Lease = 60 * time.Millisecond // heartbeat ticks every 20ms
+	b := &leaseLostBroker{MemoryBroker: queue.NewMemoryBroker()}
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var cancelled atomic.Bool
+	queue.Register(svc, kindWelcome, func(ctx context.Context, _ welcomePayload) error {
+		select {
+		case <-ctx.Done():
+			cancelled.Store(true)
+			return queue.Cancel // moot: someone else owns it now
+		case <-time.After(5 * time.Second):
+			return nil
+		}
+	})
+
+	stop := runService(t, svc)
+	defer stop()
+
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return cancelled.Load() }, "heartbeat must cancel the handler context when the lease is lost")
+}
+
+// countingBroker counts Claim calls; optionally every claim errors.
+type countingBroker struct {
+	*queue.MemoryBroker
+	claims atomic.Int64
+	fail   atomic.Bool
+}
+
+func (b *countingBroker) Claim(ctx context.Context, q string, n int, lease time.Duration) ([]queue.ClaimedJob, error) {
+	b.claims.Add(1)
+	if b.fail.Load() {
+		return nil, errors.New("broker down")
+	}
+	return b.MemoryBroker.Claim(ctx, q, n, lease)
+}
+
+func TestService_ClaimErrorBackoff(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig() // 10ms poll
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	b.fail.Store(true)
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error { return nil })
+
+	stop := runService(t, svc)
+	time.Sleep(500 * time.Millisecond)
+	failing := b.claims.Load()
+	stop()
+
+	// Naive 10ms cadence would make ~50 claims in 500ms; doubling backoff
+	// (10,20,40,80,160,320ms…) allows at most ~7, observed 5. A same-poll
+	// leftover-sweep re-probe of the errored queue (a regression caught once
+	// already) doubles that to ~10 — keep the bound tight enough to catch it
+	// while leaving CI-scheduling slack above the observed 5.
+	assert.Less(t, failing, int64(8), "claim errors must widen the poll interval, got %d claims", failing)
+	assert.GreaterOrEqual(t, failing, int64(3), "the service must keep retrying")
+}
+
+func TestService_ClaimBackoffResetsOnSuccess(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	b.fail.Store(true)
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var processed atomic.Bool
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error {
+		processed.Store(true)
+		return nil
+	})
+
+	stop := runService(t, svc)
+	defer stop()
+
+	time.Sleep(150 * time.Millisecond) // let backoff widen
+	b.fail.Store(false)
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return processed.Load() }, "service must recover and process after the broker heals")
+}
+
+func TestService_IdlePollClaimsEachQueueOnce(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error { return nil })
+
+	stop := runService(t, svc)
+	time.Sleep(300 * time.Millisecond)
+	claims := b.claims.Load()
+	stop()
+
+	// ~30 polls in 300ms at 10ms; one queue idle must claim once per poll
+	// (the old leftover sweep claimed twice). Bound generously above 1x and
+	// strictly below 2x.
+	assert.Less(t, claims, int64(45), "idle polls must not double-claim, got %d claims for ~30 polls", claims)
+}

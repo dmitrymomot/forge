@@ -12,24 +12,42 @@ import (
 // backends.
 //
 // Contract details every implementation must honor (enforced by brokertest):
-//   - Claim atomically sets the lease AND increments the attempt counter.
+//   - Push accepts a batch and is all-or-nothing; an empty batch is a no-op.
+//   - Claim atomically sets the lease, stamps a fencing token, AND increments
+//     the attempt counter. Claimed jobs return ordered by (run_at, id).
+//   - A token fences a job's claim GENERATION, and one Claim call stamps the
+//     same token on every job in its batch: it is not a per-job secret. Key
+//     any internal state by job id, not by token.
+//   - A token is scoped to the Broker instance that issued it: Extend/Ack/
+//     Nack/Kill must be called against that same instance. Implementations
+//     may track claim ownership in-process rather than in shared storage, so
+//     a token handed to a different instance can fail even though it is
+//     otherwise valid.
 //   - A claimed job is invisible to Claim until its lease expires.
+//   - Extend/Ack/Nack/Kill require the claim token and return ErrLeaseLost
+//     when it no longer owns the job (lease lost to another claim, job already
+//     finalized, or id unknown); a stale-token op must not disturb the state
+//     of the current claim.
 //   - Nack makes the job claimable again no earlier than retryAt and records
-//     reason as LastError.
-//   - Kill moves the job to the dead-letter set; Requeue resets attempts to
-//     zero and returns it to pending; Purge deletes a dead job.
-//   - Requeue/Purge return ErrJobNotFound for unknown ids and ErrNotDead for
-//     jobs that exist but are not dead.
+//     reason as LastError. Kill moves the job to the dead-letter store and
+//     records the kill time.
+//   - ListDead returns dead jobs ordered by kill time then id. Requeue resets
+//     attempts to zero and returns a dead job to pending; Purge deletes a dead
+//     job; both are unfenced (dead jobs have no lease) and return
+//     ErrJobNotFound for unknown ids and ErrNotDead for live jobs.
+//   - PurgeDeadBefore deletes dead jobs killed strictly before cutoff and
+//     returns how many were removed.
 type Broker interface {
-	Push(ctx context.Context, job Job) error
-	Claim(ctx context.Context, queue string, n int, lease time.Duration) ([]Job, error)
-	Extend(ctx context.Context, id string, lease time.Duration) error
-	Ack(ctx context.Context, id string) error
-	Nack(ctx context.Context, id string, retryAt time.Time, reason string) error
-	Kill(ctx context.Context, id string, reason string) error
+	Push(ctx context.Context, jobs ...Job) error
+	Claim(ctx context.Context, queue string, n int, lease time.Duration) ([]ClaimedJob, error)
+	Extend(ctx context.Context, id, token string, lease time.Duration) error
+	Ack(ctx context.Context, id, token string) error
+	Nack(ctx context.Context, id, token string, retryAt time.Time, reason string) error
+	Kill(ctx context.Context, id, token string, reason string) error
 	ListDead(ctx context.Context, queue string, limit int) ([]Job, error)
 	Requeue(ctx context.Context, id string) error
 	Purge(ctx context.Context, id string) error
+	PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, error)
 	Stats(ctx context.Context) (Stats, error)
 }
 
@@ -38,5 +56,13 @@ type Broker interface {
 // pgx.Tx). Brokers without this capability make PushTx return
 // ErrTxUnsupported.
 type TxPusher interface {
-	PushTx(ctx context.Context, tx any, job Job) error
+	PushTx(ctx context.Context, tx any, jobs ...Job) error
+}
+
+// Maintainer is an optional Broker capability: periodic housekeeping the
+// engine invokes from its sweep ticker (idle consumer cleanup, stale queue
+// registry pruning). Implementations must be idempotent and safe to run from
+// every worker instance concurrently.
+type Maintainer interface {
+	Maintain(ctx context.Context) error
 }

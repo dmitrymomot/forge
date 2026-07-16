@@ -1,0 +1,194 @@
+# async/queue benchmark results — POST-rework (design: 2026-07-16-queue-hardening-design.md)
+# Commit: 1a2f094 (tasks 1-9 base) + this task's bench suite and the
+# copyFromThreshold optimization below, all landed in one commit.
+# Apple M3 Max, darwin/arm64, go1.26.5, Docker 29.6.1
+# Containers: postgres:18-alpine, redis:8-alpine (platform floors: PostgreSQL >= 18, Redis >= 8)
+# Captured: 2026-07-16 via `go test -bench='^(BenchmarkPush_Memory|BenchmarkPushMany_Memory|
+# BenchmarkClaimBatch_Memory)$' -benchmem ./async/queue/`, a separate pinned-count
+# EndToEnd run, and `just bench-integration ./async/queue/{postgres,redis}/`.
+# Note: single-sample (-count=1) per the baseline file's own caveat; indicative only.
+#
+# Deviation from the literal Step 4.1 command: `just bench ./async/queue/` runs
+# `go test -bench=. -benchmem` unfiltered, which would also invoke
+# BenchmarkEndToEnd_Memory with the default time-based benchtime — exactly the
+# pitfall the baseline file warns about (push loop outruns the drain workers,
+# post-loop drain wait dominates). Ran the same three benchmarks via an explicit
+# -bench regex instead, then EndToEnd separately with -benchtime=5000x per Step 4.2.
+#
+# EndToEnd_Memory run separately with -benchtime=5000x (mandatory, see baseline file).
+
+## unit tier (MemoryBroker + engine)
+pkg: github.com/dmitrymomot/forge/async/queue
+BenchmarkPush_Memory-14           	 1834405	       709.2 ns/op	     778 B/op	       6 allocs/op
+BenchmarkPushMany_Memory/100-14   	   22336	     56341 ns/op	   73149 B/op	     303 allocs/op
+BenchmarkPushMany_Memory/10k-14   	     234	   5351897 ns/op	 7196145 B/op	   39886 allocs/op
+BenchmarkClaimBatch_Memory-14     	    1010	   1106649 ns/op	  100400 B/op	       3 allocs/op
+BenchmarkEndToEnd_Memory-14       	    5000	      2880 ns/op	     875 B/op	       6 allocs/op   (-benchtime=5000x)
+
+## integration tier (postgres:18-alpine / redis:8-alpine)
+pkg: github.com/dmitrymomot/forge/async/queue/postgres
+BenchmarkPgPushClaimAck-14        	    1856	    540634 ns/op	    4307 B/op	      99 allocs/op
+BenchmarkPgPushMany/100-14        	    2037	    733704 ns/op	  142037 B/op	    1473 allocs/op
+BenchmarkPgPushMany/10k-14        	      48	  24860418 ns/op	 8973859 B/op	  290090 allocs/op
+
+pkg: github.com/dmitrymomot/forge/async/queue/redis
+BenchmarkRedisPushClaimAck-14     	    1532	    770844 ns/op	    7087 B/op	     132 allocs/op
+BenchmarkRedisListDead-14         	    3160	    378739 ns/op	   56031 B/op	     817 allocs/op
+
+# ===========================================================================
+# Comparison vs docs/superpowers/specs/2026-07-16-queue-bench-baseline.txt
+# ===========================================================================
+#
+# BenchmarkPush_Memory-14:       567.9 ns/op  -> 709.2 ns/op   (1.25x, +25%)
+#   Regression. 426->778 B/op, 5->6 allocs/op. The Broker v2 Push path now
+#   costs one more allocation per single-job push (fencing-token-era plumbing:
+#   the variadic broker.Push(ctx, jobs...) call and its arg-building helper
+#   allocate a bit more than the old single-job path). Not gated by any Step 5
+#   trigger (no >2x threshold applies to this benchmark) and not chased further
+#   per "readable first, optimize only proven-hot paths" — this is reported,
+#   not fixed.
+#
+# BenchmarkClaimBatch_Memory-14: 1152816 ns/op -> 1106649 ns/op (0.96x, -4%)
+#   PREDICTION FAILED AS WRITTEN, BUT THE PREDICTION ITSELF WAS MIS-SCOPED, NOT
+#   JUST THE EXECUTION. The baseline file's own note ("ClaimBatch_Memory ...
+#   is the direct measure of issue #12; expect a large drop") baked in the
+#   wrong assumption that a single-queue benchmark could observe a multi-queue
+#   isolation fix - it can't, by construction, regardless of who runs it.
+#   Measured: flat, within noise (three repeat runs landed 1051170 / 1069211 /
+#   1121162 / 1106649 ns/op - all within ~7% of each other and of the baseline).
+#   Why: MemoryBroker.Claim (async/queue/memory.go) now scans mq.live for the
+#   one requested queue's bucket instead of a flat map spanning every queue -
+#   real fix for issue #12 (a Claim("q1") call no longer pays for jobs sitting
+#   in "q2".."qN"). But this specific benchmark only ever creates ONE queue
+#   ("default") holding all 10,000 jobs, and recycles the same 100 via Nack
+#   every iteration, so the bucket IS the whole broker in this shape - both
+#   before and after the rework, Claim has to linear-scan ~10,000 live entries
+#   to build its "due" slice. The benchmark (used verbatim per the brief) simply
+#   doesn't exercise cross-queue isolation, so it can't observe the win the
+#   design predicted. This is NOT evidence the per-queue-bucket fix is
+#   ineffective - it is direct evidence this benchmark's shape cannot speak to
+#   the fix at all, in either direction.
+#
+#   CLOSED by BenchmarkClaimBatch_Memory_MultiQueue (added in the review-fix
+#   pass; see async/queue/bench_test.go and the new section below), which
+#   actually exercises cross-queue isolation and demonstrates the payoff this
+#   benchmark could not. BenchmarkClaimBatch_Memory itself is left unmodified
+#   (still verbatim per the brief) since reshaping it would destroy the
+#   before/after comparability recorded here.
+#
+# BenchmarkEndToEnd_Memory-14 (-benchtime=5000x): 3473 ns/op -> 2880 ns/op (0.83x, -17%)
+#   Improvement, held.
+#
+# BenchmarkPgPushClaimAck-14:    531362 ns/op -> 540634 ns/op (1.02x, +2%)
+#   PREDICTION HELD: well within the ~2x envelope (fencing adds one WHERE
+#   clause to the claim CTE - small, as expected). No Step 5 action triggered.
+#
+# BenchmarkRedisPushClaimAck-14: 722056 ns/op -> 770844 ns/op (1.07x, +7%)
+#   PREDICTION HELD: within ~2x (ownership-fenced Lua finalize adds one
+#   XPENDING check - small, as expected). Repeat runs during this session
+#   ranged 709198-770844 ns/op, i.e. baseline-to-+7%; no regression signal.
+#
+# BenchmarkPgPushMany/10k and BenchmarkRedisListDead have no baseline entry
+# (new capability / new benchmark added by this task).
+#
+# PushMany/10k vs "10k x single-push cost":
+#   No dedicated single-row-only Push benchmark exists to compare against
+#   directly (BenchmarkPgPushClaimAck bundles push+claim+ack, three round
+#   trips). Rough bound: PgPushMany/100 costs ~734us for 100 rows (~7.3us/row
+#   at that batch size); a naive 10k x that per-row rate would be ~73ms, and
+#   10k individual round trips (each paying its own network/latency cost, not
+#   just per-row work) would run well over 1s. The measured PgPushMany/10k
+#   (24.9ms, see optimization below) is roughly 40-80x cheaper than either
+#   naive extrapolation - PREDICTION HELD ("far below 10k x").
+
+# ===========================================================================
+# Step 5: post-bench optimization pass (measured wins only)
+# ===========================================================================
+#
+# Trigger check 1 - PgPushClaimAck regressed >2x? No (1.02x). Skipped the
+# EXPLAIN ANALYZE / statsPendingSQL-DISTINCT-queue-plan / recursive-CTE swap;
+# that branch of Step 5 does not apply.
+#
+# Trigger check 2 - PushMany/10k disappoints? Investigated anyway, per the
+# brief's invitation to prototype pgx.CopyFrom above a size threshold.
+#
+# BEFORE (unnest-array INSERT via broker.Push, the only path prior to this
+# optimization), same machine/session, sizes swept to find the crossover:
+#   100    rows:    825054 ns/op   141758 B/op    1472 allocs/op
+#   500    rows:   3481790 ns/op   695910 B/op    7083 allocs/op
+#   1000   rows:   5888548 ns/op  1544129 B/op   14093 allocs/op
+#   2000   rows:   9307101 ns/op  3374973 B/op   28108 allocs/op
+#   10000  rows:  41318225 ns/op 18291286 B/op  140124 allocs/op
+#
+# PROTOTYPE (pgx.CopyFrom via pgx.CopyFromSlice, same rows, throwaway bench,
+# not committed):
+#   100    rows:   1410813 ns/op  142439 B/op    2947 allocs/op  (1.71x SLOWER)
+#   500    rows:   4174994 ns/op  678559 B/op   14558 allocs/op  (1.20x SLOWER)
+#   1000   rows:   5636852 ns/op 1184498 B/op   29065 allocs/op  (0.96x, ~even)
+#   2000   rows:   7363735 ns/op 2055632 B/op   58071 allocs/op  (0.79x, 21% faster)
+#   10000  rows:  24309611 ns/op 8983865 B/op  290093 allocs/op  (0.59x, 41% faster)
+#
+# COPY protocol setup overhead makes it a net loss below ~1000 rows and a
+# growing win above it. Chose copyFromThreshold = 2000 (crossover ~1000; 2000
+# leaves margin so the win is comfortably outside run-to-run noise) and
+# applied it to BOTH Push and PushTx (async/queue/postgres/pgqueue.go) via a
+# small copier interface satisfied by *pgxpool.Pool and pgx.Tx, gated by
+# len(jobs) >= copyFromThreshold. Below the threshold, behavior and SQL are
+# byte-for-byte unchanged.
+#
+# AFTER, measured through the real broker.Push path post-change (3 repeat runs):
+#   BenchmarkPgPushMany/100-14   744863 / 822835 / 742403 ns/op  (unnest path, unchanged)
+#   BenchmarkPgPushMany/10k-14  24666487 / 24001049 / 24334888 ns/op  (CopyFrom path)
+#
+# RESULT: KEPT. PushMany/10k: 41.3ms -> ~24.3-24.9ms, a measured 40-42% win,
+# with PushMany/100 unaffected (unnest path unchanged, still ~734-823us). Added
+# TestPgQueue_PushCopyFromThreshold (Push and PushTx subtests, exactly at
+# copyFromThreshold) to cover the new branch beyond what the existing
+# TestPgQueue_StatsCapped (10001-row push) already exercised incidentally;
+# full integration suite and `just lint` stay green.
+#
+# Also tried: pgx.CopyFromRows (builds the full [][]any up front) vs
+# pgx.CopyFromSlice (lazy per-row callback) at 10k rows:
+#   CopyFromRows:  26564737 ns/op   9193676 B/op  290080 allocs/op
+#   CopyFromSlice: 24309611 ns/op   8983865 B/op  290093 allocs/op
+# CopyFromSlice: ~8.5% faster, slightly less memory, same allocation count.
+# KEPT CopyFromSlice in the shipped implementation.
+
+# ===========================================================================
+# Review-fix pass: BenchmarkClaimBatch_Memory_MultiQueue (closes the
+# ClaimBatch_Memory gap above)
+# ===========================================================================
+#
+# The per-queue-bucket rework (async/queue/memory.go, MemoryBroker.Claim scans
+# only the claimed queue's bucket) is perf-motivated complexity and CLAUDE.md
+# requires perf-motivated complexity to carry a benchmark in the PR. Root-
+# causing why BenchmarkClaimBatch_Memory couldn't observe the win (above) is
+# not the same as producing evidence of the win, so this benchmark closes that
+# gap.
+#
+# A true old-vs-new comparison is not possible: the pre-rework whole-broker-
+# scan implementation is nine commits back and the Broker interface has
+# changed shape since (fencing tokens, batch Push), so there is no old binary
+# to run against today's harness. Instead the benchmark is self-demonstrating:
+# hold the claimed queue's size fixed (100 live jobs, recycled via Nack, same
+# shape as BenchmarkClaimBatch_Memory) while scaling a second "noise" queue
+# that is pushed to but NEVER claimed from, across a 100x range (1k / 10k /
+# 100k jobs). Under per-queue buckets, Claim("default", ...) never touches the
+# noise bucket, so ns/op should stay flat across the three sizes. Under the
+# old whole-broker scan, Claim would have paid for every live job regardless
+# of queue, so ns/op would climb roughly linearly with noise size instead. Flat
+# ns/op across a 100x change in unrelated data IS the evidence.
+#
+# Command: go test -run=^$ -bench='^BenchmarkClaimBatch_Memory_MultiQueue$' -benchmem -count=3 ./async/queue/
+#
+# BenchmarkClaimBatch_Memory_MultiQueue/noise=1k-14    13805 / 14338 / 13761 ns/op   19376 B/op   3 allocs/op
+# BenchmarkClaimBatch_Memory_MultiQueue/noise=10k-14   13990 / 14907 / 14348 ns/op   19376 B/op   3 allocs/op
+# BenchmarkClaimBatch_Memory_MultiQueue/noise=100k-14  13695 / 14232 / 14196 ns/op   19376 B/op   3 allocs/op
+#
+# CONCLUSION: ns/op is flat (13.7-14.9us across all nine samples, no trend
+# with noise size) and B/op and allocs/op are IDENTICAL (19376 B/op, 3
+# allocs/op) at every noise size. Claiming from "default" costs the same
+# whether the broker additionally holds 1,000, 10,000, or 100,000 jobs in an
+# unrelated queue - direct evidence that Claim cost tracks the claimed queue's
+# live set, not the whole broker's, confirming the per-queue-bucket rework's
+# design intent (issue #12) where BenchmarkClaimBatch_Memory alone could not.
