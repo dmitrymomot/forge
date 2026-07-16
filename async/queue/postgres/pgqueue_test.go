@@ -5,6 +5,7 @@ package pgqueue_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -161,4 +162,122 @@ func TestPgQueue_StatsCapped(t *testing.T) {
 	assert.Equal(t, 10000, st["bulk"].Pending, "count reports the cap, not the true size")
 	assert.True(t, st["bulk"].PendingCapped)
 	assert.False(t, st["bulk"].DeadCapped)
+}
+
+// TestPgQueue_PushCopyFromThreshold exercises Push/PushTx right at
+// copyFromThreshold, where the insert switches from the unnest-array INSERT
+// to pgx.CopyFrom (see pgqueue.go). TestPgQueue_StatsCapped already pushes a
+// larger batch through this path but only checks the row count.
+//
+// Every row here carries distinct, per-row-derived values in every column
+// that could plausibly transpose (type, scope, payload, attempt,
+// max_attempts, run_at, created_at): identical rows can't catch a column
+// mis-mapping in pushCopyFrom/copyFromCols, since swapping two columns of
+// identical values is invisible. Queue is deliberately left constant per
+// subtest instead — it doubles as the Claim filter key, so a queue<->other
+// transposition still surfaces loudly (wrong claimed-row-count below) without
+// needing its own per-row uniqueness.
+//
+// runAt is strictly increasing by row index and Claim returns jobs ordered by
+// (run_at, id), so the claimed slice comes back in build order and each
+// sampled index can be checked directly against what newJobs built for it,
+// with no id-keyed lookup required.
+func TestPgQueue_PushCopyFromThreshold(t *testing.T) {
+	pool := openPool(t)
+	const n = 2000 // matches copyFromThreshold
+
+	// newJobs builds n rows for queue q. runAt starts 5s in the past (past-
+	// biased: the DB clock can lag the test process on a Docker VM) and
+	// climbs 1ms per row, so even the last row (run_at = now-5s+1999ms =
+	// now-3.001s) is comfortably due by the time Claim runs.
+	newJobs := func(q string) []queue.Job {
+		runAtBase := time.Now().UTC().Add(-5 * time.Second).Truncate(time.Microsecond)
+		createdBase := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+		jobs := make([]queue.Job, n)
+		for i := range jobs {
+			jobs[i] = queue.Job{
+				ID:          id.NewUUID().String(),
+				Queue:       q,
+				Type:        fmt.Sprintf("copy.kind.%d", i),
+				Payload:     []byte(fmt.Sprintf(`{"n":%d}`, i)),
+				Scope:       fmt.Sprintf("tenant-%d", i),
+				Attempt:     i,
+				MaxAttempts: i + 10000, // offset well clear of attempt (and attempt+1 post-claim) so a swap can't hide behind equal values
+				RunAt:       runAtBase.Add(time.Duration(i) * time.Millisecond),
+				CreatedAt:   createdBase.Add(time.Duration(i) * time.Second),
+			}
+		}
+		return jobs
+	}
+
+	// assertRow checks the claimed job at build-index i against the exact
+	// values newJobs assigned it — the proof that column i landed back in
+	// field i, not some neighbor's. Claim increments Attempt by one over the
+	// pushed value (see claimSQL), hence i+1.
+	assertRow := func(t *testing.T, q string, i int, got queue.ClaimedJob, runAtBase, createdBase time.Time) {
+		t.Helper()
+		assert.Equal(t, q, got.Queue, "row %d: queue", i)
+		assert.Equal(t, fmt.Sprintf("copy.kind.%d", i), got.Type, "row %d: type", i)
+		assert.JSONEq(t, fmt.Sprintf(`{"n":%d}`, i), string(got.Payload), "row %d: payload", i)
+		assert.Equal(t, fmt.Sprintf("tenant-%d", i), got.Scope, "row %d: scope", i)
+		assert.Equal(t, i+1, got.Attempt, "row %d: attempt (post-claim)", i)
+		assert.Equal(t, i+10000, got.MaxAttempts, "row %d: max_attempts", i)
+		assert.True(t, runAtBase.Add(time.Duration(i)*time.Millisecond).Equal(got.RunAt), "row %d: run_at", i)
+		assert.True(t, createdBase.Add(time.Duration(i)*time.Second).Equal(got.CreatedAt), "row %d: created_at", i)
+	}
+
+	// sampleIndexes are spread across the batch (first, several interior, last)
+	// so a transposition affecting only some rows (unlikely, but cheap to
+	// guard) still has a good chance of being sampled.
+	sampleIndexes := []int{0, 1, 500, 999, 1500, 1999}
+
+	t.Run("Push", func(t *testing.T) {
+		b := newBroker(t, pool)
+		ctx := context.Background()
+		jobs := newJobs("copyfrom-push")
+		require.NoError(t, b.Push(ctx, jobs...))
+
+		got, err := b.Claim(ctx, "copyfrom-push", n, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, n, "all CopyFrom-inserted jobs must be claimable")
+		for _, i := range sampleIndexes {
+			assertRow(t, "copyfrom-push", i, got[i], jobs[0].RunAt, jobs[0].CreatedAt)
+		}
+	})
+
+	t.Run("PushTx", func(t *testing.T) {
+		b := newBroker(t, pool)
+		ctx := context.Background()
+
+		jobs := newJobs("copyfrom-tx")
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		require.NoError(t, b.PushTx(ctx, tx, jobs...))
+		require.NoError(t, tx.Commit(ctx))
+
+		got, err := b.Claim(ctx, "copyfrom-tx", n, time.Minute)
+		require.NoError(t, err)
+		require.Len(t, got, n, "all CopyFrom-inserted (tx) jobs must be claimable")
+		for _, i := range sampleIndexes {
+			assertRow(t, "copyfrom-tx", i, got[i], jobs[0].RunAt, jobs[0].CreatedAt)
+		}
+	})
+
+	// PushTx_Rollback pins the "commits/rolls back with the caller's
+	// transaction" contract specifically for the CopyFrom path: everything
+	// tested above goes through commit, so without this the rollback branch
+	// of the new write path would be unguarded.
+	t.Run("PushTx_Rollback", func(t *testing.T) {
+		b := newBroker(t, pool)
+		ctx := context.Background()
+
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		require.NoError(t, b.PushTx(ctx, tx, newJobs("copyfrom-tx-rollback")...))
+		require.NoError(t, tx.Rollback(ctx))
+
+		got, err := b.Claim(ctx, "copyfrom-tx-rollback", n, time.Minute)
+		require.NoError(t, err)
+		assert.Empty(t, got, "CopyFrom rows inside a rolled-back tx must leave nothing behind")
+	})
 }

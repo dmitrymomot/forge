@@ -159,8 +159,42 @@ func pushArgs(jobs []queue.Job) []any {
 	return []any{ids, queues, types, payloads, scopes, attempts, maxAttempts, runAts, createdAts}
 }
 
+// copyFromThreshold gates Push/PushTx's insert strategy: below it, the single
+// unnest-array INSERT (one bind, one round trip) is cheaper than paying for
+// COPY protocol setup; at or above it, streaming rows via pgx.CopyFrom wins.
+// Measured on Apple M3 Max / postgres:18-alpine (10k-row batch): unnest
+// ~41.3ms vs CopyFrom ~24.3ms (41% faster); crossover was around 1000 rows,
+// so 2000 leaves margin. See
+// docs/superpowers/specs/2026-07-16-queue-bench-after.txt for the full table.
+const copyFromThreshold = 2000
+
+// copyFromCols mirrors the unnest insert's column list (minus the
+// last_error/claimed_until/claim_token columns, which default on insert).
+var copyFromCols = []string{"id", "queue", "type", "payload", "scope", "attempt", "max_attempts", "run_at", "created_at"}
+
+// copier is satisfied by both *pgxpool.Pool and pgx.Tx, letting pushCopyFrom
+// serve Push and PushTx alike.
+type copier interface {
+	CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)
+}
+
+func (b *Broker) pushCopyFrom(ctx context.Context, cp copier, jobs []queue.Job) error {
+	src := pgx.CopyFromSlice(len(jobs), func(i int) ([]any, error) {
+		j := jobs[i]
+		return []any{j.ID, j.Queue, j.Type, string(j.Payload), j.Scope, int32(j.Attempt), int32(j.MaxAttempts), j.RunAt, j.CreatedAt}, nil
+	})
+	_, err := cp.CopyFrom(ctx, pgx.Identifier{b.table}, copyFromCols, src)
+	return err
+}
+
 func (b *Broker) Push(ctx context.Context, jobs ...queue.Job) error {
 	if len(jobs) == 0 {
+		return nil
+	}
+	if len(jobs) >= copyFromThreshold {
+		if err := b.pushCopyFrom(ctx, b.pool, jobs); err != nil {
+			return fmt.Errorf("pgqueue: push: %w", err)
+		}
 		return nil
 	}
 	if _, err := b.pool.Exec(ctx, b.insertSQL, pushArgs(jobs)...); err != nil {
@@ -178,6 +212,12 @@ func (b *Broker) PushTx(ctx context.Context, tx any, jobs ...queue.Job) error {
 		return fmt.Errorf("pgqueue: push tx: expected pgx.Tx, got %T", tx)
 	}
 	if len(jobs) == 0 {
+		return nil
+	}
+	if len(jobs) >= copyFromThreshold {
+		if err := b.pushCopyFrom(ctx, pgtx, jobs); err != nil {
+			return fmt.Errorf("pgqueue: push tx: %w", err)
+		}
 		return nil
 	}
 	if _, err := pgtx.Exec(ctx, b.insertSQL, pushArgs(jobs)...); err != nil {
