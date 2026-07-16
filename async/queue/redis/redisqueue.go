@@ -341,7 +341,12 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 			b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q, token: token})
 			out = append(out, queue.ClaimedJob{Job: claimedJob, Token: token})
 		}
-		remaining -= len(msgs)
+		// Decrement by jobs actually claimed, not len(msgs): parked
+		// (undecodable) and vanished (zero-counter) entries above hit
+		// continue without reaching the append, so they consumed a message
+		// but never became a job. Charging them against remaining would
+		// under-fill this batch below when the stream had more room to give.
+		remaining -= len(out)
 	}
 
 	// Fresh deliveries.
