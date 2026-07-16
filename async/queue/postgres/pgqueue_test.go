@@ -164,6 +164,57 @@ func TestPgQueue_StatsCapped(t *testing.T) {
 	assert.False(t, st["bulk"].DeadCapped)
 }
 
+// TestPgQueue_PurgeDeadBeforeSpansManyBatches covers the batched drain loop
+// that brokertest's PurgeDeadBefore subtest cannot reach: it purges a single
+// dead job, so one statement always suffices and an off-by-one in the loop — a
+// batch silently left behind, or a miscounted total — would go unnoticed.
+// 12001 dead rows span two full purgeBatch(5000) statements plus a short one,
+// and the odd row proves the loop's exit does not depend on an exact multiple.
+//
+// The rows are inserted straight into the dead table rather than pushed,
+// claimed and killed one by one: the sweep reads nothing but died_at, and
+// 12001 round-trip Kill calls would dominate the runtime without testing
+// anything this test is about. Cutoffs sit far either side of the fixture's
+// died_at values, so a lagging container clock cannot flip the outcome.
+func TestPgQueue_PurgeDeadBeforeSpansManyBatches(t *testing.T) {
+	pool := openPool(t)
+	b := newBroker(t, pool)
+	ctx := context.Background()
+
+	const dead = 12001 // > 2x the 5000 batch, deliberately not a multiple of it
+	_, err := pool.Exec(ctx, `INSERT INTO queue_jobs_dead
+(id, queue, type, payload, scope, attempt, max_attempts, run_at, created_at, died_at, last_error)
+SELECT gen_random_uuid(), 'purgebatch', 'purge.kind', '{}'::json, '', 1, 5,
+       now() - interval '40 days', now() - interval '40 days', now() - interval '40 days', 'retention fixture'
+FROM generate_series(1, $1)`, dead)
+	require.NoError(t, err)
+
+	countDead := func() int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM queue_jobs_dead").Scan(&n))
+		return n
+	}
+	// Premise guard: without this, an assertion of "everything is gone" could
+	// pass on a dead table that was never populated.
+	require.Equal(t, dead, countDead(), "fixture must fill the dead table")
+
+	// A cutoff before every died_at removes nothing: the loop must exit on the
+	// first empty batch rather than spin.
+	n, err := b.PurgeDeadBefore(ctx, time.Now().Add(-365*24*time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	require.Equal(t, dead, countDead(), "a cutoff older than every row must purge nothing")
+
+	n, err = b.PurgeDeadBefore(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, dead, n, "the batched loop must report every purged row exactly once across all batches")
+	assert.Zero(t, countDead(), "no dead row may survive the sweep")
+
+	left, err := b.ListDead(ctx, "purgebatch", 10)
+	require.NoError(t, err)
+	assert.Empty(t, left)
+}
+
 // TestPgQueue_PushCopyFromThreshold exercises Push/PushTx right at
 // copyFromThreshold, where the insert switches from the unnest-array INSERT
 // to pgx.CopyFrom (see pgqueue.go). TestPgQueue_StatsCapped already pushes a

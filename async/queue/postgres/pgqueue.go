@@ -39,6 +39,14 @@ var tableNameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // O(cap) via bounded index-only scans instead of O(table).
 const statsCap = 10000
 
+// purgeBatch bounds one PurgeDeadBefore statement: ~5ms per delete on
+// postgres:18-alpine, far inside any sane statement_timeout, with WAL and
+// vacuum debt paid off between statements rather than accumulated across a
+// multi-million-row delete. Larger than the redis driver's batch because a
+// bounded SQL delete blocks nothing but its own rows, where a redis script
+// stalls the entire single-threaded server.
+const purgeBatch = 5000
+
 // Broker is the Postgres queue.Broker and queue.TxPusher.
 type Broker struct {
 	pool      *pgxpool.Pool
@@ -118,7 +126,27 @@ RETURNING id, queue, type, payload, scope, max_attempts, created_at, last_error
 INSERT INTO %[1]s (id, queue, type, payload, scope, attempt, max_attempts, run_at, created_at, last_error)
 SELECT id, queue, type, payload, scope, 0, max_attempts, now(), created_at, last_error FROM d`, b.table, b.deadTable)
 	b.purgeSQL = fmt.Sprintf("DELETE FROM %s WHERE id = $1", b.deadTable)
-	b.purgeBeforeSQL = fmt.Sprintf("DELETE FROM %s WHERE died_at < $1", b.deadTable)
+	// Bounded per statement; PurgeDeadBefore loops. An unbounded
+	// DELETE ... WHERE died_at < $1 over a DLQ that has never been swept
+	// (DeadRetention is new, so the first sweep after an upgrade meets the
+	// whole backlog) is one long transaction: enormous WAL, vacuum blocked for
+	// its duration, and under the statement_timeout any production pool sets it
+	// is killed and rolled back — then retried identically every 5 minutes from
+	// every instance, forever, with zero progress.
+	//
+	// ARRAY(...) rather than the obvious `id IN (SELECT ...)`: IN leaves a
+	// semi-join the planner satisfies by seq-scanning the WHOLE table on every
+	// batch, so batching that shape costs table-size per batch and turns a
+	// 1M-row backlog into ~200 full scans. ARRAY forces one InitPlan, and the
+	// delete becomes a bitmap index scan over the primary key — bounded by the
+	// batch, not the table. Measured on postgres:18-alpine / 500k dead rows:
+	// 5.3ms per batch vs 28.3ms for IN, and the gap widens with table size.
+	// The inner scan is bounded by LIMIT either way, using
+	// queue_jobs_dead_sweep_idx when the cutoff is selective enough to pay for
+	// it and stopping early on a seq scan when it is not.
+	b.purgeBeforeSQL = fmt.Sprintf(`DELETE FROM %[1]s WHERE id = ANY(ARRAY(
+SELECT id FROM %[1]s WHERE died_at < $1 LIMIT $2
+))`, b.deadTable)
 	b.existsSQL = fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE id = $1)", b.table)
 	b.statsPendingSQL = fmt.Sprintf(`SELECT q.queue, c.n FROM (SELECT DISTINCT queue FROM %[1]s) q
 CROSS JOIN LATERAL (SELECT count(*) AS n FROM (SELECT 1 FROM %[1]s j WHERE j.queue = q.queue LIMIT %[2]d) t) c`, b.table, statsCap+1)
@@ -313,11 +341,24 @@ func (b *Broker) Purge(ctx context.Context, jobID string) error {
 }
 
 func (b *Broker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, error) {
-	tag, err := b.pool.Exec(ctx, b.purgeBeforeSQL, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("pgqueue: purge dead before: %w", err)
+	total := 0
+	// Drain in bounded statements so a large backlog costs many short
+	// transactions instead of one unkillable long one; a backlog too large for
+	// one tick simply continues on the next.
+	for {
+		tag, err := b.pool.Exec(ctx, b.purgeBeforeSQL, cutoff, purgeBatch)
+		if err != nil {
+			return total, fmt.Errorf("pgqueue: purge dead before: %w", err)
+		}
+		n := int(tag.RowsAffected())
+		total += n
+		if n < purgeBatch {
+			return total, nil // short batch: nothing left under the cutoff
+		}
+		if ctx.Err() != nil {
+			return total, ctx.Err()
+		}
 	}
-	return int(tag.RowsAffected()), nil
 }
 
 func (b *Broker) notDeadOrMissing(ctx context.Context, jobID string) error {
