@@ -64,6 +64,99 @@ func TestRedisQueue_NoTxPusher(t *testing.T) {
 	assert.ErrorIs(t, err, queue.ErrTxUnsupported)
 }
 
+// claimAllWithin polls Claim until it has collected want jobs, accumulating
+// partial batches. Each Claim call mints its own token, so callers must index
+// tokens by job id rather than assume one token for the whole slice.
+// Redelivery is gated by the redis server's idle clock, so poll for the
+// expected outcome instead of asserting once after a fixed sleep.
+func claimAllWithin(tb testing.TB, b *redisqueue.Broker, q string, want int, lease time.Duration) []queue.ClaimedJob {
+	tb.Helper()
+	ctx := context.Background()
+	got := make([]queue.ClaimedJob, 0, want)
+	deadline := time.Now().Add(3 * time.Second)
+	for len(got) < want {
+		batch, err := b.Claim(ctx, q, want-len(got), lease)
+		require.NoError(tb, err)
+		got = append(got, batch...)
+		if len(got) >= want {
+			break
+		}
+		require.False(tb, time.Now().After(deadline), "claimed %d of %d job(s) from %q within deadline", len(got), want, q)
+		time.Sleep(25 * time.Millisecond)
+	}
+	return got
+}
+
+// tokensByID indexes claim tokens by job id.
+func tokensByID(jobs []queue.ClaimedJob) map[string]string {
+	m := make(map[string]string, len(jobs))
+	for _, j := range jobs {
+		m[j.ID] = j.Token
+	}
+	return m
+}
+
+// TestRedisQueue_StaleWorkerCannotClobberReclaimedJob covers the Lua
+// PEL-ownership check inside the finalize scripts — the layer no other test
+// reaches. brokertest's Fencing subtest drives a SINGLE broker instance, so its
+// stale-token ops are rejected in-process by take() and the scripts never run;
+// the crash tests kill b1 before it ever attempts a finalize.
+//
+// Here b1 stays LIVE and keeps its refs, so its token passes take() and the
+// scripts DO run: only the XPENDING consumer match stands between b1 and
+// clobbering the job b2 reclaimed once the lease expired. One job per op,
+// because take() removes the ref on a token match — reusing a single job would
+// send every op after the first down the in-process path instead of the Lua one.
+func TestRedisQueue_StaleWorkerCannotClobberReclaimedJob(t *testing.T) {
+	client := dial(t)
+	prefix := fmt.Sprintf("qt:stale:%s:", runID)
+	b1, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	const lease = 300 * time.Millisecond
+
+	c := queue.NewClient(b1)
+	for range 5 { // one job per fenced op, plus a control
+		require.NoError(t, c.PushRaw(ctx, "stale.kind", []byte(`{}`)))
+	}
+
+	claimed := claimAllWithin(t, b1, "default", 5, lease)
+	b1Tok := tokensByID(claimed)
+	require.Len(t, b1Tok, 5)
+	ackID, killID, nackID, extendID, controlID := claimed[0].ID, claimed[1].ID, claimed[2].ID, claimed[3].ID, claimed[4].ID
+
+	// Premise guard: while b1 still owns the PEL entries its token finalizes for
+	// real. Without this the assertions below could pass vacuously on a take()
+	// miss instead of on the Lua check they exist to cover.
+	require.NoError(t, b1.Ack(ctx, controlID, b1Tok[controlID]), "b1's token must be live before the lease expires")
+
+	// b1 does NOT crash: it keeps its refs, so take() still matches its token.
+	b2, err := redisqueue.New(client, redisqueue.WithPrefix(prefix))
+	require.NoError(t, err)
+	time.Sleep(lease + 100*time.Millisecond) // let b1's entries go idle
+
+	reclaimed := claimAllWithin(t, b2, "default", 4, lease)
+	b2Tok := tokensByID(reclaimed)
+	require.Len(t, b2Tok, 4, "b2 must reclaim every expired job exactly once")
+
+	// Every fenced op from the live-but-stale b1 must be refused by the script's
+	// ownership check — take() cannot catch these, the token is b1's own.
+	assert.ErrorIs(t, b1.Ack(ctx, ackID, b1Tok[ackID]), queue.ErrLeaseLost)
+	assert.ErrorIs(t, b1.Kill(ctx, killID, b1Tok[killID], "stale kill"), queue.ErrLeaseLost)
+	assert.ErrorIs(t, b1.Nack(ctx, nackID, b1Tok[nackID], time.Now(), "stale nack"), queue.ErrLeaseLost)
+	assert.ErrorIs(t, b1.Extend(ctx, extendID, b1Tok[extendID], time.Minute), queue.ErrLeaseLost)
+
+	dead, err := b2.ListDead(ctx, "default", 10)
+	require.NoError(t, err)
+	assert.Empty(t, dead, "a stale worker's Kill must not dead-letter a job it no longer owns")
+
+	// b2's claim is undisturbed: its own token still finalizes every job.
+	for jobID, tok := range b2Tok {
+		assert.NoError(t, b2.Ack(ctx, jobID, tok), "b2's claim must survive the stale worker's ops")
+	}
+}
+
 func TestRedisQueue_AttemptSurvivesCrashRedelivery(t *testing.T) {
 	// A second Broker instance (fresh refs — simulated crash) must still see
 	// the correct attempt count via the XPENDING delivery counter.
@@ -89,7 +182,7 @@ func TestRedisQueue_AttemptSurvivesCrashRedelivery(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got2, 1)
 	assert.Equal(t, 2, got2[0].Attempt, "redelivery after crash must count as a new attempt")
-	require.NoError(t, b2.Ack(ctx, got2[0].ID))
+	require.NoError(t, b2.Ack(ctx, got2[0].ID, got2[0].Token))
 }
 
 func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
@@ -122,7 +215,7 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	assert.Equal(t, 2, crashed[0].Attempt, "crash redelivery = attempt 2")
 
 	// Handler fails → Nack. The consumed attempt (2) must survive.
-	require.NoError(t, b2.Nack(ctx, crashed[0].ID, time.Now(), "still failing"))
+	require.NoError(t, b2.Nack(ctx, crashed[0].ID, crashed[0].Token, time.Now(), "still failing"))
 
 	time.Sleep(20 * time.Millisecond)
 	retried, err := b2.Claim(ctx, "default", 1, time.Minute)
@@ -130,5 +223,5 @@ func TestRedisQueue_NackAfterCrashRedeliveryPreservesAttempts(t *testing.T) {
 	require.Len(t, retried, 1)
 	assert.Equal(t, 3, retried[0].Attempt, "post-nack claim must continue from the crash-redelivered attempt, not reset")
 	assert.Equal(t, "still failing", retried[0].LastError)
-	require.NoError(t, b2.Ack(ctx, retried[0].ID))
+	require.NoError(t, b2.Ack(ctx, retried[0].ID, retried[0].Token))
 }

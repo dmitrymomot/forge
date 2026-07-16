@@ -1,12 +1,10 @@
 package redisqueue
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +31,73 @@ end
 return #due
 `)
 
+// Finalize scripts verify PEL ownership atomically before mutating: XPENDING
+// for the exact message must name this consumer, otherwise the message was
+// autoclaimed by another worker (or already finalized) and the op returns 0 →
+// ErrLeaseLost. Plain XACK would succeed regardless of owner.
+var ackScript = redis.NewScript(`
+local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[3], ARGV[3], 1)
+if #p == 0 or p[1][2] ~= ARGV[2] then return 0 end
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[3])
+redis.call('XDEL', KEYS[1], ARGV[3])
+redis.call('HDEL', KEYS[2], ARGV[4])
+return 1
+`)
+
+var nackScript = redis.NewScript(`
+local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[3], ARGV[3], 1)
+if #p == 0 or p[1][2] ~= ARGV[2] then return 0 end
+redis.call('ZADD', KEYS[2], ARGV[5], ARGV[4])
+redis.call('HSET', KEYS[3], ARGV[4], ARGV[6])
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[3])
+redis.call('XDEL', KEYS[1], ARGV[3])
+return 1
+`)
+
+var killScript = redis.NewScript(`
+local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[3], ARGV[3], 1)
+if #p == 0 or p[1][2] ~= ARGV[2] then return 0 end
+redis.call('HSET', KEYS[2], ARGV[4], ARGV[5])
+redis.call('ZADD', KEYS[3], ARGV[6], ARGV[4])
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[3])
+redis.call('XDEL', KEYS[1], ARGV[3])
+return 1
+`)
+
+var extendScript = redis.NewScript(`
+local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[3], ARGV[3], 1)
+if #p == 0 or p[1][2] ~= ARGV[2] then return 0 end
+redis.call('XCLAIM', KEYS[1], ARGV[1], ARGV[2], 0, ARGV[3], 'JUSTID')
+return 1
+`)
+
+// requeueScript atomically moves a dead job back to the stream. HDEL-as-test:
+// only the caller that actually removes the dead entry re-adds the job, so a
+// concurrent double-requeue cannot duplicate it.
+var requeueScript = redis.NewScript(`
+if redis.call('HDEL', KEYS[1], ARGV[1]) == 0 then return 0 end
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('XADD', KEYS[3], '*', 'j', ARGV[2])
+return 1
+`)
+
+var purgeScript = redis.NewScript(`
+if redis.call('HDEL', KEYS[1], ARGV[1]) == 0 then return 0 end
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+return 1
+`)
+
+var purgeDeadBeforeScript = redis.NewScript(`
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+for i = 1, #ids do
+  redis.call('ZREM', KEYS[1], ids[i])
+  redis.call('HDEL', KEYS[2], ids[i])
+  redis.call('HDEL', KEYS[3], ids[i])
+end
+return #ids
+`)
+
 // Broker is the Redis queue.Broker.
 type Broker struct {
 	client   redis.UniversalClient
@@ -47,6 +112,7 @@ type Broker struct {
 type claimedRef struct {
 	msgID string
 	queue string
+	token string
 	job   queue.Job // post-claim envelope: Attempt is what the engine saw this round (incl. crash redeliveries)
 }
 
@@ -81,6 +147,7 @@ func (b *Broker) streamKey(q string) string  { return b.prefix + q }
 func (b *Broker) delayedKey(q string) string { return b.prefix + q + ":delayed" }
 func (b *Broker) dataKey(q string) string    { return b.prefix + q + ":data" }
 func (b *Broker) deadKey(q string) string    { return b.prefix + q + ":dead" }
+func (b *Broker) deadIdxKey(q string) string { return b.prefix + q + ":dead:idx" }
 func (b *Broker) queuesKey() string          { return b.prefix + "queues" }
 func (b *Broker) indexKey() string           { return b.prefix + "index" }
 
@@ -101,22 +168,34 @@ func (b *Broker) ensureGroup(ctx context.Context, q string) error {
 	return nil
 }
 
-func (b *Broker) Push(ctx context.Context, job queue.Job) error {
-	enc, err := queue.EncodeJob(job)
-	if err != nil {
-		return err
+func (b *Broker) Push(ctx context.Context, jobs ...queue.Job) error {
+	if len(jobs) == 0 {
+		return nil
 	}
-	if err := b.ensureGroup(ctx, job.Queue); err != nil {
-		return err
+	seen := make(map[string]bool, len(jobs))
+	for _, j := range jobs {
+		if seen[j.Queue] {
+			continue
+		}
+		seen[j.Queue] = true
+		if err := b.ensureGroup(ctx, j.Queue); err != nil {
+			return err
+		}
 	}
 	pipe := b.client.TxPipeline()
-	pipe.SAdd(ctx, b.queuesKey(), job.Queue)
-	pipe.HSet(ctx, b.indexKey(), job.ID, job.Queue)
-	if job.RunAt.After(time.Now()) {
-		pipe.ZAdd(ctx, b.delayedKey(job.Queue), redis.Z{Score: float64(job.RunAt.UnixMilli()), Member: job.ID})
-		pipe.HSet(ctx, b.dataKey(job.Queue), job.ID, enc)
-	} else {
-		pipe.XAdd(ctx, &redis.XAddArgs{Stream: b.streamKey(job.Queue), Values: map[string]any{"j": enc}})
+	for _, j := range jobs {
+		enc, err := queue.EncodeJob(j)
+		if err != nil {
+			return err
+		}
+		pipe.SAdd(ctx, b.queuesKey(), j.Queue)
+		pipe.HSet(ctx, b.indexKey(), j.ID, j.Queue)
+		if j.RunAt.After(time.Now()) {
+			pipe.ZAdd(ctx, b.delayedKey(j.Queue), redis.Z{Score: float64(j.RunAt.UnixMilli()), Member: j.ID})
+			pipe.HSet(ctx, b.dataKey(j.Queue), j.ID, enc)
+		} else {
+			pipe.XAdd(ctx, &redis.XAddArgs{Stream: b.streamKey(j.Queue), Values: map[string]any{"j": enc}})
+		}
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("redisqueue: push: %w", err)
@@ -124,7 +203,7 @@ func (b *Broker) Push(ctx context.Context, job queue.Job) error {
 	return nil
 }
 
-func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration) ([]queue.Job, error) {
+func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration) ([]queue.ClaimedJob, error) {
 	if err := b.ensureGroup(ctx, q); err != nil {
 		return nil, err
 	}
@@ -134,8 +213,11 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 		return nil, fmt.Errorf("redisqueue: promote delayed: %w", err)
 	}
 
+	// One fencing token per Claim call, shared by every job in this batch.
+	token := id.NewUUID().String()
+
 	remaining := n
-	var out []queue.Job
+	var out []queue.ClaimedJob
 
 	// Lease-expired redeliveries first.
 	msgs, _, err := b.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
@@ -168,8 +250,8 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 			}
 			claimedJob := j
 			claimedJob.Attempt = j.Attempt + int(delivered)
-			b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q})
-			out = append(out, claimedJob)
+			b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q, token: token})
+			out = append(out, queue.ClaimedJob{Job: claimedJob, Token: token})
 		}
 		remaining -= len(msgs)
 	}
@@ -191,8 +273,8 @@ func (b *Broker) Claim(ctx context.Context, q string, n int, lease time.Duration
 				}
 				claimedJob := j
 				claimedJob.Attempt = j.Attempt + 1
-				b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q})
-				out = append(out, claimedJob)
+				b.remember(claimedJob.ID, claimedRef{job: claimedJob, msgID: m.ID, queue: q, token: token})
+				out = append(out, queue.ClaimedJob{Job: claimedJob, Token: token})
 			}
 		}
 	}
@@ -217,54 +299,64 @@ func (b *Broker) remember(id string, ref claimedRef) {
 	b.mu.Unlock()
 }
 
-func (b *Broker) take(id string) (claimedRef, bool) {
+// take removes and returns the claimed ref for id IF token owns it. A
+// mismatched token means the ref belongs to a newer claim on this instance —
+// left untouched, the caller gets ErrLeaseLost.
+func (b *Broker) take(id, token string) (claimedRef, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ref, ok := b.claimed[id]
-	if ok {
-		delete(b.claimed, id)
+	if !ok || ref.token != token {
+		return claimedRef{}, false
 	}
-	return ref, ok
+	delete(b.claimed, id)
+	return ref, true
 }
 
-func (b *Broker) Extend(ctx context.Context, jobID string, _ time.Duration) error {
+func (b *Broker) Extend(ctx context.Context, jobID, token string, _ time.Duration) error {
 	b.mu.Lock()
 	ref, ok := b.claimed[jobID]
 	b.mu.Unlock()
-	if !ok {
-		return queue.ErrJobNotFound
+	if !ok || ref.token != token {
+		return queue.ErrLeaseLost
 	}
-	// JUSTID resets the idle clock without bumping the delivery counter.
-	// Lease expiry is idle-based here: the next Claim's MinIdle is the lease.
-	err := b.client.XClaimJustID(ctx, &redis.XClaimArgs{
-		Stream: b.streamKey(ref.queue), Group: group, Consumer: b.consumer,
-		MinIdle: 0, Messages: []string{ref.msgID},
-	}).Err()
-	if err != nil && !errors.Is(err, redis.Nil) {
+	// XCLAIM JUSTID (to ourselves, inside the ownership check) resets the idle
+	// clock without bumping the delivery counter. Lease expiry is idle-based
+	// here: the next Claim's MinIdle is the lease.
+	n, err := extendScript.Run(ctx, b.client, []string{b.streamKey(ref.queue)}, group, b.consumer, ref.msgID).Int()
+	if err != nil {
 		return fmt.Errorf("redisqueue: extend: %w", err)
 	}
+	if n == 0 {
+		b.mu.Lock()
+		delete(b.claimed, jobID) // stale ref: message moved to another consumer
+		b.mu.Unlock()
+		return queue.ErrLeaseLost
+	}
 	return nil
 }
 
-func (b *Broker) Ack(ctx context.Context, jobID string) error {
-	ref, ok := b.take(jobID)
+func (b *Broker) Ack(ctx context.Context, jobID, token string) error {
+	ref, ok := b.take(jobID, token)
 	if !ok {
-		return queue.ErrJobNotFound
+		return queue.ErrLeaseLost
 	}
-	pipe := b.client.TxPipeline()
-	pipe.XAck(ctx, b.streamKey(ref.queue), group, ref.msgID)
-	pipe.XDel(ctx, b.streamKey(ref.queue), ref.msgID)
-	pipe.HDel(ctx, b.indexKey(), jobID)
-	if _, err := pipe.Exec(ctx); err != nil {
+	n, err := ackScript.Run(ctx, b.client,
+		[]string{b.streamKey(ref.queue), b.indexKey()},
+		group, b.consumer, ref.msgID, jobID).Int()
+	if err != nil {
 		return fmt.Errorf("redisqueue: ack: %w", err)
 	}
+	if n == 0 {
+		return queue.ErrLeaseLost
+	}
 	return nil
 }
 
-func (b *Broker) Nack(ctx context.Context, jobID string, retryAt time.Time, reason string) error {
-	ref, ok := b.take(jobID)
+func (b *Broker) Nack(ctx context.Context, jobID, token string, retryAt time.Time, reason string) error {
+	ref, ok := b.take(jobID, token)
 	if !ok {
-		return queue.ErrJobNotFound
+		return queue.ErrLeaseLost
 	}
 	j := ref.job
 	// ref.job.Attempt already reflects the attempt the engine just consumed
@@ -275,21 +367,22 @@ func (b *Broker) Nack(ctx context.Context, jobID string, retryAt time.Time, reas
 	if err != nil {
 		return err
 	}
-	pipe := b.client.TxPipeline()
-	pipe.ZAdd(ctx, b.delayedKey(ref.queue), redis.Z{Score: float64(retryAt.UnixMilli()), Member: jobID})
-	pipe.HSet(ctx, b.dataKey(ref.queue), jobID, enc)
-	pipe.XAck(ctx, b.streamKey(ref.queue), group, ref.msgID)
-	pipe.XDel(ctx, b.streamKey(ref.queue), ref.msgID)
-	if _, err := pipe.Exec(ctx); err != nil {
+	n, err := nackScript.Run(ctx, b.client,
+		[]string{b.streamKey(ref.queue), b.delayedKey(ref.queue), b.dataKey(ref.queue)},
+		group, b.consumer, ref.msgID, jobID, retryAt.UnixMilli(), enc).Int()
+	if err != nil {
 		return fmt.Errorf("redisqueue: nack: %w", err)
+	}
+	if n == 0 {
+		return queue.ErrLeaseLost
 	}
 	return nil
 }
 
-func (b *Broker) Kill(ctx context.Context, jobID string, reason string) error {
-	ref, ok := b.take(jobID)
+func (b *Broker) Kill(ctx context.Context, jobID, token string, reason string) error {
+	ref, ok := b.take(jobID, token)
 	if !ok {
-		return queue.ErrJobNotFound
+		return queue.ErrLeaseLost
 	}
 	j := ref.job // Attempt already reflects the consumed attempt (incl. crash redeliveries)
 	j.LastError = reason
@@ -297,32 +390,46 @@ func (b *Broker) Kill(ctx context.Context, jobID string, reason string) error {
 	if err != nil {
 		return err
 	}
-	pipe := b.client.TxPipeline()
-	pipe.HSet(ctx, b.deadKey(ref.queue), jobID, enc)
-	pipe.XAck(ctx, b.streamKey(ref.queue), group, ref.msgID)
-	pipe.XDel(ctx, b.streamKey(ref.queue), ref.msgID)
-	if _, err := pipe.Exec(ctx); err != nil {
+	n, err := killScript.Run(ctx, b.client,
+		[]string{b.streamKey(ref.queue), b.deadKey(ref.queue), b.deadIdxKey(ref.queue)},
+		group, b.consumer, ref.msgID, jobID, enc, time.Now().UnixMilli()).Int()
+	if err != nil {
 		return fmt.Errorf("redisqueue: kill: %w", err)
+	}
+	if n == 0 {
+		return queue.ErrLeaseLost
 	}
 	return nil
 }
 
 func (b *Broker) ListDead(ctx context.Context, q string, limit int) ([]queue.Job, error) {
-	all, err := b.client.HGetAll(ctx, b.deadKey(q)).Result()
-	if err != nil {
-		return nil, fmt.Errorf("redisqueue: list dead: %w", err)
+	if limit <= 0 {
+		return nil, nil
 	}
-	jobs := make([]queue.Job, 0, len(all))
-	for _, enc := range all {
-		j, err := queue.DecodeJob([]byte(enc))
+	// The idx ZSET is scored by kill-time ms with lexicographic id tiebreak,
+	// so a range read IS the ListDead order; O(limit), never O(DLQ).
+	ids, err := b.client.ZRange(ctx, b.deadIdxKey(q), 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redisqueue: list dead range: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	encs, err := b.client.HMGet(ctx, b.deadKey(q), ids...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redisqueue: list dead fetch: %w", err)
+	}
+	jobs := make([]queue.Job, 0, len(encs))
+	for _, enc := range encs {
+		s, ok := enc.(string)
+		if !ok {
+			continue // purged between ZRANGE and HMGET
+		}
+		j, err := queue.DecodeJob([]byte(s))
 		if err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)
-	}
-	sortDead(jobs)
-	if len(jobs) > limit {
-		jobs = jobs[:limit]
 	}
 	return jobs, nil
 }
@@ -352,11 +459,13 @@ func (b *Broker) Requeue(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
-	pipe := b.client.TxPipeline()
-	pipe.XAdd(ctx, &redis.XAddArgs{Stream: b.streamKey(q), Values: map[string]any{"j": fresh}})
-	pipe.HDel(ctx, b.deadKey(q), jobID)
-	if _, err := pipe.Exec(ctx); err != nil {
+	n, err := requeueScript.Run(ctx, b.client,
+		[]string{b.deadKey(q), b.deadIdxKey(q), b.streamKey(q)}, jobID, fresh).Int()
+	if err != nil {
 		return fmt.Errorf("redisqueue: requeue: %w", err)
+	}
+	if n == 0 {
+		return queue.ErrNotDead // lost a concurrent requeue/purge race
 	}
 	return nil
 }
@@ -369,20 +478,34 @@ func (b *Broker) Purge(ctx context.Context, jobID string) error {
 	if err != nil {
 		return fmt.Errorf("redisqueue: purge index: %w", err)
 	}
-	exists, err := b.client.HExists(ctx, b.deadKey(q), jobID).Result()
+	n, err := purgeScript.Run(ctx, b.client,
+		[]string{b.deadKey(q), b.deadIdxKey(q), b.indexKey()}, jobID).Int()
 	if err != nil {
-		return fmt.Errorf("redisqueue: purge exists: %w", err)
-	}
-	if !exists {
-		return queue.ErrNotDead
-	}
-	pipe := b.client.TxPipeline()
-	pipe.HDel(ctx, b.deadKey(q), jobID)
-	pipe.HDel(ctx, b.indexKey(), jobID)
-	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("redisqueue: purge: %w", err)
 	}
+	if n == 0 {
+		return queue.ErrNotDead
+	}
 	return nil
+}
+
+func (b *Broker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	queues, err := b.client.SMembers(ctx, b.queuesKey()).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redisqueue: purge dead before: %w", err)
+	}
+	total := 0
+	for _, q := range queues {
+		// "(" makes the score bound exclusive: died_at < cutoff, not <=.
+		n, err := purgeDeadBeforeScript.Run(ctx, b.client,
+			[]string{b.deadIdxKey(q), b.deadKey(q), b.indexKey()},
+			fmt.Sprintf("(%d", cutoff.UnixMilli())).Int()
+		if err != nil {
+			return total, fmt.Errorf("redisqueue: purge dead before %q: %w", q, err)
+		}
+		total += n
+	}
+	return total, nil
 }
 
 func (b *Broker) Stats(ctx context.Context) (queue.Stats, error) {
@@ -407,14 +530,4 @@ func (b *Broker) Stats(ctx context.Context) (queue.Stats, error) {
 		st[q] = queue.QueueStats{Pending: int(streamLen + delayed), Dead: int(dead)}
 	}
 	return st, nil
-}
-
-// sortDead orders dead jobs by CreatedAt then ID (HGETALL is unordered).
-func sortDead(jobs []queue.Job) {
-	slices.SortFunc(jobs, func(a, c queue.Job) int {
-		if r := a.CreatedAt.Compare(c.CreatedAt); r != 0 {
-			return r
-		}
-		return cmp.Compare(a.ID, c.ID)
-	})
 }
