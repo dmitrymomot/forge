@@ -15,7 +15,9 @@
 // handler runs; if the process crashes the lease expires and the job is
 // redelivered. Claims carry a fencing token: a worker whose lease was lost
 // cannot ack, retry, kill, or extend the job anymore (queue.ErrLeaseLost), so
-// duplicate execution is confined to true crash-mid-handler redelivery.
+// a worker that lost its lease cannot corrupt the new claim's state.
+// Duplicates still occur on any lease loss — crash, GC pause, or broker
+// partition — because a cancelled handler's side effects have already landed.
 // HANDLERS MUST STILL BE IDEMPOTENT. Ordering is not guaranteed.
 //
 // # Usage

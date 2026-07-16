@@ -15,6 +15,9 @@ import (
 //   - Push accepts a batch and is all-or-nothing; an empty batch is a no-op.
 //   - Claim atomically sets the lease, stamps a fencing token, AND increments
 //     the attempt counter. Claimed jobs return ordered by (run_at, id).
+//   - A token fences a job's claim GENERATION, and one Claim call stamps the
+//     same token on every job in its batch: it is not a per-job secret. Key
+//     any internal state by job id, not by token.
 //   - A claimed job is invisible to Claim until its lease expires.
 //   - Extend/Ack/Nack/Kill require the claim token and return ErrLeaseLost
 //     when it no longer owns the job (lease lost to another claim, job already

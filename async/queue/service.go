@@ -320,6 +320,11 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 	if s.scopeCtx != nil {
 		hctx = s.scopeCtx(hctx, job.Scope)
 	}
+	// INVARIANT: no early return between here and hbWG.Wait() below. Cleanup
+	// is straight-line rather than deferred on purpose — deferring would run it
+	// after the logAttrs appends below, reordering the log record and racing
+	// the heartbeat's own writes — so a return added in this window would leak
+	// hctx and orphan the heartbeat goroutine, with no compiler help.
 	hctx, cancelHandler := context.WithCancel(hctx)
 
 	// Heartbeat: extend the lease at lease/3 until the handler returns. A
