@@ -523,6 +523,19 @@ func TestRegister_DuplicatePanics(t *testing.T) {
 	})
 }
 
+// TestWithHandlerTimeout_NegativePanics pins the fail-fast-at-wiring idiom for
+// the per-kind timeout. Config.HandlerTimeout < 0 is an ErrInvalidConfig, but
+// the per-kind option is only read through a `timeout > 0` check: without the
+// panic a negative duration would silently mean "disabled", leaving a handler
+// the caller explicitly meant to bound running unbounded forever.
+func TestWithHandlerTimeout_NegativePanics(t *testing.T) {
+	t.Parallel()
+	assert.Panics(t, func() { queue.WithHandlerTimeout(-time.Second) })
+	// The two legal values must stay legal: 0 is the documented opt-out.
+	assert.NotPanics(t, func() { queue.WithHandlerTimeout(0) })
+	assert.NotPanics(t, func() { queue.WithHandlerTimeout(time.Second) })
+}
+
 func TestService_DefaultHandlerTimeout(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig()

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -119,8 +120,13 @@ type HandlerOption func(*handler)
 // WithHandlerTimeout bounds each invocation of this kind; expiry counts as a
 // failure and takes the retry path. Overrides Config.HandlerTimeout;
 // WithHandlerTimeout(0) disables the timeout entirely for kinds that
-// legitimately run long.
+// legitimately run long. Panics on a negative duration, which Config.Validate
+// rejects too — it would otherwise read as "disabled" and silently unbound a
+// handler the caller meant to bound.
 func WithHandlerTimeout(d time.Duration) HandlerOption {
+	if d < 0 {
+		panic(fmt.Sprintf("queue: WithHandlerTimeout(%v): timeout must be >= 0 (0 disables the timeout)", d))
+	}
 	return func(h *handler) { h.timeout, h.timeoutSet = d, true }
 }
 
