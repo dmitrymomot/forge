@@ -19,9 +19,11 @@ func BenchmarkPgPushClaimAck(b *testing.B) {
 	}]("bench.pg")
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
+		// Past-biased RunAt: visibility is decided by the database clock, which
+		// can lag the test process on a Docker VM (see brokertest.dueNow).
 		if err := queue.Push(ctx, c, kind, struct {
 			N int `json:"n"`
-		}{N: i}); err != nil {
+		}{N: i}, queue.WithRunAt(time.Now().Add(-2*time.Second))); err != nil {
 			b.Fatal(err)
 		}
 		jobs, err := broker.Claim(ctx, "default", 1, time.Minute)

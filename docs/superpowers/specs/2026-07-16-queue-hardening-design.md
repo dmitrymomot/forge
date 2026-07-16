@@ -181,6 +181,8 @@ Unchanged: SWRR priority + strict mode, verdicts (`Cancel`, `SkipRetry`), attemp
 
 **Benchmarks** (before/after in PR, per repo rule): memory benches rerun on the new layout; `PushMany` at N ∈ {1, 100, 10k} on all three brokers; pg claim-cycle before/after schema rework; redis `ListDead` before/after ZSET index. Post-bench optimization pass, measured wins only (e.g. `CopyFrom` threshold decided by data).
 
+**Baseline**: pre-rework numbers are captured in `2026-07-16-queue-bench-baseline.txt` (commit `b155bb0`, Apple M3 Max, go1.26.5, testcontainers pg16/redis7). Notables: pg push+claim+ack cycle 537µs/op, redis 815µs/op, memory 100-job claim against a 10k backlog 1.15ms/op (the O(all jobs) scan, issue #12, quantified). The PR's final comparison reruns the baseline side from that commit in a throwaway worktree with `benchstat` at `-count>=10` on the same machine — the committed file is the reference, not the statistical input. Two bench-harness rules discovered while capturing: `EndToEnd_Memory` must run with `-benchtime=5000x` (time-based benchtime makes the drain wait unbounded pre-rework — the run had to be killed after 8+ CPU-minutes), and the pg bench pushes with a past-biased `RunAt` (brokertest `dueNow()` idiom) to survive macOS Docker clock lag; the reworked bench suite keeps both conventions.
+
 **Docs**: doc.go delivery contract gains the fencing story ("duplicates only on true crash"), the 30d retention default (behavioral change), `PushMany` usage; redis package doc documents the poison key; `docs/packages.md` untouched (package already cataloged).
 
 ## Out of scope
