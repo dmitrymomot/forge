@@ -30,7 +30,7 @@ func BenchmarkPgPushClaimAck(b *testing.B) {
 		if err != nil || len(jobs) != 1 {
 			b.Fatalf("claim: %v (%d jobs)", err, len(jobs))
 		}
-		if err := broker.Ack(ctx, jobs[0].ID); err != nil {
+		if err := broker.Ack(ctx, jobs[0].ID, jobs[0].Token); err != nil {
 			b.Fatal(err)
 		}
 	}

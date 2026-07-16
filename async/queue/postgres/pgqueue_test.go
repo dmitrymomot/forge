@@ -16,6 +16,7 @@ import (
 	"github.com/dmitrymomot/forge/async/queue"
 	"github.com/dmitrymomot/forge/async/queue/brokertest"
 	pgqueue "github.com/dmitrymomot/forge/async/queue/postgres"
+	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/data/migration"
 	"github.com/dmitrymomot/forge/data/postgres"
 	"github.com/dmitrymomot/forge/testkit/pgtest"
@@ -43,7 +44,7 @@ func openPool(tb testing.TB) *pgxpool.Pool {
 
 func newBroker(tb testing.TB, pool *pgxpool.Pool) *pgqueue.Broker {
 	tb.Helper()
-	_, err := pool.Exec(context.Background(), "TRUNCATE queue_jobs")
+	_, err := pool.Exec(context.Background(), "TRUNCATE queue_jobs, queue_jobs_dead")
 	require.NoError(tb, err)
 	b, err := pgqueue.New(pool)
 	require.NoError(tb, err)
@@ -54,7 +55,7 @@ func newBroker(tb testing.TB, pool *pgxpool.Pool) *pgqueue.Broker {
 // pushed via the client carry a RunAt stamped from the test-process clock, but
 // visibility is decided by the Postgres clock; polling tolerates a containerised
 // database whose clock lags the test process (e.g. a Docker VM under load).
-func claimOne(t *testing.T, b queue.Broker, q string) queue.Job {
+func claimOne(t *testing.T, b queue.Broker, q string) queue.ClaimedJob {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(3 * time.Second)
@@ -66,7 +67,7 @@ func claimOne(t *testing.T, b queue.Broker, q string) queue.Job {
 		}
 		if time.Now().After(deadline) {
 			require.Len(t, got, 1, "expected 1 claimable job within deadline")
-			return queue.Job{}
+			return queue.ClaimedJob{}
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -99,7 +100,7 @@ func TestPgQueue_PushTx(t *testing.T) {
 
 		require.NoError(t, tx.Commit(ctx))
 		job := claimOne(t, b, "default")
-		require.NoError(t, b.Ack(ctx, job.ID))
+		require.NoError(t, b.Ack(ctx, job.ID, job.Token))
 	})
 
 	t.Run("rollback discards the job", func(t *testing.T) {
@@ -131,7 +132,7 @@ func TestPgQueue_WithTableValidation(t *testing.T) {
 	require.Error(t, err, "unsafe table name rejected")
 }
 
-func TestPgQueue_PayloadIsJSONB(t *testing.T) {
+func TestPgQueue_PayloadRoundTripsJSON(t *testing.T) {
 	pool := openPool(t)
 	b := newBroker(t, pool)
 	ctx := context.Background()
@@ -139,4 +140,25 @@ func TestPgQueue_PayloadIsJSONB(t *testing.T) {
 	require.NoError(t, c.PushRaw(ctx, "raw.kind", json.RawMessage(`{"deep":{"x":[1,2,3]}}`)))
 	job := claimOne(t, b, "default")
 	assert.JSONEq(t, `{"deep":{"x":[1,2,3]}}`, string(job.Payload))
+}
+
+func TestPgQueue_StatsCapped(t *testing.T) {
+	pool := openPool(t)
+	b := newBroker(t, pool)
+	ctx := context.Background()
+
+	jobs := make([]queue.Job, 10001)
+	for i := range jobs {
+		jobs[i] = queue.Job{
+			ID: id.NewUUID().String(), Queue: "bulk", Type: "cap.kind",
+			Payload: []byte(`{}`), RunAt: time.Now().UTC(), CreatedAt: time.Now().UTC(),
+		}
+	}
+	require.NoError(t, b.Push(ctx, jobs...))
+
+	st, err := b.Stats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 10000, st["bulk"].Pending, "count reports the cap, not the true size")
+	assert.True(t, st["bulk"].PendingCapped)
+	assert.False(t, st["bulk"].DeadCapped)
 }
