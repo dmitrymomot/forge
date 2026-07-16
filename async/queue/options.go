@@ -107,6 +107,12 @@ func WithBackoff(b backoff.Backoff) ServiceOption {
 	return func(s *Service) { s.defaultBackoff = b }
 }
 
+// WithServiceClock injects a clock used for retry scheduling and the
+// retention sweep cutoff (tests). Tickers stay real time.
+func WithServiceClock(clk clock.Clock) ServiceOption {
+	return func(s *Service) { s.clk = clk }
+}
+
 // HandlerOption configures a single Register call.
 type HandlerOption func(*handler)
 

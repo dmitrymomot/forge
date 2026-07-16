@@ -618,3 +618,82 @@ func TestService_LeaseLostCancelsHandler(t *testing.T) {
 
 	eventually(t, func() bool { return cancelled.Load() }, "heartbeat must cancel the handler context when the lease is lost")
 }
+
+// countingBroker counts Claim calls; optionally every claim errors.
+type countingBroker struct {
+	*queue.MemoryBroker
+	claims atomic.Int64
+	fail   atomic.Bool
+}
+
+func (b *countingBroker) Claim(ctx context.Context, q string, n int, lease time.Duration) ([]queue.ClaimedJob, error) {
+	b.claims.Add(1)
+	if b.fail.Load() {
+		return nil, errors.New("broker down")
+	}
+	return b.MemoryBroker.Claim(ctx, q, n, lease)
+}
+
+func TestService_ClaimErrorBackoff(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig() // 10ms poll
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	b.fail.Store(true)
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error { return nil })
+
+	stop := runService(t, svc)
+	time.Sleep(500 * time.Millisecond)
+	failing := b.claims.Load()
+	stop()
+
+	// Naive 10ms cadence would make ~50 claims in 500ms; doubling backoff
+	// (10,20,40,80,160,320ms…) allows at most ~7. Generous bound: < 15.
+	assert.Less(t, failing, int64(15), "claim errors must widen the poll interval, got %d claims", failing)
+	assert.GreaterOrEqual(t, failing, int64(3), "the service must keep retrying")
+}
+
+func TestService_ClaimBackoffResetsOnSuccess(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	b.fail.Store(true)
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+
+	var processed atomic.Bool
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error {
+		processed.Store(true)
+		return nil
+	})
+
+	stop := runService(t, svc)
+	defer stop()
+
+	time.Sleep(150 * time.Millisecond) // let backoff widen
+	b.fail.Store(false)
+	c := queue.NewClient(b)
+	require.NoError(t, queue.Push(context.Background(), c, kindWelcome, welcomePayload{UserID: "u"}))
+
+	eventually(t, func() bool { return processed.Load() }, "service must recover and process after the broker heals")
+}
+
+func TestService_IdlePollClaimsEachQueueOnce(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	b := &countingBroker{MemoryBroker: queue.NewMemoryBroker()}
+	svc, err := queue.NewService(b, queue.WithConfig(cfg))
+	require.NoError(t, err)
+	queue.Register(svc, kindWelcome, func(context.Context, welcomePayload) error { return nil })
+
+	stop := runService(t, svc)
+	time.Sleep(300 * time.Millisecond)
+	claims := b.claims.Load()
+	stop()
+
+	// ~30 polls in 300ms at 10ms; one queue idle must claim once per poll
+	// (the old leftover sweep claimed twice). Bound generously above 1x and
+	// strictly below 2x.
+	assert.Less(t, claims, int64(45), "idle polls must not double-claim, got %d claims for ~30 polls", claims)
+}

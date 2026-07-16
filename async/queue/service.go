@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/ops/logger"
 	"github.com/dmitrymomot/forge/resilience/backoff"
 )
@@ -22,6 +23,7 @@ import (
 type Service struct {
 	broker         Broker
 	defaultBackoff backoff.Backoff
+	clk            clock.Clock
 	queueWeights   map[string]int
 	log            *slog.Logger
 	scopeCtx       func(ctx context.Context, scope string) context.Context
@@ -57,6 +59,7 @@ func NewService(broker Broker, opts ...ServiceOption) (*Service, error) {
 		log:            logger.NewNope(),
 		defaultBackoff: backoff.Exponential(15*time.Second, 6*time.Hour, backoff.WithJitter(0.2)),
 		handlers:       make(map[string]*handler),
+		clk:            clock.System(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -118,21 +121,25 @@ func (s *Service) Run(ctx context.Context) error {
 	sem := make(chan struct{}, s.cfg.Concurrency)
 	var wg sync.WaitGroup
 
-	ticker := time.NewTicker(s.cfg.PollInterval)
-	defer ticker.Stop()
-
 	s.log.InfoContext(ctx, "queue service started", slog.String("service", s.name), slog.Int("concurrency", s.cfg.Concurrency))
+	maxWait := max(30*time.Second, s.cfg.PollInterval)
+	wait := s.cfg.PollInterval
 	for {
-		claimed := s.pollOnce(ctx, opCtx, sem, &wg)
+		claimed, allErrored := s.pollOnce(ctx, opCtx, sem, &wg)
 		if ctx.Err() != nil {
 			break
 		}
-		if claimed > 0 {
-			continue // backlog: keep claiming without waiting for the tick
+		if allErrored {
+			wait = min(wait*2, maxWait) // broker down: widen instead of hammering
+		} else {
+			wait = s.cfg.PollInterval
+			if claimed > 0 {
+				continue // backlog: keep claiming without waiting
+			}
 		}
 		select {
 		case <-ctx.Done():
-		case <-ticker.C:
+		case <-time.After(wait):
 			continue
 		}
 		break
@@ -144,26 +151,33 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 // pollOnce claims up to the free slot budget across queues (in claimOrder)
-// and dispatches each claimed job. Returns the number of jobs claimed.
-func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan struct{}, wg *sync.WaitGroup) int {
+// and dispatches each claimed job. Returns the number of jobs claimed and
+// whether every attempted claim errored (the signal to back off).
+func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan struct{}, wg *sync.WaitGroup) (int, bool) {
 	free := s.cfg.Concurrency - len(sem)
 	if free <= 0 {
-		return 0
+		return 0, false
 	}
 	if s.cfg.ClaimBatch > 0 && free > s.cfg.ClaimBatch {
 		free = s.cfg.ClaimBatch
 	}
-	total := 0
+	total, attempted, errored := 0, 0, 0
+	drained := make(map[string]bool, len(s.queues))
 	claim := func(qname string, n int) {
 		if n <= 0 || ctx.Err() != nil {
 			return
 		}
+		attempted++
 		jobs, err := s.broker.Claim(ctx, qname, n, s.cfg.Lease)
 		if err != nil {
+			errored++
 			if ctx.Err() == nil {
 				s.log.ErrorContext(ctx, "queue claim failed", slog.String("queue", qname), slog.Any("error", err))
 			}
 			return
+		}
+		if len(jobs) < n {
+			drained[qname] = true // returned less than asked: proven empty
 		}
 		for _, cj := range jobs {
 			sem <- struct{}{}
@@ -180,16 +194,20 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 		for _, q := range s.queues { // static weight-desc order
 			claim(q.name, free)
 		}
-		return total
+		return total, attempted > 0 && errored == attempted
 	}
 	order, quota := s.claimPlan(free)
 	for _, qname := range order {
 		claim(qname, min(quota[qname], free))
 	}
-	for _, q := range s.queues { // leftover sweep: unfilled quotas roll to any queue with work
-		claim(q.name, free)
+	if total > 0 { // leftover sweep only when something was claimed at all
+		for _, q := range s.queues {
+			if !drained[q.name] {
+				claim(q.name, free)
+			}
+		}
 	}
-	return total
+	return total, attempted > 0 && errored == attempted
 }
 
 // pickNext advances the smooth weighted round-robin state one step and
@@ -320,7 +338,7 @@ func (s *Service) process(opCtx context.Context, cj ClaimedJob) {
 		if h.backoff != nil {
 			bo = h.backoff
 		}
-		retryAt := time.Now().UTC().Add(bo.Next(job.Attempt))
+		retryAt := s.clk.Now().UTC().Add(bo.Next(job.Attempt))
 		logAttrs = append(logAttrs, slog.Time("retry_at", retryAt))
 		s.finalize(opCtx, "retry", logAttrs, func() error { return s.broker.Nack(opCtx, job.ID, cj.Token, retryAt, err.Error()) })
 	}
