@@ -649,8 +649,11 @@ func TestService_ClaimErrorBackoff(t *testing.T) {
 	stop()
 
 	// Naive 10ms cadence would make ~50 claims in 500ms; doubling backoff
-	// (10,20,40,80,160,320ms…) allows at most ~7. Generous bound: < 15.
-	assert.Less(t, failing, int64(15), "claim errors must widen the poll interval, got %d claims", failing)
+	// (10,20,40,80,160,320ms…) allows at most ~7, observed 5. A same-poll
+	// leftover-sweep re-probe of the errored queue (a regression caught once
+	// already) doubles that to ~10 — keep the bound tight enough to catch it
+	// while leaving CI-scheduling slack above the observed 5.
+	assert.Less(t, failing, int64(8), "claim errors must widen the poll interval, got %d claims", failing)
 	assert.GreaterOrEqual(t, failing, int64(3), "the service must keep retrying")
 }
 

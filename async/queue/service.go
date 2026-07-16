@@ -200,7 +200,7 @@ func (s *Service) pollOnce(ctx context.Context, opCtx context.Context, sem chan 
 	for _, qname := range order {
 		claim(qname, min(quota[qname], free))
 	}
-	if total > 0 { // leftover sweep only when something was claimed at all
+	if free > 0 && errored == 0 { // leftover sweep only with capacity to spare and a healthy broker this round
 		for _, q := range s.queues {
 			if !drained[q.name] {
 				claim(q.name, free)
