@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/forge/core/clock"
 )
 
 func newWeightedService(t *testing.T, weights map[string]int) *Service {
@@ -151,4 +153,82 @@ func TestPollOnce_ErroredQueueNotResweptSamePoll(t *testing.T) {
 	require.Len(t, fb.calls, 1, "an errored queue must not be re-probed by the leftover sweep in the same poll")
 	assert.Equal(t, 0, total)
 	assert.True(t, allErrored)
+}
+
+type sweepSpyBroker struct {
+	*MemoryBroker
+	mu         sync.Mutex
+	maintains  int
+	purges     int
+	lastCutoff time.Time
+}
+
+func (b *sweepSpyBroker) Maintain(context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maintains++
+	return nil
+}
+
+func (b *sweepSpyBroker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	b.mu.Lock()
+	b.purges++
+	b.lastCutoff = cutoff
+	b.mu.Unlock()
+	return b.MemoryBroker.PurgeDeadBefore(ctx, cutoff)
+}
+
+func TestSweepLoop_MaintainsAndPurges(t *testing.T) {
+	t.Parallel()
+	fixed := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	b := &sweepSpyBroker{MemoryBroker: NewMemoryBroker()}
+	cfg := DefaultConfig()
+	cfg.PollInterval = 10 * time.Millisecond
+	cfg.DeadRetention = 24 * time.Hour
+	s, err := NewService(b, WithConfig(cfg), WithServiceClock(clock.NewMock(fixed)))
+	require.NoError(t, err)
+	s.sweepEvery = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.maintains >= 2 && b.purges >= 2
+	}, 5*time.Second, 5*time.Millisecond, "sweep must invoke Maintain and PurgeDeadBefore repeatedly")
+
+	cancel()
+	<-done
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	assert.Equal(t, fixed.Add(-24*time.Hour), b.lastCutoff, "cutoff = clock now - DeadRetention")
+}
+
+func TestSweepLoop_RetentionZeroSkipsPurge(t *testing.T) {
+	t.Parallel()
+	b := &sweepSpyBroker{MemoryBroker: NewMemoryBroker()}
+	cfg := DefaultConfig()
+	cfg.PollInterval = 10 * time.Millisecond
+	cfg.DeadRetention = 0
+	s, err := NewService(b, WithConfig(cfg))
+	require.NoError(t, err)
+	s.sweepEvery = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.maintains >= 2
+	}, 5*time.Second, 5*time.Millisecond, "Maintain still runs with retention disabled")
+
+	cancel()
+	<-done
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	assert.Zero(t, b.purges, "DeadRetention=0 must never purge")
 }

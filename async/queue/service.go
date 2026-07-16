@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ type Service struct {
 	name           string
 	queues         []weightedQueue // weight desc, name asc; built by NewService
 	cfg            Config
+	sweepEvery     time.Duration
 	strict         bool
 }
 
@@ -60,6 +62,7 @@ func NewService(broker Broker, opts ...ServiceOption) (*Service, error) {
 		defaultBackoff: backoff.Exponential(15*time.Second, 6*time.Hour, backoff.WithJitter(0.2)),
 		handlers:       make(map[string]*handler),
 		clk:            clock.System(),
+		sweepEvery:     5 * time.Minute,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -122,6 +125,12 @@ func (s *Service) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 
 	s.log.InfoContext(ctx, "queue service started", slog.String("service", s.name), slog.Int("concurrency", s.cfg.Concurrency))
+
+	maintainer, hasMaintain := s.broker.(Maintainer)
+	if hasMaintain || s.cfg.DeadRetention > 0 {
+		wg.Go(func() { s.sweepLoop(ctx, maintainer) })
+	}
+
 	maxWait := max(30*time.Second, s.cfg.PollInterval)
 	wait := s.cfg.PollInterval
 	for {
@@ -148,6 +157,49 @@ func (s *Service) Run(ctx context.Context) error {
 	wg.Wait()
 	s.log.InfoContext(opCtx, "queue service stopped", slog.String("service", s.name))
 	return ctx.Err()
+}
+
+// sweepLoop runs low-frequency housekeeping: broker Maintain (when
+// implemented) and DLQ retention. The first run is jittered so a fleet
+// restarting together does not sweep in lockstep; both ops are idempotent and
+// cheap, so every instance runs them without leader election.
+func (s *Service) sweepLoop(ctx context.Context, maintainer Maintainer) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(rand.N(s.sweepEvery)):
+	}
+	t := time.NewTicker(s.sweepEvery)
+	defer t.Stop()
+	for {
+		s.sweepOnce(ctx, maintainer)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Service) sweepOnce(ctx context.Context, maintainer Maintainer) {
+	if maintainer != nil {
+		if err := maintainer.Maintain(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "queue maintenance failed", slog.String("service", s.name), slog.Any("error", err))
+		}
+	}
+	if s.cfg.DeadRetention <= 0 {
+		return
+	}
+	n, err := s.broker.PurgeDeadBefore(ctx, s.clk.Now().Add(-s.cfg.DeadRetention))
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "queue dead retention purge failed", slog.String("service", s.name), slog.Any("error", err))
+		}
+		return
+	}
+	if n > 0 {
+		s.log.InfoContext(ctx, "queue dead jobs purged by retention", slog.String("service", s.name), slog.Int("purged", n), slog.Duration("retention", s.cfg.DeadRetention))
+	}
 }
 
 // pollOnce claims up to the free slot budget across queues (in claimOrder)

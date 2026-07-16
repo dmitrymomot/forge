@@ -57,3 +57,15 @@ func TestConfig_HandlerTimeout(t *testing.T) {
 	cfg.HandlerTimeout = -time.Second
 	assert.ErrorIs(t, cfg.Validate(), queue.ErrInvalidConfig)
 }
+
+func TestConfig_DeadRetention(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, 720*time.Hour, queue.DefaultConfig().DeadRetention, "default DLQ retention is 30 days")
+
+	cfg := queue.DefaultConfig()
+	cfg.DeadRetention = 0
+	assert.NoError(t, cfg.Validate(), "0 keeps dead jobs forever")
+
+	cfg.DeadRetention = -time.Hour
+	assert.ErrorIs(t, cfg.Validate(), queue.ErrInvalidConfig)
+}
