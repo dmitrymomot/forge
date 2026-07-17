@@ -2,6 +2,7 @@ package shortlink_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -98,6 +99,25 @@ func TestHandler_ExpiredUsesFallback(t *testing.T) {
 	w := serve(mgr.Handler(), "/"+l.Code)
 	assert.Equal(t, http.StatusFound, w.Code)
 	assert.Equal(t, "/gone", w.Header().Get("Location"))
+}
+
+// erroringStore fails every Get with a non-sentinel error, simulating a
+// backend outage.
+type erroringStore struct{ shortlink.Store }
+
+func (erroringStore) Get(context.Context, string) (shortlink.Link, error) {
+	return shortlink.Link{}, errors.New("connection refused")
+}
+
+func TestHandler_BackendErrorIs500(t *testing.T) {
+	t.Parallel()
+	mgr := shortlink.New(erroringStore{shortlink.NewMemoryStore()},
+		shortlink.WithFallbackURL("https://example.com/link-gone"))
+
+	// An outage must surface as 500, never as a dead-link fallback or 404.
+	w := serve(mgr.Handler(), "/anycode")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Empty(t, w.Header().Get("Location"))
 }
 
 func TestHandler_OnHitFires(t *testing.T) {

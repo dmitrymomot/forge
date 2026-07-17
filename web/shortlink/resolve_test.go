@@ -165,7 +165,7 @@ func TestResolve_CacheFailureFallsBackToStore(t *testing.T) {
 	assert.Equal(t, l.URL, got.URL)
 }
 
-func TestMutation_SurfacesCacheInvalidateFailure(t *testing.T) {
+func TestMutation_SucceedsDespiteCacheFailure(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mgr := shortlink.New(shortlink.NewMemoryStore(), shortlink.WithCache(failingCache{}))
@@ -173,11 +173,33 @@ func TestMutation_SurfacesCacheInvalidateFailure(t *testing.T) {
 	l, err := mgr.Create(ctx, shortlink.CreateParams{URL: "https://example.com"})
 	require.NoError(t, err)
 
-	err = mgr.Deactivate(ctx, l.Code)
-	require.ErrorIs(t, err, errCacheDown)
-
-	// The store mutation itself landed even though invalidation failed.
+	// Invalidation is best-effort within the TTL staleness bound, so a
+	// broken cache must not fail the mutation itself.
+	require.NoError(t, mgr.Deactivate(ctx, l.Code))
 	got, err := mgr.Get(ctx, l.Code)
 	require.NoError(t, err)
 	assert.False(t, got.DeactivatedAt.IsZero())
+}
+
+func TestDelete_ClearsPoisonedCacheOnRetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c := newCache(t)
+	store := shortlink.NewMemoryStore()
+	mgr := shortlink.New(store, shortlink.WithCache(c))
+
+	l, err := mgr.Create(ctx, shortlink.CreateParams{URL: "https://example.com"})
+	require.NoError(t, err)
+	_, err = mgr.Resolve(ctx, l.Code) // warm the cache
+	require.NoError(t, err)
+
+	// Simulate a crashed earlier invalidation: the record is gone from the
+	// store while the cache still holds it.
+	require.NoError(t, store.Delete(ctx, l.Code, ""))
+
+	// A repeated Delete reports ErrNotFound but still clears the cache, so
+	// the dead link stops resolving.
+	assert.ErrorIs(t, mgr.Delete(ctx, l.Code), shortlink.ErrNotFound)
+	_, err = mgr.Resolve(ctx, l.Code)
+	assert.ErrorIs(t, err, shortlink.ErrNotFound)
 }

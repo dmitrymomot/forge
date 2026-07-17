@@ -65,12 +65,24 @@ func (s *Store) Get(ctx context.Context, code string) (shortlink.Link, error) {
 }
 
 // List returns records matching f, newest first (created_at DESC, code ASC
-// on ties).
+// on ties). The tenant-filtered and unfiltered shapes are separate static
+// statements so the tenant-leading index serves the filtered one and the
+// planner never has to fold a `$1 = ”` catch-all out of a generic plan.
 func (s *Store) List(ctx context.Context, f shortlink.Filter) ([]shortlink.Link, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT `+cols+` FROM forge_short_links
-		 WHERE ($1 = '' OR tenant = $1)
-		 ORDER BY created_at DESC, code ASC`, f.Tenant)
+	var rows pgx.Rows
+	var err error
+	if f.Tenant == "" {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+` FROM forge_short_links
+			 ORDER BY created_at DESC, code ASC
+			 LIMIT NULLIF($1, 0)`, f.Limit)
+	} else {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+` FROM forge_short_links
+			 WHERE tenant = $1
+			 ORDER BY created_at DESC, code ASC
+			 LIMIT NULLIF($2, 0)`, f.Tenant, f.Limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -88,19 +100,28 @@ func (s *Store) List(ctx context.Context, f shortlink.Filter) ([]shortlink.Link,
 	return out, rows.Err()
 }
 
-// Deactivate sets deactivated_at, or returns shortlink.ErrNotFound.
-func (s *Store) Deactivate(ctx context.Context, code string, at time.Time) error {
-	return s.exec(ctx, `UPDATE forge_short_links SET deactivated_at = $2 WHERE code = $1`, code, at)
+// Deactivate sets deactivated_at, or returns shortlink.ErrNotFound. The
+// tenant predicate is part of the statement so scope confinement is atomic
+// with the mutation; a zero at maps to NULL, matching the memory store's
+// zero-means-active semantics.
+func (s *Store) Deactivate(ctx context.Context, code, tenant string, at time.Time) error {
+	return s.exec(ctx,
+		`UPDATE forge_short_links SET deactivated_at = $2 WHERE code = $1 AND ($3 = '' OR tenant = $3)`,
+		code, nullTime(at), tenant)
 }
 
 // Activate clears deactivated_at, or returns shortlink.ErrNotFound.
-func (s *Store) Activate(ctx context.Context, code string) error {
-	return s.exec(ctx, `UPDATE forge_short_links SET deactivated_at = NULL WHERE code = $1`, code)
+func (s *Store) Activate(ctx context.Context, code, tenant string) error {
+	return s.exec(ctx,
+		`UPDATE forge_short_links SET deactivated_at = NULL WHERE code = $1 AND ($2 = '' OR tenant = $2)`,
+		code, tenant)
 }
 
 // Delete removes the record, or returns shortlink.ErrNotFound.
-func (s *Store) Delete(ctx context.Context, code string) error {
-	return s.exec(ctx, `DELETE FROM forge_short_links WHERE code = $1`, code)
+func (s *Store) Delete(ctx context.Context, code, tenant string) error {
+	return s.exec(ctx,
+		`DELETE FROM forge_short_links WHERE code = $1 AND ($2 = '' OR tenant = $2)`,
+		code, tenant)
 }
 
 func (s *Store) exec(ctx context.Context, sql string, args ...any) error {

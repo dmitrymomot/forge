@@ -2,7 +2,6 @@ package shortlink
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -44,6 +43,7 @@ var defaultReserved = []string{
 // concurrent use.
 type Manager struct {
 	store Store
+	cache *cache.Cache[Link]
 	cfg   config
 }
 
@@ -78,7 +78,12 @@ func New(store Store, opts ...Option) *Manager {
 	if cfg.redirectStatus != http.StatusFound && cfg.redirectStatus != http.StatusTemporaryRedirect {
 		panic(fmt.Sprintf("shortlink: redirect status %d is not 302 or 307", cfg.redirectStatus))
 	}
-	return &Manager{store: store, cfg: cfg}
+	m := &Manager{store: store, cfg: cfg}
+	if cfg.cache != nil {
+		m.cache = cache.New[Link](cfg.cache,
+			cache.WithPrefix(cacheKeyPrefix), cache.WithDefaultTTL(cfg.cacheTTL))
+	}
+	return m
 }
 
 // Create stores a link to p.URL and returns the record. With p.Code empty a
@@ -156,41 +161,47 @@ func (m *Manager) List(ctx context.Context, f Filter) ([]Link, error) {
 }
 
 // Deactivate turns the link off: Resolve reports ErrLinkDeactivated until
-// Activate. The cached entry is invalidated; an invalidation error is
-// returned even though the store was updated — retry, the call is
-// idempotent.
+// Activate. Under WithScope, other tenants' links report ErrNotFound.
 func (m *Manager) Deactivate(ctx context.Context, code string) error {
-	if _, err := m.Get(ctx, code); err != nil {
-		return err
-	}
-	if err := m.store.Deactivate(ctx, code, time.Now().UTC()); err != nil {
-		return fmt.Errorf("shortlink: deactivate: %w", err)
-	}
-	return m.invalidate(ctx, code)
+	at := time.Now().UTC()
+	return m.mutate(ctx, code, "deactivate", func(tenant string) error {
+		return m.store.Deactivate(ctx, code, tenant, at)
+	})
 }
 
-// Activate turns a deactivated link back on and invalidates the cached
-// entry.
+// Activate turns a deactivated link back on.
 func (m *Manager) Activate(ctx context.Context, code string) error {
-	if _, err := m.Get(ctx, code); err != nil {
-		return err
-	}
-	if err := m.store.Activate(ctx, code); err != nil {
-		return fmt.Errorf("shortlink: activate: %w", err)
-	}
-	return m.invalidate(ctx, code)
+	return m.mutate(ctx, code, "activate", func(tenant string) error {
+		return m.store.Activate(ctx, code, tenant)
+	})
 }
 
-// Delete permanently removes the link and invalidates the cached entry.
-// The code becomes available again.
+// Delete permanently removes the link. The code becomes available again.
 func (m *Manager) Delete(ctx context.Context, code string) error {
-	if _, err := m.Get(ctx, code); err != nil {
+	return m.mutate(ctx, code, "delete", func(tenant string) error {
+		return m.store.Delete(ctx, code, tenant)
+	})
+}
+
+// mutate runs one scope-confined store mutation and invalidates the cached
+// entry. The tenant predicate rides into the store call so confinement is
+// atomic with the mutation — a pre-flight ownership check would race a
+// delete-and-recreate of the same code by another tenant. The cache entry
+// is dropped even when the store reports ErrNotFound: the record may be
+// gone from the store while a stale copy lingers in the cache (e.g. a
+// crashed earlier invalidation), and this is the only API path that can
+// clear it.
+func (m *Manager) mutate(ctx context.Context, code, verb string, op func(tenant string) error) error {
+	tenant, err := m.scoped(ctx, "")
+	if err != nil {
 		return err
 	}
-	if err := m.store.Delete(ctx, code); err != nil {
-		return fmt.Errorf("shortlink: delete: %w", err)
+	opErr := op(tenant)
+	if opErr != nil && !errors.Is(opErr, ErrNotFound) {
+		return fmt.Errorf("shortlink: %s: %w", verb, opErr)
 	}
-	return m.invalidate(ctx, code)
+	m.invalidate(ctx, code)
+	return opErr
 }
 
 // Resolve returns the live link for code — the redirect hot path. It is
@@ -220,41 +231,35 @@ func (m *Manager) Resolve(ctx context.Context, code string) (Link, error) {
 
 // lookup fetches the raw record, serving from cache when configured.
 // Expiry and deactivation are re-checked by Resolve on every hit, so
-// caching the raw record is safe; mutations invalidate the entry. Cache
-// failures degrade to the store, and cache writes are best-effort — the
-// cache can only slow resolution down, never break it.
+// caching the raw record is safe. Cache failures degrade to the store, and
+// cache writes are best-effort — the cache can only slow resolution down,
+// never break it.
 func (m *Manager) lookup(ctx context.Context, code string) (Link, error) {
-	if m.cfg.cache == nil {
+	if m.cache == nil {
 		return m.store.Get(ctx, code)
 	}
-	key := cacheKeyPrefix + code
-	if b, err := m.cfg.cache.Get(ctx, key); err == nil {
-		var l Link
-		if err := json.Unmarshal(b, &l); err == nil {
-			return l, nil
-		}
+	if l, err := m.cache.Get(ctx, code); err == nil {
+		return l, nil
 	}
 	l, err := m.store.Get(ctx, code)
 	if err != nil {
 		return Link{}, err
 	}
-	if b, err := json.Marshal(l); err == nil {
-		_ = m.cfg.cache.Set(ctx, key, b, cache.WithTTL(m.cfg.cacheTTL))
-	}
+	_ = m.cache.Set(ctx, code, l)
 	return l, nil
 }
 
-// invalidate drops the cached entry after a mutation. A failure is
-// surfaced: silently keeping a stale entry would serve a deactivated or
-// deleted link until the TTL runs out.
-func (m *Manager) invalidate(ctx context.Context, code string) error {
-	if m.cfg.cache == nil {
-		return nil
+// invalidate drops the cached entry after a mutation, best-effort. Cache
+// coherence is bounded, not exact: an in-flight lookup that read the store
+// before the mutation can re-populate the entry right after this delete,
+// and a failed delete leaves the stale entry in place — either way the
+// entry dies within the WithCacheTTL bound, which is the staleness
+// contract WithCache documents. Failing the mutation over it would claim a
+// precision the read path cannot honor.
+func (m *Manager) invalidate(ctx context.Context, code string) {
+	if m.cache != nil {
+		_ = m.cache.Delete(ctx, code)
 	}
-	if err := m.cfg.cache.Delete(ctx, cacheKeyPrefix+code); err != nil {
-		return fmt.Errorf("shortlink: cache invalidate: %w", err)
-	}
-	return nil
 }
 
 // scoped resolves the tenant a management operation is confined to. With

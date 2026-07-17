@@ -35,14 +35,19 @@ func WithScope(fn func(context.Context) (string, error)) Option {
 
 // WithCache enables read-through caching of Resolve lookups: hits are
 // served from the cache store, misses fall through to the Store and are
-// cached for the WithCacheTTL duration. Deactivate, Activate, and Delete
-// invalidate the cached entry. A nil store disables caching.
+// cached for the WithCacheTTL duration. Coherence is bounded, not exact:
+// mutations invalidate the cached entry best-effort, but a concurrent
+// in-flight resolve can re-populate it, so a just-deactivated or
+// just-deleted link may keep resolving for up to WithCacheTTL. Pick the
+// TTL as the longest acceptable revocation delay. A nil store disables
+// caching.
 func WithCache(store cache.Store) Option {
 	return func(c *config) { c.cache = store }
 }
 
-// WithCacheTTL bounds how long a resolved link is cached (default 5m).
-// Only meaningful together with WithCache. New panics on a non-positive d.
+// WithCacheTTL bounds how long a resolved link is cached, and with it the
+// worst-case staleness after a mutation (default 5m). Only meaningful
+// together with WithCache. New panics on a non-positive d.
 func WithCacheTTL(d time.Duration) Option {
 	return func(c *config) { c.cacheTTL = d }
 }
@@ -75,9 +80,12 @@ func WithReservedCodes(codes ...string) Option {
 	}
 }
 
-// WithFallbackURL redirects failed resolves (unknown, expired, or
-// deactivated codes) in the Handler to u — a branded "link gone" page —
-// instead of responding 404. Relative paths are allowed.
+// WithFallbackURL redirects dead links (unknown, expired, or deactivated
+// codes) in the Handler to u — a branded "link gone" page — instead of
+// responding 404. Relative paths are allowed, but when the Handler is
+// mounted as a catch-all the fallback must not route back into it: a
+// relative fallback the Handler itself serves resolves as yet another
+// unknown code and redirect-loops.
 func WithFallbackURL(u string) Option {
 	return func(c *config) { c.fallbackURL = u }
 }

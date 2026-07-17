@@ -149,19 +149,54 @@ func TestPg_DeactivateActivate(t *testing.T) {
 	require.NoError(t, s.Create(ctx, l))
 
 	at := time.Now().UTC().Truncate(time.Millisecond)
-	require.NoError(t, s.Deactivate(ctx, l.Code, at))
+	require.NoError(t, s.Deactivate(ctx, l.Code, "", at))
 	got, err := s.Get(ctx, l.Code)
 	require.NoError(t, err)
 	assert.True(t, at.Equal(got.DeactivatedAt))
 
-	require.NoError(t, s.Activate(ctx, l.Code))
+	require.NoError(t, s.Activate(ctx, l.Code, ""))
 	got, err = s.Get(ctx, l.Code)
 	require.NoError(t, err)
 	assert.True(t, got.DeactivatedAt.IsZero())
 
 	missing := "missing-" + random.Hex(8)
-	assert.ErrorIs(t, s.Deactivate(ctx, missing, at), shortlink.ErrNotFound)
-	assert.ErrorIs(t, s.Activate(ctx, missing), shortlink.ErrNotFound)
+	assert.ErrorIs(t, s.Deactivate(ctx, missing, "", at), shortlink.ErrNotFound)
+	assert.ErrorIs(t, s.Activate(ctx, missing, ""), shortlink.ErrNotFound)
+}
+
+func TestPg_TenantPredicate(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	l := mkLink(t)
+	require.NoError(t, s.Create(ctx, l))
+
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	other := "tenant-other-" + random.Hex(8)
+	// A mismatched tenant is atomically rejected as ErrNotFound.
+	assert.ErrorIs(t, s.Deactivate(ctx, l.Code, other, at), shortlink.ErrNotFound)
+	assert.ErrorIs(t, s.Activate(ctx, l.Code, other), shortlink.ErrNotFound)
+	assert.ErrorIs(t, s.Delete(ctx, l.Code, other), shortlink.ErrNotFound)
+	got, err := s.Get(ctx, l.Code)
+	require.NoError(t, err)
+	assert.True(t, got.DeactivatedAt.IsZero())
+
+	// The owning tenant passes.
+	require.NoError(t, s.Deactivate(ctx, l.Code, l.Tenant, at))
+	require.NoError(t, s.Delete(ctx, l.Code, l.Tenant))
+}
+
+func TestPg_DeactivateZeroTimeStaysActive(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	l := mkLink(t)
+	require.NoError(t, s.Create(ctx, l))
+
+	// A zero at maps to NULL — same zero-means-active semantics as the
+	// memory store.
+	require.NoError(t, s.Deactivate(ctx, l.Code, "", time.Time{}))
+	got, err := s.Get(ctx, l.Code)
+	require.NoError(t, err)
+	assert.True(t, got.DeactivatedAt.IsZero())
 }
 
 func TestPg_Delete(t *testing.T) {
@@ -170,10 +205,29 @@ func TestPg_Delete(t *testing.T) {
 	l := mkLink(t)
 	require.NoError(t, s.Create(ctx, l))
 
-	require.NoError(t, s.Delete(ctx, l.Code))
+	require.NoError(t, s.Delete(ctx, l.Code, ""))
 	_, err := s.Get(ctx, l.Code)
 	assert.ErrorIs(t, err, shortlink.ErrNotFound)
-	assert.ErrorIs(t, s.Delete(ctx, l.Code), shortlink.ErrNotFound)
+	assert.ErrorIs(t, s.Delete(ctx, l.Code, ""), shortlink.ErrNotFound)
+}
+
+func TestPg_ListLimit(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	tenant := "tenant-" + random.Hex(8)
+	base := time.Now().UTC().Truncate(time.Millisecond)
+
+	for i := range 3 {
+		l := mkLink(t)
+		l.Tenant = tenant
+		l.CreatedAt = base.Add(-time.Duration(i) * time.Hour)
+		require.NoError(t, s.Create(ctx, l))
+	}
+
+	got, err := s.List(ctx, shortlink.Filter{Tenant: tenant, Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.True(t, got[0].CreatedAt.After(got[1].CreatedAt))
 }
 
 func TestPg_ManagerEndToEnd(t *testing.T) {

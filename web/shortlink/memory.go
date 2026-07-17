@@ -41,7 +41,12 @@ func (s *memoryStore) Get(_ context.Context, code string) (Link, error) {
 func (s *memoryStore) List(_ context.Context, f Filter) ([]Link, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]Link, 0, len(s.links))
+	// Preallocate only for the unfiltered listing, where the map size is
+	// exact; a tenant filter may match a small fraction of entries.
+	out := []Link{}
+	if f.Tenant == "" {
+		out = make([]Link, 0, len(s.links))
+	}
 	for _, l := range s.links {
 		if f.Tenant != "" && l.Tenant != f.Tenant {
 			continue
@@ -54,32 +59,36 @@ func (s *memoryStore) List(_ context.Context, f Filter) ([]Link, error) {
 		}
 		return strings.Compare(a.Code, b.Code)
 	})
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
 	return out, nil
 }
 
-func (s *memoryStore) Deactivate(_ context.Context, code string, at time.Time) error {
-	return s.update(code, func(l *Link) { l.DeactivatedAt = at })
+func (s *memoryStore) Deactivate(_ context.Context, code, tenant string, at time.Time) error {
+	return s.update(code, tenant, func(l *Link) { l.DeactivatedAt = at })
 }
 
-func (s *memoryStore) Activate(_ context.Context, code string) error {
-	return s.update(code, func(l *Link) { l.DeactivatedAt = time.Time{} })
+func (s *memoryStore) Activate(_ context.Context, code, tenant string) error {
+	return s.update(code, tenant, func(l *Link) { l.DeactivatedAt = time.Time{} })
 }
 
-func (s *memoryStore) Delete(_ context.Context, code string) error {
+func (s *memoryStore) Delete(_ context.Context, code, tenant string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.links[code]; !ok {
+	l, ok := s.links[code]
+	if !ok || (tenant != "" && l.Tenant != tenant) {
 		return ErrNotFound
 	}
 	delete(s.links, code)
 	return nil
 }
 
-func (s *memoryStore) update(code string, fn func(*Link)) error {
+func (s *memoryStore) update(code, tenant string, fn func(*Link)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, ok := s.links[code]
-	if !ok {
+	if !ok || (tenant != "" && l.Tenant != tenant) {
 		return ErrNotFound
 	}
 	fn(&l)

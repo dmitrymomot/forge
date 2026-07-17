@@ -27,10 +27,14 @@
 //	mgr := shortlink.New(pgstore.New(pool),
 //		shortlink.WithCache(redisStore),
 //		shortlink.WithOnHit(func(ctx context.Context, l shortlink.Link) {
-//			go bumpCounter(l.Code) // counting is the caller's job
+//			clicks.Push(ctx, l.Code) // enqueue; counting is the caller's job
 //		}),
 //		shortlink.WithFallbackURL("https://example.com/link-gone"),
 //	)
+//
+// The hook runs synchronously on the redirect hot path — hand the hit to a
+// bounded sink (a queue, a buffered channel drained by a worker), don't do
+// the counting inline or spawn a goroutine per hit.
 //
 // Multi-tenant applications confine management operations with WithScope;
 // Resolve and the Handler need no hook because a short code is a public
