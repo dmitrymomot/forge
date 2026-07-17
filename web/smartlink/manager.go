@@ -206,31 +206,46 @@ func (m *Manager) List(ctx context.Context, f Filter) ([]Link, error) {
 
 // Deactivate marks code inactive. With WithScope configured, the scoped
 // tenant is passed as the Store predicate, so a foreign-tenant code is
-// untouched and reads back as [ErrNotFound].
+// untouched and reads back as [ErrNotFound]. On success it best-effort
+// evicts any cached entry for code (see [Manager.invalidateCache]).
 func (m *Manager) Deactivate(ctx context.Context, code string) error {
 	tenant, err := m.tenantScope(ctx)
 	if err != nil {
 		return err
 	}
-	return m.store.Deactivate(ctx, code, tenant, time.Now().UTC())
+	if err := m.store.Deactivate(ctx, code, tenant, time.Now().UTC()); err != nil {
+		return err
+	}
+	m.invalidateCache(ctx, code)
+	return nil
 }
 
-// Activate clears a prior Deactivate. See [Manager.Deactivate] for scope handling.
+// Activate clears a prior Deactivate. See [Manager.Deactivate] for scope
+// handling and cache invalidation.
 func (m *Manager) Activate(ctx context.Context, code string) error {
 	tenant, err := m.tenantScope(ctx)
 	if err != nil {
 		return err
 	}
-	return m.store.Activate(ctx, code, tenant)
+	if err := m.store.Activate(ctx, code, tenant); err != nil {
+		return err
+	}
+	m.invalidateCache(ctx, code)
+	return nil
 }
 
-// Delete removes code. See [Manager.Deactivate] for scope handling.
+// Delete removes code. See [Manager.Deactivate] for scope handling and
+// cache invalidation.
 func (m *Manager) Delete(ctx context.Context, code string) error {
 	tenant, err := m.tenantScope(ctx)
 	if err != nil {
 		return err
 	}
-	return m.store.Delete(ctx, code, tenant)
+	if err := m.store.Delete(ctx, code, tenant); err != nil {
+		return err
+	}
+	m.invalidateCache(ctx, code)
+	return nil
 }
 
 // ShortURL renders code onto the base URL from [WithBaseURL]. Without that
