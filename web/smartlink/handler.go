@@ -75,9 +75,11 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 	case l.Target != "":
 		compiled, err := m.compileTarget(l)
 		if err != nil {
-			// Unreachable in practice: Create validates Target with the same
-			// compile call. Still handled as an internal error, not a 404 —
-			// it reflects a configuration/data problem, not a dead link.
+			// Rows created through this Manager cannot fail here — Create
+			// validates Target with the same compile call. Rows written to the
+			// Store directly (migrations, another Manager with different
+			// options, admin tooling) can, so it stays an internal error, not
+			// a 404 — a configuration/data problem, not a dead link.
 			m.cfg.logger.ErrorContext(ctx, "smartlink: compile target", "code", code, "error", err)
 			internalServerError(w)
 			return nil, false
