@@ -168,6 +168,43 @@ func TestTNUsesRuleOfLocaleWhereMessageFound(t *testing.T) {
 	assert.Equal(t, "1 item in your cart", b.TN(de, "cart.items", 1))
 }
 
+func TestWithPluralReducesRegionalTagToLanguage(t *testing.T) {
+	t.Parallel()
+	// Plural rules are keyed by base language, not the full tag: WithPlural
+	// must reduce "pt-BR" to "pt" when storing the rule, and New must look up
+	// a locale's rule by its base language too. Both halves have to hold for a
+	// rule wired under a regional tag to ever apply to that locale.
+	//
+	// rule diverges from DefaultRule at n=3: DefaultRule sends every count
+	// other than 0/±1 to Many, which pt-BR/cart.json has no form for, so it
+	// falls back to "other". rule instead sends 2-4 to Few, which
+	// pt-BR/cart.json does define. If either half of the reduction is broken,
+	// the wired rule is never found for pt-BR, DefaultRule applies instead,
+	// and the assertion below observes the "other" text instead of "few".
+	rule := func(n int) i18n.PluralCategory {
+		switch {
+		case n == 1:
+			return i18n.One
+		case n >= 2 && n <= 4:
+			return i18n.Few
+		default:
+			return i18n.Other
+		}
+	}
+	b, err := i18n.New(
+		i18n.WithMessages(fstest.MapFS{
+			"en/cart.json": &fstest.MapFile{Data: []byte(
+				`{"items": {"one": "1 item", "other": "{{count}} items"}}`)},
+			"pt-BR/cart.json": &fstest.MapFile{Data: []byte(
+				`{"items": {"one": "{{count}} item BR", "few": "{{count}} poucos BR", "other": "{{count}} itens BR"}}`)},
+		}),
+		i18n.WithPlural("pt-BR", rule),
+	)
+	require.NoError(t, err)
+	ptBR := b.ParseOrDefault("pt-BR")
+	assert.Equal(t, "3 poucos BR", b.TN(ptBR, "cart.items", 3))
+}
+
 func TestTNExplicitCountOverride(t *testing.T) {
 	t.Parallel()
 	b := newBundle(t)
