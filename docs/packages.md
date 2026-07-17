@@ -15,44 +15,6 @@ tagged `(planned)` are elsewhere in this file and define build order.
 External module deps stay in the entry prose. Composition partners
 (packages a consumer wires alongside) are not deps and are not listed.
 
-## core/
-
----
-
-**core/i18n**
-
-Internationalization as pure mechanism: the package knows no languages. JSON
-`fs.FS` message catalogs (nested keys flattened to dot notation, `{{name}}`
-placeholders precompiled at `New`), plural sub-keys with form-fallback chains
-over a `PluralRule` seam, locale negotiation (Accept-Language q-values, cookie
-/ query resolver chain) plus ctx carrier and middleware, and locale-aware
-number/currency/percent/date formatting over a `FormatSpec` seam. The set of
-supported locales is whatever the application's catalogs declare — any tag is
-permitted; resolution is exact tag → base language → default. Ships no locale
-list, no per-language plural rules, and no per-locale format data: unconfigured
-locales get a built-in zero-one-many plural rule and invariant formatting, and
-correct CLDR data is opt-in via `core/i18n/cldr`. Replaces the previously
-planned `i18n/catalog`, `i18n/locale`, `i18n/numbers`, `i18n/dates`. No
-relative-time ladder (it is a product decision, expressible as one plural key
-per unit). Interned locale tags, ctx one-liner API, nil-default miss-handler
-hook. Zero external deps — no x/text, no YAML.
-
-Deps: `core/money`, `core/ctxkey`.
-
----
-
-**core/i18n/cldr**
-
-Opt-in CLDR data for `core/i18n`, never imported by it and never applied
-automatically: per-base-language plural rules (~40: European + Asian/ME; one
-entry per language, no family buckets) and per-locale-tag `FormatSpec` values
-(incl. LatAm: es-MX, es-AR, es-CO, es-CL, pt-BR). Wired explicitly —
-`i18n.WithPlural("uk", cldr.Uk)`, `i18n.WithFormat("es-MX", cldr.FormatEsMX)`.
-Rules are differential-tested against `x/text`'s CLDR tables (test-only dep)
-with a documented stale-data exception list.
-
-Deps: `core/i18n` (planned).
-
 ## web/
 
 ---
@@ -146,7 +108,7 @@ sticky `Values`, render-friendly `Errors` carrying `validate`'s i18n keys
 (translated by `core/i18n`), plus error-class/aria helpers. Backbone of
 server-rendered CRUD.
 
-Deps: `core/structfields`, `core/validate`; `core/i18n` (planned).
+Deps: `core/structfields`, `core/validate`, `core/i18n`.
 
 ## data/
 
