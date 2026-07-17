@@ -10,7 +10,7 @@ import (
 )
 
 func BenchmarkSubdomain(b *testing.B) {
-	resolve := tenant.Subdomain("app.example.com")
+	resolve := tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"}))
 	r := newRequest("acme.app.example.com", "/")
 	b.ReportAllocs()
 	for b.Loop() {
@@ -21,7 +21,7 @@ func BenchmarkSubdomain(b *testing.B) {
 }
 
 func BenchmarkSubdomainMiss(b *testing.B) {
-	resolve := tenant.Subdomain("app.example.com")
+	resolve := tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"}))
 	r := newRequest("other.example.org", "/")
 	b.ReportAllocs()
 	for b.Loop() {
@@ -67,8 +67,8 @@ func BenchmarkDomainStatic(b *testing.B) {
 
 func BenchmarkMiddleware(b *testing.B) {
 	h := tenant.Middleware(
-		tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "acme"})),
-		tenant.Subdomain("app.example.com"),
+		tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "t_01acme"})),
+		tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"})),
 	)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	r := newRequest("acme.app.example.com", "/")
 	w := httptest.NewRecorder()

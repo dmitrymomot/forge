@@ -10,10 +10,13 @@ The multi-tenancy package: resolve which tenant an inbound request (or job) belo
 
 ## Non-goals
 
-- No tenant registry/CRUD (consumer domain; `DomainLookup` is the only storage seam).
+- No tenant registry/CRUD (consumer domain; `DomainLookup`/`SubdomainLookup` are the only storage seams).
 - No automatic query rewriting or ORM hooks — ScopeClause is built and concatenated by the consumer, visibly.
-- No slug→canonical-ID mapping: resolvers return the raw identifier they saw; consumers that key on something else wrap a `Resolver` (it is a plain func) or map inside `DomainLookup`.
 - No path rewriting in `PathPrefix` — routing stays the consumer's concern.
+
+## Aliases vs tenant IDs
+
+A resolver always yields the canonical tenant ID (uuid/ulid/short id — whatever the consumer's tenants table keys on), never an alias. Subdomain labels and custom domains are aliases and are translated through lookup seams inside their resolvers; `Map` adds the same translation step to any other resolver (e.g. slugs in `PathPrefix` URLs). `Header`/`Cookie`/`PathPrefix` are documented as carrying the ID itself unless wrapped with `Map`.
 
 ## API
 
@@ -35,24 +38,28 @@ The context key is an unexported package-level key (stdlib-only; same collision-
 type Resolver func(r *http.Request) (string, error)
 ```
 
-Contract: `("", nil)` = not resolved, chain continues; non-empty = resolved; error = stop the chain (middleware responds 500). Shipped constructors:
+Contract: `("", nil)` = not resolved, chain continues; non-empty = resolved tenant ID; error = stop the chain (middleware responds 500). Shipped constructors:
 
-- `Subdomain(base string) Resolver` — resolves `acme` from `acme.<base>`. Host is normalized (port stripped, IPv6 brackets, trailing FQDN dot, lowercased — hostrouter's zero-alloc approach). Resolves only when exactly one label precedes the base (nested `a.b.<base>` and the bare base do not resolve). Reserved names (`www`, `api`, …) are NOT special-cased — exclude them in your handler or by wrapping the resolver.
-- `Domain(lookup DomainLookup) Resolver` — custom domains. Normalized full host is looked up; `ErrDomainNotFound` continues the chain, any other error stops it.
-- `Header(name string) Resolver` — trusts a request header (`X-Tenant-ID`). For internal traffic behind a trusted gateway only; documented loudly.
-- `Cookie(name string) Resolver` — cookie value.
-- `PathPrefix(prefix string) Resolver` — tenant is the path segment after `prefix` (`PathPrefix("/t")`: `/t/acme/dash` → `acme`); `PathPrefix("")`: first segment. Never rewrites the path.
+- `Subdomain(base string, lookup SubdomainLookup) Resolver` — extracts the label `acme` from `acme.<base>` and translates it to a tenant ID through lookup. Host is normalized (port stripped, IPv6 brackets, trailing FQDN dot, lowercased — hostrouter's zero-alloc approach). Extracts only when exactly one label precedes the base (nested `a.b.<base>` and the bare base do not resolve). Reserved names (`www`, `api`, …) are NOT special-cased — the lookup returns `ErrTenantNotFound` for them and the chain continues.
+- `Domain(lookup DomainLookup) Resolver` — custom domains. Normalized full host is looked up; `ErrTenantNotFound` continues the chain, any other error stops it.
+- `Header(name string) Resolver` — trusts a request header (`X-Tenant-ID`) carrying the tenant ID itself. For internal traffic behind a trusted gateway only; documented loudly.
+- `Cookie(name string) Resolver` — cookie value carrying the tenant ID itself.
+- `PathPrefix(prefix string) Resolver` — tenant ID is the path segment after `prefix` (`PathPrefix("/t")`: `/t/t_123/dash` → `t_123`); `PathPrefix("")`: first segment. Never rewrites the path; wrap with `Map` when URLs carry slugs.
 - `Context() Resolver` — reads a tenant already stamped on the request context by an upstream middleware (e.g. API-key auth that called `NewContext`). Gives ctx-derived tenancy an explicit slot in the precedence order.
+- `Map(r Resolver, fn func(ctx, value) (string, error)) Resolver` — decorates any resolver with an alias→ID translation; `ErrTenantNotFound` from fn continues the chain.
 
-### DomainLookup seam (resolver.go)
+### Lookup seams (resolver.go)
 
 ```go
 type DomainLookup interface {
     TenantByDomain(ctx context.Context, domain string) (string, error)
 }
+type SubdomainLookup interface {
+    TenantBySubdomain(ctx context.Context, subdomain string) (string, error)
+}
 ```
 
-Return `ErrDomainNotFound` (sentinel owned here) when the domain is unknown. `StaticDomains(map[string]string) DomainLookup` ships as the in-memory implementation for tests/dev; keys are normalized at construction.
+Return `ErrTenantNotFound` (sentinel owned here, shared by both seams and Map fns) when the alias is unknown. `StaticDomains(map[string]string) DomainLookup` and `StaticSubdomains(map[string]string) SubdomainLookup` ship as the in-memory implementations for tests/dev; keys are normalized at construction.
 
 ### Middleware (middleware.go)
 
@@ -88,7 +95,7 @@ rows, err := db.Query(ctx, "SELECT id FROM orders WHERE status = $1 AND "+c.SQL,
 
 ### Errors (errors.go)
 
-`ErrNoTenant`, `ErrDomainNotFound`, `ErrInvalidColumn`, `ErrInvalidPlaceholder` — single-line, `errors.Is`-matchable.
+`ErrNoTenant`, `ErrTenantNotFound`, `ErrInvalidColumn`, `ErrInvalidPlaceholder` — single-line, `errors.Is`-matchable.
 
 ## Layout
 

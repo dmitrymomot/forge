@@ -1,6 +1,7 @@
 package tenant_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,7 +10,8 @@ import (
 
 // FuzzSubdomain asserts the resolver never panics or errors and that any
 // resolved label is a single dot-free DNS label sitting directly in front of
-// the base domain.
+// the base domain. The echo lookup returns the label itself so the
+// properties check pure extraction.
 func FuzzSubdomain(f *testing.F) {
 	f.Add("acme.app.example.com")
 	f.Add("app.example.com")
@@ -20,7 +22,10 @@ func FuzzSubdomain(f *testing.F) {
 	f.Add(".app.example.com")
 	f.Add("xn--bcher-kva.app.example.com")
 
-	resolve := tenant.Subdomain("app.example.com")
+	echo := subdomainLookupFunc(func(_ context.Context, subdomain string) (string, error) {
+		return subdomain, nil
+	})
+	resolve := tenant.Subdomain("app.example.com", echo)
 	f.Fuzz(func(t *testing.T, host string) {
 		r := newRequest("example.com", "/")
 		r.Host = host

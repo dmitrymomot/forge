@@ -19,20 +19,28 @@ func newRequest(host, path string) *http.Request {
 	return r
 }
 
+type subdomainLookupFunc func(ctx context.Context, subdomain string) (string, error)
+
+func (f subdomainLookupFunc) TenantBySubdomain(ctx context.Context, subdomain string) (string, error) {
+	return f(ctx, subdomain)
+}
+
 func TestSubdomain(t *testing.T) {
 	t.Parallel()
 
-	resolve := tenant.Subdomain("app.example.com")
+	lookup := tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"})
+	resolve := tenant.Subdomain("app.example.com", lookup)
 	tests := []struct{ name, host, want string }{
-		{"single label", "acme.app.example.com", "acme"},
+		{"single label", "acme.app.example.com", "t_01acme"},
+		{"unknown label continues chain", "other.app.example.com", ""},
 		{"bare base", "app.example.com", ""},
 		{"nested labels", "a.b.app.example.com", ""},
 		{"unrelated host", "other.example.org", ""},
 		{"suffix but not label boundary", "notapp.example.com", ""},
 		{"embedded base not suffix", "app.example.com.evil.io", ""},
-		{"with port", "acme.app.example.com:8443", "acme"},
-		{"uppercase", "ACME.App.Example.COM", "acme"},
-		{"trailing FQDN dot", "acme.app.example.com.", "acme"},
+		{"with port", "acme.app.example.com:8443", "t_01acme"},
+		{"uppercase", "ACME.App.Example.COM", "t_01acme"},
+		{"trailing FQDN dot", "acme.app.example.com.", "t_01acme"},
 		{"empty host", "", ""},
 		{"dot only prefix", ".app.example.com", ""},
 		{"ipv6 literal", "[::1]:8080", ""},
@@ -48,15 +56,146 @@ func TestSubdomain(t *testing.T) {
 
 	t.Run("base is normalized at construction", func(t *testing.T) {
 		t.Parallel()
-		resolve := tenant.Subdomain("App.Example.COM:443")
+		resolve := tenant.Subdomain("App.Example.COM:443", lookup)
 		id, err := resolve(newRequest("acme.app.example.com", "/"))
 		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		assert.Equal(t, "t_01acme", id)
+	})
+
+	t.Run("lookup receives the normalized label", func(t *testing.T) {
+		t.Parallel()
+		var got string
+		resolve := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(_ context.Context, subdomain string) (string, error) {
+			got = subdomain
+			return "t_1", nil
+		}))
+		_, err := resolve(newRequest("ACME.app.example.com:8443", "/"))
+		require.NoError(t, err)
+		assert.Equal(t, "acme", got)
+	})
+
+	t.Run("lookup skipped when no label matches", func(t *testing.T) {
+		t.Parallel()
+		resolve := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(context.Context, string) (string, error) {
+			t.Fatal("lookup must not run without a matched label")
+			return "", nil
+		}))
+		id, err := resolve(newRequest("app.example.com", "/"))
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("infrastructure error stops chain", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("db down")
+		resolve := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(context.Context, string) (string, error) {
+			return "", boom
+		}))
+		_, err := resolve(newRequest("acme.app.example.com", "/"))
+		require.ErrorIs(t, err, boom)
 	})
 
 	t.Run("empty base panics", func(t *testing.T) {
 		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrEmptyName, func() { tenant.Subdomain("") })
+		assert.PanicsWithValue(t, tenant.ErrEmptyName, func() { tenant.Subdomain("", lookup) })
+	})
+
+	t.Run("nil lookup panics", func(t *testing.T) {
+		t.Parallel()
+		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() { tenant.Subdomain("app.example.com", nil) })
+	})
+}
+
+func TestStaticSubdomains(t *testing.T) {
+	t.Parallel()
+
+	lookup := tenant.StaticSubdomains(map[string]string{
+		"Acme":  "t_01acme",
+		"":      "dropped",
+		"empty": "",
+	})
+
+	t.Run("keys lowercased at construction", func(t *testing.T) {
+		t.Parallel()
+		id, err := lookup.TenantBySubdomain(context.Background(), "acme")
+		require.NoError(t, err)
+		assert.Equal(t, "t_01acme", id)
+	})
+
+	t.Run("unknown label", func(t *testing.T) {
+		t.Parallel()
+		_, err := lookup.TenantBySubdomain(context.Background(), "other")
+		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+	})
+
+	t.Run("empty-key and empty-ID entries dropped", func(t *testing.T) {
+		t.Parallel()
+		_, err := lookup.TenantBySubdomain(context.Background(), "")
+		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+		_, err = lookup.TenantBySubdomain(context.Background(), "empty")
+		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+	})
+}
+
+func TestMap(t *testing.T) {
+	t.Parallel()
+
+	slugToID := func(_ context.Context, slug string) (string, error) {
+		if slug == "acme" {
+			return "t_01acme", nil
+		}
+		return "", tenant.ErrTenantNotFound
+	}
+
+	t.Run("translates resolved value", func(t *testing.T) {
+		t.Parallel()
+		resolve := tenant.Map(tenant.PathPrefix("/t"), slugToID)
+		id, err := resolve(newRequest("example.com", "/t/acme/dashboard"))
+		require.NoError(t, err)
+		assert.Equal(t, "t_01acme", id)
+	})
+
+	t.Run("ErrTenantNotFound continues chain", func(t *testing.T) {
+		t.Parallel()
+		resolve := tenant.Map(tenant.PathPrefix("/t"), slugToID)
+		id, err := resolve(newRequest("example.com", "/t/other/dashboard"))
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("fn skipped when inner resolver misses", func(t *testing.T) {
+		t.Parallel()
+		resolve := tenant.Map(tenant.PathPrefix("/t"), func(context.Context, string) (string, error) {
+			t.Fatal("fn must not run for an unresolved value")
+			return "", nil
+		})
+		id, err := resolve(newRequest("example.com", "/orders"))
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("inner resolver error propagates without fn", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("inner failed")
+		resolve := tenant.Map(func(*http.Request) (string, error) { return "", boom }, slugToID)
+		_, err := resolve(newRequest("example.com", "/"))
+		require.ErrorIs(t, err, boom)
+	})
+
+	t.Run("fn error stops chain", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("db down")
+		resolve := tenant.Map(tenant.PathPrefix("/t"), func(context.Context, string) (string, error) {
+			return "", boom
+		})
+		_, err := resolve(newRequest("example.com", "/t/acme"))
+		require.ErrorIs(t, err, boom)
+	})
+
+	t.Run("nil arguments panic", func(t *testing.T) {
+		t.Parallel()
+		assert.PanicsWithValue(t, tenant.ErrNilResolver, func() { tenant.Map(nil, slugToID) })
+		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() { tenant.Map(tenant.Context(), nil) })
 	})
 }
 
@@ -139,13 +278,13 @@ func TestStaticDomains(t *testing.T) {
 	t.Run("unknown domain", func(t *testing.T) {
 		t.Parallel()
 		_, err := lookup.TenantByDomain(context.Background(), "other.example.com")
-		require.ErrorIs(t, err, tenant.ErrDomainNotFound)
+		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
 	})
 
 	t.Run("empty-ID entries dropped", func(t *testing.T) {
 		t.Parallel()
 		_, err := lookup.TenantByDomain(context.Background(), "empty.example.com")
-		require.ErrorIs(t, err, tenant.ErrDomainNotFound)
+		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
 	})
 }
 

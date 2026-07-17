@@ -8,11 +8,11 @@ var (
 	// unscoped query.
 	ErrNoTenant = errors.New("tenant: no tenant in context")
 
-	// ErrDomainNotFound is returned by a DomainLookup when the domain maps
-	// to no tenant. The Domain resolver treats it as "not resolved" and the
-	// middleware continues with the next resolver; any other lookup error
-	// stops the chain.
-	ErrDomainNotFound = errors.New("tenant: domain not found")
+	// ErrTenantNotFound is returned by a DomainLookup or SubdomainLookup
+	// (and by Map translation funcs) when the alias maps to no tenant. The
+	// resolver treats it as "not resolved" and the middleware continues
+	// with the next resolver; any other lookup error stops the chain.
+	ErrTenantNotFound = errors.New("tenant: tenant not found")
 
 	// ErrInvalidColumn rejects a ScopeClause column that is not a plain,
 	// optionally qualified SQL identifier.

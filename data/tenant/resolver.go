@@ -8,36 +8,50 @@ import (
 	"strings"
 )
 
-// Resolver extracts a tenant identifier from an HTTP request. Returning
+// Resolver resolves the canonical tenant ID (uuid/ulid/short id — whatever
+// the consumer's tenants table keys on) from an HTTP request. Returning
 // ("", nil) means "not resolved" and the middleware tries the next resolver
 // in the chain; a non-empty ID resolves the request; a non-nil error stops
 // the chain and the middleware responds 500.
 //
-// Resolvers return the raw identifier they saw (subdomain label, header
-// value, path segment). A consumer that keys tenants on something else wraps
-// a Resolver — it is a plain func — or maps inside its DomainLookup.
+// A subdomain label, custom domain, or URL slug is an alias, never the ID:
+// Subdomain and Domain translate aliases through their lookup seams, and Map
+// decorates any other Resolver with the same translation step.
 type Resolver func(r *http.Request) (string, error)
 
 // DomainLookup maps a full custom domain to a tenant ID. Implementations
-// return ErrDomainNotFound when the domain maps to no tenant; any other
+// return ErrTenantNotFound when the domain maps to no tenant; any other
 // error is treated as infrastructure failure and stops resolution.
 type DomainLookup interface {
 	TenantByDomain(ctx context.Context, domain string) (string, error)
 }
 
-// Subdomain resolves the tenant from the first DNS label in front of base:
-// with base "app.example.com", host "acme.app.example.com" resolves "acme".
-// The bare base and nested labels ("a.b.app.example.com") do not resolve.
-// Hosts are compared case-insensitively with any port, IPv6 brackets, and
-// trailing FQDN dot stripped.
+// SubdomainLookup maps a subdomain label ("acme") to a tenant ID.
+// Implementations return ErrTenantNotFound when the label maps to no
+// tenant; any other error is treated as infrastructure failure and stops
+// resolution.
+type SubdomainLookup interface {
+	TenantBySubdomain(ctx context.Context, subdomain string) (string, error)
+}
+
+// Subdomain resolves the tenant from the first DNS label in front of base,
+// translated to a tenant ID through lookup: with base "app.example.com",
+// host "acme.app.example.com" looks up "acme". The bare base and nested
+// labels ("a.b.app.example.com") do not resolve. Hosts are compared
+// case-insensitively with any port, IPv6 brackets, and trailing FQDN dot
+// stripped.
 //
-// Reserved names (www, api, ...) are not special-cased: exclude them in your
-// handler or by wrapping the returned Resolver. Panics with ErrEmptyName
-// when base normalizes to "".
-func Subdomain(base string) Resolver {
+// Reserved names (www, api, ...) are not special-cased — the lookup decides:
+// return ErrTenantNotFound for them and the chain continues. Panics with
+// ErrEmptyName when base normalizes to "" and with ErrNilLookup when lookup
+// is nil.
+func Subdomain(base string, lookup SubdomainLookup) Resolver {
 	base = normalizeHost(base)
 	if base == "" {
 		panic(ErrEmptyName)
+	}
+	if lookup == nil {
+		panic(ErrNilLookup)
 	}
 	return func(r *http.Request) (string, error) {
 		host := normalizeHost(r.Host)
@@ -49,13 +63,20 @@ func Subdomain(base string) Resolver {
 		if strings.IndexByte(label, '.') >= 0 {
 			return "", nil
 		}
-		return label, nil
+		id, err := lookup.TenantBySubdomain(r.Context(), label)
+		if err != nil {
+			if errors.Is(err, ErrTenantNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return id, nil
 	}
 }
 
 // Domain resolves the tenant by looking up the full (normalized) request
 // host through lookup — the custom-domain path of a white-label SaaS.
-// ErrDomainNotFound from the lookup means "not resolved" and the chain
+// ErrTenantNotFound from the lookup means "not resolved" and the chain
 // continues; any other error stops the chain. Panics with ErrNilLookup when
 // lookup is nil.
 func Domain(lookup DomainLookup) Resolver {
@@ -69,7 +90,7 @@ func Domain(lookup DomainLookup) Resolver {
 		}
 		id, err := lookup.TenantByDomain(r.Context(), host)
 		if err != nil {
-			if errors.Is(err, ErrDomainNotFound) {
+			if errors.Is(err, ErrTenantNotFound) {
 				return "", nil
 			}
 			return "", err
@@ -79,6 +100,8 @@ func Domain(lookup DomainLookup) Resolver {
 }
 
 // Header resolves the tenant from a request header, e.g. "X-Tenant-ID".
+// The header is expected to carry the tenant ID itself; wrap with Map when
+// it carries an alias instead.
 //
 // The value is attacker-controlled on any edge-facing listener: use this
 // resolver only behind a trusted gateway that sets or strips the header, or
@@ -97,7 +120,8 @@ func Header(name string) Resolver {
 	}
 }
 
-// Cookie resolves the tenant from a cookie value. Like Header, the value is
+// Cookie resolves the tenant from a cookie expected to carry the tenant ID
+// itself (wrap with Map for aliases). Like Header, the value is
 // client-controlled — pair it with authorization checks downstream. Panics
 // with ErrEmptyName when name is empty.
 func Cookie(name string) Resolver {
@@ -114,11 +138,12 @@ func Cookie(name string) Resolver {
 }
 
 // PathPrefix resolves the tenant from the path segment following prefix:
-// PathPrefix("/t") resolves "acme" from "/t/acme/dashboard", and
-// PathPrefix("") resolves the first segment ("/acme/dashboard"). The path is
-// never rewritten — stripping the prefix stays a routing concern. prefix
-// must be empty or start with "/" and not end with "/"; otherwise the
-// constructor panics with ErrInvalidPrefix.
+// PathPrefix("/t") resolves "t_123" from "/t/t_123/dashboard", and
+// PathPrefix("") resolves the first segment. The segment is expected to
+// carry the tenant ID itself; wrap with Map when your URLs carry slugs. The
+// path is never rewritten — stripping the prefix stays a routing concern.
+// prefix must be empty or start with "/" and not end with "/"; otherwise
+// the constructor panics with ErrInvalidPrefix.
 func PathPrefix(prefix string) Resolver {
 	if prefix != "" && (prefix[0] != '/' || prefix[len(prefix)-1] == '/') {
 		panic(ErrInvalidPrefix)
@@ -148,12 +173,48 @@ func Context() Resolver {
 	}
 }
 
+// Map decorates r, translating every value it resolves through fn — the
+// alias→tenant-ID step for resolvers that see aliases the shipped lookups
+// don't cover, e.g. a slug in the URL path:
+//
+//	tenant.Map(tenant.PathPrefix("/t"), func(ctx context.Context, slug string) (string, error) {
+//		return tenants.IDBySlug(ctx, slug) // ErrTenantNotFound to continue the chain
+//	})
+//
+// fn runs only when r resolved a non-empty value; ErrTenantNotFound from fn
+// means "not resolved" and the chain continues, any other error stops the
+// chain. Panics with ErrNilResolver when r is nil and ErrNilLookup when fn
+// is nil.
+func Map(r Resolver, fn func(ctx context.Context, value string) (string, error)) Resolver {
+	if r == nil {
+		panic(ErrNilResolver)
+	}
+	if fn == nil {
+		panic(ErrNilLookup)
+	}
+	return func(req *http.Request) (string, error) {
+		value, err := r(req)
+		if err != nil || value == "" {
+			return "", err
+		}
+		id, err := fn(req.Context(), value)
+		if err != nil {
+			if errors.Is(err, ErrTenantNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return id, nil
+	}
+}
+
 // staticDomains is the in-memory DomainLookup for tests and development.
 type staticDomains map[string]string
 
 // StaticDomains returns an immutable in-memory DomainLookup for tests and
-// development. Keys are normalized like request hosts (lowercased, port and
-// trailing dot stripped); entries with an empty tenant ID are dropped.
+// development, mapping custom domains to tenant IDs. Keys are normalized
+// like request hosts (lowercased, port and trailing dot stripped); entries
+// with an empty tenant ID are dropped.
 func StaticDomains(domains map[string]string) DomainLookup {
 	s := make(staticDomains, len(domains))
 	for domain, id := range domains {
@@ -168,7 +229,31 @@ func (s staticDomains) TenantByDomain(_ context.Context, domain string) (string,
 	if id, ok := s[normalizeHost(domain)]; ok {
 		return id, nil
 	}
-	return "", ErrDomainNotFound
+	return "", ErrTenantNotFound
+}
+
+// staticSubdomains is the in-memory SubdomainLookup for tests and development.
+type staticSubdomains map[string]string
+
+// StaticSubdomains returns an immutable in-memory SubdomainLookup for tests
+// and development, mapping subdomain labels to tenant IDs. Keys are
+// lowercased to match the normalized labels the Subdomain resolver looks
+// up; entries with an empty key or tenant ID are dropped.
+func StaticSubdomains(subdomains map[string]string) SubdomainLookup {
+	s := make(staticSubdomains, len(subdomains))
+	for label, id := range subdomains {
+		if label != "" && id != "" {
+			s[strings.ToLower(label)] = id
+		}
+	}
+	return s
+}
+
+func (s staticSubdomains) TenantBySubdomain(_ context.Context, subdomain string) (string, error) {
+	if id, ok := s[subdomain]; ok {
+		return id, nil
+	}
+	return "", ErrTenantNotFound
 }
 
 // normalizeHost lowercases the host, strips any port, removes IPv6 brackets,
