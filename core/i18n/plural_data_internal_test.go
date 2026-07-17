@@ -12,7 +12,7 @@ import (
 var ruleByLang = map[string]PluralRule{
 	"en": ruleOneOther, "de": ruleOneOther, "nl": ruleOneOther, "tr": ruleOneOther,
 	"fr": ruleFrench, "es": ruleSpanish,
-	"it": ruleItalianPortuguese, "pt": ruleItalianPortuguese,
+	"it": ruleItalian, "pt": rulePortuguese,
 	"uk": ruleEastSlavic, "ru": ruleEastSlavic,
 	"pl": rulePolish, "cs": ruleCzech, "ar": ruleArabic,
 	"ja": ruleOther, "zh": ruleOther,
@@ -33,8 +33,8 @@ func TestPluralRules(t *testing.T) {
 		// Spanish: 1 → one; 1e6 → many; 0 → other.
 		{"es", 0, Other}, {"es", 1, One}, {"es", 1000000, Many},
 		// Italian/Portuguese: 1 → one; 1e6 → many.
-		{"it", 1, One}, {"it", 2, Other}, {"it", 1000000, Many},
-		{"pt", 1, One}, {"pt", 0, Other}, {"pt", 1000000, Many},
+		{"it", 1, One}, {"it", 2, Other}, {"it", 1000000, Many}, {"it", 0, Other},
+		{"pt", 1, One}, {"pt", 0, One}, {"pt", 1000000, Many},
 		// East Slavic (uk/ru): 21 → one (the old SlavicPluralRule bug), 11 → many, 0 → many.
 		{"uk", 1, One}, {"uk", 21, One}, {"uk", 101, One},
 		{"uk", 2, Few}, {"uk", 4, Few}, {"uk", 22, Few}, {"uk", 102, Few},
@@ -51,12 +51,15 @@ func TestPluralRules(t *testing.T) {
 		{"ja", 1, Other}, {"zh", 1, Other},
 	}
 	for _, c := range cases {
-		assert.Equal(t, c.want, ruleByLang[c.lang](c.n), "%s(%d)", c.lang, c.n)
+		got := ruleByLang[c.lang](c.n)
+		assert.Equalf(t, c.want, got, "%s(%d) = %v, want %v", c.lang, c.n, got, c.want)
 	}
 }
 
 func TestPluralRulesNegative(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, One, ruleEastSlavic(-21), "uk(-21)")
-	assert.Equal(t, Few, rulePolish(-3), "pl(-3)")
+	got := ruleEastSlavic(-21)
+	assert.Equalf(t, One, got, "uk(-21) = %v, want %v", got, One)
+	got = rulePolish(-3)
+	assert.Equalf(t, Few, got, "pl(-3) = %v, want %v", got, Few)
 }

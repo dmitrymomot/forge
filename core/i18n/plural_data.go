@@ -46,8 +46,13 @@ func ruleSpanish(n int) PluralCategory {
 	return Other
 }
 
-// ruleItalianPortuguese shares the Spanish integer branch.
-func ruleItalianPortuguese(n int) PluralCategory { return ruleSpanish(n) }
+// ruleItalian: it — exactly 1 → one (shares the Spanish integer branch);
+// n=0 → other (it has no zero/one merge, unlike pt).
+func ruleItalian(n int) PluralCategory { return ruleSpanish(n) }
+
+// rulePortuguese: pt — 0..1 → one (shares the French integer branch);
+// n=0 → one ("0 dia"), unlike it where 0 → other.
+func rulePortuguese(n int) PluralCategory { return ruleFrench(n) }
 
 // ruleEastSlavic: uk, ru (and sr/hr/bs when added).
 // one:  n%10==1 && n%100!=11
