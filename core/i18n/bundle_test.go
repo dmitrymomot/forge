@@ -98,6 +98,9 @@ func TestLocales(t *testing.T) {
 		tags = append(tags, l.Tag())
 	}
 	assert.ElementsMatch(t, []string{"en", "en-GB", "uk", "de", "vi"}, tags)
+	// Locales documents "sorted by tag", which is also what makes the locale
+	// indices behind it deterministic across runs.
+	assert.IsIncreasing(t, tags)
 }
 
 func TestZeroLocaleUsesDefault(t *testing.T) {
@@ -316,6 +319,67 @@ func TestAppendMissEchoesKey(t *testing.T) {
 	en := b.Default()
 	assert.Equal(t, "x:app.nope", string(b.AppendT([]byte("x:"), en, "app.nope")))
 	assert.Equal(t, "x:app.nope", string(b.AppendTN([]byte("x:"), en, "app.nope", 2)))
+}
+
+func TestTNMissEchoesKey(t *testing.T) {
+	t.Parallel()
+	b := newBundle(t)
+	assert.Equal(t, "app.nope", b.TN(b.Default(), "app.nope", 2))
+}
+
+func TestTNRendersPlainMessage(t *testing.T) {
+	t.Parallel()
+	// A key with no plural forms still renders under TN, with count injected —
+	// so a catalog may later promote it to plural forms without breaking
+	// callers that already say TN.
+	b := newBundle(t)
+	en := b.Default()
+	assert.Equal(t, "Dashboard", b.TN(en, "app.title", 3))
+	assert.Equal(t, "x:Dashboard", string(b.AppendTN([]byte("x:"), en, "app.title", 3)))
+}
+
+func TestLocaleFromAnotherBundleResolvesByLanguage(t *testing.T) {
+	t.Parallel()
+	// A Locale is globally meaningful: the same tag means the same thing in
+	// every Bundle. One bundle's regional Locale used against a bundle that
+	// only carries the base language must layer down to it, not silently
+	// become the default.
+	regional, err := i18n.New(i18n.WithMessages(fstest.MapFS{
+		"en/app.json":    &fstest.MapFile{Data: []byte(`{"k": "en"}`)},
+		"pt-BR/app.json": &fstest.MapFile{Data: []byte(`{"k": "pt-BR"}`)},
+		"de/app.json":    &fstest.MapFile{Data: []byte(`{"k": "de"}`)},
+	}))
+	require.NoError(t, err)
+	ptBR, err := regional.Parse("pt-BR")
+	require.NoError(t, err)
+	require.Equal(t, "pt-BR", ptBR.Tag())
+
+	base, err := i18n.New(i18n.WithMessages(fstest.MapFS{
+		"en/app.json": &fstest.MapFile{Data: []byte(`{"k": "en"}`)},
+		"pt/app.json": &fstest.MapFile{Data: []byte(`{"k": "pt"}`)},
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, "pt", base.T(ptBR, "app.k"))
+
+	// A language the second bundle carries no catalog for at all falls all the
+	// way to its default.
+	de, err := regional.Parse("de")
+	require.NoError(t, err)
+	assert.Equal(t, "en", base.T(de, "app.k"))
+}
+
+func TestRuleReturningUnknownCategoryDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	// Rules are caller-supplied, so a bad one must degrade, not crash: an
+	// out-of-range category resolves to nothing and the chain carries on.
+	junk := func(int) i18n.PluralCategory { return i18n.PluralCategory(200) }
+	b := newBundle(t, i18n.WithPlural("uk", junk))
+	uk := b.ParseOrDefault("uk")
+	assert.NotPanics(t, func() {
+		// uk's forms are unreachable via a junk category, so the lookup falls
+		// through to en, which resolves with en's own rule.
+		assert.Equal(t, "1 item in your cart", b.TN(uk, "cart.items", 1))
+	})
 }
 
 func TestNewErrors(t *testing.T) {
