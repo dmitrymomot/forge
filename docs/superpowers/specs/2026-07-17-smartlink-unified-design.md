@@ -168,9 +168,10 @@ Metadata merge happens before `Decide`, so `ParamEquals` rules can branch per-af
 ## Catalog & PR mechanics
 
 - packages.md: rewrite the `web/smartlink` entry (engine + link manager + pipeline), delete the `web/shortlink` entry, fix cross-references (`magiclink`, `attribution`, engine doc "not shortlink" notes).
-- PR #64 (engine) merges first, unchanged except the `Link`→`Compiled` rename noted above (amended on that branch before merge, or as the first commit of the new PR — decided at planning).
-- PR #65 (shortlink) closes without merging, with a comment pointing at this design.
-- This design lands as one new PR: engine additions + manager + memory store + pgstore + catalog updates. Benchmarks (engine ones exist in #64; manager/handler added) + before/after numbers per repo policy.
+- Both PRs close without merging, each with a comment pointing at this design. Everything lands as ONE fresh PR from main.
+- The engine is NOT re-implemented: the first commit of the new branch takes the `web/smartlink` files verbatim from the #64 branch (`git checkout origin/dm/web-smartlink-package-e1168c -- web/smartlink`) — that code is review-hardened (authority-macro fail-closed escaping, zero-alloc matcher) and re-deriving it would risk losing that. The `Link`→`Compiled` rename is the second commit. Engine tests/benches come along in the seed commit.
+- The #65 code is not ported file-wise — the manager/store/handler are written fresh against this spec, which encodes the #65 behaviors worth keeping (atomic tenant-predicate mutators, fallback/no-store/never-301, blocklist, bounded-staleness cache contract). Do not re-read the #65 diff during implementation.
+- Benchmarks: engine ones arrive with the seed commit; manager/handler benches added new; before/after numbers in the PR per repo policy.
 
 ## Testing
 
