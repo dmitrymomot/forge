@@ -6,7 +6,7 @@ import (
 	"github.com/dmitrymomot/forge/web/smartlink"
 )
 
-func benchLink(b *testing.B, spec smartlink.Spec) *smartlink.Link {
+func benchLink(b *testing.B, spec smartlink.Spec) *smartlink.Compiled {
 	b.Helper()
 	link, err := smartlink.Compile(spec)
 	if err != nil {

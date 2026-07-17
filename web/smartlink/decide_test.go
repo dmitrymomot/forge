@@ -12,7 +12,7 @@ import (
 	"github.com/dmitrymomot/forge/web/smartlink"
 )
 
-func mustCompile(t *testing.T, spec smartlink.Spec, opts ...smartlink.Option) *smartlink.Link {
+func mustCompile(t *testing.T, spec smartlink.Spec, opts ...smartlink.Option) *smartlink.Compiled {
 	t.Helper()
 	link, err := smartlink.Compile(spec, opts...)
 	if err != nil {

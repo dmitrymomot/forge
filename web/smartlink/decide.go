@@ -21,7 +21,7 @@ type Decision struct {
 // whose matchers all match wins, falling back to the default target — picks a
 // split target by sticky-key bucket, and renders the final URL. It never
 // fails: every failure mode is a Compile error.
-func (l *Link) Decide(v Visit) Decision {
+func (l *Compiled) Decide(v Visit) Decision {
 	var now time.Time
 	if l.needsNow {
 		now = v.At
@@ -69,7 +69,7 @@ func (s *split) pick(stickyKey string) *compiledTarget {
 
 // finalURL renders the target's macros and merges visit params per the link
 // policy.
-func (l *Link) finalURL(t *compiledTarget, v *Visit) string {
+func (l *Compiled) finalURL(t *compiledTarget, v *Visit) string {
 	rendered := t.tmpl.render(v)
 	if l.params == ParamsDrop || len(v.Params) == 0 {
 		return rendered

@@ -7,9 +7,9 @@ import (
 	"github.com/dmitrymomot/forge/core/clock"
 )
 
-// Link is a compiled Spec ready for per-click decisions. Compile once per
+// Compiled is a compiled Spec ready for per-click decisions. Compile once per
 // rule-set version and reuse; Decide is safe for concurrent use.
-type Link struct {
+type Compiled struct {
 	clock    clock.Clock
 	rules    []compiledRule
 	def      split
@@ -43,9 +43,9 @@ type compiledTarget struct {
 // Compile validates a consumer-hydrated Spec fail-fast — missing default,
 // bad rule or matcher values, malformed or unknown-macro templates are all
 // construction errors — and returns the immutable decision engine for it.
-func Compile(spec Spec, opts ...Option) (*Link, error) {
+func Compile(spec Spec, opts ...Option) (*Compiled, error) {
 	cfg := newConfig(opts...)
-	l := &Link{clock: cfg.clock, params: spec.Params}
+	l := &Compiled{clock: cfg.clock, params: spec.Params}
 	switch spec.Params {
 	case ParamsDrop, ParamsFill, ParamsOverride:
 	default:

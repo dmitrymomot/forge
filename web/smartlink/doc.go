@@ -6,7 +6,7 @@
 // for subject").
 //
 // [Compile] validates a consumer-hydrated [Spec] fail-fast and returns an
-// immutable [Link]; [Link.Decide] is the infallible per-click hot path. Rule
+// immutable [Compiled]; [Compiled.Decide] is the infallible per-click hot path. Rule
 // values are consumer data hydrated into the typed vocabulary — there is no
 // DSL, and rule storage/admin, target health checks, and bot filtering stay
 // consumer-side. The package never imports net/http: the caller builds the
@@ -24,7 +24,7 @@
 // [ParamPolicy] controls merging Visit.Params into the final URL.
 //
 // Multi-tenant apps hydrate per-tenant rule sets and compile per-tenant
-// Links — tenancy is a passed value; there is no stored state to scope.
+// [Compiled] values — tenancy is a passed value; there is no stored state to scope.
 package smartlink
 
 import "fmt"
