@@ -10,8 +10,10 @@ import (
 // stamped on the request context via NewContext, overriding any tenant
 // already there (give a pre-existing context tenant an explicit slot with
 // the Context resolver). A resolver error responds 500 with a generic body
-// and does not call next. When nothing resolves, next runs untenanted so
-// single-tenant routes coexist; add Require where tenancy is mandatory.
+// and does not call next. When nothing resolves, the request passes through
+// unchanged: a tenant stamped by an upstream middleware is preserved, and a
+// request with none stays untenanted so single-tenant routes coexist; add
+// Require where tenancy is mandatory.
 //
 // The returned wrapper satisfies web/middleware.Middleware structurally.
 // Panics with ErrNilResolver when any resolver is nil.

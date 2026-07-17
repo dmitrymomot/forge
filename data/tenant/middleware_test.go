@@ -103,6 +103,21 @@ func TestMiddleware(t *testing.T) {
 		assert.Equal(t, "upstream", id)
 	})
 
+	t.Run("upstream tenant survives when nothing resolves", func(t *testing.T) {
+		t.Parallel()
+		var id string
+		var ok bool
+		h := tenant.Middleware(tenant.Header("X-Tenant-ID"))(captureTenant(&id, &ok))
+
+		r := newRequest("example.com", "/")
+		r = r.WithContext(tenant.NewContext(r.Context(), "upstream"))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+
+		require.True(t, ok)
+		assert.Equal(t, "upstream", id)
+	})
+
 	t.Run("no resolvers is identity-ish", func(t *testing.T) {
 		t.Parallel()
 		var ok bool

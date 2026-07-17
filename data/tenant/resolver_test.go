@@ -35,6 +35,7 @@ func TestSubdomain(t *testing.T) {
 		{"trailing FQDN dot", "acme.app.example.com.", "acme"},
 		{"empty host", "", ""},
 		{"dot only prefix", ".app.example.com", ""},
+		{"ipv6 literal", "[::1]:8080", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -192,6 +193,15 @@ func TestCookie(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
 		t.Parallel()
 		id, err := resolve(newRequest("example.com", "/"))
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("empty value reads as not resolved", func(t *testing.T) {
+		t.Parallel()
+		r := newRequest("example.com", "/")
+		r.Header.Set("Cookie", "tenant=")
+		id, err := resolve(r)
 		require.NoError(t, err)
 		assert.Empty(t, id)
 	})

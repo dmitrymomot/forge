@@ -61,7 +61,7 @@ func Middleware(resolvers ...Resolver) func(http.Handler) http.Handler
 func Require(next http.Handler) http.Handler
 ```
 
-- `Middleware`: precedence-ordered — first resolver returning a non-empty ID wins and is stamped via `NewContext` (overriding any pre-existing ctx tenant; use `Context()` in the chain to give the pre-existing value a precedence slot). A resolver error responds `500 Internal Server Error` (generic body, no leak) and does not call next. No resolution → next runs untenanted (single-tenant routes coexist).
+- `Middleware`: precedence-ordered — first resolver returning a non-empty ID wins and is stamped via `NewContext` (overriding any pre-existing ctx tenant; use `Context()` in the chain to give the pre-existing value a precedence slot). A resolver error responds `500 Internal Server Error` (generic body, no leak) and does not call next. No resolution → the request passes through unchanged: a tenant stamped upstream is preserved, a request with none stays untenanted (single-tenant routes coexist).
 - `Require`: guard middleware responding `404 Not Found` when the context carries no tenant. 404, not 401/403 — an unresolved tenant host is "nothing here", and 404 leaks nothing about tenancy. Both satisfy `web/middleware.Middleware` structurally (no import).
 
 ### ScopeClause (clause.go)
@@ -92,7 +92,7 @@ rows, err := db.Query(ctx, "SELECT id FROM orders WHERE status = $1 AND "+c.SQL,
 
 ## Layout
 
-`doc.go` (runnable example) · `tenant.go` · `resolver.go` · `middleware.go` · `clause.go` · `errors.go` · black-box tests (`package tenant_test`) · `fuzz_test.go` (Subdomain/PathPrefix/normalizeHost) · `bench_test.go`.
+`doc.go` (runnable example) · `tenant.go` · `resolver.go` · `middleware.go` · `clause.go` · `errors.go` · black-box tests (`package tenant_test`) · `fuzz_test.go` (Subdomain/PathPrefix; host normalization is exercised through the Subdomain target) · `bench_test.go`.
 
 ## Performance
 
