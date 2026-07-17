@@ -223,6 +223,29 @@ func TestFormatNeverFallsBackToDefaultLocaleSpec(t *testing.T) {
 	assert.Equal(t, "1,234.5", b.Number(uk, 1234.5))
 }
 
+// TestWithFormatMalformedTagIsNoOp covers WithFormat's documented no-op
+// branch: a tag that does not normalize (empty, or "-" with no language
+// subtag) must have its spec silently dropped, not stored under some
+// accidental key that a real locale could later pick up. junkSpec's
+// separators are chosen to be visibly unlike Invariant's ("," and "."), so if
+// either malformed call ever leaked into resolution, the assertions below
+// would render "1|234#5" instead of "1,234.5" and fail.
+func TestWithFormatMalformedTagIsNoOp(t *testing.T) {
+	t.Parallel()
+	junkSpec := i18n.FormatSpec{DecimalSep: "#", GroupSep: "|", DateLayout: "JUNK", TimeLayout: "JUNK", DateTimeLayout: "JUNK"}
+	b, err := i18n.New(
+		i18n.WithMessages(os.DirFS("testdata/locales")),
+		i18n.WithFormat("", junkSpec),  // empty tag normalizes to ""
+		i18n.WithFormat("-", junkSpec), // no language subtag also normalizes to ""
+	)
+	require.NoError(t, err)
+	// Neither malformed call wired a real spec, so both the default locale
+	// and an unrelated supported locale must still render with Invariant.
+	assert.Equal(t, "1,234.5", b.Number(b.Default(), 1234.5))
+	uk := b.ParseOrDefault("uk")
+	assert.Equal(t, "1,234.5", b.Number(uk, 1234.5))
+}
+
 func TestNumberNaNAndInf(t *testing.T) {
 	t.Parallel()
 	b := fmtBundle(t)
