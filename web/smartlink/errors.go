@@ -18,3 +18,27 @@ var (
 	// ErrUnknownMacro is returned for a template macro outside the vocabulary.
 	ErrUnknownMacro = errors.New("smartlink: unknown macro")
 )
+
+// Store and Manager errors. A Manager (a later task) layers codegen, scope,
+// and redirect-time checks on top of a Store.
+var (
+	// ErrNotFound is returned when a code has no Link record, or by a
+	// tenant-scoped Store mutator when the code belongs to a different tenant.
+	ErrNotFound = errors.New("smartlink: not found")
+	// ErrDuplicate is returned by Store.Create when the code already exists.
+	ErrDuplicate = errors.New("smartlink: duplicate code")
+	// ErrLinkExpired is returned when a Link's ExpiresAt has passed.
+	ErrLinkExpired = errors.New("smartlink: link expired")
+	// ErrLinkDeactivated is returned when a Link has been deactivated.
+	ErrLinkDeactivated = errors.New("smartlink: link deactivated")
+	// ErrNoTarget is returned when a Link has neither a Target URL nor a Ref
+	// to a compiled Spec.
+	ErrNoTarget = errors.New("smartlink: no target")
+	// ErrInvalidLink is returned for a malformed Link or CreateParams.
+	ErrInvalidLink = errors.New("smartlink: invalid link")
+	// ErrCodeReserved is returned when a caller-supplied code collides with a
+	// reserved value.
+	ErrCodeReserved = errors.New("smartlink: code reserved")
+	// ErrScope is returned when a required tenant scope is missing.
+	ErrScope = errors.New("smartlink: scope required")
+)
