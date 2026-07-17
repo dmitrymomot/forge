@@ -159,6 +159,9 @@ func appendNumberSpec(dst []byte, v float64, s *FormatSpec) []byte {
 
 // appendGroupedDigits regroups an already-rendered digit string.
 func appendGroupedDigits(dst []byte, digits []byte, groupSep string) []byte {
+	if digits == nil {
+		return append(dst, '0')
+	}
 	n := len(digits)
 	if n == 0 {
 		return append(dst, '0')

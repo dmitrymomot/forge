@@ -58,7 +58,7 @@ func TestValidateKeys(t *testing.T) {
 
 	err := b.ValidateKeys(keyTitle, keyTypo)
 	require.ErrorIs(t, err, i18n.ErrUnknownKey)
-	assert.Contains(t, err.Error(), "app.ttile", "the error must name the offending key")
+	assert.ErrorContains(t, err, "app.ttile", "the error must name the offending key")
 }
 
 func TestValidateKeysChecksDefaultLocaleOnly(t *testing.T) {
@@ -74,8 +74,9 @@ func TestValidateKeysReportsAllMissing(t *testing.T) {
 	b := newBundle(t)
 	err := b.ValidateKeys(i18n.NewKey("a.b"), keyTitle, i18n.NewKey("c.d"))
 	require.ErrorIs(t, err, i18n.ErrUnknownKey)
-	assert.Contains(t, err.Error(), "a.b")
-	assert.Contains(t, err.Error(), "c.d")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "a.b")
+	assert.ErrorContains(t, err, "c.d")
 	assert.NotContains(t, err.Error(), "app.title")
 }
 
