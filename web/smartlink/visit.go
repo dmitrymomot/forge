@@ -24,5 +24,7 @@ type Visit struct {
 	// StickyKey is the bucketing identity (click ID, visitor ID) that keeps
 	// Percent matchers and weighted splits deterministic per visitor. With an
 	// empty key, Percent never matches and splits pick their first target.
+	// Consumers typically set it to their fingerprint digest, so weighted-split
+	// stickiness and fraud identity agree by construction.
 	StickyKey string
 }
