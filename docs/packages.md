@@ -39,23 +39,6 @@ Deps: `web/httpserver`.
 
 ---
 
-**web/shortlink**
-
-Short-code links over a storage-agnostic Store with `cache.Store`
-read-through: collision-retried generation over an unambiguous
-base58-style alphabet, vanity slugs with a reserved-word blocklist,
-expiry/deactivation with a configurable fallback, and an `OnHit` hook
-that emits — counting stays the caller's job. Redirects are 302/307 with
-no-cache headers (a cached 301 kills hit counting forever); destinations
-live server-side (never `?url=`) and are scheme-allowlisted at creation.
-Branded short domains compose `tenant` custom domains + `hostrouter`.
-Not `magiclink` (self-contained signed token); not `smartlink` (no rules
-— a code resolves to one target or one rule-table handle).
-
-Deps: `core/random`, `resilience/cache`.
-
----
-
 **web/smartlink**
 
 Destination-decision engine (the TDS/smartlink core): ordered rules of
