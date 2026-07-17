@@ -215,8 +215,8 @@ func BenchmarkResolveDecideTarget(b *testing.B) {
 }
 
 // BenchmarkHandlerRef is the same full ServeHTTP loop for a Ref-backed Link
-// resolved through a warm [smartlink.Cache] Resolver — the hit path of
-// Task 4's compile cache, not the load-and-compile miss path.
+// resolved through a warm [smartlink.Cache] Resolver — the compile cache's
+// hit path, not the load-and-compile miss path.
 func BenchmarkHandlerRef(b *testing.B) {
 	c := smartlink.NewCache(func(_ context.Context, ref string) (smartlink.Spec, error) {
 		return smartlink.Spec{Default: []smartlink.Target{{URL: "https://offer.example.com/" + ref}}}, nil
