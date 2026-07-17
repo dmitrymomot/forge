@@ -21,7 +21,11 @@ type Resolver func(ctx context.Context, l Link) (Decider, error)
 type Cache struct {
 	load    func(ctx context.Context, ref string) (Spec, error)
 	entries map[string]*Compiled
-	opts    []Option
+	// gens counts Invalidate calls per ref. Get stores a loaded result only
+	// when the generation it observed on the miss is still current, so a
+	// stale in-flight load can never overwrite a post-Invalidate entry.
+	gens map[string]uint64
+	opts []Option
 
 	mu sync.RWMutex
 }
@@ -34,13 +38,17 @@ type Cache struct {
 // goroutines that miss on the same ref concurrently may both load and
 // compile — the redundant work is benign because Compiled values for the
 // same Spec are interchangeable, so the second store just overwrites the
-// first with an equivalent result. Errors from load or Compile are never
+// first with an equivalent result. An Invalidate concurrent with an
+// in-flight load bumps the ref's generation, so the straggler's stale
+// result is discarded instead of stored — it can never overwrite an entry
+// cached after the Invalidate. Errors from load or Compile are never
 // cached, so the next Get retries.
 func NewCache(load func(ctx context.Context, ref string) (Spec, error), compileOpts ...Option) *Cache {
 	return &Cache{
 		load:    load,
 		opts:    compileOpts,
 		entries: make(map[string]*Compiled),
+		gens:    make(map[string]uint64),
 	}
 }
 
@@ -49,6 +57,7 @@ func NewCache(load func(ctx context.Context, ref string) (Spec, error), compileO
 func (c *Cache) Get(ctx context.Context, ref string) (*Compiled, error) {
 	c.mu.RLock()
 	compiled, ok := c.entries[ref]
+	gen := c.gens[ref]
 	c.mu.RUnlock()
 	if ok {
 		return compiled, nil
@@ -64,7 +73,12 @@ func (c *Cache) Get(ctx context.Context, ref string) (*Compiled, error) {
 	}
 
 	c.mu.Lock()
-	c.entries[ref] = compiled
+	if c.gens[ref] == gen {
+		c.entries[ref] = compiled
+	}
+	// Otherwise an Invalidate landed while this load was in flight: discard
+	// the stale result from the cache but still return it — it was correct
+	// when this call began, and the next Get reloads fresh.
 	c.mu.Unlock()
 	return compiled, nil
 }
@@ -74,6 +88,7 @@ func (c *Cache) Get(ctx context.Context, ref string) (*Compiled, error) {
 func (c *Cache) Invalidate(ref string) {
 	c.mu.Lock()
 	delete(c.entries, ref)
+	c.gens[ref]++
 	c.mu.Unlock()
 }
 

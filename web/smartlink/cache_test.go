@@ -3,6 +3,7 @@ package smartlink_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dmitrymomot/forge/web/smartlink"
@@ -87,6 +88,64 @@ func TestCacheCompileErrorPropagates(t *testing.T) {
 	_, err := cache.Get(ctx, "ref-1")
 	if !errors.Is(err, smartlink.ErrNoDefault) {
 		t.Fatalf("Get() error = %v, want wrapping %v", err, smartlink.ErrNoDefault)
+	}
+}
+
+// TestCacheInvalidateDuringLoad asserts that an Invalidate issued while a
+// load is in flight cannot be defeated by the stale result: the straggler's
+// Compiled must not overwrite a fresher entry stored after the Invalidate.
+func TestCacheInvalidateDuringLoad(t *testing.T) {
+	t.Parallel()
+	const (
+		oldURL = "https://old.example.com/"
+		newURL = "https://new.example.com/"
+	)
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	cache := smartlink.NewCache(func(context.Context, string) (smartlink.Spec, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+			return smartlink.Spec{Default: []smartlink.Target{{URL: oldURL}}}, nil
+		}
+		return smartlink.Spec{Default: []smartlink.Target{{URL: newURL}}}, nil
+	})
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The straggler still gets a correct-at-call-time result; only the
+		// store must be suppressed.
+		if _, err := cache.Get(ctx, "ref-1"); err != nil {
+			t.Errorf("straggler Get() error = %v", err)
+		}
+	}()
+
+	<-entered // straggler is inside load, nothing cached yet
+	cache.Invalidate("ref-1")
+
+	compiled, err := cache.Get(ctx, "ref-1") // loads and stores the new Spec
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got := compiled.Decide(smartlink.Visit{}).URL; got != newURL {
+		t.Fatalf("post-invalidate Decide().URL = %q, want %q", got, newURL)
+	}
+
+	close(release) // straggler finishes; its stale result must be discarded
+	<-done
+
+	final, err := cache.Get(ctx, "ref-1")
+	if err != nil {
+		t.Fatalf("final Get() error = %v", err)
+	}
+	if got := final.Decide(smartlink.Visit{}).URL; got != newURL {
+		t.Fatalf("final Decide().URL = %q, want %q (stale store overwrote fresh entry)", got, newURL)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("load calls = %d, want 2 (final Get must hit the cache)", n)
 	}
 }
 
