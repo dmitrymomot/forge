@@ -1,7 +1,8 @@
 package smartlink
 
 // ParamPolicy controls how Visit.Params merge into the final URL after macro
-// rendering.
+// rendering. ParamsFill and ParamsOverride re-encode the query, which sorts
+// its keys — don't point merged links at order-sensitive (e.g. signed) URLs.
 type ParamPolicy int
 
 const (
@@ -44,7 +45,12 @@ type Rule struct {
 // Target is one destination URL template with its split weight.
 type Target struct {
 	// URL is the destination template; it may contain {country}, {device},
-	// {locale}, and {param.NAME} macros.
+	// {locale}, and {param.NAME} macros in the host, path, or query. Macro
+	// values escape by position, so they can never alter the URL structure:
+	// path and query values percent-encode, and a host-position value renders
+	// only when it is entirely hostname-safe bytes ([A-Za-z0-9._~-]) — any
+	// other value renders empty, yielding a dead but well-formed URL, never a
+	// different destination shape.
 	URL string
 	// Weight is the target's relative share of a split; must be >= 1 when the
 	// target list has more than one entry, ignored otherwise.

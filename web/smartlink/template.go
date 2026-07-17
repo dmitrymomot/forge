@@ -17,15 +17,30 @@ const (
 	macroParam
 )
 
+// escMode selects the positional escaping for a macro, decided at compile
+// from the literal text preceding it: authority (between "//" and the first
+// '/', '?', or '#') renders hostname-safe values verbatim and anything else
+// as empty — net/url forbids percent-escapes like %40 in a host, so encoding
+// isn't an option and a hostile value fails closed to a dead but well-formed
+// URL; path escapes with url.PathEscape plus ':' (so a value can't smuggle a
+// scheme into the first segment of a relative template); query escapes with
+// url.QueryEscape. Together these keep macro values from ever altering the
+// URL structure validated at compile time.
+type escMode uint8
+
+const (
+	escPath escMode = iota
+	escQuery
+	escAuthority
+)
+
 // segment is one compiled piece of a URL template: a literal followed by an
-// optional macro. Escaping is positional: macros before the first '?' render
-// path-escaped, macros after it query-escaped, so values can never alter the
-// URL structure.
+// optional macro.
 type segment struct {
-	literal    string
-	param      string // param name for macroParam
-	macro      macroKind
-	pathEscape bool
+	literal string
+	param   string // param name for macroParam
+	macro   macroKind
+	esc     escMode
 }
 
 // template is a compiled URL template. A nil segs means the URL is a plain
@@ -49,7 +64,6 @@ func parseTemplate(raw, where string) (template, error) {
 	var segs []segment
 	var elided strings.Builder
 	rest := raw
-	inQuery := false
 	for {
 		open := strings.IndexByte(rest, '{')
 		if open < 0 {
@@ -69,11 +83,8 @@ func parseTemplate(raw, where string) (template, error) {
 		if err != nil {
 			return template{}, err
 		}
-		if strings.ContainsRune(literal, '?') {
-			inQuery = true
-		}
-		segs = append(segs, segment{literal: literal, macro: kind, param: param, pathEscape: !inQuery})
 		elided.WriteString(literal)
+		segs = append(segs, segment{literal: literal, macro: kind, param: param, esc: escapeModeFor(elided.String())})
 		rest = rest[close+1:]
 	}
 	if strings.ContainsRune(rest, '}') {
@@ -87,6 +98,25 @@ func parseTemplate(raw, where string) (template, error) {
 		return template{}, fmt.Errorf("%w: %s: %v", ErrInvalidTemplate, where, err)
 	}
 	return template{raw: raw, segs: segs}, nil
+}
+
+// escapeModeFor derives a macro's escaping from the macro-elided literal
+// prefix before it (macro values never create structure, so the prefix alone
+// fixes the position).
+func escapeModeFor(prefix string) escMode {
+	if strings.ContainsRune(prefix, '?') {
+		return escQuery
+	}
+	auth := -1
+	if i := strings.Index(prefix, "://"); i >= 0 {
+		auth = i + 3
+	} else if strings.HasPrefix(prefix, "//") {
+		auth = 2
+	}
+	if auth >= 0 && !strings.ContainsAny(prefix[auth:], "/?#") {
+		return escAuthority
+	}
+	return escPath
 }
 
 // resolveMacro maps a macro name to its kind; unknown names are compile
@@ -133,11 +163,47 @@ func (t template) render(v *Visit) string {
 		if val == "" {
 			continue
 		}
-		if s.pathEscape {
-			b.WriteString(url.PathEscape(val))
-		} else {
+		switch s.esc {
+		case escAuthority:
+			if isHostSafe(val) {
+				b.WriteString(val)
+			}
+		case escPath:
+			writePathEscaped(&b, val)
+		case escQuery:
 			b.WriteString(url.QueryEscape(val))
 		}
 	}
 	return b.String()
+}
+
+// isHostSafe reports whether every byte of s belongs to the unreserved
+// hostname set, so an authority-position value can't introduce userinfo
+// ('@'), a port (':'), or end the authority ('/', '?', '#').
+func isHostSafe(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_' || c == '~' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// writePathEscaped writes url.PathEscape output with ':' additionally
+// encoded: a ':' in the first segment of a relative template would otherwise
+// reparse as a scheme delimiter.
+func writePathEscaped(b *strings.Builder, s string) {
+	escaped := url.PathEscape(s)
+	for {
+		i := strings.IndexByte(escaped, ':')
+		if i < 0 {
+			b.WriteString(escaped)
+			return
+		}
+		b.WriteString(escaped[:i])
+		b.WriteString("%3A")
+		escaped = escaped[i+1:]
+	}
 }

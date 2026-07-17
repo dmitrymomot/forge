@@ -1,6 +1,7 @@
 package smartlink_test
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -282,6 +283,46 @@ func TestMacroPathEscaping(t *testing.T) {
 	d := link.Decide(smartlink.Visit{Params: map[string]string{"slug": "a b/c?d"}})
 	if want := "https://a.com/a%20b%2Fc%3Fd/x"; d.URL != want {
 		t.Fatalf("URL = %q, want %q", d.URL, want)
+	}
+}
+
+func TestMacroAuthorityEscaping(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{
+		Default: []smartlink.Target{{URL: "https://cdn-{param.region}.example.com/lp"}},
+	})
+	// Legitimate per-region subdomains render untouched.
+	if got := link.Decide(smartlink.Visit{Params: map[string]string{"region": "eu-1"}}).URL; got != "https://cdn-eu-1.example.com/lp" {
+		t.Fatalf("URL = %q", got)
+	}
+	// Hostile values cannot introduce userinfo, a port, or end the authority:
+	// the rendered URL still parses with a host under example.com.
+	for _, hostile := range []string{"evil.com@real.com", "a:9999", "evil.com/x", "e?y", "e#z"} {
+		got := link.Decide(smartlink.Visit{Params: map[string]string{"region": hostile}}).URL
+		u, err := url.Parse(got)
+		if err != nil {
+			t.Fatalf("region %q rendered unparseable URL %q: %v", hostile, got, err)
+		}
+		if u.User != nil || u.Port() != "" || !strings.HasSuffix(u.Hostname(), ".example.com") || u.Path != "/lp" {
+			t.Fatalf("region %q altered URL structure: %q", hostile, got)
+		}
+	}
+}
+
+func TestMacroSchemeInjection(t *testing.T) {
+	t.Parallel()
+	// A ':' in the first segment of a relative template must not reparse as a
+	// scheme delimiter.
+	link := mustCompile(t, smartlink.Spec{
+		Default: []smartlink.Target{{URL: "{param.p}/lp"}},
+	})
+	got := link.Decide(smartlink.Visit{Params: map[string]string{"p": "https://evil.com"}}).URL
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("rendered unparseable URL %q: %v", got, err)
+	}
+	if u.IsAbs() || u.Host != "" {
+		t.Fatalf("relative template became absolute: %q", got)
 	}
 }
 

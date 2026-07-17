@@ -19,9 +19,9 @@
 // always lands on the same side. Target URLs are templates over a fixed
 // macro vocabulary ({country}, {device}, {locale}, {param.NAME}) parsed at
 // compile time: an unknown macro is a construction error, never an empty
-// substitution at decide time. Macro values escape positionally (path vs
-// query), and [ParamPolicy] controls merging Visit.Params into the final
-// URL.
+// substitution at decide time. Macro values escape positionally (authority
+// vs path vs query), so they can never alter the URL structure, and
+// [ParamPolicy] controls merging Visit.Params into the final URL.
 //
 // Multi-tenant apps hydrate per-tenant rule sets and compile per-tenant
 // Links — tenancy is a passed value; there is no stored state to scope.
