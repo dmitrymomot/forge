@@ -105,15 +105,21 @@ func TestMiddlewareHeaders(t *testing.T) {
 func TestMiddlewarePreservesExistingVary(t *testing.T) {
 	t.Parallel()
 	b := newBundle(t)
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Vary", "Cookie")
-		echoHandler().ServeHTTP(w, r)
-	})
-	h := b.Middleware()(inner)
+	// The inner handler must not touch Vary itself — otherwise it would
+	// re-introduce "Cookie" independently of the middleware, and the test
+	// would pass even if the middleware used Header.Set instead of Add.
+	h := b.Middleware()(echoHandler())
+
+	// Pre-set Vary on the recorder BEFORE the middleware runs, simulating an
+	// outer middleware (or a prior response-writing layer) that already
+	// declared a Vary dependency.
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Vary", "Cookie")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Language", "uk")
-	rec := serve(t, h, req)
+	h.ServeHTTP(rec, req)
+
 	vary := rec.Header().Values("Vary")
 	assert.Contains(t, vary, "Cookie", "a pre-existing Vary value must survive")
 	assert.Contains(t, vary, "Accept-Language")
