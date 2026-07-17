@@ -3,10 +3,10 @@ package smartlink
 import "time"
 
 // Link is a stored short-code record: a code bound to a redirect target —
-// either a literal Target URL or, via Ref, a compiled [Spec] resolved by a
-// Manager (a later task) — plus tenant scope and caller metadata. ShortURL is
-// derived from Code and the app's base URL for API responses; it is never
-// persisted.
+// either a literal Target URL template or, via Ref, a consumer [Spec]
+// resolved through [WithResolver] — plus tenant scope and caller metadata.
+// ShortURL is derived from Code and the app's base URL for API responses;
+// it is never persisted.
 type Link struct {
 	CreatedAt     time.Time         `json:"created_at"`
 	ExpiresAt     time.Time         `json:"expires_at,omitzero"`
@@ -19,11 +19,12 @@ type Link struct {
 	ShortURL      string            `json:"short_url,omitempty"`
 }
 
-// CreateParams are the caller-supplied fields for creating a Link. A Manager
-// (a later task) validates Target/Ref, generates Code when empty, and stamps
-// CreatedAt before handing the resulting Link to Store.Create. SkipRefCheck
-// bypasses the Manager's check that Ref names a known compiled Spec, for
-// callers that register the Spec after the Link.
+// CreateParams are the caller-supplied fields for creating a Link.
+// [Manager.Create] validates Target/Ref, generates Code when empty, and
+// stamps CreatedAt before handing the resulting Link to Store.Create.
+// SkipRefCheck bypasses the create-time check that Ref resolves via the
+// configured [WithResolver], for callers that register the Spec after the
+// Link.
 type CreateParams struct {
 	ExpiresAt    time.Time
 	Target       string

@@ -17,8 +17,9 @@ const maxCodeAttempts = 5
 // Manager is the management surface over a [Store]: it validates and
 // creates Links (vanity or generated code, Target or Ref, tenant scope) and
 // drives their lifecycle (Get, List, Deactivate, Activate, Delete).
-// Resolving a code to a redirect decision is a Handler's job (a later
-// task). Safe for concurrent use — all state lives in the Store.
+// Resolving a code to a live Link is [Manager.Resolve]; serving it as a
+// redirect is [Manager.Handler]. Safe for concurrent use — all state lives
+// in the Store.
 type Manager struct {
 	store Store
 	cfg   managerConfig

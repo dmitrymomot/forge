@@ -7,8 +7,8 @@ import (
 )
 
 // Resolver resolves a Ref-backed Link to a Decider ready for a click decision.
-// [Cache.Resolver] returns a ready-made one; a Manager (a later task) is the
-// seam's consumer. Resolver does not special-case ErrNoTarget: when the
+// [Cache.Resolver] returns a ready-made one; [WithResolver] wires it into a
+// Manager. Resolver does not special-case ErrNoTarget: when the
 // consumer's load func returns it for a paused or deleted offer, Resolver
 // propagates the wrapped error and leaves the mapping to dead-link handling
 // to the caller.

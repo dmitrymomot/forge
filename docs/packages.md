@@ -60,7 +60,7 @@ uniform per-click pipeline serves both a fixed-destination link (a
 compiled degenerate spec — no rules) and a rule-driven one (a
 consumer-supplied resolver) identically: build the visit, merge the
 link's metadata, decide, redirect 302/307 with no-store (never 301 — it
-would kill hit observation forever), then hand the hit to a synchronous
+would kill hit observation forever), then hand the hit to a post-redirect
 `OnHit` observer for the caller to log or count. Sync decorators
 (fraud diversion, A/B overrides, metrics) wrap the decision itself;
 `WithScope` fail-closed tenancy applies to management operations only —

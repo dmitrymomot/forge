@@ -54,9 +54,11 @@
 // redirect (302 or 307 via [WithRedirectStatus] — 301 is rejected, since a
 // cached permanent redirect would kill hit observation forever, and every
 // response carries Cache-Control: no-store), and call [WithOnHit]
-// synchronously after the response is written. A store, cache, or resolver
-// outage answers 500 — an outage must read as an outage, not as every link
-// being gone.
+// synchronously after the response is written. A store or resolver outage
+// answers 500 — an outage must read as an outage, not as every link being
+// gone. A cache outage never surfaces: any cache error or decode failure is
+// treated as a miss and falls through to the Store (logged at debug), so a
+// bad cache backend degrades to "always hit the Store", not to failures.
 //
 // # Hooks
 //

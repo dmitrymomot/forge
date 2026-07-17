@@ -15,14 +15,14 @@ import (
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
 
-// VisitFunc builds or decorates a [Visit] from the inbound request. A
-// Handler (a later task) calls it before Decide; the Visit passed in is the
-// zero value on the first call in a chain.
+// VisitFunc builds or decorates a [Visit] from the inbound request.
+// [Manager.Handler] calls it before Decide, passing a Visit whose Params
+// are already pre-filled from the query string (first value per key).
 type VisitFunc func(*http.Request, Visit) Visit
 
-// Hit is delivered to a [WithOnHit] callback (a later task) after a redirect
-// decision has been made: the resolved Link, the Visit built for the
-// request, and the Decision Decide returned.
+// Hit is delivered to a [WithOnHit] callback after [Manager.Handler] writes
+// a redirect: the resolved Link, the Visit built for the request, and the
+// Decision Decide returned.
 type Hit struct {
 	Link     Link
 	Visit    Visit
@@ -142,21 +142,25 @@ func WithResolver(r Resolver) ManagerOption {
 	return func(c *managerConfig) { c.resolver = r }
 }
 
-// WithVisitFunc sets the [VisitFunc] a Handler (a later task) uses to build
-// the [Visit] for each request.
+// WithVisitFunc sets the [VisitFunc] [Manager.Handler] uses to enrich the
+// [Visit] for each request.
 func WithVisitFunc(f VisitFunc) ManagerOption {
 	return func(c *managerConfig) { c.visitFunc = f }
 }
 
-// WithOnHit registers a callback a Handler (a later task) invokes after each
-// redirect decision, for click logging or analytics.
+// WithOnHit registers a callback [Manager.Handler] invokes synchronously
+// after each redirect is written. Hand the [Hit] to a bounded sink (queue
+// push, buffered channel) — never do work inline or spawn per-hit
+// goroutines, since a slow callback blocks every click.
 func WithOnHit(f func(context.Context, Hit)) ManagerOption {
 	return func(c *managerConfig) { c.onHit = f }
 }
 
-// WithCache configures the read-through compile cache a Handler (a later
-// task) uses when resolving Ref-backed Links: cs is the backing
-// [cache.Store] and ttl bounds how long a resolved entry is reused.
+// WithCache configures the read-through Link cache [Manager.Resolve] (and
+// so [Manager.Handler]) consults before the Store: cs is the backing
+// [cache.Store] and ttl bounds how long a cached record is reused. Cache
+// errors degrade to Store reads; lifecycle mutations best-effort evict, so
+// a warmed entry is stale for at most ttl.
 func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 	return func(c *managerConfig) {
 		c.cacheStore = cs
@@ -164,14 +168,15 @@ func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 	}
 }
 
-// WithFallbackURL sets the destination a Handler (a later task) redirects to
-// when a code cannot be resolved to a live decision.
+// WithFallbackURL sets the destination [Manager.Handler] redirects to for a
+// dead link (unknown, expired, or deactivated code, or a Ref the resolver
+// reports as [ErrNoTarget]). Without it, dead links answer 404.
 func WithFallbackURL(u string) ManagerOption {
 	return func(c *managerConfig) { c.fallbackURL = u }
 }
 
-// WithRedirectStatus sets the HTTP status a Handler (a later task) uses for
-// a successful redirect. Only 302 (Found, the default) and 307 (Temporary
+// WithRedirectStatus sets the HTTP status [Manager.Handler] uses for a
+// successful redirect. Only 302 (Found, the default) and 307 (Temporary
 // Redirect) are accepted: a 301 (permanent) would let browsers cache a
 // destination that can change on the next rule evaluation. Any other value
 // is a NewManager error.

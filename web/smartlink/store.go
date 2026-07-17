@@ -6,8 +6,8 @@ import (
 )
 
 // Store persists Link records by code. [MemoryStore] is the in-memory
-// reference implementation; a Postgres driver (a later task) implements the
-// same contract.
+// reference implementation; the pgstore subpackage is the Postgres driver
+// implementing the same contract.
 //
 // Deactivate, Activate, and Delete take a tenant: when non-empty, the
 // mutation applies only to a record owned by that tenant, and the tenant

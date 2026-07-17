@@ -19,8 +19,8 @@ var (
 	ErrUnknownMacro = errors.New("smartlink: unknown macro")
 )
 
-// Store and Manager errors. A Manager (a later task) layers codegen, scope,
-// and redirect-time checks on top of a Store.
+// Store and Manager errors. A [Manager] layers codegen, scope, and
+// redirect-time checks on top of a [Store].
 var (
 	// ErrNotFound is returned when a code has no Link record, or by a
 	// tenant-scoped Store mutator when the code belongs to a different tenant.
