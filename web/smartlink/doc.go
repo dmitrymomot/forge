@@ -27,7 +27,13 @@
 // compile time: an unknown macro is a construction error, never an empty
 // substitution at decide time. Macro values escape positionally (authority
 // vs path vs query), so they can never alter the URL structure, and
-// [ParamPolicy] controls merging Visit.Params into the final URL.
+// [ParamPolicy] controls merging Visit.Params into the final URL. A Target
+// whose authority (host) contains a {param.NAME} macro fed by a
+// visitor-controlled query parameter is a creator opt-in open-redirect
+// surface — the visitor chooses the destination host outright. A creator
+// who must keep the host out of visitor control should instead pin the
+// host-feeding param via the Link's Metadata, since Metadata wins the merge
+// into Visit.Params and so overrides whatever the query string supplies.
 //
 // [Decider], [DecideFunc], and [Decorator] let a consumer wrap a [*Compiled]
 // (or a [Cache]-backed [Resolver]) with concerns that must affect the

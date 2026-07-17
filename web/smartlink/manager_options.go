@@ -79,21 +79,34 @@ func WithCodeFunc(f func() string) ManagerOption {
 }
 
 // WithBaseURL sets the base [Manager.ShortURL] renders a code onto. It must
-// be an absolute http(s) URL (scheme and host); a trailing slash is added if
-// missing. Without this option, ShortURL always returns "".
+// be an absolute http(s) URL (scheme and host); any trailing slashes are
+// trimmed and exactly one is added back, so "https://s.example.com//" can't
+// produce a double slash in a rendered ShortURL. Without this option,
+// ShortURL always returns "".
 func WithBaseURL(u string) ManagerOption {
 	return func(c *managerConfig) {
-		parsed, err := url.Parse(u)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			c.errs = append(c.errs, fmt.Errorf("smartlink: base URL must be absolute (scheme and host): %q", u))
+		if err := validateAbsoluteHTTPURL(u); err != nil {
+			c.errs = append(c.errs, fmt.Errorf("smartlink: base URL: %w", err))
 			return
 		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			c.errs = append(c.errs, fmt.Errorf("smartlink: base URL scheme must be http or https: %q", u))
-			return
-		}
-		c.baseURL = strings.TrimSuffix(u, "/") + "/"
+		c.baseURL = strings.TrimRight(u, "/") + "/"
 	}
+}
+
+// validateAbsoluteHTTPURL requires u to be an absolute URL with a non-empty
+// host and an http or https scheme. Shared by [WithBaseURL] and
+// [WithFallbackURL], whose values are both rendered as redirect Location
+// headers and so must not be relative — a typo'd relative fallback would
+// silently redirect relative to the handler's own path.
+func validateAbsoluteHTTPURL(u string) error {
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("must be absolute (scheme and host): %q", u)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https: %q", u)
+	}
+	return nil
 }
 
 // WithSchemes replaces the allowed Target URL schemes (default "http",
@@ -160,9 +173,17 @@ func WithOnHit(f func(context.Context, Hit)) ManagerOption {
 // so [Manager.Handler]) consults before the Store: cs is the backing
 // [cache.Store] and ttl bounds how long a cached record is reused. Cache
 // errors degrade to Store reads; lifecycle mutations best-effort evict, so
-// a warmed entry is stale for at most ttl.
+// a warmed entry is stale for at most ttl. ttl must be positive: [cache.WithTTL]
+// treats a non-positive ttl as "never expire", which would let a cached
+// entry that survives a failed eviction (see [Manager.invalidateCache])
+// serve forever instead of bounding its staleness — a non-positive ttl is a
+// NewManager error.
 func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 	return func(c *managerConfig) {
+		if ttl <= 0 {
+			c.errs = append(c.errs, fmt.Errorf("smartlink: cache ttl must be positive, got %s", ttl))
+			return
+		}
 		c.cacheStore = cs
 		c.cacheTTL = ttl
 	}
@@ -170,9 +191,18 @@ func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 
 // WithFallbackURL sets the destination [Manager.Handler] redirects to for a
 // dead link (unknown, expired, or deactivated code, or a Ref the resolver
-// reports as [ErrNoTarget]). Without it, dead links answer 404.
+// reports as [ErrNoTarget]). Without it, dead links answer 404. Like
+// [WithBaseURL], it must be an absolute http(s) URL (scheme and host): a
+// typo'd relative value would silently redirect relative to the handler's
+// own path instead of failing construction.
 func WithFallbackURL(u string) ManagerOption {
-	return func(c *managerConfig) { c.fallbackURL = u }
+	return func(c *managerConfig) {
+		if err := validateAbsoluteHTTPURL(u); err != nil {
+			c.errs = append(c.errs, fmt.Errorf("smartlink: fallback URL: %w", err))
+			return
+		}
+		c.fallbackURL = u
+	}
 }
 
 // WithRedirectStatus sets the HTTP status [Manager.Handler] uses for a

@@ -111,6 +111,36 @@ func TestResolveCacheReadThrough(t *testing.T) {
 	}
 }
 
+// TestResolveCorruptCacheFallsThrough asserts a cache entry that fails to
+// decode (garbage bytes, not the Link JSON envelope) degrades identically to
+// a miss: Resolve still returns the Link from the backing Store instead of
+// surfacing a decode error.
+func TestResolveCorruptCacheFallsThrough(t *testing.T) {
+	t.Parallel()
+	cs := cache.NewMemoryStore()
+	m, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithCache(cs, time.Minute))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	ctx := context.Background()
+
+	created, err := m.Create(ctx, smartlink.CreateParams{Target: "https://example.com/", Code: "corrupt1"})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	if err := cs.Set(ctx, "smartlink:code:"+created.Code, []byte("not json"), cache.WithTTL(time.Minute)); err != nil {
+		t.Fatalf("cache Set() error = %v, want nil", err)
+	}
+
+	got, err := m.Resolve(ctx, created.Code)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil (corrupt cache entry must degrade to Store)", err)
+	}
+	if got.Code != created.Code {
+		t.Fatalf("Resolve().Code = %q, want %q", got.Code, created.Code)
+	}
+}
+
 var errCacheBoom = errors.New("cache boundary: unavailable")
 
 // failingCache is a cache.Store whose every method errors, to prove cache

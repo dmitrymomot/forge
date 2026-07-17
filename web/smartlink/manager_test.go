@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/resilience/cache"
 	"github.com/dmitrymomot/forge/web/smartlink"
 )
 
@@ -48,6 +50,37 @@ func TestNewManagerBadBaseURL(t *testing.T) {
 	}
 	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithBaseURL("https://s.example.com")); err != nil {
 		t.Fatalf("NewManager(WithBaseURL(valid)) error = %v, want nil", err)
+	}
+}
+
+// TestNewManagerBadFallbackURL asserts WithFallbackURL requires an absolute
+// http(s) URL, same as WithBaseURL: a relative value would silently redirect
+// relative to the handler's own path instead of failing construction.
+func TestNewManagerBadFallbackURL(t *testing.T) {
+	t.Parallel()
+	cases := []string{"", "/relative/path", "app.example.com/verify", "ftp://example.com/"}
+	for _, u := range cases {
+		if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithFallbackURL(u)); err == nil {
+			t.Fatalf("NewManager(WithFallbackURL(%q)) error = nil, want error", u)
+		}
+	}
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithFallbackURL("https://fallback.example.com/")); err != nil {
+		t.Fatalf("NewManager(WithFallbackURL(valid)) error = %v, want nil", err)
+	}
+}
+
+// TestNewManagerRejectsNonPositiveCacheTTL asserts WithCache rejects a
+// zero or negative ttl: [cache.WithTTL] treats it as "never expire", which
+// would defeat the bounded-staleness guarantee on a failed cache eviction.
+func TestNewManagerRejectsNonPositiveCacheTTL(t *testing.T) {
+	t.Parallel()
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithCache(cache.NewMemoryStore(), ttl)); err == nil {
+			t.Fatalf("NewManager(WithCache(ttl=%s)) error = nil, want error", ttl)
+		}
+	}
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithCache(cache.NewMemoryStore(), time.Minute)); err != nil {
+		t.Fatalf("NewManager(WithCache(ttl=1m)) error = %v, want nil", err)
 	}
 }
 
@@ -137,6 +170,17 @@ func TestCreateCollisionRetry(t *testing.T) {
 			t.Fatal("Create() error = nil, want error after exhausting retries")
 		}
 	})
+}
+
+// TestCreateGeneratedCodeEmptyFails asserts a [WithCodeFunc] that returns ""
+// never persists a Link with an empty code: each empty result is treated as
+// a failed attempt, and Create errors once the retry budget is exhausted.
+func TestCreateGeneratedCodeEmptyFails(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, smartlink.WithCodeFunc(func() string { return "" }))
+	if _, err := m.Create(context.Background(), smartlink.CreateParams{Target: "https://example.com/"}); err == nil {
+		t.Fatal("Create() error = nil, want error (empty generated code must not be stored)")
+	}
 }
 
 // TestCreateVanity covers caller-supplied Code validation: charset, length,
@@ -320,6 +364,14 @@ func TestShortURL(t *testing.T) {
 		m := newTestManager(t, smartlink.WithBaseURL("https://s.example.com/"))
 		if got, want := m.ShortURL("abc"), "https://s.example.com/abc"; got != want {
 			t.Fatalf("ShortURL() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("with base, multiple trailing slashes", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, smartlink.WithBaseURL("https://s.example.com//"))
+		if got, want := m.ShortURL("abc"), "https://s.example.com/abc"; got != want {
+			t.Fatalf("ShortURL() = %q, want %q (must not double up the slash)", got, want)
 		}
 	})
 

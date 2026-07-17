@@ -97,11 +97,10 @@ func (m *Manager) cacheSet(ctx context.Context, code, key string, l Link) {
 
 // invalidateCache best-effort evicts code's cache entry after a lifecycle
 // mutation (Deactivate, Activate, Delete), bounding staleness of a warmed
-// entry to at most the configured TTL (when a positive [WithCache] ttl is
-// set — a non-positive ttl means "never expire" per [cache.WithTTL], and an
-// entry that survives a failed eviction here has no bound). A no-op without
-// [WithCache]; a failure is logged at debug, never surfaced — the mutation
-// already succeeded against the Store.
+// entry to at most the configured [WithCache] ttl (ttl is validated positive
+// at construction, so an entry that survives a failed eviction here is
+// always bounded). A no-op without [WithCache]; a failure is logged at
+// debug, never surfaced — the mutation already succeeded against the Store.
 func (m *Manager) invalidateCache(ctx context.Context, code string) {
 	if m.cfg.cacheStore == nil {
 		return

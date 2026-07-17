@@ -22,6 +22,12 @@ import (
 // "Cache-Control: no-store": a redirect decision can change on the next
 // rule evaluation or offer update, so nothing here is safe for a client or
 // intermediary to cache.
+//
+// The Handler redirects for every HTTP method, including HEAD, and
+// [WithOnHit] fires for all of them alike — it does not special-case
+// method. A consumer that needs method awareness (e.g. to skip counting
+// HEAD as a click) stamps the method into the Visit itself via
+// [WithVisitFunc], e.g. into Visit.Params, and reads it back from the Hit.
 func (m *Manager) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		code := r.PathValue("code")

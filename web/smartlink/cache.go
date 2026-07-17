@@ -24,6 +24,9 @@ type Cache struct {
 	// gens counts Invalidate calls per ref. Get stores a loaded result only
 	// when the generation it observed on the miss is still current, so a
 	// stale in-flight load can never overwrite a post-Invalidate entry.
+	// Growth is bounded by distinct-ref cardinality (~16 bytes/entry) and
+	// deliberately never pruned — dropping a counter would let a stale
+	// in-flight load re-admit a straggler after Invalidate.
 	gens map[string]uint64
 	opts []Option
 
@@ -31,7 +34,10 @@ type Cache struct {
 }
 
 // NewCache returns a Cache that loads a Spec via load and compiles it with
-// compileOpts on a cache miss.
+// compileOpts on a cache miss. ref must be globally unique and load must be
+// a pure function of ref — the cache is keyed by the bare ref string with no
+// tenant dimension, so a multi-tenant consumer whose resolution differs per
+// tenant must embed the tenant in ref itself.
 //
 // Get takes an RLock fast path; on a miss it calls load and Compile outside
 // the write lock, then stores the result under a short write lock. Two

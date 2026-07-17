@@ -108,11 +108,18 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 }
 
 // createGenerated assigns l.Code from the configured code function and
-// creates it, retrying on ErrDuplicate up to maxCodeAttempts times.
+// creates it, retrying on ErrDuplicate up to maxCodeAttempts times. An empty
+// string from a broken [WithCodeFunc] is treated as a failed attempt (not
+// stored) and retried the same way — a misbehaving generator exhausts the
+// loop and surfaces the same error as an unlucky collision streak, rather
+// than silently persisting a Link with an empty code.
 func (m *Manager) createGenerated(ctx context.Context, l *Link) error {
-	var lastErr error
+	lastErr := errors.New("generated code was empty")
 	for range maxCodeAttempts {
 		l.Code = m.cfg.codeFunc()
+		if l.Code == "" {
+			continue
+		}
 		err := m.store.Create(ctx, *l)
 		if err == nil {
 			return nil
