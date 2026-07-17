@@ -166,20 +166,6 @@ Deps: `crypto/sign`.
 
 ---
 
-**data/tenant**
-
-The multi-tenancy package: `Resolver` chain with shipped resolvers —
-subdomain (against a base domain), custom domain (via a storage-agnostic
-`DomainLookup` seam), header, cookie, path prefix, API-key-derived —
-precedence-ordered middleware putting `TenantID` in context, a
-transport-agnostic carrier (queue handlers set/read tenant without
-HTTP), and explicit parameterized `ScopeClause` SQL fragments — visible at
-every query, never auto-injected.
-
-Deps: none (stdlib only).
-
----
-
 **data/dataloader**
 
 Generic per-request batch-and-cache loader collapsing N+1 lookups; pure
