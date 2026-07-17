@@ -73,20 +73,6 @@ filtering stay consumer-side.
 
 Deps: `core/clock`.
 
----
-
-**web/attribution**
-
-Marketing-touch capture: middleware records a configured param set
-(`utm_*`, click IDs, sub-IDs) into a signed cookie (`cookie` + `sign`)
-under first-touch or last-touch policy with an attribution window, and
-hands the stored touch back at conversion time. Includes a
-tracking-pixel endpoint (correct 1×1 GIF + no-cache). The "where did
-this signup come from" answer every SaaS wants and every affiliate
-platform requires; multi-touch models stay out.
-
-Deps: `web/cookie`, `crypto/sign`.
-
 ## view/
 
 ---
