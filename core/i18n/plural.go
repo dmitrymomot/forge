@@ -67,10 +67,10 @@ type PluralRule func(n int) PluralCategory
 // It compares against ±1 directly rather than taking an absolute value: abs
 // overflows at math.MinInt, and DefaultRule must be total for every int.
 func DefaultRule(n int) PluralCategory {
-	switch {
-	case n == 0:
+	switch n {
+	case 0:
 		return Zero
-	case n == 1 || n == -1:
+	case 1, -1:
 		return One
 	default:
 		return Many

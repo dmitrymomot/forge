@@ -39,14 +39,17 @@ func TestLoadFS(t *testing.T) {
 	assert.Equal(t, "{{count}} items in your cart", forms[Other])
 
 	// uk/cart.json has no "other" form; loading must not invent one.
-	ukForms := cats["uk"].plurals["cart.items"]
+	uk := cats["uk"]
+	require.NotNil(t, uk)
+	ukForms := uk.plurals["cart.items"]
 	require.NotNil(t, ukForms)
 	assert.NotContains(t, ukForms, Other)
 	assert.Equal(t, "{{count}} товарів у кошику", ukForms[Many])
 
 	// Directory name is normalized into the tag.
-	assert.Contains(t, cats, "en-GB")
-	assert.Equal(t, "Dashboard (GB)", cats["en-GB"].messages["app.title"])
+	gb := cats["en-GB"]
+	require.NotNil(t, gb)
+	assert.Equal(t, "Dashboard (GB)", gb.messages["app.title"])
 }
 
 func TestIsPluralMap(t *testing.T) {
@@ -99,8 +102,10 @@ func TestLoadFSScalars(t *testing.T) {
 		"en/app.json": &fstest.MapFile{Data: []byte(`{"n": 42, "b": true}`)},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "42", cats["en"].messages["app.n"])
-	assert.Equal(t, "true", cats["en"].messages["app.b"])
+	en := cats["en"]
+	require.NotNil(t, en)
+	assert.Equal(t, "42", en.messages["app.n"])
+	assert.Equal(t, "true", en.messages["app.b"])
 }
 
 func TestLoadFSIgnoresNonJSON(t *testing.T) {
@@ -112,5 +117,7 @@ func TestLoadFSIgnoresNonJSON(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, cats, 1)
-	assert.Equal(t, "b", cats["en"].messages["app.a"])
+	en := cats["en"]
+	require.NotNil(t, en)
+	assert.Equal(t, "b", en.messages["app.a"])
 }
