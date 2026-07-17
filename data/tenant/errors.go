@@ -29,8 +29,9 @@ var (
 	// ErrEmptyName is used when Subdomain, Header, or Cookie is constructed
 	// with an empty (after normalization) base domain or name.
 	ErrEmptyName = errors.New("tenant: empty base domain or name")
-	// ErrNilLookup is used when Domain is constructed with a nil DomainLookup.
-	ErrNilLookup = errors.New("tenant: nil DomainLookup")
+	// ErrNilLookup is used when Domain or Subdomain is constructed with a
+	// nil lookup, or Map with a nil translation func.
+	ErrNilLookup = errors.New("tenant: nil lookup")
 	// ErrInvalidPrefix is used when PathPrefix is constructed with a prefix
 	// that is neither empty nor starting with "/", or that ends with "/".
 	ErrInvalidPrefix = errors.New("tenant: invalid path prefix")
