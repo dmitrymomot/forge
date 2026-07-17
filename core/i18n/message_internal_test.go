@@ -80,16 +80,11 @@ func FuzzCompileMessage(f *testing.F) {
 	f.Add("{{count}}")
 	f.Fuzz(func(t *testing.T, s string) {
 		m := compileMessage(s)
-		// Must never panic; a message with no placeholders must round-trip.
+		// Must never panic. With no args and hasCount=false, every
+		// placeholder segment (matched or not) falls back to rendering its
+		// exact original "{{name}}" bytes, so the round trip holds for any
+		// input, not just placeholder-free ones.
 		got := m.render(nil, 0, false)
-		hasPlaceholder := false
-		for _, seg := range m.segs {
-			if seg.arg != "" {
-				hasPlaceholder = true
-			}
-		}
-		if !hasPlaceholder {
-			assert.Equal(t, s, got)
-		}
+		assert.Equal(t, s, got)
 	})
 }

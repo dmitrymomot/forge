@@ -42,12 +42,11 @@ func compileMessage(s string) *compiledMsg {
 			break
 		}
 		body := s[open+2:]
-		closeAt := strings.Index(body, "}}")
-		if closeAt < 0 {
+		name, after, ok := strings.Cut(body, "}}")
+		if !ok {
 			m.appendLit(s)
 			break
 		}
-		name := body[:closeAt]
 		if name == "" || strings.ContainsAny(name, " \t\n{}") {
 			// Not a valid placeholder: keep the "{{" as literal text and
 			// resume scanning right after it, so a stray "{{" doesn't
@@ -61,7 +60,7 @@ func compileMessage(s string) *compiledMsg {
 		}
 		m.segs = append(m.segs, segment{arg: name})
 		m.size += len(name) + 8 // rough per-placeholder size hint
-		s = body[closeAt+2:]
+		s = after
 	}
 	return m
 }
