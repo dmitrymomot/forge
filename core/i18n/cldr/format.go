@@ -184,19 +184,22 @@ var (
 	}
 	// FormatZhCN is the CLDR format spec for zh-CN: CLDR's "zh"/"zh-Hans"
 	// root already represents Mainland China (there is no separate zh-CN
-	// override). Same shape as ja-JP: year-month-day order, symbol first.
+	// override). Year-month-day order, symbol first — but unlike ja-JP, the
+	// month and day are UNPADDED (CLDR short date pattern "y/M/d", not
+	// "y/MM/dd").
 	FormatZhCN = i18n.FormatSpec{
 		DecimalSep: ".", GroupSep: ",",
-		DateLayout: "2006/01/02", TimeLayout: "15:04", DateTimeLayout: "2006/01/02 15:04",
+		DateLayout: "2006/1/2", TimeLayout: "15:04", DateTimeLayout: "2006/1/2 15:04",
 		CurrencyBefore: true,
 	}
 	// FormatKoKR is the CLDR format spec for ko-KR: year-month-day order with
-	// a trailing period on each field, and the AM/PM marker leads the clock
-	// time rather than trailing it ("PM 3:04", not "3:04 PM"). Go's AM/PM
-	// token itself only ever renders the literal English "AM"/"PM".
+	// a trailing period on each field, month/day UNPADDED (CLDR medium date
+	// pattern "y. M. d."), and the AM/PM marker leads the clock time rather
+	// than trailing it ("PM 3:04", not "3:04 PM"). Go's AM/PM token itself
+	// only ever renders the literal English "AM"/"PM".
 	FormatKoKR = i18n.FormatSpec{
 		DecimalSep: ".", GroupSep: ",",
-		DateLayout: "2006. 01. 02.", TimeLayout: "PM 3:04", DateTimeLayout: "2006. 01. 02. PM 3:04",
+		DateLayout: "2006. 1. 2.", TimeLayout: "PM 3:04", DateTimeLayout: "2006. 1. 2. PM 3:04",
 		CurrencyBefore: true,
 	}
 )
