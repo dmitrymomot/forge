@@ -2,6 +2,7 @@ package attribution
 
 import (
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/clock"
@@ -72,7 +73,9 @@ func WithWindow(d time.Duration) Option {
 
 // WithCookieName overrides the touch cookie name (default
 // "__Host-attribution", falling back to "attribution" when the codec policy
-// can't satisfy __Host-). Empty names are ignored.
+// can't satisfy __Host-). A custom __Host- name on a codec that can't
+// satisfy the prefix rules panics in New — otherwise every best-effort
+// capture would fail silently. Empty names are ignored.
 func WithCookieName(name string) Option {
 	return func(c *config) {
 		if name != "" {
@@ -81,19 +84,21 @@ func WithCookieName(name string) Option {
 	}
 }
 
-// WithParams replaces the captured param set. Empty calls are ignored.
+// WithParams replaces the captured param set. The names are copied, so a
+// slice expanded into the call can be reused freely. Empty calls are
+// ignored.
 func WithParams(names ...string) Option {
 	return func(c *config) {
 		if len(names) > 0 {
-			c.params = names
+			c.params = slices.Clone(names)
 		}
 	}
 }
 
 // WithExtraParams appends names (e.g. affiliate sub-IDs) to the captured
-// param set.
+// param set without mutating any caller-owned backing array.
 func WithExtraParams(names ...string) Option {
-	return func(c *config) { c.params = append(c.params, names...) }
+	return func(c *config) { c.params = append(slices.Clip(c.params), names...) }
 }
 
 // WithClock overrides the time source (default the system clock). Nil is

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/ctxkey"
@@ -59,10 +60,12 @@ type Tracker struct {
 	cfg   config
 }
 
-// New builds a Tracker over codec. New panics if codec is nil — that is a
-// wiring bug, not a runtime condition. The default policy is LastTouch with
-// a 30-day window over DefaultParams, stored in a "__Host-attribution"
-// cookie ("attribution" when the codec policy can't satisfy __Host-).
+// New builds a Tracker over codec. New panics on wiring bugs — a nil codec,
+// or a custom __Host- cookie name the codec policy can't satisfy (which
+// would otherwise fail every capture silently, since capture is
+// best-effort). The default policy is LastTouch with a 30-day window over
+// DefaultParams, stored in a "__Host-attribution" cookie ("attribution"
+// when the codec policy can't satisfy __Host-).
 func New(codec *cookie.Codec, opts ...Option) *Tracker {
 	if codec == nil {
 		panic("attribution: nil cookie codec")
@@ -71,14 +74,18 @@ func New(codec *cookie.Codec, opts ...Option) *Tracker {
 	if cfg.cookieName == defaultCookieName && !codec.SupportsHostPrefix() {
 		cfg.cookieName = "attribution"
 	}
+	if strings.HasPrefix(cfg.cookieName, "__Host-") && !codec.SupportsHostPrefix() {
+		panic("attribution: cookie name " + cfg.cookieName + " requires a codec with Secure, Path=/, and no Domain")
+	}
 	return &Tracker{codec: codec, cfg: cfg}
 }
 
 // Middleware captures configured params from the request query into the
 // touch cookie and exposes the effective touch to the handler chain via
 // Touch. Requests without campaign params pass through untouched — no
-// cookie read, no allocation. Capture is best-effort and never fails the
-// request.
+// cookie read or write; a request with no query string at all skips even
+// the query parse (zero allocations). Capture is best-effort and never
+// fails the request.
 func (t *Tracker) Middleware() middleware.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

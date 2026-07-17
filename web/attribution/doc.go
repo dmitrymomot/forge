@@ -10,8 +10,9 @@
 // overwrite the stored touch; FirstTouch keeps the original until it
 // expires. The attribution window (default 30 days) bounds both the cookie
 // lifetime and a server-side timestamp check, so an expired touch never
-// counts even if the browser kept the cookie. Requests without campaign
-// params pass through with zero overhead.
+// counts even if the browser kept the cookie. Requests with no query string
+// pass through with zero overhead; an unrelated query string costs one
+// parse and no cookie work.
 //
 // At conversion (signup, purchase), Touch returns the stored touch —
 // persist its params with the conversion, then Clear the cookie so the

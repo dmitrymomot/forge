@@ -312,6 +312,35 @@ func TestNewPanicsOnNilCodec(t *testing.T) {
 	attribution.New(nil)
 }
 
+func TestNewPanicsOnIncompatibleHostPrefixName(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("custom __Host- name on a Domain-scoped codec must panic")
+		}
+	}()
+	attribution.New(newCodec(t, cookie.WithDomain("example.com")), attribution.WithCookieName("__Host-touch"))
+}
+
+func TestParamOptionsDoNotAliasCallerSlice(t *testing.T) {
+	t.Parallel()
+	codec := newCodec(t)
+	base := make([]string, 1, 2) // spare capacity invites in-place append
+	base[0] = "aff_id"
+
+	tr := attribution.New(codec, attribution.WithParams(base...), attribution.WithExtraParams("sub1"))
+	if base[:cap(base)][1] == "sub1" {
+		t.Fatal("WithExtraParams wrote into the caller's backing array")
+	}
+	_, seen, err := visit(t, tr, "/?aff_id=42&sub1=x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen.Get("aff_id") != "42" || seen.Get("sub1") != "x" {
+		t.Fatalf("capture = %v", seen.Params)
+	}
+}
+
 func TestTouchZeroValue(t *testing.T) {
 	t.Parallel()
 	var zero attribution.Touch
