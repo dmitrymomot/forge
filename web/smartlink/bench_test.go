@@ -184,7 +184,10 @@ func BenchmarkHandlerTarget(b *testing.B) {
 // from ServeHTTP/httptest scaffolding (request-line parsing, header
 // cloning, response recording, mux routing): Resolve against MemoryStore
 // plus the same per-hit degenerate Compile+Decide [Manager.decider] runs,
-// with no net/http request/response machinery in the loop.
+// with no net/http request/response machinery in the loop. The Visit
+// carries the two query params plus the Link.Metadata entry the handler
+// merges into Visit.Params before Decide, so Decide sees the same three
+// params it would through ServeHTTP.
 func BenchmarkResolveDecideTarget(b *testing.B) {
 	m, err := smartlink.NewManager(smartlink.NewMemoryStore())
 	if err != nil {
@@ -198,7 +201,9 @@ func BenchmarkResolveDecideTarget(b *testing.B) {
 		b.Fatalf("Create() error = %v", err)
 	}
 	ctx := context.Background()
-	visit := smartlink.Visit{Params: map[string]string{"click_id": "abc123", "sub1": "x"}}
+	// click_id and sub1 mirror the query string; aff mirrors the handler's
+	// Link.Metadata merge.
+	visit := smartlink.Visit{Params: map[string]string{"click_id": "abc123", "sub1": "x", "aff": "abc123"}}
 
 	b.ReportAllocs()
 	for b.Loop() {
