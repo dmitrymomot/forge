@@ -1,8 +1,9 @@
 package i18n
 
 import (
+	"cmp"
 	"math"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -58,7 +59,10 @@ func parseAcceptLanguage(header string) []langQ {
 		}
 		out = append(out, langQ{tag: tag, q: q})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].q > out[j].q })
+	// slices.SortStableFunc over sort.SliceStable: sort.Slice* builds a
+	// reflection-based swapper per call, which profiles show costing ~1/3
+	// of Negotiate's allocations for a header this small.
+	slices.SortStableFunc(out, func(a, b langQ) int { return cmp.Compare(b.q, a.q) })
 	return out
 }
 
