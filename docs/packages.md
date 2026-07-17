@@ -56,25 +56,6 @@ Deps: `core/random`, `resilience/cache`.
 
 ---
 
-**web/smartlink**
-
-Destination-decision engine (the TDS/smartlink core): ordered rules of
-typed matchers — `Geo`, `Device`, `Locale`, `ParamEquals`, `TimeWindow`,
-`Percent` — evaluated over a caller-built visit context (no net/http
-import), first match wins, mandatory default target. Weighted splits
-bucket deterministically by hash of a caller-supplied sticky key, never
-RNG. The decision returns the matched rule and the final URL — template
-macros from the visit context, param merge policy — and is what the
-caller emits as the click event. Rule values are consumer data hydrated
-into the typed vocabulary; no DSL. Not `featureflag` ("is X on for
-subject"); not `hostrouter` (inbound hosts) — this selects outbound
-destinations. Rule storage/admin, target health checks, and bot
-filtering stay consumer-side.
-
-Deps: `core/clock`.
-
----
-
 **web/attribution**
 
 Marketing-touch capture: middleware records a configured param set
