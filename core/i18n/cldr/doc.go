@@ -22,6 +22,11 @@
 // FormatEsES) — es-MX and es-ES pluralize identically and format nothing
 // alike.
 //
+// This means a format spec's tag must match your catalog's locale tag: wiring
+// FormatUkUA only takes effect for a uk-UA locale/catalog (WithFormat resolves
+// tag → base language → Invariant) — a bare uk locale falls through to
+// Invariant formatting even though WithPlural("uk", cldr.Uk) still applies.
+//
 // # No family buckets
 //
 // Every language has its own rule, even where two share an implementation.

@@ -118,6 +118,32 @@ func TestNumberIntMinInt64(t *testing.T) {
 	assert.Equal(t, "-9,223,372,036,854,775,808", b.NumberInt(b.Default(), math.MinInt64))
 }
 
+// TestNumberIntLongGroupSepDoesNotPanic pins appendGroupedUint's total
+// contract: GroupSep is a public FormatSpec field an app can set to any
+// string, and rendering must never panic regardless of its length. The old
+// implementation wrote into a fixed 64-byte stack array sized for short
+// separators; an 8-byte separator combined with a 19-digit int64 (6 group
+// separators) overruns it — 19 digit bytes + 6*8 separator bytes = 67 > 64 —
+// and the write index goes negative, panicking on both the copy and the
+// digit write. math.MaxInt64 is the natural choice for "as many separators as
+// an int64 can produce": 19 digits group into 7 chunks (leading "9" plus six
+// 3-digit groups), the same 6-separator count the old fixed buffer's comment
+// budgeted for short separators only.
+func TestNumberIntLongGroupSepDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	longSepSpec := i18n.FormatSpec{DecimalSep: ".", GroupSep: "GROUPSEP"}
+	b, err := i18n.New(
+		i18n.WithMessages(os.DirFS("testdata/locales")),
+		i18n.WithFormat("en", longSepSpec),
+	)
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		got := b.NumberInt(b.Default(), math.MaxInt64)
+		assert.Equal(t, "9GROUPSEP223GROUPSEP372GROUPSEP036GROUPSEP854GROUPSEP775GROUPSEP807", got)
+	})
+}
+
 func TestPercent(t *testing.T) {
 	t.Parallel()
 	b := fmtBundle(t)

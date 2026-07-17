@@ -19,6 +19,11 @@
 //	    i18n.WithFormat("uk-UA", cldr.FormatUkUA),
 //	)
 //
+// WithFormat's tag must match a real locale tag in your catalog: FormatUkUA
+// applies to a uk-UA locale (resolved tag → base language → Invariant) and
+// will not apply to a bare uk locale, even though WithPlural's base-language
+// key does.
+//
 // # Catalogs
 //
 // Catalogs are JSON under an fs.FS, laid out as {tag}/{namespace}.json. The

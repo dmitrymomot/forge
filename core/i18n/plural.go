@@ -58,7 +58,7 @@ type PluralRule func(n int) PluralCategory
 // DefaultRule is the built-in fallback rule applied to any locale for which
 // no rule was wired: zero for 0, one for ±1, many otherwise.
 //
-// It is deliberately not any real language's rule. It exists so that T is
+// It is deliberately not any real language's rule. It exists so that TN is
 // total without the package having to guess at grammar, and it composes with
 // the form-fallback chain to do the right thing for an ordinary {one, other}
 // catalog (many→other, zero→other) while giving a catalog that defines a

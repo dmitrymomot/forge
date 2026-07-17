@@ -99,13 +99,21 @@ func appendIntSpec(dst []byte, n int64, s *FormatSpec) []byte {
 }
 
 // appendGroupedUint writes n with a separator every three digits. It formats
-// into a stack array back-to-front, so it never allocates.
+// back-to-front into buf, sized to fit 20 uint64 digits plus up to 7
+// separators. For a normal (short) GroupSep that fits in the fixed stack
+// array, formatting never allocates. GroupSep is a public FormatSpec field an
+// app can set to any string, so a pathological long separator must not
+// overflow the buffer — it falls back to a heap allocation sized to fit
+// instead, keeping rendering total.
 func appendGroupedUint(dst []byte, n uint64, groupSep string) []byte {
 	if n == 0 {
 		return append(dst, '0')
 	}
-	// 20 digits max for uint64, plus up to 6 separators.
-	var buf [64]byte
+	var stack [64]byte
+	buf := stack[:]
+	if need := 20 + 7*len(groupSep); need > len(buf) {
+		buf = make([]byte, need)
+	}
 	pos := len(buf)
 	digits := 0
 	for n > 0 {
