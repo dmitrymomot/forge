@@ -159,16 +159,6 @@ func mod10OneExcept11(n int) i18n.PluralCategory {
 	return i18n.Other
 }
 
-// macedonian: one when n%10==1, with no %100==11 exception — unlike
-// Icelandic's superficially similar rule, 11, 111, 211, ... are one too.
-func macedonian(n int) i18n.PluralCategory {
-	a := magnitude(n)
-	if a%10 == 1 {
-		return i18n.One
-	}
-	return i18n.Other
-}
-
 // latvian: zero for n%10==0 or n%100 in 11..19; one for n%10==1 excluding
 // n%100==11; other otherwise.
 func latvian(n int) i18n.PluralCategory {
@@ -231,17 +221,15 @@ func arabic(n int) i18n.PluralCategory {
 	}
 }
 
-// hebrew: one for 1, two for 2, many for round multiples of ten above 10;
-// other otherwise. Hebrew has no "zero" cardinal category.
+// hebrew: one for 1, two for 2, other otherwise. Hebrew has no "zero"
+// cardinal category, and CLDR removed the round-tens "many" category at v42.
 func hebrew(n int) i18n.PluralCategory {
 	a := magnitude(n)
-	switch {
-	case a == 1:
+	switch a {
+	case 1:
 		return i18n.One
-	case a == 2:
+	case 2:
 		return i18n.Two
-	case a > 10 && a%10 == 0:
-		return i18n.Many
 	default:
 		return i18n.Other
 	}
@@ -308,9 +296,9 @@ var (
 	Sr i18n.PluralRule = southSlavic
 	// Bg is the CLDR cardinal rule for Bulgarian: one is exactly 1.
 	Bg i18n.PluralRule = oneOther
-	// Mk is the CLDR cardinal rule for Macedonian: one is n%10==1, with no
-	// %100==11 exception — this is where it diverges from Icelandic.
-	Mk i18n.PluralRule = macedonian
+	// Mk is the CLDR cardinal rule for Macedonian: one is n%10==1 except
+	// n%100==11 — the same shape as Icelandic.
+	Mk i18n.PluralRule = mod10OneExcept11
 
 	// Lv is the CLDR cardinal rule for Latvian: zero/one/other with mod-10
 	// and mod-100 windows.

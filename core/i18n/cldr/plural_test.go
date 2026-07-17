@@ -44,6 +44,39 @@ var staleExceptions = map[string]map[int]string{
 	"it": {1000000: "CLDR 38 Romance whole-millions many", 2000000: "ditto", 3000000: "ditto", 10000000: "ditto"},
 	"pt": {1000000: "CLDR 38 Romance whole-millions many", 2000000: "ditto", 3000000: "ditto", 10000000: "ditto"},
 	"ca": {1000000: "CLDR 38 Romance whole-millions many", 2000000: "ditto", 3000000: "ditto", 10000000: "ditto"},
+	// x/text v0.38 omits CLDR's i%100!=11 exception for Macedonian, so it
+	// wrongly says "one" at every n%10==1 && n%100==11 probe value.
+	"mk": {
+		11:   "x/text v0.38 Macedonian bug: omits CLDR i%100!=11 exception",
+		111:  "x/text v0.38 Macedonian bug: omits CLDR i%100!=11 exception",
+		211:  "x/text v0.38 Macedonian bug: omits CLDR i%100!=11 exception",
+		1011: "x/text v0.38 Macedonian bug: omits CLDR i%100!=11 exception",
+	},
+	// x/text v0.38 predates CLDR v42, which removed Hebrew's round-tens
+	// "many" category; x/text still reports "many" for those values.
+	"he": {
+		20:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		30:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		40:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		50:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		60:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		70:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		80:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		90:       "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		100:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		110:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		120:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		130:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		200:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		300:      "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		1000:     "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		10000:    "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		100000:   "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		1000000:  "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		2000000:  "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		3000000:  "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+		10000000: "x/text v0.38 stale: CLDR removed Hebrew round-tens 'many' at v42",
+	},
 }
 
 // probe covers every band real CLDR rules discriminate on.
@@ -133,6 +166,10 @@ func TestKnownCases(t *testing.T) {
 		{"ar", 3, i18n.Few}, {"ar", 11, i18n.Many}, {"ar", 100, i18n.Other},
 		// No plural distinction.
 		{"ja", 1, i18n.Other}, {"zh", 5, i18n.Other}, {"vi", 1, i18n.Other},
+		// Macedonian: CLDR's i%100!=11 exception (x/text v0.38 misses this).
+		{"mk", 1, i18n.One}, {"mk", 11, i18n.Other}, {"mk", 21, i18n.One}, {"mk", 111, i18n.Other},
+		// Hebrew: no round-tens "many" in modern CLDR (x/text v0.38 is stale here).
+		{"he", 1, i18n.One}, {"he", 2, i18n.Two}, {"he", 3, i18n.Other}, {"he", 20, i18n.Other}, {"he", 100, i18n.Other},
 	}
 	for _, c := range cases {
 		rule, ok := cldr.PluralFor(c.lang)
