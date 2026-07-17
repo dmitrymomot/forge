@@ -380,10 +380,9 @@ func selectForm(pm *pluralMsg, cat PluralCategory, n int) *compiledMsg {
 	return nil
 }
 
-// T renders a message. args are variadic key/value pairs. A key no catalog in
-// the chain defines echoes back and notifies the miss handler — T never fails.
-func (b *Bundle) T(loc Locale, key string, args ...any) string {
-	idx := b.locIdx(loc)
+// tAt renders key at an already-resolved locale index. Shared by T and
+// Localizer.T, which must not redo the locIdx hash T already paid for.
+func (b *Bundle) tAt(idx int, key string, args ...any) string {
 	if m := b.lookupMsg(idx, key); m != nil {
 		return m.render(args, 0, false)
 	}
@@ -391,9 +390,8 @@ func (b *Bundle) T(loc Locale, key string, args ...any) string {
 	return key
 }
 
-// AppendT is T appending into dst.
-func (b *Bundle) AppendT(dst []byte, loc Locale, key string, args ...any) []byte {
-	idx := b.locIdx(loc)
+// appendTAt is tAt appending into dst.
+func (b *Bundle) appendTAt(dst []byte, idx int, key string, args ...any) []byte {
 	if m := b.lookupMsg(idx, key); m != nil {
 		return m.appendTo(dst, args, 0, false)
 	}
@@ -401,11 +399,9 @@ func (b *Bundle) AppendT(dst []byte, loc Locale, key string, args ...any) []byte
 	return append(dst, key...)
 }
 
-// TN renders a pluralized message, injecting n as {{count}}. A plain (non
-// plural) message under the same key still renders, so a catalog may promote a
-// key to plural forms without breaking callers.
-func (b *Bundle) TN(loc Locale, key string, n int, args ...any) string {
-	idx := b.locIdx(loc)
+// tnAt renders a pluralized message at an already-resolved locale index.
+// Shared by TN and Localizer.TN.
+func (b *Bundle) tnAt(idx int, key string, n int, args ...any) string {
 	if m := b.lookupPlural(idx, key, n); m != nil {
 		return m.render(args, n, true)
 	}
@@ -416,9 +412,8 @@ func (b *Bundle) TN(loc Locale, key string, n int, args ...any) string {
 	return key
 }
 
-// AppendTN is TN appending into dst.
-func (b *Bundle) AppendTN(dst []byte, loc Locale, key string, n int, args ...any) []byte {
-	idx := b.locIdx(loc)
+// appendTNAt is tnAt appending into dst.
+func (b *Bundle) appendTNAt(dst []byte, idx int, key string, n int, args ...any) []byte {
 	if m := b.lookupPlural(idx, key, n); m != nil {
 		return m.appendTo(dst, args, n, true)
 	}
@@ -427,6 +422,29 @@ func (b *Bundle) AppendTN(dst []byte, loc Locale, key string, n int, args ...any
 	}
 	b.miss(idx, key, MissingKey)
 	return append(dst, key...)
+}
+
+// T renders a message. args are variadic key/value pairs. A key no catalog in
+// the chain defines echoes back and notifies the miss handler — T never fails.
+func (b *Bundle) T(loc Locale, key string, args ...any) string {
+	return b.tAt(b.locIdx(loc), key, args...)
+}
+
+// AppendT is T appending into dst.
+func (b *Bundle) AppendT(dst []byte, loc Locale, key string, args ...any) []byte {
+	return b.appendTAt(dst, b.locIdx(loc), key, args...)
+}
+
+// TN renders a pluralized message, injecting n as {{count}}. A plain (non
+// plural) message under the same key still renders, so a catalog may promote a
+// key to plural forms without breaking callers.
+func (b *Bundle) TN(loc Locale, key string, n int, args ...any) string {
+	return b.tnAt(b.locIdx(loc), key, n, args...)
+}
+
+// AppendTN is TN appending into dst.
+func (b *Bundle) AppendTN(dst []byte, loc Locale, key string, n int, args ...any) []byte {
+	return b.appendTNAt(dst, b.locIdx(loc), key, n, args...)
 }
 
 // Parse resolves a tag against the supported set, returning the locale that
