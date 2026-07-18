@@ -141,18 +141,6 @@ Deps: none (stdlib only).
 
 ---
 
-**data/pagination**
-
-Opaque cursor codec (base64+JSON, optional HMAC via `sign`), keyset
-WHERE/ORDER fragment builders emitting `(sql, args)` with a
-placeholder-dialect option (`$n` pgx default, `?` for ClickHouse),
-`Page[T]` metadata, and the page-window view-model (ellipses, links
-preserving query params) for server-rendered navigation.
-
-Deps: `crypto/sign`.
-
----
-
 **data/dataloader**
 
 Generic per-request batch-and-cache loader collapsing N+1 lookups; pure
@@ -798,7 +786,7 @@ every B2B SaaS shows in its UI. Optional per-stream hash chaining
 (prev-hash + a verify pass) makes the trail tamper-evident for
 compliance-grade audits.
 
-Deps: `ops/logger`, `data/postgres`; `data/pagination` (planned).
+Deps: `ops/logger`, `data/postgres`, `data/pagination`.
 
 ---
 
