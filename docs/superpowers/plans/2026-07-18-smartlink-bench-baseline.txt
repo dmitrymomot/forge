@@ -1,0 +1,16 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/web/smartlink
+cpu: Apple M3 Max
+BenchmarkDecideLiteral-14          	45892886	        25.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecideSplit-14            	77301735	        15.48 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecideMacro-14            	20422982	        58.20 ns/op	      80 B/op	       1 allocs/op
+BenchmarkDecideMerge-14            	 2232692	       536.6 ns/op	     760 B/op	      11 allocs/op
+BenchmarkDecideBare-14             	134317682	         8.934 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain3-14                 	30684160	        39.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryStoreGet-14         	11201762	       108.1 ns/op	     336 B/op	       2 allocs/op
+BenchmarkHandlerTarget-14          	  383238	      3109 ns/op	    9124 B/op	      51 allocs/op
+BenchmarkResolveDecideTarget-14    	 1358593	       886.2 ns/op	    1464 B/op	      17 allocs/op
+BenchmarkHandlerRef-14             	  601191	      2024 ns/op	    7393 B/op	      34 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/web/smartlink	12.213s

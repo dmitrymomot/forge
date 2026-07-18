@@ -39,39 +39,40 @@ Deps: `web/httpserver`.
 
 ---
 
-**web/shortlink**
-
-Short-code links over a storage-agnostic Store with `cache.Store`
-read-through: collision-retried generation over an unambiguous
-base58-style alphabet, vanity slugs with a reserved-word blocklist,
-expiry/deactivation with a configurable fallback, and an `OnHit` hook
-that emits — counting stays the caller's job. Redirects are 302/307 with
-no-cache headers (a cached 301 kills hit counting forever); destinations
-live server-side (never `?url=`) and are scheme-allowlisted at creation.
-Branded short domains compose `tenant` custom domains + `hostrouter`.
-Not `magiclink` (self-contained signed token); not `smartlink` (no rules
-— a code resolves to one target or one rule-table handle).
-
-Deps: `core/random`, `resilience/cache`.
-
----
-
 **web/smartlink**
 
-Destination-decision engine (the TDS/smartlink core): ordered rules of
-typed matchers — `Geo`, `Device`, `Locale`, `ParamEquals`, `TimeWindow`,
-`Percent` — evaluated over a caller-built visit context (no net/http
-import), first match wins, mandatory default target. Weighted splits
-bucket deterministically by hash of a caller-supplied sticky key, never
-RNG. The decision returns the matched rule and the final URL — template
-macros from the visit context, param merge policy — and is what the
-caller emits as the click event. Rule values are consumer data hydrated
-into the typed vocabulary; no DSL. Not `featureflag` ("is X on for
-subject"); not `hostrouter` (inbound hosts) — this selects outbound
-destinations. Rule storage/admin, target health checks, and bot
+The link package: a destination-decision engine plus a storage-backed
+manager and redirect handler on top of it. The engine compiles ordered
+rules of typed matchers — `Geo`, `Device`, `Locale`, `ParamEquals`,
+`TimeWindow`, `Percent` — evaluated over a caller-built visit context (no
+net/http import), first match wins, mandatory default target. Weighted
+splits bucket deterministically by hash of a caller-supplied sticky key,
+never RNG. The decision returns the matched rule and the final URL —
+template macros from the visit context, param merge policy — and is what
+the caller emits as the click event. Rule values are consumer data
+hydrated into the typed vocabulary; no DSL.
+
+The manager mints short codes over a storage-agnostic `Store` (`pgstore`
+driver + migration ships with the package) with `cache.Store`
+read-through: collision-retried generation, vanity codes with a
+reserved-word blocklist, expiry/deactivation, and metadata stamping. A
+uniform per-click pipeline serves both a fixed-destination link (a
+compiled degenerate spec — no rules) and a rule-driven one (a
+consumer-supplied resolver) identically: build the visit, merge the
+link's metadata, decide, redirect 302/307 with no-store (never 301 — it
+would kill hit observation forever), then hand the hit to a post-redirect
+`OnHit` observer for the caller to log or count. Sync decorators
+(fraud diversion, A/B overrides, metrics) wrap the decision itself;
+`WithScope` fail-closed tenancy applies to management operations only —
+resolving a code and serving it stay public, and codes are globally
+unique. Not `featureflag` ("is X on for subject"); not `hostrouter`
+(inbound hosts); not `magiclink` (self-contained signed token, not a
+redirect) — this selects and serves outbound destinations from a stored
+code. Rule storage/admin, target health checks, click counting, and bot
 filtering stay consumer-side.
 
-Deps: `core/clock`.
+Deps: `core/clock`, `core/id`, `core/random`, `resilience/cache`,
+`ops/logger` (+ pgx in the pgstore driver).
 
 ## view/
 
