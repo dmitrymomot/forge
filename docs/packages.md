@@ -340,8 +340,10 @@ Additional `queue.Broker` drivers for the shipped `async/queue` engine
 dev/test), `queue/nats`, `queue/kafka`. The engine — not the driver —
 owns retry/backoff, delay, and max-attempts → dead-letter, so behavior is
 identical across backends; each driver only moves bytes behind the
-strictly-pull `Broker` seam. Non-SQL brokers get transactional enqueue
-via `async/outbox` (SQL drivers implement `TxPusher` natively).
+strictly-pull `Broker` seam. Brokers without real multi-document ACID
+transactions (redis, nats, kafka) get transactional enqueue via
+`async/outbox`; stores that have them implement `TxPusher` natively
+(`queue/postgres`, `queue/mongo`, `queue/sqlite`).
 
 Deps: `async/queue`; drivers: `data/sqlite` (planned), `data/nats`
 (planned), `data/kafka` (planned).

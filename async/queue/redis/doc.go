@@ -2,8 +2,8 @@
 // per queue for claim-with-lease (XAUTOCLAIM redelivers entries idle longer
 // than the lease), a sorted set staging delayed and retried jobs (promoted
 // atomically by a Lua script during Claim), and a hash holding dead-letter
-// payloads. No transactional enqueue — use async/queue/postgres or, once it
-// lands, async/outbox.
+// payloads. No transactional enqueue — use async/queue/postgres,
+// async/queue/mongo, or, once it lands, async/outbox.
 //
 // Claim ownership is tracked in-process, not in redis: Broker keeps a
 // job-id-keyed map of live claims in memory, so a fencing token from Claim is
