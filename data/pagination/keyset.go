@@ -80,9 +80,13 @@ func (k Keyset) Where(cur Cursor, d Dialect, start int) (Fragment, error) {
 
 	n := len(k)
 	var b strings.Builder
-	// Dollar binds each column once and reuses the placeholder; Question
-	// repeats prefix values, so it needs 1+2+…+n = n(n+1)/2 slots.
-	args := make([]any, 0, n*(n+1)/2)
+	// Dollar binds each column once and reuses the placeholder (n values);
+	// Question repeats prefix values, so it needs 1+2+…+n = n(n+1)/2 slots.
+	capArgs := n
+	if d == Question {
+		capArgs = n * (n + 1) / 2
+	}
+	args := make([]any, 0, capArgs)
 	if d == Dollar {
 		args = append(args, cur.Keys...)
 	}
