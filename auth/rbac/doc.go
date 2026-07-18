@@ -12,35 +12,3 @@
 // access.Subject.Roles → rbac.Decider(rs, rbac.FromSubject()). Gate routes with
 // access.RequirePermission and toggle views with access.Can.
 package rbac
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/dmitrymomot/forge/auth/access"
-)
-
-func Example() {
-	rs, err := NewRoleSet(
-		WithRoles(
-			Role("viewer", "documents:read"),
-			Role("editor", "documents:*"),
-			Role("admin", "*"),
-		),
-		WithRoleInheritance(
-			RoleInherits("editor", "viewer"),
-		),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	d := Decider(rs, FromSubject())
-	dec, _ := access.Authorize(
-		context.Background(), d,
-		access.Subject{ID: "u1", Roles: []string{"editor"}},
-		"documents:write", access.Resource{},
-	)
-	fmt.Println(dec.Effect)
-	// Output: allow
-}
