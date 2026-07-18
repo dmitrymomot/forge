@@ -159,9 +159,11 @@ func internalServerError(w http.ResponseWriter) {
 // and the link's param-merge policy — without materializing an intermediate
 // url.Values (a map plus a slice per key, discarded immediately, on every
 // redirect). Pairs url.ParseQuery would reject (';' separators, undecodable
-// escapes, empty keys) are skipped, matching r.URL.Query()'s partial-parse
-// behavior. A request with no usable query params yields a nil map, matching
-// Visit's zero value.
+// escapes) are skipped, matching r.URL.Query()'s partial-parse behavior;
+// empty-key pairs ("?=foo") are additionally dropped on purpose — no
+// consumer (ParamEquals, {param.NAME}, the param merge) can act on an
+// empty key. A request with no usable query params yields a nil map,
+// matching Visit's zero value.
 func firstQueryValues(rawQuery string) map[string]string {
 	if rawQuery == "" {
 		return nil
