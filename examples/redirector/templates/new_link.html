@@ -4,6 +4,7 @@
 <h1>New ref link</h1>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <form method="post" action="/links">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
   <label>Offer (ref link)
     <select name="ref">
       <option value="">— none, use a direct URL —</option>

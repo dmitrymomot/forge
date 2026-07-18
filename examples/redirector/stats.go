@@ -174,11 +174,11 @@ func (t *Tracker) Stats(ctx context.Context, code string) (LinkStats, error) {
 		return s, nil
 	}
 
-	s.ByCountry, err = t.groupCount(ctx, code, `COALESCE(NULLIF(country, ''), 'unknown')`)
+	s.ByCountry, err = t.groupCount(ctx, clicksByCountrySQL, code)
 	if err != nil {
 		return LinkStats{}, err
 	}
-	s.ByRule, err = t.groupCount(ctx, code, `COALESCE(NULLIF(rule, ''), 'default')`)
+	s.ByRule, err = t.groupCount(ctx, clicksByRuleSQL, code)
 	if err != nil {
 		return LinkStats{}, err
 	}
@@ -201,11 +201,19 @@ func (t *Tracker) Stats(ctx context.Context, code string) (LinkStats, error) {
 	return s, rows.Err()
 }
 
-// groupCount aggregates clicks for code by expr (a trusted SQL expression,
-// never user input).
-func (t *Tracker) groupCount(ctx context.Context, code, expr string) (map[string]int, error) {
-	rows, err := t.pool.Query(ctx,
-		`SELECT `+expr+`, count(*) FROM redirector_clicks WHERE code = $1 GROUP BY 1`, code)
+// Complete per-dimension aggregate queries: full constant statements rather
+// than a fragment interpolated into a shared shell, so no SQL is ever built
+// by string concatenation.
+const (
+	clicksByCountrySQL = `SELECT COALESCE(NULLIF(country, ''), 'unknown'), count(*)
+		FROM redirector_clicks WHERE code = $1 GROUP BY 1`
+	clicksByRuleSQL = `SELECT COALESCE(NULLIF(rule, ''), 'default'), count(*)
+		FROM redirector_clicks WHERE code = $1 GROUP BY 1`
+)
+
+// groupCount runs one of the constant aggregate queries above for code.
+func (t *Tracker) groupCount(ctx context.Context, query, code string) (map[string]int, error) {
+	rows, err := t.pool.Query(ctx, query, code)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/web/csrf"
 	"github.com/dmitrymomot/forge/web/render"
 	"github.com/dmitrymomot/forge/web/smartlink"
 )
@@ -120,6 +121,7 @@ type newLinkData struct {
 	Ref      string
 	Target   string
 	Campaign string
+	CSRF     string
 	Offers   []Offer
 }
 
@@ -129,7 +131,7 @@ func (d *Dashboard) newLinkForm(w http.ResponseWriter, r *http.Request) {
 		d.serverError(w, "list offers", err)
 		return
 	}
-	d.render(w, http.StatusOK, newLinkTmpl, newLinkData{Offers: offers})
+	d.render(w, http.StatusOK, newLinkTmpl, newLinkData{Offers: offers, CSRF: csrf.Token(r)})
 }
 
 func (d *Dashboard) createLink(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +146,7 @@ func (d *Dashboard) createLink(w http.ResponseWriter, r *http.Request) {
 		Ref:      r.FormValue("ref"),
 		Target:   strings.TrimSpace(r.FormValue("target")),
 		Campaign: strings.TrimSpace(r.FormValue("campaign")),
+		CSRF:     csrf.Token(r),
 		Offers:   offers,
 	}
 	p := smartlink.CreateParams{Code: form.Code, Ref: form.Ref, Target: form.Target}
@@ -173,6 +176,7 @@ type newOfferData struct {
 	Error      string
 	Name       string
 	DefaultURL string
+	CSRF       string
 	Rows       []offerRowForm
 }
 
@@ -186,12 +190,15 @@ func emptyOfferForm() newOfferData {
 	return newOfferData{Rows: rows}
 }
 
-func (d *Dashboard) newOfferForm(w http.ResponseWriter, _ *http.Request) {
-	d.render(w, http.StatusOK, newOfferTmpl, emptyOfferForm())
+func (d *Dashboard) newOfferForm(w http.ResponseWriter, r *http.Request) {
+	form := emptyOfferForm()
+	form.CSRF = csrf.Token(r)
+	d.render(w, http.StatusOK, newOfferTmpl, form)
 }
 
 func (d *Dashboard) createOffer(w http.ResponseWriter, r *http.Request) {
 	form := emptyOfferForm()
+	form.CSRF = csrf.Token(r)
 	form.Name = strings.TrimSpace(r.FormValue("name"))
 	form.DefaultURL = strings.TrimSpace(r.FormValue("default_url"))
 	for i := range form.Rows {

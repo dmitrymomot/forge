@@ -41,11 +41,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dmitrymomot/forge/crypto/keyset"
 	"github.com/dmitrymomot/forge/data/migration"
 	"github.com/dmitrymomot/forge/data/postgres"
 	"github.com/dmitrymomot/forge/ops/logger"
 	"github.com/dmitrymomot/forge/ops/supervisor"
 	"github.com/dmitrymomot/forge/web/clientip"
+	"github.com/dmitrymomot/forge/web/cookie"
+	"github.com/dmitrymomot/forge/web/csrf"
 	"github.com/dmitrymomot/forge/web/fingerprint"
 	"github.com/dmitrymomot/forge/web/geoip"
 	"github.com/dmitrymomot/forge/web/geoip/mmdb"
@@ -136,9 +139,24 @@ func run(log *slog.Logger) error {
 
 	dash := &Dashboard{manager: manager, offers: offers, cache: specCache, tracker: tracker, log: log}
 
+	// Double-submit CSRF for the dashboard's POST forms. The demo runs plain
+	// HTTP on lvh.me, so the cookie codec drops Secure and the token cookie
+	// cannot use the default __Host- name (browsers reject __Host- cookies
+	// over HTTP); a real deployment keeps both defaults. Demo-only fixed key,
+	// like the fingerprint secret.
+	ks, err := keyset.New(keyset.WithPrimary(1, []byte("redirector-demo-cookie-secret-key-01")))
+	if err != nil {
+		return err
+	}
+	codec, err := cookie.New(ks, cookie.WithSecure(false))
+	if err != nil {
+		return err
+	}
+	csrfMW := csrf.New(codec, csrf.WithCookieName("csrf"))
+
 	router := hostrouter.New(
 		hostrouter.WithHost(redirectHost, middleware.Wrap(redirectMux, geoip.Middleware(geoSrc))),
-		hostrouter.WithHost(dashboardHost, dash.Handler()),
+		hostrouter.WithHost(dashboardHost, middleware.Wrap(dash.Handler(), csrfMW)),
 		hostrouter.WithHost("lvh.me", http.RedirectHandler(dashboardURL, http.StatusFound)),
 	)
 
