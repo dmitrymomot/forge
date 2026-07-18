@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,17 +48,25 @@ func dial(tb testing.TB) *mongodriver.Database {
 	return client.Database("forge_queue_test")
 }
 
-var collSeq int
+var collSeq atomic.Int64
 
-// newBroker namespaces each subtest in its own collection; collections leak
-// into the ephemeral test server (the mongotest container or a shared real
-// mongo), which is acceptable — runID keeps re-runs collision-free.
-func newBroker(tb testing.TB) *mongoqueue.Broker {
+// brokerOn builds a broker over db in its own uniquely named collection and
+// creates its indexes; it returns the collection name for tests that need the
+// raw collection. Collections leak into the ephemeral test server (the
+// mongotest container or a shared real mongo), which is acceptable — runID
+// keeps re-runs collision-free.
+func brokerOn(tb testing.TB, db *mongodriver.Database) (*mongoqueue.Broker, string) {
 	tb.Helper()
-	collSeq++
-	b, err := mongoqueue.New(dial(tb), mongoqueue.WithCollection(fmt.Sprintf("qt_%s_%d", runID, collSeq)))
+	name := fmt.Sprintf("qt_%s_%d", runID, collSeq.Add(1))
+	b, err := mongoqueue.New(db, mongoqueue.WithCollection(name))
 	require.NoError(tb, err)
 	require.NoError(tb, b.EnsureIndexes(context.Background()))
+	return b, name
+}
+
+func newBroker(tb testing.TB) *mongoqueue.Broker {
+	tb.Helper()
+	b, _ := brokerOn(tb, dial(tb))
 	return b
 }
 
@@ -85,12 +94,21 @@ func claimOne(t *testing.T, b queue.Broker, q string) queue.ClaimedJob {
 	}
 }
 
+func makeJob(q string) queue.Job {
+	return queue.Job{
+		ID:          id.NewUUID().String(),
+		Queue:       q,
+		Type:        "test.kind",
+		Payload:     []byte(`{"n":1}`),
+		MaxAttempts: 25,
+		RunAt:       time.Now().UTC().Add(-2 * time.Second),
+		CreatedAt:   time.Now().UTC(),
+	}
+}
+
 func TestMongoQueue_PushTx(t *testing.T) {
 	db := dial(t)
-	collSeq++
-	b, err := mongoqueue.New(db, mongoqueue.WithCollection(fmt.Sprintf("qt_%s_tx_%d", runID, collSeq)))
-	require.NoError(t, err)
-	require.NoError(t, b.EnsureIndexes(context.Background()))
+	b, _ := brokerOn(t, db)
 	ctx := context.Background()
 	c := queue.NewClient(b)
 	kind := queue.NewKind[struct {
@@ -132,26 +150,35 @@ func TestMongoQueue_PushTx(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
+	t.Run("session without a running transaction is rejected", func(t *testing.T) {
+		sess, err := db.Client().StartSession()
+		require.NoError(t, err)
+		defer sess.EndSession(ctx)
+		err = queue.PushTx(ctx, c, sess, kind, struct {
+			N int `json:"n"`
+		}{N: 3})
+		require.Error(t, err, "a session with no transaction must not degrade to a plain insert")
+
+		got, err := b.Claim(ctx, "default", 10, time.Minute)
+		require.NoError(t, err)
+		assert.Empty(t, got, "nothing may be enqueued by the rejected push")
+	})
+
 	t.Run("wrong tx type errors", func(t *testing.T) {
 		err := queue.PushTx(ctx, c, "not a session", kind, struct {
 			N int `json:"n"`
-		}{N: 3})
+		}{N: 4})
 		require.Error(t, err)
 	})
 }
 
 // TestMongoQueue_PushJoinsAmbientSession pins the session-riding idiom the
 // package doc promises: a multi-job Push under a caller-owned session-bound
-// context must join that transaction instead of starting its own, so an abort
-// discards the whole batch.
+// context with a RUNNING transaction must join that transaction instead of
+// starting its own, so an abort discards the whole batch.
 func TestMongoQueue_PushJoinsAmbientSession(t *testing.T) {
 	db := dial(t)
-	collSeq++
-	// The session below is bound to db's client, so the broker must live on
-	// the same client — newBroker would dial a separate one.
-	b, err := mongoqueue.New(db, mongoqueue.WithCollection(fmt.Sprintf("qt_%s_ambient_%d", runID, collSeq)))
-	require.NoError(t, err)
-	require.NoError(t, b.EnsureIndexes(context.Background()))
+	b, _ := brokerOn(t, db)
 	ctx := context.Background()
 
 	sess, err := db.Client().StartSession()
@@ -169,12 +196,29 @@ func TestMongoQueue_PushJoinsAmbientSession(t *testing.T) {
 	assert.Empty(t, got, "aborted ambient transaction must discard the batch")
 }
 
-func TestMongoQueue_WithCollectionValidation(t *testing.T) {
+// TestMongoQueue_PushAmbientSessionWithoutTransaction pins the other side of
+// the idiom: a session bound for causal consistency only (no transaction
+// running) must NOT be mistaken for a caller-owned transaction — Push wraps
+// the batch in its own transaction, so a mid-batch failure (duplicate _id
+// here) leaves nothing behind instead of the pre-failure prefix.
+func TestMongoQueue_PushAmbientSessionWithoutTransaction(t *testing.T) {
 	db := dial(t)
-	_, err := mongoqueue.New(db, mongoqueue.WithCollection("bad$name"))
-	require.Error(t, err, "unsafe collection name rejected")
-	_, err = mongoqueue.New(db, mongoqueue.WithCollection(""))
-	require.Error(t, err, "empty collection name rejected")
+	b, _ := brokerOn(t, db)
+	ctx := context.Background()
+
+	sess, err := db.Client().StartSession()
+	require.NoError(t, err)
+	defer sess.EndSession(ctx)
+	sc := mongodriver.NewSessionContext(ctx, sess)
+
+	j1, j3 := makeJob("noamb"), makeJob("noamb")
+	dup := makeJob("noamb")
+	dup.ID = j1.ID // ordered insert fails here, after j1 landed
+	require.Error(t, b.Push(sc, j1, dup, j3), "duplicate id must fail the batch")
+
+	got, err := b.Claim(ctx, "noamb", 10, time.Minute)
+	require.NoError(t, err)
+	assert.Empty(t, got, "failed batch must be all-or-nothing even under a non-transactional ambient session")
 }
 
 func TestMongoQueue_PayloadRoundTripsJSON(t *testing.T) {
@@ -184,18 +228,6 @@ func TestMongoQueue_PayloadRoundTripsJSON(t *testing.T) {
 	require.NoError(t, c.PushRaw(ctx, "raw.kind", json.RawMessage(`{"deep":{"x":[1,2,3]}}`)))
 	job := claimOne(t, b, "default")
 	assert.JSONEq(t, `{"deep":{"x":[1,2,3]}}`, string(job.Payload))
-}
-
-func makeJob(q string) queue.Job {
-	return queue.Job{
-		ID:          id.NewUUID().String(),
-		Queue:       q,
-		Type:        "test.kind",
-		Payload:     []byte(`{"n":1}`),
-		MaxAttempts: 25,
-		RunAt:       time.Now().UTC().Add(-2 * time.Second),
-		CreatedAt:   time.Now().UTC(),
-	}
 }
 
 func TestMongoQueue_StatsCapped(t *testing.T) {
@@ -232,11 +264,7 @@ func TestMongoQueue_StatsCapped(t *testing.T) {
 // dominate the runtime without testing anything this test is about.
 func TestMongoQueue_PurgeDeadBeforeSpansManyBatches(t *testing.T) {
 	db := dial(t)
-	collSeq++
-	collName := fmt.Sprintf("qt_%s_purge_%d", runID, collSeq)
-	b, err := mongoqueue.New(db, mongoqueue.WithCollection(collName))
-	require.NoError(t, err)
-	require.NoError(t, b.EnsureIndexes(context.Background()))
+	b, collName := brokerOn(t, db)
 	ctx := context.Background()
 	coll := db.Collection(collName)
 
@@ -254,12 +282,13 @@ func TestMongoQueue_PurgeDeadBeforeSpansManyBatches(t *testing.T) {
 			{Key: "attempt", Value: int32(1)},
 			{Key: "max_attempts", Value: int32(5)},
 			{Key: "run_at", Value: diedAt},
+			{Key: "visible_at", Value: diedAt},
 			{Key: "created_at", Value: diedAt},
 			{Key: "died_at", Value: diedAt},
 			{Key: "last_error", Value: "retention fixture"},
 		}
 	}
-	_, err = coll.InsertMany(ctx, docs)
+	_, err := coll.InsertMany(ctx, docs)
 	require.NoError(t, err)
 
 	countDead := func() int {
@@ -286,4 +315,33 @@ func TestMongoQueue_PurgeDeadBeforeSpansManyBatches(t *testing.T) {
 	left, err := b.ListDead(ctx, "purgebatch", 10)
 	require.NoError(t, err)
 	assert.Empty(t, left)
+}
+
+// TestMongoQueue_ClaimFillsPastRivalClaims pins that another worker's
+// in-flight claims never occupy shortlist slots: after a rival broker claims
+// half the queue, a full batch must still come back from the unclaimed
+// remainder. (The mid-claim interleaving the refill loop exists for — a
+// candidate stolen between the shortlist read and the guarded update — has
+// no deterministic external trigger; this covers the observable contract
+// that contention must not shrink a batch while due work remains.)
+func TestMongoQueue_ClaimFillsPastRivalClaims(t *testing.T) {
+	db := dial(t)
+	b, collName := brokerOn(t, db)
+	rival, err := mongoqueue.New(db, mongoqueue.WithCollection(collName))
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	jobs := make([]queue.Job, 6)
+	for i := range jobs {
+		jobs[i] = makeJob("contended")
+	}
+	require.NoError(t, b.Push(ctx, jobs...))
+
+	stolen, err := rival.Claim(ctx, "contended", 3, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, stolen, 3)
+
+	got, err := b.Claim(ctx, "contended", 3, time.Minute)
+	require.NoError(t, err)
+	assert.Len(t, got, 3, "claim must fill its batch from the unclaimed remainder")
 }

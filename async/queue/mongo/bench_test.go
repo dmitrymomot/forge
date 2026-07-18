@@ -61,15 +61,21 @@ func BenchmarkMongoClaimBatch(b *testing.B) {
 	broker := newBroker(b)
 	ctx := context.Background()
 
-	// Seed enough backlog that Claim never runs dry inside the measured loop.
+	// seed keeps a backlog ahead of the measured loop; when it runs dry
+	// (long -benchtime or -count), it is refilled outside the timer so any
+	// iteration count measures pure claim/ack work.
 	const seed = 20000
-	jobs := make([]queue.Job, seed)
-	for i := range jobs {
-		jobs[i] = benchJob("default")
+	refill := func() {
+		b.Helper()
+		jobs := make([]queue.Job, seed)
+		for i := range jobs {
+			jobs[i] = benchJob("default")
+		}
+		if err := broker.Push(ctx, jobs...); err != nil {
+			b.Fatal(err)
+		}
 	}
-	if err := broker.Push(ctx, jobs...); err != nil {
-		b.Fatal(err)
-	}
+	refill()
 
 	b.ReportAllocs()
 	for b.Loop() {
@@ -78,7 +84,10 @@ func BenchmarkMongoClaimBatch(b *testing.B) {
 			b.Fatal(err)
 		}
 		if len(got) == 0 {
-			b.Fatal("backlog ran dry mid-benchmark")
+			b.StopTimer()
+			refill()
+			b.StartTimer()
+			continue
 		}
 		for _, j := range got {
 			if err := broker.Ack(ctx, j.ID, j.Token); err != nil {

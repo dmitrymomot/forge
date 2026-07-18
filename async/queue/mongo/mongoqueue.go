@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 
 	"github.com/dmitrymomot/forge/async/queue"
 	"github.com/dmitrymomot/forge/core/id"
@@ -37,13 +40,31 @@ const statsCap = 10000
 // inside the 16MB command ceiling.
 const purgeBatch = 5000
 
-// jobDoc is the BSON shape of a queue job. claimed_until, claim_token, and
-// died_at exist only while relevant (set/unset by the lifecycle updates) and
-// are never decoded back into a Job, so they carry no struct fields. Payload
-// is stored as a raw JSON string, never re-encoded as BSON, so bytes round-trip
-// exactly.
+// claimRounds bounds the batch-claim refill loop: under claimer contention a
+// round can lose its whole shortlist to a faster worker, and without a cap
+// two pathological claimers could ping-pong indefinitely. Four rounds cover
+// realistic contention; a short batch is legal, the engine just polls again.
+const claimRounds = 4
+
+// Constant filter/update fragments hoisted off the hot paths, like claimSort.
+var (
+	claimSort    = bson.D{{Key: "visible_at", Value: 1}, {Key: "_id", Value: 1}}
+	deadSort     = bson.D{{Key: "died_at", Value: 1}, {Key: "_id", Value: 1}}
+	idProjection = bson.D{{Key: "_id", Value: 1}}
+	unsetClaim   = bson.D{{Key: "claim_token", Value: ""}}
+)
+
+// jobDoc is the BSON shape of a queue job. visible_at is the single indexed
+// visibility watermark: run_at on push, the lease deadline while claimed, the
+// retry time after a nack — so "claimable" is one range predicate with tight
+// index bounds instead of an $or over an optional lease field. claim_token
+// exists only while claimed and died_at only once dead (set/unset by the
+// lifecycle updates); neither is decoded back into a Job, so they carry no
+// struct fields. Payload is stored as a raw JSON string, never re-encoded as
+// BSON, so bytes round-trip exactly.
 type jobDoc struct {
 	RunAt       time.Time `bson:"run_at"`
+	VisibleAt   time.Time `bson:"visible_at"`
 	CreatedAt   time.Time `bson:"created_at"`
 	ID          string    `bson:"_id"`
 	Queue       string    `bson:"queue"`
@@ -54,6 +75,19 @@ type jobDoc struct {
 	LastError   string    `bson:"last_error,omitempty"`
 	Attempt     int32     `bson:"attempt"`
 	MaxAttempts int32     `bson:"max_attempts"`
+}
+
+// ceilMillis rounds t up to the next BSON-representable instant. BSON
+// datetimes carry millisecond precision and marshalling floors, which would
+// make a nacked job claimable up to 1ms before its retryAt and every lease
+// expire up to 1ms early; visibility watermarks are therefore ceiled so
+// "no earlier than" holds literally.
+func ceilMillis(t time.Time) time.Time {
+	f := t.Truncate(time.Millisecond)
+	if f.Equal(t) {
+		return t
+	}
+	return f.Add(time.Millisecond)
 }
 
 func newDoc(j queue.Job) jobDoc {
@@ -68,6 +102,7 @@ func newDoc(j queue.Job) jobDoc {
 		Attempt:     int32(j.Attempt),
 		MaxAttempts: int32(j.MaxAttempts),
 		RunAt:       j.RunAt.UTC(),
+		VisibleAt:   ceilMillis(j.RunAt.UTC()),
 		CreatedAt:   j.CreatedAt.UTC(),
 	}
 }
@@ -106,7 +141,11 @@ func WithCollection(name string) Option {
 }
 
 // New builds a Broker over db. It performs no I/O; call EnsureIndexes once at
-// boot to create the indexes the hot paths depend on.
+// boot to create the indexes the hot paths depend on. The broker's collection
+// handle is pinned to primary reads regardless of the client's read
+// preference: a queue must read its own acknowledged writes, and a
+// secondary-lagging read after a claim would hand out leases on jobs it then
+// fails to return.
 func New(db *mongodriver.Database, opts ...Option) (*Broker, error) {
 	cfg := config{collection: "queue_jobs"}
 	for _, opt := range opts {
@@ -118,7 +157,8 @@ func New(db *mongodriver.Database, opts ...Option) (*Broker, error) {
 	if !collectionNameRe.MatchString(cfg.collection) {
 		return nil, fmt.Errorf("mongoqueue: invalid collection name %q", cfg.collection)
 	}
-	return &Broker{coll: db.Collection(cfg.collection)}, nil
+	coll := db.Collection(cfg.collection, options.Collection().SetReadPreference(readpref.Primary()))
+	return &Broker{coll: coll}, nil
 }
 
 // EnsureIndexes idempotently creates the partial indexes the broker relies
@@ -128,7 +168,7 @@ func New(db *mongodriver.Database, opts ...Option) (*Broker, error) {
 func (b *Broker) EnsureIndexes(ctx context.Context) error {
 	models := []mongodriver.IndexModel{
 		{
-			Keys: bson.D{{Key: "queue", Value: 1}, {Key: "run_at", Value: 1}, {Key: "_id", Value: 1}},
+			Keys: bson.D{{Key: "queue", Value: 1}, {Key: "visible_at", Value: 1}, {Key: "_id", Value: 1}},
 			Options: options.Index().SetName("queue_claim").
 				SetPartialFilterExpression(bson.D{{Key: "state", Value: stateLive}}),
 		},
@@ -168,9 +208,13 @@ func (b *Broker) Push(ctx context.Context, jobs ...queue.Job) error {
 		return nil
 	}
 	docs := docsOf(jobs)
-	// Inside a caller-owned session (e.g. data/mongo.WithTransaction) the
-	// insert joins that transaction; all-or-nothing is the caller's commit.
-	if mongodriver.SessionFromContext(ctx) != nil {
+	// Inside a caller-owned transaction (e.g. data/mongo.WithTransaction) the
+	// insert joins it; all-or-nothing is the caller's commit. A session
+	// without a running transaction (causal consistency only) gives no
+	// atomicity, so it falls through to the broker's own transaction below —
+	// WithTransaction binds its session into the callback context, replacing
+	// the ambient one for the insert only.
+	if sess := mongodriver.SessionFromContext(ctx); sess != nil && sess.TransactionRunning() {
 		if _, err := b.coll.InsertMany(ctx, docs); err != nil {
 			return fmt.Errorf("mongoqueue: push: %w", err)
 		}
@@ -193,13 +237,20 @@ func (b *Broker) Push(ctx context.Context, jobs ...queue.Job) error {
 }
 
 // PushTx implements queue.TxPusher: the batch insert inside a caller-owned
-// *mongo.Session whose transaction the caller has already started (typically
-// via Session.WithTransaction), so the jobs commit or abort with the business
-// transaction.
+// *mongo.Session with a running transaction (started via StartTransaction or
+// inside Session.WithTransaction), so the jobs commit or abort with the
+// business transaction. A session whose transaction is not running is
+// rejected rather than silently degrading to a non-transactional insert.
+// Callers inside data/mongo.WithTransaction can recover the session with
+// mongo.SessionFromContext(ctx), or simply call Push with the callback
+// context — it joins the transaction on its own.
 func (b *Broker) PushTx(ctx context.Context, tx any, jobs ...queue.Job) error {
 	sess, ok := tx.(*mongodriver.Session)
 	if !ok || sess == nil {
 		return fmt.Errorf("mongoqueue: push tx: expected *mongo.Session, got %T", tx)
+	}
+	if !sess.TransactionRunning() {
+		return errors.New("mongoqueue: push tx: session has no running transaction")
 	}
 	if len(jobs) == 0 {
 		return nil
@@ -210,28 +261,22 @@ func (b *Broker) PushTx(ctx context.Context, tx any, jobs ...queue.Job) error {
 	return nil
 }
 
-// claimable matches live jobs in queueName that are due and not under an
-// active lease as of now. claimed_until is unset (never null) on unclaimed
-// documents, so $exists:false is the "no lease" arm.
+// claimable matches live jobs in queueName whose visibility watermark has
+// passed: due and not under an active lease.
 func claimable(queueName string, now time.Time) bson.D {
 	return bson.D{
 		{Key: "state", Value: stateLive},
 		{Key: "queue", Value: queueName},
-		{Key: "run_at", Value: bson.D{{Key: "$lte", Value: now}}},
-		{Key: "$or", Value: bson.A{
-			bson.D{{Key: "claimed_until", Value: bson.D{{Key: "$exists", Value: false}}}},
-			bson.D{{Key: "claimed_until", Value: bson.D{{Key: "$lt", Value: now}}}},
-		}},
+		{Key: "visible_at", Value: bson.D{{Key: "$lte", Value: now}}},
 	}
 }
 
-var claimSort = bson.D{{Key: "run_at", Value: 1}, {Key: "_id", Value: 1}}
-
-// claimUpdate stamps the lease, the fencing token, and the attempt increment.
+// claimUpdate stamps the lease (as the visibility watermark), the fencing
+// token, and the attempt increment.
 func claimUpdate(token string, until time.Time) bson.D {
 	return bson.D{
 		{Key: "$set", Value: bson.D{
-			{Key: "claimed_until", Value: until},
+			{Key: "visible_at", Value: until},
 			{Key: "claim_token", Value: token},
 		}},
 		{Key: "$inc", Value: bson.D{{Key: "attempt", Value: 1}}},
@@ -242,17 +287,19 @@ func (b *Broker) Claim(ctx context.Context, queueName string, n int, lease time.
 	if n <= 0 {
 		return nil, nil
 	}
-	now := time.Now().UTC()
 	token := id.NewUUID().String()
 
 	// Single-job fast path: findAndModify claims, stamps, and returns the
-	// post-update document atomically in one round trip instead of the
-	// three-step batch below. Measured ~19% faster on the push/claim/ack
-	// cycle (1.61ms -> 1.31ms per op) with 41% fewer allocations; see
-	// bench_test.go.
+	// post-update document atomically in one server command instead of the
+	// find/update/fetch rounds below. Wall latency ties the batch path on a
+	// local server (A/B via bench_test.go PushClaimAck: ~1.8ms/op both ways,
+	// within container noise), but it measures 44% fewer allocations
+	// (352 vs 625, 32KB vs 57KB), issues a third of the commands, and closes
+	// the batch path's claimed-but-unfetched crash window entirely.
 	if n == 1 {
+		now := time.Now().UTC()
 		var d jobDoc
-		err := b.coll.FindOneAndUpdate(ctx, claimable(queueName, now), claimUpdate(token, now.Add(lease)),
+		err := b.coll.FindOneAndUpdate(ctx, claimable(queueName, now), claimUpdate(token, ceilMillis(now.Add(lease))),
 			options.FindOneAndUpdate().SetSort(claimSort).SetReturnDocument(options.After)).Decode(&d)
 		switch {
 		case errors.Is(err, mongodriver.ErrNoDocuments):
@@ -263,48 +310,66 @@ func (b *Broker) Claim(ctx context.Context, queueName string, n int, lease time.
 		return []queue.ClaimedJob{{Job: d.job(), Token: token}}, nil
 	}
 
-	// Round trip 1: candidate ids in (run_at, _id) order off the partial
-	// claim index. Not yet a claim — just the shortlist.
-	cur, err := b.coll.Find(ctx, claimable(queueName, now), options.Find().
-		SetSort(claimSort).
-		SetLimit(int64(n)).
-		SetProjection(bson.D{{Key: "_id", Value: 1}}))
-	if err != nil {
-		return nil, fmt.Errorf("mongoqueue: claim find: %w", err)
+	// Batch path: shortlist candidate ids in visibility order, then claim
+	// them with a guarded updateMany — each matched document gets the lease,
+	// the batch token, and its attempt increment in one atomic update, and a
+	// candidate won by a concurrent claimer since the shortlist is skipped,
+	// not stolen. Lost candidates are refilled from the next shortlist (their
+	// winner's lease bump hides them) so contention thins a batch instead of
+	// emptying it: the engine reads a short return as "queue drained".
+	remaining := n
+	var ids []string
+	for round := 0; remaining > 0 && round < claimRounds; round++ {
+		limit := remaining
+		now := time.Now().UTC()
+		cur, err := b.coll.Find(ctx, claimable(queueName, now), options.Find().
+			SetSort(claimSort).
+			SetLimit(int64(limit)).
+			SetBatchSize(int32(limit)).
+			SetProjection(idProjection))
+		if err != nil {
+			return nil, fmt.Errorf("mongoqueue: claim find: %w", err)
+		}
+		var candidates []struct {
+			ID string `bson:"_id"`
+		}
+		if err := cur.All(ctx, &candidates); err != nil {
+			return nil, fmt.Errorf("mongoqueue: claim decode: %w", err)
+		}
+		if len(candidates) == 0 {
+			break
+		}
+		batch := make([]string, len(candidates))
+		for i, c := range candidates {
+			batch[i] = c.ID
+		}
+		ids = append(ids, batch...)
+		// The guard repeats the claimable predicate with a fresh clock so the
+		// lease is measured from the moment it is stamped, not from before
+		// the shortlist round trip.
+		now = time.Now().UTC()
+		guard := append(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: batch}}}}, claimable(queueName, now)...)
+		res, err := b.coll.UpdateMany(ctx, guard, claimUpdate(token, ceilMillis(now.Add(lease))))
+		if err != nil {
+			return nil, fmt.Errorf("mongoqueue: claim update: %w", err)
+		}
+		remaining -= int(res.MatchedCount)
+		if len(candidates) < limit {
+			// Short shortlist: nothing more was due when it was taken.
+			break
+		}
 	}
-	var candidates []struct {
-		ID string `bson:"_id"`
-	}
-	if err := cur.All(ctx, &candidates); err != nil {
-		return nil, fmt.Errorf("mongoqueue: claim decode: %w", err)
-	}
-	if len(candidates) == 0 {
+	if remaining == n {
 		return nil, nil
 	}
-	ids := make([]string, len(candidates))
-	for i, c := range candidates {
-		ids[i] = c.ID
-	}
 
-	// Round trip 2: claim atomically per document. The guard repeats the
-	// claimable predicate so a candidate won by a concurrent claimer since
-	// round trip 1 is skipped, not stolen; each matched document gets the
-	// lease, the batch token, and its attempt increment in one atomic update.
-	guard := append(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}, claimable(queueName, now)...)
-	res, err := b.coll.UpdateMany(ctx, guard, claimUpdate(token, now.Add(lease)))
-	if err != nil {
-		return nil, fmt.Errorf("mongoqueue: claim update: %w", err)
-	}
-	if res.ModifiedCount == 0 {
-		return nil, nil
-	}
-
-	// Round trip 3: fetch the documents this token actually won, post-update
-	// (attempt already incremented), via the _id index.
-	cur, err = b.coll.Find(ctx, bson.D{
+	// Fetch the documents this token actually won, post-update (attempt
+	// already incremented), via the _id index; ordering is restored
+	// client-side, sparing the server a blocking sort stage no index covers.
+	cur, err := b.coll.Find(ctx, bson.D{
 		{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}},
 		{Key: "claim_token", Value: token},
-	}, options.Find().SetSort(claimSort))
+	}, options.Find().SetBatchSize(int32(len(ids))))
 	if err != nil {
 		return nil, fmt.Errorf("mongoqueue: claim fetch: %w", err)
 	}
@@ -312,6 +377,12 @@ func (b *Broker) Claim(ctx context.Context, queueName string, n int, lease time.
 	if err := cur.All(ctx, &docs); err != nil {
 		return nil, fmt.Errorf("mongoqueue: claim fetch decode: %w", err)
 	}
+	slices.SortFunc(docs, func(a, b jobDoc) int {
+		if c := a.RunAt.Compare(b.RunAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 	claimed := make([]queue.ClaimedJob, len(docs))
 	for i, d := range docs {
 		claimed[i] = queue.ClaimedJob{Job: d.job(), Token: token}
@@ -329,17 +400,24 @@ func fenced(jobID, token string) bson.D {
 	}
 }
 
-func (b *Broker) Extend(ctx context.Context, jobID, token string, lease time.Duration) error {
-	res, err := b.coll.UpdateOne(ctx, fenced(jobID, token), bson.D{
-		{Key: "$set", Value: bson.D{{Key: "claimed_until", Value: time.Now().UTC().Add(lease)}}},
-	})
+// fencedUpdate runs a token-guarded update; zero matched documents means the
+// token no longer owns the job. Matched, not modified: a no-op rewrite (e.g.
+// an Extend landing on the same millisecond) still proves ownership.
+func (b *Broker) fencedUpdate(ctx context.Context, op, jobID, token string, update bson.D) error {
+	res, err := b.coll.UpdateOne(ctx, fenced(jobID, token), update)
 	if err != nil {
-		return fmt.Errorf("mongoqueue: extend: %w", err)
+		return fmt.Errorf("mongoqueue: %s: %w", op, err)
 	}
 	if res.MatchedCount == 0 {
 		return queue.ErrLeaseLost
 	}
 	return nil
+}
+
+func (b *Broker) Extend(ctx context.Context, jobID, token string, lease time.Duration) error {
+	return b.fencedUpdate(ctx, "extend", jobID, token, bson.D{
+		{Key: "$set", Value: bson.D{{Key: "visible_at", Value: ceilMillis(time.Now().UTC().Add(lease))}}},
+	})
 }
 
 func (b *Broker) Ack(ctx context.Context, jobID, token string) error {
@@ -354,44 +432,26 @@ func (b *Broker) Ack(ctx context.Context, jobID, token string) error {
 }
 
 func (b *Broker) Nack(ctx context.Context, jobID, token string, retryAt time.Time, reason string) error {
-	res, err := b.coll.UpdateOne(ctx, fenced(jobID, token), bson.D{
+	visibleAt := ceilMillis(retryAt.UTC())
+	return b.fencedUpdate(ctx, "nack", jobID, token, bson.D{
 		{Key: "$set", Value: bson.D{
 			{Key: "run_at", Value: retryAt.UTC()},
+			{Key: "visible_at", Value: visibleAt},
 			{Key: "last_error", Value: reason},
 		}},
-		{Key: "$unset", Value: bson.D{
-			{Key: "claimed_until", Value: ""},
-			{Key: "claim_token", Value: ""},
-		}},
+		{Key: "$unset", Value: unsetClaim},
 	})
-	if err != nil {
-		return fmt.Errorf("mongoqueue: nack: %w", err)
-	}
-	if res.MatchedCount == 0 {
-		return queue.ErrLeaseLost
-	}
-	return nil
 }
 
 func (b *Broker) Kill(ctx context.Context, jobID, token string, reason string) error {
-	res, err := b.coll.UpdateOne(ctx, fenced(jobID, token), bson.D{
+	return b.fencedUpdate(ctx, "kill", jobID, token, bson.D{
 		{Key: "$set", Value: bson.D{
 			{Key: "state", Value: stateDead},
 			{Key: "died_at", Value: time.Now().UTC()},
 			{Key: "last_error", Value: reason},
 		}},
-		{Key: "$unset", Value: bson.D{
-			{Key: "claimed_until", Value: ""},
-			{Key: "claim_token", Value: ""},
-		}},
+		{Key: "$unset", Value: unsetClaim},
 	})
-	if err != nil {
-		return fmt.Errorf("mongoqueue: kill: %w", err)
-	}
-	if res.MatchedCount == 0 {
-		return queue.ErrLeaseLost
-	}
-	return nil
 }
 
 func (b *Broker) ListDead(ctx context.Context, queueName string, limit int) ([]queue.Job, error) {
@@ -402,8 +462,9 @@ func (b *Broker) ListDead(ctx context.Context, queueName string, limit int) ([]q
 		{Key: "state", Value: stateDead},
 		{Key: "queue", Value: queueName},
 	}, options.Find().
-		SetSort(bson.D{{Key: "died_at", Value: 1}, {Key: "_id", Value: 1}}).
-		SetLimit(int64(limit)))
+		SetSort(deadSort).
+		SetLimit(int64(limit)).
+		SetBatchSize(int32(limit)))
 	if err != nil {
 		return nil, fmt.Errorf("mongoqueue: list dead: %w", err)
 	}
@@ -419,6 +480,7 @@ func (b *Broker) ListDead(ctx context.Context, queueName string, limit int) ([]q
 }
 
 func (b *Broker) Requeue(ctx context.Context, jobID string) error {
+	now := time.Now().UTC()
 	res, err := b.coll.UpdateOne(ctx, bson.D{
 		{Key: "_id", Value: jobID},
 		{Key: "state", Value: stateDead},
@@ -426,7 +488,8 @@ func (b *Broker) Requeue(ctx context.Context, jobID string) error {
 		{Key: "$set", Value: bson.D{
 			{Key: "state", Value: stateLive},
 			{Key: "attempt", Value: int32(0)},
-			{Key: "run_at", Value: time.Now().UTC()},
+			{Key: "run_at", Value: now},
+			{Key: "visible_at", Value: now},
 		}},
 		{Key: "$unset", Value: bson.D{{Key: "died_at", Value: ""}}},
 	})
@@ -464,7 +527,8 @@ func (b *Broker) PurgeDeadBefore(ctx context.Context, cutoff time.Time) (int, er
 			{Key: "died_at", Value: bson.D{{Key: "$lt", Value: cutoff.UTC()}}},
 		}, options.Find().
 			SetLimit(purgeBatch).
-			SetProjection(bson.D{{Key: "_id", Value: 1}}))
+			SetBatchSize(purgeBatch).
+			SetProjection(idProjection))
 		if err != nil {
 			return total, fmt.Errorf("mongoqueue: purge dead before: %w", err)
 		}
@@ -541,6 +605,11 @@ func (b *Broker) statsInto(ctx context.Context, st queue.Stats, state string) er
 		}, options.Count().SetLimit(statsCap+1))
 		if err != nil {
 			return fmt.Errorf("mongoqueue: stats count: %w", err)
+		}
+		if n == 0 {
+			// The queue drained between the distinct and the count; skip it
+			// rather than report a {0, 0} entry no other broker would emit.
+			continue
 		}
 		capped := n > statsCap
 		if capped {
