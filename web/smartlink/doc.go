@@ -6,6 +6,22 @@
 // simply the degenerate case — a single default target, no rules — with
 // every ability intact: macros, param forwarding, metadata stamping, hooks.
 //
+// # Usage
+//
+//	link, err := smartlink.Compile(smartlink.Spec{
+//		Rules: []smartlink.Rule{{
+//			Name:    "de-mobile",
+//			When:    []smartlink.Matcher{smartlink.Geo{Countries: []string{"DE"}}},
+//			Targets: []smartlink.Target{{URL: "https://a.example.com/lp"}},
+//		}},
+//		Default: []smartlink.Target{{URL: "https://example.com/"}},
+//	})
+//	if err != nil {
+//		// handle error
+//	}
+//	d := link.Decide(smartlink.Visit{Country: "de", StickyKey: "visitor-42"})
+//	// d.Rule == "de-mobile", d.URL == "https://a.example.com/lp"
+//
 // # Engine
 //
 // [Compile] validates a consumer-hydrated [Spec] fail-fast — ordered rules

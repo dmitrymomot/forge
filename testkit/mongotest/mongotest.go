@@ -9,8 +9,12 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 var (
@@ -65,4 +69,36 @@ func startShared() {
 	q.Set("directConnection", "true")
 	u.RawQuery = q.Encode()
 	sharedURI = u.String()
+	waitForPrimary(ctx, sharedURI)
+}
+
+// waitForPrimary blocks until the single-node replica set has a writable primary.
+// The module's own readiness check (rs.status().ok) can report true mid-election,
+// before any member is writable, so an immediate write can fail with
+// "NotWritablePrimary"; retrying Ping(readpref.Primary()) waits out that window.
+func waitForPrimary(ctx context.Context, uri string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	client, err := mongodriver.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		panic(fmt.Sprintf("mongotest: connect: %v", err))
+	}
+	defer func() {
+		dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer dcancel()
+		_ = client.Disconnect(dctx)
+	}()
+
+	var lastErr error
+	for {
+		if lastErr = client.Ping(ctx, readpref.Primary()); lastErr == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			panic(fmt.Sprintf("mongotest: wait for primary: %v (last ping error: %v)", ctx.Err(), lastErr))
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
