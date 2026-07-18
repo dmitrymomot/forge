@@ -3,14 +3,15 @@ package pgstore
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dmitrymomot/forge/data/postgres"
 	"github.com/dmitrymomot/forge/web/smartlink"
 )
 
@@ -51,16 +52,18 @@ INSERT INTO forge_smart_links (` + cols + `)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 // Create inserts l keyed by l.Code. A colliding code yields smartlink.ErrDuplicate.
+// Metadata is stored as its JSON encoding — a nil map as jsonb 'null' — so a
+// nil round-trips back as nil and an empty map as an empty map, matching the
+// MemoryStore reference contract exactly.
 func (s *Store) Create(ctx context.Context, l smartlink.Link) error {
-	meta := l.Metadata
-	if meta == nil {
-		meta = map[string]string{}
+	meta, err := json.Marshal(l.Metadata)
+	if err != nil {
+		return err // unreachable: map[string]string always marshals
 	}
-	_, err := s.pool.Exec(ctx, createSQL,
+	_, err = s.pool.Exec(ctx, createSQL,
 		l.Code, l.Target, l.Ref, meta, l.Tenant,
 		l.CreatedAt, nullTime(l.ExpiresAt), nullTime(l.DeactivatedAt))
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+	if postgres.IsUniqueViolation(err) {
 		return smartlink.ErrDuplicate
 	}
 	return err
@@ -110,7 +113,8 @@ SET deactivated_at = CASE WHEN $3::timestamptz IS NULL THEN deactivated_at ELSE 
 WHERE code = $1 AND ($2 = '' OR tenant = $2)`
 
 // Deactivate sets DeactivatedAt to at on code, scoped to tenant. A zero at
-// leaves the link active but still enforces the code/tenant predicate.
+// leaves DeactivatedAt unchanged (never reactivates) but still enforces the
+// code/tenant predicate.
 func (s *Store) Deactivate(ctx context.Context, code, tenant string, at time.Time) error {
 	return s.exec(ctx, deactivateSQL, code, tenant, nullTime(at))
 }
