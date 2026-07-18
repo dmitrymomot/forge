@@ -93,11 +93,11 @@
 // guard diverting a suspicious visit, an A/B override, an inline metrics
 // tap. [WithDecorators] wraps every link's Decider — Target- and Ref-backed
 // alike — while a [Cache.Resolver] chain decorates Ref links only, inside
-// the manager chain. [WithOnHit] is the asynchronous observer: it runs after the redirect
-// is already written and cannot change it. It must hand the [Hit] to a
-// bounded sink — a queue push, a buffered channel — and never do work
-// inline or spawn a goroutine per hit; a slow or unbounded [WithOnHit]
-// blocks or leaks on every click.
+// the manager chain. [WithOnHit] is the asynchronous observer: it runs
+// after the redirect is already written and cannot change it. It must hand
+// the [Hit] to a bounded sink — a queue push, a buffered channel — and
+// never do work inline or spawn a goroutine per hit; a slow or unbounded
+// [WithOnHit] blocks or leaks on every click.
 //
 // # Tenancy
 //
