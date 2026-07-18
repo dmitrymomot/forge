@@ -198,9 +198,9 @@ Column/aggregate expressions are trusted registered strings; spec values
 only ever bind as args — user input never enters SQL text. Tenancy via
 an optional construction-time scope hook appending a scope clause to
 every emitted WHERE; a configured hook yielding no scope is an error,
-never an unscoped query. Composes `data/pagination` for keyset paging
-and `data/export` for streaming; result execution, caching, and saved
-reports stay consumer-side.
+never an unscoped query. Composes `data/export` for streaming;
+pagination, result execution, caching, and saved reports stay
+consumer-side.
 
 Deps: none (stdlib only).
 
@@ -746,7 +746,7 @@ every B2B SaaS shows in its UI. Optional per-stream hash chaining
 (prev-hash + a verify pass) makes the trail tamper-evident for
 compliance-grade audits.
 
-Deps: `ops/logger`, `data/postgres`, `data/pagination`.
+Deps: `ops/logger`, `data/postgres`.
 
 ---
 
