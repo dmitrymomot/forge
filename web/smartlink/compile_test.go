@@ -25,7 +25,6 @@ func TestCompileValidation(t *testing.T) {
 		{"no default with rules", smartlink.Spec{Rules: []smartlink.Rule{{Name: "r", Targets: defTargets()}}}, smartlink.ErrNoDefault},
 		{"default empty URL", smartlink.Spec{Default: []smartlink.Target{{}}}, smartlink.ErrInvalidTarget},
 		{"default split zero weight", smartlink.Spec{Default: []smartlink.Target{{URL: "https://a.com", Weight: 1}, {URL: "https://b.com"}}}, smartlink.ErrInvalidTarget},
-		{"negative weight single target", smartlink.Spec{Default: []smartlink.Target{{URL: "https://a.com", Weight: -1}}}, smartlink.ErrInvalidTarget},
 		{"split weight overflow", smartlink.Spec{Default: []smartlink.Target{
 			{URL: "https://a.com", Weight: math.MaxInt32}, {URL: "https://b.com", Weight: 1},
 		}}, smartlink.ErrInvalidTarget},

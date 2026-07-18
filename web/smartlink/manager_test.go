@@ -3,6 +3,7 @@ package smartlink_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -274,9 +275,9 @@ func TestCreateRefValidation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	t.Run("resolver error wraps ErrInvalidLink", func(t *testing.T) {
+	t.Run("unknown ref wraps ErrInvalidLink", func(t *testing.T) {
 		t.Parallel()
-		resolverErr := errors.New("ref not found")
+		resolverErr := fmt.Errorf("offer lookup: %w", smartlink.ErrRefNotFound)
 		resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) {
 			return nil, resolverErr
 		}
@@ -287,6 +288,22 @@ func TestCreateRefValidation(t *testing.T) {
 		}
 		if !errors.Is(err, resolverErr) {
 			t.Fatalf("Create() = %v, want wrapped resolver error", err)
+		}
+	})
+
+	t.Run("resolver infrastructure error is not ErrInvalidLink", func(t *testing.T) {
+		t.Parallel()
+		infraErr := errors.New("consumer db timeout")
+		resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) {
+			return nil, infraErr
+		}
+		m := newTestManager(t, smartlink.WithResolver(resolver))
+		_, err := m.Create(ctx, smartlink.CreateParams{Ref: "offer-1"})
+		if errors.Is(err, smartlink.ErrInvalidLink) {
+			t.Fatalf("Create() = %v, must not read as caller input error", err)
+		}
+		if !errors.Is(err, infraErr) {
+			t.Fatalf("Create() = %v, want wrapped infrastructure error", err)
 		}
 	})
 
@@ -472,4 +489,57 @@ func TestRandomCode(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestNewManagerRejectsUnknownParamPolicy asserts an out-of-range
+// WithLinkParamPolicy fails at construction like every other validated
+// option, instead of surfacing per-Create and per-hit.
+func TestNewManagerRejectsUnknownParamPolicy(t *testing.T) {
+	t.Parallel()
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithLinkParamPolicy(smartlink.ParamPolicy(7))); err == nil {
+		t.Fatal("NewManager(WithLinkParamPolicy(7)) error = nil, want construction error")
+	}
+}
+
+// TestCreateGeneratedCodeValidation asserts generated codes face the same
+// reserved-word and charset rules as vanity codes.
+func TestCreateGeneratedCodeValidation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("reserved generated code retried", func(t *testing.T) {
+		t.Parallel()
+		seq := []string{"api", "okcode1"}
+		i := 0
+		m := newTestManager(t, smartlink.WithCodeFunc(func() string { i++; return seq[i-1] }))
+		l, err := m.Create(ctx, smartlink.CreateParams{Target: "https://example.com/"})
+		if err != nil {
+			t.Fatalf("Create() error = %v, want nil", err)
+		}
+		if l.Code != "okcode1" {
+			t.Fatalf("Create().Code = %q, want the non-reserved retry %q", l.Code, "okcode1")
+		}
+	})
+
+	t.Run("always-reserved generator exhausts attempts", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, smartlink.WithCodeFunc(func() string { return "api" }))
+		_, err := m.Create(ctx, smartlink.CreateParams{Target: "https://example.com/"})
+		if !errors.Is(err, smartlink.ErrCodeReserved) {
+			t.Fatalf("Create() = %v, want wrapped ErrCodeReserved", err)
+		}
+	})
+
+	t.Run("invalid charset fails fast", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		m := newTestManager(t, smartlink.WithCodeFunc(func() string { calls++; return "a/b" }))
+		_, err := m.Create(ctx, smartlink.CreateParams{Target: "https://example.com/"})
+		if !errors.Is(err, smartlink.ErrInvalidLink) {
+			t.Fatalf("Create() = %v, want ErrInvalidLink", err)
+		}
+		if calls != 1 {
+			t.Fatalf("code generator calls = %d, want 1 (broken generator must not be retried)", calls)
+		}
+	})
 }

@@ -2,6 +2,8 @@ package smartlink
 
 import (
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -58,37 +60,113 @@ func (s *split) pick(stickyKey string) *compiledTarget {
 	if s.cum == nil || stickyKey == "" {
 		return &s.targets[0]
 	}
-	n := int(hashString(s.seed, stickyKey) % s.total)
+	n := int(hashString(s.seed, stickyKey) % uint64(s.cum[len(s.cum)-1]))
 	for i, c := range s.cum {
 		if n < c {
 			return &s.targets[i]
 		}
 	}
-	return &s.targets[len(s.targets)-1] // unreachable: n < total == cum[last]
+	return &s.targets[len(s.targets)-1] // unreachable: n < cum[last]
 }
 
 // finalURL renders the target's macros and merges visit params per the link
-// policy.
+// policy. Original query pairs are preserved verbatim (order and encoding
+// intact — a pair url.Values could not round-trip, like an unencoded '%' or a
+// ';', is never silently dropped); merged params append in sorted key order.
+// A literal target reuses its compile-time parse instead of re-parsing the
+// identical string per decide.
 func (l *Compiled) finalURL(t *compiledTarget, v *Visit) string {
-	rendered := t.tmpl.render(v)
 	if l.params == ParamsDrop || len(v.Params) == 0 {
-		return rendered
+		return t.tmpl.render(v)
 	}
+	override := l.params == ParamsOverride
+	if t.lit != nil {
+		u := t.lit.u
+		u.RawQuery = mergeQuery(t.lit.pairs, v.Params, override)
+		return u.String()
+	}
+	rendered := t.tmpl.render(v)
 	u, err := url.Parse(rendered)
 	if err != nil {
 		// Unreachable: the template parsed at compile and macro values are
 		// escaped, so the rendered URL preserves the validated structure.
 		return rendered
 	}
-	q := u.Query()
-	for k, val := range v.Params {
+	u.RawQuery = mergeQuery(splitQuery(u.RawQuery), v.Params, override)
+	return u.String()
+}
+
+// qpair is one raw query pair with its best-effort decoded key.
+type qpair struct {
+	raw string // the pair verbatim as it appeared in the query
+	key string // decoded key; "" when the key does not decode (opaque pair)
+}
+
+// splitQuery splits rawQuery on '&', keeping each non-empty pair verbatim.
+// Keys are decoded best-effort for merge comparisons only; an undecodable key
+// leaves the pair opaque — always preserved, never matched by a param.
+func splitQuery(rawQuery string) []qpair {
+	if rawQuery == "" {
+		return nil
+	}
+	pairs := make([]qpair, 0, strings.Count(rawQuery, "&")+1)
+	for p := range strings.SplitSeq(rawQuery, "&") {
+		if p == "" {
+			continue
+		}
+		rawKey, _, _ := strings.Cut(p, "=")
+		key, err := url.QueryUnescape(rawKey)
+		if err != nil {
+			key = ""
+		}
+		pairs = append(pairs, qpair{raw: p, key: key})
+	}
+	return pairs
+}
+
+// mergeQuery merges params into pairs per policy: fill keeps every original
+// pair and appends only params whose key the target does not already set;
+// override rewrites the first occurrence of a matched key in place (dropping
+// its duplicates, like url.Values.Set) and appends the rest. Appended params
+// are sorted by key for deterministic output.
+func mergeQuery(pairs []qpair, params map[string]string, override bool) string {
+	var b strings.Builder
+	matched := make(map[string]struct{}, len(params))
+	for _, p := range pairs {
+		if v, ok := params[p.key]; ok && p.key != "" {
+			if override {
+				if _, done := matched[p.key]; done {
+					continue
+				}
+				matched[p.key] = struct{}{}
+				writePair(&b, url.QueryEscape(p.key)+"="+url.QueryEscape(v))
+				continue
+			}
+			matched[p.key] = struct{}{}
+		}
+		writePair(&b, p.raw)
+	}
+	keys := make([]string, 0, len(params))
+	for k := range params {
 		if k == "" {
 			continue
 		}
-		if l.params == ParamsOverride || !q.Has(k) {
-			q.Set(k, val)
+		if _, ok := matched[k]; ok {
+			continue
 		}
+		keys = append(keys, k)
 	}
-	u.RawQuery = q.Encode()
-	return u.String()
+	slices.Sort(keys)
+	for _, k := range keys {
+		writePair(&b, url.QueryEscape(k)+"="+url.QueryEscape(params[k]))
+	}
+	return b.String()
+}
+
+// writePair appends pair to b with the '&' separator when b is non-empty.
+func writePair(b *strings.Builder, pair string) {
+	if b.Len() > 0 {
+		b.WriteByte('&')
+	}
+	b.WriteString(pair)
 }

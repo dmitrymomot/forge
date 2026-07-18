@@ -21,10 +21,27 @@ func countingLoad(n *int, spec smartlink.Spec, err error) func(context.Context, 
 	}
 }
 
+// mustNewCache builds a Cache or fails the test.
+func mustNewCache(tb testing.TB, load func(context.Context, string) (smartlink.Spec, error), opts ...smartlink.Option) *smartlink.Cache {
+	tb.Helper()
+	c, err := smartlink.NewCache(load, opts...)
+	if err != nil {
+		tb.Fatalf("NewCache() error = %v", err)
+	}
+	return c
+}
+
+func TestNewCacheNilLoad(t *testing.T) {
+	t.Parallel()
+	if _, err := smartlink.NewCache(nil); err == nil {
+		t.Fatal("NewCache(nil) error = nil, want construction error")
+	}
+}
+
 func TestCacheGetCompilesOnce(t *testing.T) {
 	t.Parallel()
 	var calls int
-	cache := smartlink.NewCache(countingLoad(&calls, smartlink.Spec{Default: defTargets()}, nil))
+	cache := mustNewCache(t, countingLoad(&calls, smartlink.Spec{Default: defTargets()}, nil))
 	ctx := context.Background()
 
 	if _, err := cache.Get(ctx, "ref-1"); err != nil {
@@ -41,7 +58,7 @@ func TestCacheGetCompilesOnce(t *testing.T) {
 func TestCacheInvalidate(t *testing.T) {
 	t.Parallel()
 	var calls int
-	cache := smartlink.NewCache(countingLoad(&calls, smartlink.Spec{Default: defTargets()}, nil))
+	cache := mustNewCache(t, countingLoad(&calls, smartlink.Spec{Default: defTargets()}, nil))
 	ctx := context.Background()
 
 	if _, err := cache.Get(ctx, "ref-1"); err != nil {
@@ -60,7 +77,7 @@ func TestCacheLoadErrorNotCached(t *testing.T) {
 	t.Parallel()
 	loadErr := errors.New("boundary: db unavailable")
 	first := true
-	cache := smartlink.NewCache(func(context.Context, string) (smartlink.Spec, error) {
+	cache := mustNewCache(t, func(context.Context, string) (smartlink.Spec, error) {
 		if first {
 			first = false
 			return smartlink.Spec{}, loadErr
@@ -80,7 +97,7 @@ func TestCacheLoadErrorNotCached(t *testing.T) {
 func TestCacheCompileErrorPropagates(t *testing.T) {
 	t.Parallel()
 	// Spec{} has no default target, a Compile-time validation error.
-	cache := smartlink.NewCache(func(context.Context, string) (smartlink.Spec, error) {
+	cache := mustNewCache(t, func(context.Context, string) (smartlink.Spec, error) {
 		return smartlink.Spec{}, nil
 	})
 	ctx := context.Background()
@@ -103,7 +120,7 @@ func TestCacheInvalidateDuringLoad(t *testing.T) {
 	var calls atomic.Int32
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	cache := smartlink.NewCache(func(context.Context, string) (smartlink.Spec, error) {
+	cache := mustNewCache(t, func(context.Context, string) (smartlink.Spec, error) {
 		if calls.Add(1) == 1 {
 			close(entered)
 			<-release
@@ -151,7 +168,7 @@ func TestCacheInvalidateDuringLoad(t *testing.T) {
 
 func TestCacheResolver(t *testing.T) {
 	t.Parallel()
-	cache := smartlink.NewCache(func(context.Context, string) (smartlink.Spec, error) {
+	cache := mustNewCache(t, func(context.Context, string) (smartlink.Spec, error) {
 		return smartlink.Spec{Default: defTargets()}, nil
 	})
 	resolver := cache.Resolver(tagDecorator("R"))
@@ -163,5 +180,48 @@ func TestCacheResolver(t *testing.T) {
 	got := d.Decide(smartlink.Visit{}).Rule
 	if got != "R" {
 		t.Fatalf("Decide().Rule = %q, want %q", got, "R")
+	}
+}
+
+// TestCacheGetDedupsConcurrentLoads asserts concurrent Gets for one ref
+// share a single load+compile instead of each hitting the consumer's
+// database: the second Get joins the in-flight leader (or hits the completed
+// entry) — either way exactly one load runs.
+func TestCacheGetDedupsConcurrentLoads(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	cache := mustNewCache(t, func(context.Context, string) (smartlink.Spec, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return smartlink.Spec{Default: defTargets()}, nil
+	})
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := cache.Get(ctx, "ref-1"); err != nil {
+			t.Errorf("leader Get() error = %v", err)
+		}
+	}()
+	<-entered // leader is inside load; the entry is already in the map
+
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		if _, err := cache.Get(ctx, "ref-1"); err != nil {
+			t.Errorf("joining Get() error = %v", err)
+		}
+	}()
+	close(release)
+	<-done
+	<-joined
+
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("load calls = %d, want 1 (concurrent misses must share one load)", n)
 	}
 }

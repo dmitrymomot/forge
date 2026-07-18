@@ -1,8 +1,6 @@
 package smartlink
 
 import (
-	"strings"
-
 	"github.com/dmitrymomot/forge/core/random"
 )
 
@@ -51,49 +49,4 @@ func validCodeChars(code string) bool {
 		}
 	}
 	return true
-}
-
-// macroElide strips {macro} placeholders from a target template, leaving
-// only the literal text. Compile has already validated brace balance by the
-// time this runs, so it is a plain scan, not a re-validation.
-func macroElide(raw string) string {
-	var b strings.Builder
-	rest := raw
-	for {
-		open := strings.IndexByte(rest, '{')
-		if open < 0 {
-			b.WriteString(rest)
-			break
-		}
-		close := strings.IndexByte(rest[open:], '}')
-		if close < 0 {
-			b.WriteString(rest)
-			break
-		}
-		close += open
-		b.WriteString(rest[:open])
-		rest = rest[close+1:]
-	}
-	return b.String()
-}
-
-// authorityHasMacro reports whether raw's authority (host[:port]) segment —
-// between "//" (or "scheme://") and the first '/', '?', or '#' — contains a
-// macro placeholder, so a fully or partially dynamic host is recognized as
-// intentional rather than a missing-host error.
-func authorityHasMacro(raw string) bool {
-	start := -1
-	if i := strings.Index(raw, "://"); i >= 0 {
-		start = i + 3
-	} else if strings.HasPrefix(raw, "//") {
-		start = 2
-	}
-	if start < 0 {
-		return false
-	}
-	end := len(raw)
-	if i := strings.IndexAny(raw[start:], "/?#"); i >= 0 {
-		end = start + i
-	}
-	return strings.ContainsRune(raw[start:end], '{')
 }

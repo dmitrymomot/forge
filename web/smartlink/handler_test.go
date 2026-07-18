@@ -172,7 +172,7 @@ func TestHandlerVisitFuncEnriches(t *testing.T) {
 // a real Cache-backed Resolver (Task 4's Cache.Resolver).
 func TestHandlerRefResolves(t *testing.T) {
 	t.Parallel()
-	c := smartlink.NewCache(func(_ context.Context, ref string) (smartlink.Spec, error) {
+	c := mustNewCache(t, func(_ context.Context, ref string) (smartlink.Spec, error) {
 		return smartlink.Spec{Default: []smartlink.Target{{URL: "https://offer.example.com/" + ref}}}, nil
 	})
 	m := newTestManager(t, smartlink.WithResolver(c.Resolver()))
@@ -481,5 +481,63 @@ func TestHandlerPathFallback(t *testing.T) {
 	}
 	if got, want := rec.Header().Get("Location"), "https://dest.example.com/"; got != want {
 		t.Fatalf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandlerOnHitContextDetached asserts the OnHit callback receives a
+// cancellation-detached context: a client disconnecting right after the
+// redirect (canceling the request context) must not cancel hit delivery.
+func TestHandlerOnHitContextDetached(t *testing.T) {
+	t.Parallel()
+	hitCtxErr := make(chan error, 1)
+	m := newTestManager(t, smartlink.WithOnHit(func(ctx context.Context, _ smartlink.Hit) {
+		hitCtxErr <- ctx.Err()
+	}))
+	l, err := m.Create(context.Background(), smartlink.CreateParams{Target: "https://dest.example.com/"})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client is already gone
+	req := httptest.NewRequest(http.MethodGet, "/r/"+l.Code, nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if err := <-hitCtxErr; err != nil {
+		t.Fatalf("OnHit ctx.Err() = %v, want nil (must be cancellation-detached)", err)
+	}
+}
+
+// TestHandlerBlocksDisallowedSchemeFromStore asserts a Target row written to
+// the Store outside the Manager (bypassing Create's validation) cannot serve
+// a disallowed scheme as a redirect: the hit answers 500, not a
+// javascript: Location.
+func TestHandlerBlocksDisallowedSchemeFromStore(t *testing.T) {
+	t.Parallel()
+	store := smartlink.NewMemoryStore()
+	ctx := context.Background()
+	if err := store.Create(ctx, smartlink.Link{Code: "evil", Target: "javascript:alert(1)", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("store Create() error = %v, want nil", err)
+	}
+	m, err := smartlink.NewManager(store)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/r/evil", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d (disallowed scheme must not redirect)", rec.Code, http.StatusInternalServerError)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Fatalf("Location = %q, want empty", loc)
 	}
 }

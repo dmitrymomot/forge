@@ -44,10 +44,15 @@ type segment struct {
 }
 
 // template is a compiled URL template. A nil segs means the URL is a plain
-// literal and renders with zero work.
+// literal and renders with zero work. elided is the macro-elided form (equal
+// to raw for a literal) and authMacro reports whether any macro sits in the
+// authority segment — both computed here once so validation layers never
+// re-scan the raw template with a second parser.
 type template struct {
-	raw  string
-	segs []segment
+	raw       string
+	elided    string
+	segs      []segment
+	authMacro bool
 }
 
 // parseTemplate compiles a target URL template: splits out {macro}
@@ -58,11 +63,12 @@ func parseTemplate(raw, where string) (template, error) {
 		if _, err := url.Parse(raw); err != nil {
 			return template{}, fmt.Errorf("%w: %s: %v", ErrInvalidTemplate, where, err)
 		}
-		return template{raw: raw}, nil
+		return template{raw: raw, elided: raw}, nil
 	}
 
 	var segs []segment
 	var elided strings.Builder
+	var authMacro bool
 	rest := raw
 	for {
 		open := strings.IndexByte(rest, '{')
@@ -84,7 +90,11 @@ func parseTemplate(raw, where string) (template, error) {
 			return template{}, err
 		}
 		elided.WriteString(literal)
-		segs = append(segs, segment{literal: literal, macro: kind, param: param, esc: escapeModeFor(elided.String())})
+		esc := escapeModeFor(elided.String())
+		if esc == escAuthority {
+			authMacro = true
+		}
+		segs = append(segs, segment{literal: literal, macro: kind, param: param, esc: esc})
 		rest = rest[close+1:]
 	}
 	if strings.ContainsRune(rest, '}') {
@@ -97,7 +107,7 @@ func parseTemplate(raw, where string) (template, error) {
 	if _, err := url.Parse(elided.String()); err != nil {
 		return template{}, fmt.Errorf("%w: %s: %v", ErrInvalidTemplate, where, err)
 	}
-	return template{raw: raw, segs: segs}, nil
+	return template{raw: raw, elided: elided.String(), segs: segs, authMacro: authMacro}, nil
 }
 
 // escapeModeFor derives a macro's escaping from the macro-elided literal

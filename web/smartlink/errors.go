@@ -34,6 +34,12 @@ var (
 	// ErrNoTarget is returned when a Link has neither a Target URL nor a Ref
 	// to a compiled Spec.
 	ErrNoTarget = errors.New("smartlink: no target")
+	// ErrRefNotFound is the sentinel a consumer's [Cache] load func (or a
+	// custom [Resolver]) wraps when a ref names no known Spec. Create's ref
+	// precheck maps it (and ErrNoTarget) to ErrInvalidLink — caller input —
+	// while any other resolver error propagates unwrapped as infrastructure
+	// failure.
+	ErrRefNotFound = errors.New("smartlink: ref not found")
 	// ErrInvalidLink is returned for a malformed Link or CreateParams.
 	ErrInvalidLink = errors.New("smartlink: invalid link")
 	// ErrCodeReserved is returned when a caller-supplied code collides with a

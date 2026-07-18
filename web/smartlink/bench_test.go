@@ -223,7 +223,7 @@ func BenchmarkResolveDecideTarget(b *testing.B) {
 // resolved through a warm [smartlink.Cache] Resolver — the compile cache's
 // hit path, not the load-and-compile miss path.
 func BenchmarkHandlerRef(b *testing.B) {
-	c := smartlink.NewCache(func(_ context.Context, ref string) (smartlink.Spec, error) {
+	c := mustNewCache(b, func(_ context.Context, ref string) (smartlink.Spec, error) {
 		return smartlink.Spec{Default: []smartlink.Target{{URL: "https://offer.example.com/" + ref}}}, nil
 	})
 	m, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithResolver(c.Resolver()))

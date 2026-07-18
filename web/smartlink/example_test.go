@@ -74,5 +74,5 @@ func Example_manager() {
 	// Output:
 	// https://s.example.com/promo
 	// 302
-	// https://dest.example.com/landing?click_id=abc123&src=affiliate42
+	// https://dest.example.com/landing?src=affiliate42&click_id=abc123
 }

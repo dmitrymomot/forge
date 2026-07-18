@@ -21,8 +21,9 @@
 // event.
 //
 // Weighted splits and [Percent] shares bucket deterministically by FNV-1a
-// hash of the rule name and Visit.StickyKey — never RNG — so a visitor
-// always lands on the same side. Target URLs are templates over a fixed
+// hash of [Spec.Salt], the rule name, and Visit.StickyKey — never RNG — so a
+// visitor always lands on the same side while distinct links bucket
+// independently ([Manager] salts by link code, [Cache] by ref). Target URLs are templates over a fixed
 // macro vocabulary ({country}, {device}, {locale}, {param.NAME}) parsed at
 // compile time: an unknown macro is a construction error, never an empty
 // substitution at decide time. Macro values escape positionally (authority

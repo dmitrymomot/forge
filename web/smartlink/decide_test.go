@@ -1,6 +1,7 @@
 package smartlink_test
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -336,13 +337,14 @@ func TestParamPolicies(t *testing.T) {
 		t.Fatalf("ParamsDrop URL = %q", got)
 	}
 
+	// Original target pairs stay first, verbatim; merged params append sorted.
 	fill := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsFill})
-	if got := fill.Decide(visit).URL; got != "https://a.com/lp?extra=1&keep=orig" {
+	if got := fill.Decide(visit).URL; got != "https://a.com/lp?keep=orig&extra=1" {
 		t.Fatalf("ParamsFill URL = %q", got)
 	}
 
 	override := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsOverride})
-	if got := override.Decide(visit).URL; got != "https://a.com/lp?extra=1&keep=new" {
+	if got := override.Decide(visit).URL; got != "https://a.com/lp?keep=new&extra=1" {
 		t.Fatalf("ParamsOverride URL = %q", got)
 	}
 
@@ -418,5 +420,96 @@ func TestDecisionReportsRawTarget(t *testing.T) {
 	}
 	if !strings.Contains(d.URL, "/DE") {
 		t.Fatalf("URL = %q, want rendered", d.URL)
+	}
+}
+
+// TestParamMergePreservesRawPairs asserts the merge policies keep original
+// query pairs verbatim — including pairs url.Values cannot round-trip (an
+// unencoded '%', a ';' separator) — instead of silently dropping them.
+func TestParamMergePreservesRawPairs(t *testing.T) {
+	t.Parallel()
+	target := []smartlink.Target{{URL: "https://a.com/lp?promo=50%off&a=1;b=2&keep=orig"}}
+
+	fill := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsFill})
+	visit := smartlink.Visit{Params: map[string]string{"sub": "123", "keep": "new"}}
+	if got, want := fill.Decide(visit).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=orig&sub=123"; got != want {
+		t.Fatalf("ParamsFill URL = %q, want %q", got, want)
+	}
+
+	override := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsOverride})
+	if got, want := override.Decide(smartlink.Visit{Params: map[string]string{"keep": "new"}}).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=new"; got != want {
+		t.Fatalf("ParamsOverride URL = %q, want %q", got, want)
+	}
+}
+
+// TestParamOverrideCollapsesDuplicates asserts overriding a key that appears
+// multiple times rewrites the first occurrence and drops the rest, matching
+// url.Values.Set semantics.
+func TestParamOverrideCollapsesDuplicates(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{
+		Default: []smartlink.Target{{URL: "https://a.com/lp?k=1&k=2&x=9"}},
+		Params:  smartlink.ParamsOverride,
+	})
+	if got, want := link.Decide(smartlink.Visit{Params: map[string]string{"k": "new"}}).URL, "https://a.com/lp?k=new&x=9"; got != want {
+		t.Fatalf("ParamsOverride URL = %q, want %q", got, want)
+	}
+}
+
+// TestPercentConjunctionComposes asserts two Percent gates in one rule draw
+// independently: 50% AND 50% must pass ~25% of keyed traffic, not collapse
+// into a single 50% gate.
+func TestPercentConjunctionComposes(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{
+		Rules: []smartlink.Rule{{
+			Name:    "gate",
+			When:    []smartlink.Matcher{smartlink.Percent{Share: 50}, smartlink.Percent{Share: 50}},
+			Targets: []smartlink.Target{{URL: "https://rule.example.com/"}},
+		}},
+		Default: []smartlink.Target{{URL: "https://def.example.com/"}},
+	})
+	const n = 20000
+	hits := 0
+	for i := range n {
+		if link.Decide(smartlink.Visit{StickyKey: fmt.Sprintf("k%d", i)}).Rule == "gate" {
+			hits++
+		}
+	}
+	share := float64(hits) / n
+	if share < 0.23 || share > 0.27 {
+		t.Fatalf("50%%*50%% conjunction matched %.1f%%, want ~25%% (collapsed gates match 50%%)", share*100)
+	}
+}
+
+// TestSaltDecorrelatesBucketing asserts two identically-shaped splits with
+// different Spec salts assign sticky keys independently, while the same salt
+// stays deterministic.
+func TestSaltDecorrelatesBucketing(t *testing.T) {
+	t.Parallel()
+	spec := func(salt string) smartlink.Spec {
+		return smartlink.Spec{Salt: salt, Default: []smartlink.Target{
+			{URL: "https://one.example.com/", Weight: 1},
+			{URL: "https://two.example.com/", Weight: 1},
+		}}
+	}
+	a := mustCompile(t, spec("link-a"))
+	a2 := mustCompile(t, spec("link-a"))
+	b := mustCompile(t, spec("link-b"))
+
+	const n = 5000
+	differ := 0
+	for i := range n {
+		key := fmt.Sprintf("k%d", i)
+		ua := a.Decide(smartlink.Visit{StickyKey: key}).URL
+		if got := a2.Decide(smartlink.Visit{StickyKey: key}).URL; got != ua {
+			t.Fatalf("same salt diverged for key %q: %q vs %q", key, ua, got)
+		}
+		if b.Decide(smartlink.Visit{StickyKey: key}).URL != ua {
+			differ++
+		}
+	}
+	if frac := float64(differ) / n; frac < 0.25 {
+		t.Fatalf("different salts diverge on %.1f%% of keys, want ~50%% (0%% means salts are ignored)", frac*100)
 	}
 }
