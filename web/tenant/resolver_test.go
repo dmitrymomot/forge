@@ -15,6 +15,22 @@ import (
 	"github.com/dmitrymomot/forge/web/tenant"
 )
 
+// idLookup resolves KindID identifiers against a fixed set of live tenants;
+// everything else is not found. The default consumer shape for tests.
+func idLookup(live ...string) tenant.Lookup {
+	return tenant.LookupFunc(func(_ context.Context, ident tenant.Identifier) (string, error) {
+		if ident.Kind != tenant.KindID {
+			return "", tenant.ErrTenantNotFound
+		}
+		for _, id := range live {
+			if ident.Value == id {
+				return id, nil
+			}
+		}
+		return "", tenant.ErrTenantNotFound
+	})
+}
+
 // captureTenant records the tenant seen by the wrapped handler.
 func captureTenant(id *string, ok *bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,9 +42,16 @@ func captureTenant(id *string, ok *bool) http.Handler {
 func TestNew(t *testing.T) {
 	t.Parallel()
 
+	t.Run("nil lookup panics", func(t *testing.T) {
+		t.Parallel()
+		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() {
+			tenant.New(nil, tenant.WithSources(tenant.Context()))
+		})
+	})
+
 	t.Run("no sources panics", func(t *testing.T) {
 		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrNoSources, func() { tenant.New() })
+		assert.PanicsWithValue(t, tenant.ErrNoSources, func() { tenant.New(idLookup()) })
 	})
 
 	t.Run("nil source panics", func(t *testing.T) {
@@ -36,11 +59,6 @@ func TestNew(t *testing.T) {
 		assert.PanicsWithValue(t, tenant.ErrNilSource, func() {
 			tenant.WithSources(tenant.Context(), nil)
 		})
-	})
-
-	t.Run("nil validator panics", func(t *testing.T) {
-		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrNilComponent, func() { tenant.WithValidator(nil) })
 	})
 
 	t.Run("nil error handler panics", func(t *testing.T) {
@@ -52,9 +70,9 @@ func TestNew(t *testing.T) {
 func TestResolve(t *testing.T) {
 	t.Parallel()
 
-	t.Run("first non-empty source wins", func(t *testing.T) {
+	t.Run("first extracted identifier wins", func(t *testing.T) {
 		t.Parallel()
-		rv := tenant.New(tenant.WithSources(
+		rv := tenant.New(idLookup("alpha", "beta"), tenant.WithSources(
 			tenant.Header("X-Missing"),
 			tenant.Header("X-First"),
 			tenant.Header("X-Second"),
@@ -67,9 +85,44 @@ func TestResolve(t *testing.T) {
 		assert.Equal(t, "alpha", id)
 	})
 
-	t.Run("repeated WithSources appends in order", func(t *testing.T) {
+	t.Run("lookup receives the tagged identifier", func(t *testing.T) {
+		t.Parallel()
+		var got tenant.Identifier
+		rv := tenant.New(
+			tenant.LookupFunc(func(_ context.Context, ident tenant.Identifier) (string, error) {
+				got = ident
+				return "t_01acme", nil
+			}),
+			tenant.WithSources(tenant.Subdomain("app.example.com")),
+		)
+		id, err := rv.Resolve(newRequest("ACME.app.example.com:8443", "/"))
+		require.NoError(t, err)
+		assert.Equal(t, "t_01acme", id)
+		assert.Equal(t, tenant.Identifier{Kind: tenant.KindSubdomain, Value: "acme"}, got)
+	})
+
+	t.Run("not found continues chain to a later source", func(t *testing.T) {
 		t.Parallel()
 		rv := tenant.New(
+			tenant.LookupFunc(func(_ context.Context, ident tenant.Identifier) (string, error) {
+				if ident.Kind == tenant.KindSubdomain && ident.Value == "acme" {
+					return "t_01acme", nil
+				}
+				return "", tenant.ErrTenantNotFound
+			}),
+			tenant.WithSources(
+				tenant.Domain(), // extracts on every host; lookup says not found
+				tenant.Subdomain("app.example.com"),
+			),
+		)
+		id, err := rv.Resolve(newRequest("acme.app.example.com", "/"))
+		require.NoError(t, err)
+		assert.Equal(t, "t_01acme", id)
+	})
+
+	t.Run("repeated WithSources appends in order", func(t *testing.T) {
+		t.Parallel()
+		rv := tenant.New(idLookup("alpha", "beta"),
 			tenant.WithSources(tenant.Header("X-First")),
 			tenant.WithSources(tenant.Header("X-Second")),
 		)
@@ -85,57 +138,38 @@ func TestResolve(t *testing.T) {
 		assert.Equal(t, "alpha", id)
 	})
 
-	t.Run("nothing resolves returns ErrNoTenant", func(t *testing.T) {
+	t.Run("nothing extracts returns ErrNoTenant without calling lookup", func(t *testing.T) {
 		t.Parallel()
-		rv := tenant.New(tenant.WithSources(tenant.Header("X-Tenant-ID")))
+		rv := tenant.New(
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				t.Fatal("lookup must not run without an extracted identifier")
+				return "", nil
+			}),
+			tenant.WithSources(tenant.Header("X-Tenant-ID")),
+		)
 		_, err := rv.Resolve(newRequest("example.com", "/"))
 		require.ErrorIs(t, err, tenant.ErrNoTenant)
 	})
 
-	t.Run("source error stops chain", func(t *testing.T) {
+	t.Run("nothing resolves returns ErrNoTenant", func(t *testing.T) {
 		t.Parallel()
-		boom := errors.New("lookup down")
-		rv := tenant.New(tenant.WithSources(
-			func(*http.Request) (string, error) { return "", boom },
-			tenant.Header("X-Tenant-ID"),
-		))
+		rv := tenant.New(idLookup(), tenant.WithSources(tenant.Header("X-Tenant-ID")))
 		r := newRequest("example.com", "/")
-		r.Header.Set("X-Tenant-ID", "acme")
+		r.Header.Set("X-Tenant-ID", "ghost")
 		_, err := rv.Resolve(r)
-		require.ErrorIs(t, err, boom)
+		require.ErrorIs(t, err, tenant.ErrNoTenant)
 	})
 
-	t.Run("validator approves resolved ID", func(t *testing.T) {
-		t.Parallel()
-		var got string
-		rv := tenant.New(
-			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(_ context.Context, id string) error {
-				got = id
-				return nil
-			})),
-		)
-		r := newRequest("example.com", "/")
-		r.Header.Set("X-Tenant-ID", "acme")
-		id, err := rv.Resolve(r)
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
-		assert.Equal(t, "acme", got)
-	})
-
-	t.Run("validator rejection fails closed without trying later sources", func(t *testing.T) {
+	t.Run("inactive fails closed without trying later sources", func(t *testing.T) {
 		t.Parallel()
 		rv := tenant.New(
-			tenant.WithSources(
-				tenant.Header("X-Stale"),
-				tenant.Header("X-Live"),
-			),
-			tenant.WithValidator(tenant.ValidatorFunc(func(_ context.Context, id string) error {
-				if id == "stale" {
-					return tenant.ErrTenantInactive
+			tenant.LookupFunc(func(_ context.Context, ident tenant.Identifier) (string, error) {
+				if ident.Value == "stale" {
+					return "", tenant.ErrTenantInactive
 				}
-				return nil
-			})),
+				return ident.Value, nil
+			}),
+			tenant.WithSources(tenant.Header("X-Stale"), tenant.Header("X-Live")),
 		)
 		r := newRequest("example.com", "/")
 		r.Header.Set("X-Stale", "stale")
@@ -144,31 +178,36 @@ func TestResolve(t *testing.T) {
 		require.ErrorIs(t, err, tenant.ErrTenantInactive)
 	})
 
-	t.Run("validator not-found fails closed", func(t *testing.T) {
+	t.Run("infrastructure error fails closed", func(t *testing.T) {
 		t.Parallel()
+		boom := errors.New("db down")
 		rv := tenant.New(
-			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				return tenant.ErrTenantNotFound
-			})),
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", boom
+			}),
+			tenant.WithSources(tenant.Header("X-Tenant-ID"), tenant.Header("X-Backup")),
 		)
 		r := newRequest("example.com", "/")
-		r.Header.Set("X-Tenant-ID", "ghost")
+		r.Header.Set("X-Tenant-ID", "acme")
+		r.Header.Set("X-Backup", "other")
 		_, err := rv.Resolve(r)
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+		require.ErrorIs(t, err, boom)
 	})
 
-	t.Run("validator skipped when nothing resolves", func(t *testing.T) {
+	t.Run("empty id with nil error fails closed as a lookup bug", func(t *testing.T) {
 		t.Parallel()
 		rv := tenant.New(
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", nil
+			}),
 			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				t.Fatal("validator must not run without a resolved ID")
-				return nil
-			})),
 		)
-		_, err := rv.Resolve(newRequest("example.com", "/"))
-		require.ErrorIs(t, err, tenant.ErrNoTenant)
+		r := newRequest("example.com", "/")
+		r.Header.Set("X-Tenant-ID", "acme")
+		_, err := rv.Resolve(r)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, tenant.ErrNoTenant)
+		assert.NotErrorIs(t, err, tenant.ErrTenantNotFound)
 	})
 }
 
@@ -179,7 +218,7 @@ func TestMiddleware(t *testing.T) {
 		t.Parallel()
 		var id string
 		var ok bool
-		h := tenant.New(tenant.WithSources(tenant.Header("X-Tenant-ID"))).
+		h := tenant.New(idLookup("acme"), tenant.WithSources(tenant.Header("X-Tenant-ID"))).
 			Middleware()(captureTenant(&id, &ok))
 
 		r := newRequest("example.com", "/")
@@ -196,7 +235,7 @@ func TestMiddleware(t *testing.T) {
 		t.Parallel()
 		var id string
 		var ok bool
-		h := tenant.New(tenant.WithSources(tenant.Header("X-Tenant-ID"))).
+		h := tenant.New(idLookup(), tenant.WithSources(tenant.Header("X-Tenant-ID"))).
 			Middleware()(captureTenant(&id, &ok))
 
 		w := httptest.NewRecorder()
@@ -206,28 +245,49 @@ func TestMiddleware(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("source error responds 500 and skips next", func(t *testing.T) {
+	t.Run("not found on every source passes through untenanted", func(t *testing.T) {
+		t.Parallel()
+		var id string
+		var ok bool
+		h := tenant.New(idLookup(), tenant.WithSources(tenant.Domain(), tenant.Header("X-Tenant-ID"))).
+			Middleware()(captureTenant(&id, &ok))
+
+		r := newRequest("marketing.example.com", "/")
+		r.Header.Set("X-Tenant-ID", "ghost")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.False(t, ok)
+	})
+
+	t.Run("infrastructure error responds 500 and skips next", func(t *testing.T) {
 		t.Parallel()
 		called := false
-		boom := errors.New("lookup down")
-		h := tenant.New(tenant.WithSources(func(*http.Request) (string, error) { return "", boom })).
-			Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+		h := tenant.New(
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", errors.New("db down")
+			}),
+			tenant.WithSources(tenant.Header("X-Tenant-ID")),
+		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 
+		r := newRequest("example.com", "/")
+		r.Header.Set("X-Tenant-ID", "acme")
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, newRequest("example.com", "/"))
+		h.ServeHTTP(w, r)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.False(t, called)
 	})
 
-	t.Run("validator rejection responds 404 and skips next", func(t *testing.T) {
+	t.Run("inactive tenant responds 404 and skips next", func(t *testing.T) {
 		t.Parallel()
 		called := false
 		h := tenant.New(
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", tenant.ErrTenantInactive
+			}),
 			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				return tenant.ErrTenantInactive
-			})),
 		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 
 		r := newRequest("example.com", "/")
@@ -239,51 +299,14 @@ func TestMiddleware(t *testing.T) {
 		assert.False(t, called)
 	})
 
-	t.Run("custom error handler receives the resolution error", func(t *testing.T) {
+	t.Run("ErrNoTenant from the lookup fails closed, never passes through", func(t *testing.T) {
 		t.Parallel()
-		var got error
+		called := false
 		h := tenant.New(
-			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				return tenant.ErrTenantNotFound
-			})),
-			tenant.WithErrorHandler(func(w http.ResponseWriter, _ *http.Request, err error) {
-				got = err
-				w.WriteHeader(http.StatusTeapot)
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", tenant.ErrNoTenant
 			}),
-		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-
-		r := newRequest("example.com", "/")
-		r.Header.Set("X-Tenant-ID", "ghost")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-
-		assert.Equal(t, http.StatusTeapot, w.Code)
-		require.ErrorIs(t, got, tenant.ErrTenantNotFound)
-	})
-
-	t.Run("ErrNoTenant from a source fails closed, never passes through", func(t *testing.T) {
-		t.Parallel()
-		called := false
-		h := tenant.New(tenant.WithSources(func(*http.Request) (string, error) {
-			return "", tenant.ErrNoTenant
-		})).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, newRequest("example.com", "/"))
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.False(t, called)
-	})
-
-	t.Run("ErrNoTenant from the validator fails closed, never passes through", func(t *testing.T) {
-		t.Parallel()
-		called := false
-		h := tenant.New(
 			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				return tenant.ErrNoTenant
-			})),
 		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 
 		r := newRequest("example.com", "/")
@@ -295,16 +318,39 @@ func TestMiddleware(t *testing.T) {
 		assert.False(t, called)
 	})
 
+	t.Run("custom error handler receives the resolution error", func(t *testing.T) {
+		t.Parallel()
+		var got error
+		h := tenant.New(
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", tenant.ErrTenantInactive
+			}),
+			tenant.WithSources(tenant.Header("X-Tenant-ID")),
+			tenant.WithErrorHandler(func(w http.ResponseWriter, _ *http.Request, err error) {
+				got = err
+				w.WriteHeader(http.StatusTeapot)
+			}),
+		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+		r := newRequest("example.com", "/")
+		r.Header.Set("X-Tenant-ID", "acme")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusTeapot, w.Code)
+		require.ErrorIs(t, got, tenant.ErrTenantInactive)
+	})
+
 	t.Run("rejections log at debug, infrastructure errors at error", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-		h := tenant.New(
+		inactive := tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+			return "", tenant.ErrTenantInactive
+		})
+		h := tenant.New(inactive,
 			tenant.WithSources(tenant.Header("X-Tenant-ID")),
-			tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error {
-				return tenant.ErrTenantInactive
-			})),
 			tenant.WithLogger(log),
 		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		r := newRequest("example.com", "/")
@@ -314,11 +360,14 @@ func TestMiddleware(t *testing.T) {
 		assert.Contains(t, buf.String(), "level=DEBUG")
 
 		buf.Reset()
-		h = tenant.New(
-			tenant.WithSources(func(*http.Request) (string, error) { return "", errors.New("db down") }),
+		broken := tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+			return "", errors.New("db down")
+		})
+		h = tenant.New(broken,
+			tenant.WithSources(tenant.Header("X-Tenant-ID")),
 			tenant.WithLogger(log),
 		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-		h.ServeHTTP(httptest.NewRecorder(), newRequest("example.com", "/"))
+		h.ServeHTTP(httptest.NewRecorder(), r)
 		assert.Contains(t, buf.String(), "tenant: resolution failed")
 		assert.Contains(t, buf.String(), "level=ERROR")
 	})
@@ -326,12 +375,17 @@ func TestMiddleware(t *testing.T) {
 	t.Run("nil logger is ignored", func(t *testing.T) {
 		t.Parallel()
 		h := tenant.New(
-			tenant.WithSources(func(*http.Request) (string, error) { return "", errors.New("db down") }),
+			tenant.LookupFunc(func(context.Context, tenant.Identifier) (string, error) {
+				return "", errors.New("db down")
+			}),
+			tenant.WithSources(tenant.Header("X-Tenant-ID")),
 			tenant.WithLogger(nil),
 		).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
+		r := newRequest("example.com", "/")
+		r.Header.Set("X-Tenant-ID", "acme")
 		w := httptest.NewRecorder()
-		assert.NotPanics(t, func() { h.ServeHTTP(w, newRequest("example.com", "/")) })
+		assert.NotPanics(t, func() { h.ServeHTTP(w, r) })
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
@@ -339,7 +393,7 @@ func TestMiddleware(t *testing.T) {
 		t.Parallel()
 		var id string
 		var ok bool
-		h := tenant.New(tenant.WithSources(tenant.Header("X-Tenant-ID"))).
+		h := tenant.New(idLookup("resolved"), tenant.WithSources(tenant.Header("X-Tenant-ID"))).
 			Middleware()(captureTenant(&id, &ok))
 
 		r := newRequest("example.com", "/")
@@ -356,7 +410,8 @@ func TestMiddleware(t *testing.T) {
 		t.Parallel()
 		var id string
 		var ok bool
-		h := tenant.New(tenant.WithSources(tenant.Context(), tenant.Header("X-Tenant-ID"))).
+		h := tenant.New(idLookup("upstream", "header"),
+			tenant.WithSources(tenant.Context(), tenant.Header("X-Tenant-ID"))).
 			Middleware()(captureTenant(&id, &ok))
 
 		r := newRequest("example.com", "/")
@@ -373,7 +428,7 @@ func TestMiddleware(t *testing.T) {
 		t.Parallel()
 		var id string
 		var ok bool
-		h := tenant.New(tenant.WithSources(tenant.Header("X-Tenant-ID"))).
+		h := tenant.New(idLookup(), tenant.WithSources(tenant.Header("X-Tenant-ID"))).
 			Middleware()(captureTenant(&id, &ok))
 
 		r := newRequest("example.com", "/")

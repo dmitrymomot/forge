@@ -1,21 +1,21 @@
 // Package tenant resolves which tenant an inbound HTTP request belongs to
 // and carries the tenant ID through context transport-agnostically. It is
-// pure transport layer: the package derives a candidate identifier from the
-// request, validates it through consumer-owned seams, and yields the
-// canonical tenant ID — how that ID scopes storage is each consumer
-// package's concern (wire tenant.Scope into their WithScope options).
+// pure transport layer, split in two like auth/guard: Sources extract a
+// candidate identifier from the request (pure, no I/O), and the single
+// consumer-owned Lookup seam translates it to a live canonical tenant ID —
+// existence and status (soft-deleted, disabled) are one call, typically one
+// query. How the ID scopes storage is each consumer package's concern (wire
+// tenant.Scope into their WithScope options).
 //
-// Resolution is a precedence-ordered chain of Source funcs configured on a
-// Resolver, and every source yields the canonical tenant ID (uuid/ulid/short
-// id — whatever the consumer's tenants table keys on), never an alias:
-// subdomain labels and custom domains are translated through the
-// storage-agnostic SubdomainLookup/DomainLookup seams, and Map adds the same
-// translation to any other source. Shipped sources cover the common SaaS
-// shapes: subdomain against a base domain, custom domain, header, cookie,
-// query parameter, path prefix, and a context passthrough for identities
-// derived upstream (e.g. from an API key). The first source deriving a
-// non-empty ID wins; the optional Validator seam then rejects tenants that
-// exist but must not serve traffic (soft-deleted, disabled, suspended).
+// Shipped sources cover the common SaaS shapes — subdomain against a base
+// domain, custom domain, header, cookie, query parameter, path prefix, and
+// a context passthrough for identities derived upstream (e.g. from an API
+// key) — each tagging its value with a Kind (subdomain label, full domain,
+// path segment, canonical ID) so one Lookup implementation can interpret
+// every namespace; any func matching the Source signature adds a custom
+// source with its own Kind. Sources run in precedence order: the first
+// extracted identifier the Lookup resolves wins, ErrTenantNotFound moves to
+// the next source, ErrTenantInactive and infrastructure errors fail closed.
 //
 // The carrier is plain context: HTTP middleware stamps it, queue handlers
 // and cron jobs call NewContext/FromContext directly — no transport
@@ -24,24 +24,26 @@
 //
 // Single-tenant apps skip the package entirely; multi-tenant apps opt in per
 // route. Nothing is implicit: an unresolved request passes through
-// untenanted (add Require where tenancy is mandatory), while a resolved but
-// invalid tenant fails closed with a 404.
+// untenanted (add Require where tenancy is mandatory), while an inactive
+// tenant fails closed with a 404.
 //
 // # Usage
 //
-//	// Real apps back these seams with their tenants table.
-//	domains := tenant.StaticDomains(map[string]string{"shop.acme.com": "01JT9GA6Z3"})
-//	subdomains := tenant.StaticSubdomains(map[string]string{"acme": "01JT9GA6Z3"})
+//	// One seam answers "which tenant" and "may it serve" — usually one query
+//	// per request against the consumer's tenants table.
+//	lookup := tenant.LookupFunc(func(ctx context.Context, ident tenant.Identifier) (string, error) {
+//		switch ident.Kind {
+//		case tenant.KindDomain: // SELECT tenant_id FROM tenant_domains WHERE domain=$1 AND ...
+//		case tenant.KindSubdomain: // SELECT id FROM tenants WHERE subdomain=$1 AND deleted_at IS NULL
+//		case tenant.KindID: // SELECT id FROM tenants WHERE id=$1 AND deleted_at IS NULL
+//		}
+//		return "", tenant.ErrTenantNotFound
+//	})
 //
-//	resolver := tenant.New(
-//		tenant.WithSources(
-//			tenant.Domain(domains),                          // custom domains win,
-//			tenant.Subdomain("app.example.com", subdomains), // then acme.app.example.com
-//		),
-//		tenant.WithValidator(tenant.ValidatorFunc(func(ctx context.Context, id string) error {
-//			return nil // consult your tenants table: ErrTenantNotFound / ErrTenantInactive
-//		})),
-//	)
+//	resolver := tenant.New(lookup, tenant.WithSources(
+//		tenant.Domain(),                     // custom domains win,
+//		tenant.Subdomain("app.example.com"), // then acme.app.example.com
+//	))
 //
 //	mux := http.NewServeMux()
 //	mux.Handle("/orders", tenant.Require(http.HandlerFunc(listOrders)))

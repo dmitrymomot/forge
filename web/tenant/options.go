@@ -7,10 +7,9 @@ import (
 )
 
 type config struct {
-	validate Validator
-	onError  ErrorHandler
-	log      *slog.Logger
-	sources  []Source
+	onError ErrorHandler
+	log     *slog.Logger
+	sources []Source
 }
 
 // Option configures New. Options apply in order and panic on invalid input.
@@ -28,8 +27,9 @@ func newConfig(opts ...Option) config {
 }
 
 // WithSources appends sources to the precedence chain in the order given;
-// repeated calls keep appending. The first source deriving a non-empty ID
-// wins. Panics with ErrNilSource when any source is nil.
+// repeated calls keep appending. The first source extracting an identifier
+// the Lookup resolves to a live tenant wins. Panics with ErrNilSource when
+// any source is nil.
 func WithSources(sources ...Source) Option {
 	for _, src := range sources {
 		if src == nil {
@@ -39,18 +39,6 @@ func WithSources(sources ...Source) Option {
 	return func(c *config) {
 		c.sources = append(c.sources, sources...)
 	}
-}
-
-// WithValidator installs the tenant status check run on every resolved ID —
-// the seam where "is this tenant soft-deleted or disabled" lives. Without
-// it, resolution trusts the sources (fine when every source already
-// translates through a lookup that only returns live tenants). Last wins.
-// Panics with ErrNilComponent when v is nil.
-func WithValidator(v Validator) Option {
-	if v == nil {
-		panic(ErrNilComponent)
-	}
-	return func(c *config) { c.validate = v }
 }
 
 // WithErrorHandler replaces the response written when resolution fails

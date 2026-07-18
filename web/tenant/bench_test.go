@@ -9,81 +9,96 @@ import (
 	"github.com/dmitrymomot/forge/web/tenant"
 )
 
+// benchLookup resolves subdomain "acme" and domain "shop.acme.com" to fixed
+// IDs and echoes KindID values, mimicking a consumer's single-query lookup.
+var benchLookup = tenant.LookupFunc(func(_ context.Context, ident tenant.Identifier) (string, error) {
+	switch ident.Kind {
+	case tenant.KindSubdomain:
+		if ident.Value == "acme" {
+			return "t_01acme", nil
+		}
+	case tenant.KindDomain:
+		if ident.Value == "shop.acme.com" {
+			return "t_01acme", nil
+		}
+	case tenant.KindID:
+		return ident.Value, nil
+	}
+	return "", tenant.ErrTenantNotFound
+})
+
 func BenchmarkSubdomain(b *testing.B) {
-	derive := tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"}))
+	extract := tenant.Subdomain("app.example.com")
 	r := newRequest("acme.app.example.com", "/")
 	b.ReportAllocs()
 	for b.Loop() {
-		if id, _ := derive(r); id == "" {
-			b.Fatal("expected resolution")
+		if _, ok := extract(r); !ok {
+			b.Fatal("expected extraction")
 		}
 	}
 }
 
 func BenchmarkSubdomainMiss(b *testing.B) {
-	derive := tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"}))
+	extract := tenant.Subdomain("app.example.com")
 	r := newRequest("other.example.org", "/")
 	b.ReportAllocs()
 	for b.Loop() {
-		if id, _ := derive(r); id != "" {
-			b.Fatal("unexpected resolution")
+		if _, ok := extract(r); ok {
+			b.Fatal("unexpected extraction")
+		}
+	}
+}
+
+func BenchmarkDomain(b *testing.B) {
+	extract := tenant.Domain()
+	r := newRequest("shop.acme.com", "/")
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, ok := extract(r); !ok {
+			b.Fatal("expected extraction")
 		}
 	}
 }
 
 func BenchmarkHeader(b *testing.B) {
-	derive := tenant.Header("X-Tenant-ID")
+	extract := tenant.Header("X-Tenant-ID")
 	r := newRequest("example.com", "/")
-	r.Header.Set("X-Tenant-ID", "acme")
+	r.Header.Set("X-Tenant-ID", "t_01acme")
 	b.ReportAllocs()
 	for b.Loop() {
-		if id, _ := derive(r); id == "" {
-			b.Fatal("expected resolution")
+		if _, ok := extract(r); !ok {
+			b.Fatal("expected extraction")
 		}
 	}
 }
 
 func BenchmarkQuery(b *testing.B) {
-	derive := tenant.Query("tenant")
-	r := newRequest("example.com", "/orders?tenant=acme")
+	extract := tenant.Query("tenant")
+	r := newRequest("example.com", "/orders?utm_source=x&tenant=t_01acme")
 	b.ReportAllocs()
 	for b.Loop() {
-		if id, _ := derive(r); id == "" {
-			b.Fatal("expected resolution")
+		if _, ok := extract(r); !ok {
+			b.Fatal("expected extraction")
 		}
 	}
 }
 
 func BenchmarkPathPrefix(b *testing.B) {
-	derive := tenant.PathPrefix("/t")
+	extract := tenant.PathPrefix("/t")
 	r := newRequest("example.com", "/t/acme/dashboard")
 	b.ReportAllocs()
 	for b.Loop() {
-		if id, _ := derive(r); id == "" {
-			b.Fatal("expected resolution")
-		}
-	}
-}
-
-func BenchmarkDomainStatic(b *testing.B) {
-	derive := tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "acme"}))
-	r := newRequest("shop.acme.com", "/")
-	b.ReportAllocs()
-	for b.Loop() {
-		if id, _ := derive(r); id == "" {
-			b.Fatal("expected resolution")
+		if _, ok := extract(r); !ok {
+			b.Fatal("expected extraction")
 		}
 	}
 }
 
 func BenchmarkResolve(b *testing.B) {
-	rv := tenant.New(
-		tenant.WithSources(
-			tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "t_01acme"})),
-			tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"})),
-		),
-		tenant.WithValidator(tenant.ValidatorFunc(func(context.Context, string) error { return nil })),
-	)
+	rv := tenant.New(benchLookup, tenant.WithSources(
+		tenant.Domain(),
+		tenant.Subdomain("app.example.com"),
+	))
 	r := newRequest("acme.app.example.com", "/")
 	b.ReportAllocs()
 	for b.Loop() {
@@ -94,9 +109,9 @@ func BenchmarkResolve(b *testing.B) {
 }
 
 func BenchmarkMiddleware(b *testing.B) {
-	h := tenant.New(tenant.WithSources(
-		tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "t_01acme"})),
-		tenant.Subdomain("app.example.com", tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"})),
+	h := tenant.New(benchLookup, tenant.WithSources(
+		tenant.Domain(),
+		tenant.Subdomain("app.example.com"),
 	)).Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	r := newRequest("acme.app.example.com", "/")
 	w := httptest.NewRecorder()

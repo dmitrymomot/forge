@@ -1,14 +1,11 @@
 package tenant_test
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/web/tenant"
 )
@@ -19,28 +16,20 @@ func newRequest(host, path string) *http.Request {
 	return r
 }
 
-type subdomainLookupFunc func(ctx context.Context, subdomain string) (string, error)
-
-func (f subdomainLookupFunc) TenantBySubdomain(ctx context.Context, subdomain string) (string, error) {
-	return f(ctx, subdomain)
-}
-
 func TestSubdomain(t *testing.T) {
 	t.Parallel()
 
-	lookup := tenant.StaticSubdomains(map[string]string{"acme": "t_01acme"})
-	derive := tenant.Subdomain("app.example.com", lookup)
+	extract := tenant.Subdomain("app.example.com")
 	tests := []struct{ name, host, want string }{
-		{"single label", "acme.app.example.com", "t_01acme"},
-		{"unknown label continues chain", "other.app.example.com", ""},
+		{"single label", "acme.app.example.com", "acme"},
 		{"bare base", "app.example.com", ""},
 		{"nested labels", "a.b.app.example.com", ""},
 		{"unrelated host", "other.example.org", ""},
 		{"suffix but not label boundary", "notapp.example.com", ""},
 		{"embedded base not suffix", "app.example.com.evil.io", ""},
-		{"with port", "acme.app.example.com:8443", "t_01acme"},
-		{"uppercase", "ACME.App.Example.COM", "t_01acme"},
-		{"trailing FQDN dot", "acme.app.example.com.", "t_01acme"},
+		{"with port", "acme.app.example.com:8443", "acme"},
+		{"uppercase", "ACME.App.Example.COM", "acme"},
+		{"trailing FQDN dot", "acme.app.example.com.", "acme"},
 		{"empty host", "", ""},
 		{"dot only prefix", ".app.example.com", ""},
 		{"ipv6 literal", "[::1]:8080", ""},
@@ -48,278 +37,71 @@ func TestSubdomain(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			id, err := derive(newRequest(tt.host, "/"))
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, id)
+			ident, ok := extract(newRequest(tt.host, "/"))
+			if tt.want == "" {
+				assert.False(t, ok)
+				assert.Zero(t, ident)
+				return
+			}
+			assert.True(t, ok)
+			assert.Equal(t, tenant.Identifier{Kind: tenant.KindSubdomain, Value: tt.want}, ident)
 		})
 	}
 
 	t.Run("base is normalized at construction", func(t *testing.T) {
 		t.Parallel()
-		derive := tenant.Subdomain("App.Example.COM:443", lookup)
-		id, err := derive(newRequest("acme.app.example.com", "/"))
-		require.NoError(t, err)
-		assert.Equal(t, "t_01acme", id)
-	})
-
-	t.Run("lookup receives the normalized label", func(t *testing.T) {
-		t.Parallel()
-		var got string
-		derive := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(_ context.Context, subdomain string) (string, error) {
-			got = subdomain
-			return "t_1", nil
-		}))
-		_, err := derive(newRequest("ACME.app.example.com:8443", "/"))
-		require.NoError(t, err)
-		assert.Equal(t, "acme", got)
-	})
-
-	t.Run("lookup skipped when no label matches", func(t *testing.T) {
-		t.Parallel()
-		derive := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(context.Context, string) (string, error) {
-			t.Fatal("lookup must not run without a matched label")
-			return "", nil
-		}))
-		id, err := derive(newRequest("app.example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
-
-	t.Run("infrastructure error stops chain", func(t *testing.T) {
-		t.Parallel()
-		boom := errors.New("db down")
-		derive := tenant.Subdomain("app.example.com", subdomainLookupFunc(func(context.Context, string) (string, error) {
-			return "", boom
-		}))
-		_, err := derive(newRequest("acme.app.example.com", "/"))
-		require.ErrorIs(t, err, boom)
+		extract := tenant.Subdomain("App.Example.COM:443")
+		ident, ok := extract(newRequest("acme.app.example.com", "/"))
+		assert.True(t, ok)
+		assert.Equal(t, "acme", ident.Value)
 	})
 
 	t.Run("empty base panics", func(t *testing.T) {
 		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrEmptyName, func() { tenant.Subdomain("", lookup) })
+		assert.PanicsWithValue(t, tenant.ErrEmptyName, func() { tenant.Subdomain("") })
 	})
-
-	t.Run("nil lookup panics", func(t *testing.T) {
-		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() { tenant.Subdomain("app.example.com", nil) })
-	})
-}
-
-func TestStaticSubdomains(t *testing.T) {
-	t.Parallel()
-
-	lookup := tenant.StaticSubdomains(map[string]string{
-		"Acme":  "t_01acme",
-		"":      "dropped",
-		"empty": "",
-	})
-
-	t.Run("keys lowercased at construction", func(t *testing.T) {
-		t.Parallel()
-		id, err := lookup.TenantBySubdomain(context.Background(), "acme")
-		require.NoError(t, err)
-		assert.Equal(t, "t_01acme", id)
-	})
-
-	t.Run("unknown label", func(t *testing.T) {
-		t.Parallel()
-		_, err := lookup.TenantBySubdomain(context.Background(), "other")
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
-	})
-
-	t.Run("empty-key and empty-ID entries dropped", func(t *testing.T) {
-		t.Parallel()
-		_, err := lookup.TenantBySubdomain(context.Background(), "")
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
-		_, err = lookup.TenantBySubdomain(context.Background(), "empty")
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
-	})
-}
-
-func TestMap(t *testing.T) {
-	t.Parallel()
-
-	slugToID := func(_ context.Context, slug string) (string, error) {
-		if slug == "acme" {
-			return "t_01acme", nil
-		}
-		return "", tenant.ErrTenantNotFound
-	}
-
-	t.Run("translates derived value", func(t *testing.T) {
-		t.Parallel()
-		derive := tenant.Map(tenant.PathPrefix("/t"), slugToID)
-		id, err := derive(newRequest("example.com", "/t/acme/dashboard"))
-		require.NoError(t, err)
-		assert.Equal(t, "t_01acme", id)
-	})
-
-	t.Run("ErrTenantNotFound continues chain", func(t *testing.T) {
-		t.Parallel()
-		derive := tenant.Map(tenant.PathPrefix("/t"), slugToID)
-		id, err := derive(newRequest("example.com", "/t/other/dashboard"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
-
-	t.Run("fn skipped when inner source misses", func(t *testing.T) {
-		t.Parallel()
-		derive := tenant.Map(tenant.PathPrefix("/t"), func(context.Context, string) (string, error) {
-			t.Fatal("fn must not run for an underived value")
-			return "", nil
-		})
-		id, err := derive(newRequest("example.com", "/orders"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
-
-	t.Run("inner source error propagates without fn", func(t *testing.T) {
-		t.Parallel()
-		boom := errors.New("inner failed")
-		derive := tenant.Map(func(*http.Request) (string, error) { return "", boom }, slugToID)
-		_, err := derive(newRequest("example.com", "/"))
-		require.ErrorIs(t, err, boom)
-	})
-
-	t.Run("fn error stops chain", func(t *testing.T) {
-		t.Parallel()
-		boom := errors.New("db down")
-		derive := tenant.Map(tenant.PathPrefix("/t"), func(context.Context, string) (string, error) {
-			return "", boom
-		})
-		_, err := derive(newRequest("example.com", "/t/acme"))
-		require.ErrorIs(t, err, boom)
-	})
-
-	t.Run("nil arguments panic", func(t *testing.T) {
-		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrNilSource, func() { tenant.Map(nil, slugToID) })
-		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() { tenant.Map(tenant.Context(), nil) })
-	})
-}
-
-type lookupFunc func(ctx context.Context, domain string) (string, error)
-
-func (f lookupFunc) TenantByDomain(ctx context.Context, domain string) (string, error) {
-	return f(ctx, domain)
 }
 
 func TestDomain(t *testing.T) {
 	t.Parallel()
 
-	t.Run("found", func(t *testing.T) {
+	extract := tenant.Domain()
+
+	t.Run("extracts normalized host", func(t *testing.T) {
 		t.Parallel()
-		derive := tenant.Domain(tenant.StaticDomains(map[string]string{"shop.acme.com": "acme"}))
-		id, err := derive(newRequest("shop.acme.com", "/"))
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		ident, ok := extract(newRequest("Shop.Acme.COM:8443", "/"))
+		assert.True(t, ok)
+		assert.Equal(t, tenant.Identifier{Kind: tenant.KindDomain, Value: "shop.acme.com"}, ident)
 	})
 
-	t.Run("not found continues chain", func(t *testing.T) {
+	t.Run("empty and malformed hosts do not extract", func(t *testing.T) {
 		t.Parallel()
-		derive := tenant.Domain(tenant.StaticDomains(nil))
-		id, err := derive(newRequest("unknown.example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
-
-	t.Run("empty and malformed hosts skip the lookup", func(t *testing.T) {
-		t.Parallel()
-		derive := tenant.Domain(lookupFunc(func(context.Context, string) (string, error) {
-			t.Fatal("lookup must not run without a normalized host")
-			return "", nil
-		}))
 		for _, host := range []string{"", "[::1"} {
-			id, err := derive(newRequest(host, "/"))
-			require.NoError(t, err)
-			assert.Empty(t, id)
+			ident, ok := extract(newRequest(host, "/"))
+			assert.False(t, ok)
+			assert.Zero(t, ident)
 		}
-	})
-
-	t.Run("lookup receives normalized host", func(t *testing.T) {
-		t.Parallel()
-		var got string
-		derive := tenant.Domain(lookupFunc(func(_ context.Context, domain string) (string, error) {
-			got = domain
-			return "acme", nil
-		}))
-		_, err := derive(newRequest("Shop.Acme.COM:8443", "/"))
-		require.NoError(t, err)
-		assert.Equal(t, "shop.acme.com", got)
-	})
-
-	t.Run("infrastructure error stops chain", func(t *testing.T) {
-		t.Parallel()
-		boom := errors.New("db down")
-		derive := tenant.Domain(lookupFunc(func(context.Context, string) (string, error) {
-			return "", boom
-		}))
-		_, err := derive(newRequest("shop.acme.com", "/"))
-		require.ErrorIs(t, err, boom)
-	})
-
-	t.Run("nil lookup panics", func(t *testing.T) {
-		t.Parallel()
-		assert.PanicsWithValue(t, tenant.ErrNilLookup, func() { tenant.Domain(nil) })
-	})
-}
-
-func TestStaticDomains(t *testing.T) {
-	t.Parallel()
-
-	lookup := tenant.StaticDomains(map[string]string{
-		"Shop.Acme.com:443": "acme",
-		"":                  "dropped",
-		"empty.example.com": "",
-	})
-
-	t.Run("keys normalized at construction", func(t *testing.T) {
-		t.Parallel()
-		id, err := lookup.TenantByDomain(context.Background(), "shop.acme.com")
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
-	})
-
-	t.Run("lookup input normalized", func(t *testing.T) {
-		t.Parallel()
-		id, err := lookup.TenantByDomain(context.Background(), "SHOP.acme.com.")
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
-	})
-
-	t.Run("unknown domain", func(t *testing.T) {
-		t.Parallel()
-		_, err := lookup.TenantByDomain(context.Background(), "other.example.com")
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
-	})
-
-	t.Run("empty-ID entries dropped", func(t *testing.T) {
-		t.Parallel()
-		_, err := lookup.TenantByDomain(context.Background(), "empty.example.com")
-		require.ErrorIs(t, err, tenant.ErrTenantNotFound)
 	})
 }
 
 func TestHeader(t *testing.T) {
 	t.Parallel()
 
-	derive := tenant.Header("X-Tenant-ID")
+	extract := tenant.Header("X-Tenant-ID")
 
 	t.Run("present", func(t *testing.T) {
 		t.Parallel()
 		r := newRequest("example.com", "/")
-		r.Header.Set("X-Tenant-ID", "acme")
-		id, err := derive(r)
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		r.Header.Set("X-Tenant-ID", "t_123")
+		ident, ok := extract(r)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.Identifier{Kind: tenant.KindID, Value: "t_123"}, ident)
 	})
 
 	t.Run("absent", func(t *testing.T) {
 		t.Parallel()
-		id, err := derive(newRequest("example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
+		_, ok := extract(newRequest("example.com", "/"))
+		assert.False(t, ok)
 	})
 
 	t.Run("empty name panics", func(t *testing.T) {
@@ -331,31 +113,29 @@ func TestHeader(t *testing.T) {
 func TestCookie(t *testing.T) {
 	t.Parallel()
 
-	derive := tenant.Cookie("tenant")
+	extract := tenant.Cookie("tenant")
 
 	t.Run("present", func(t *testing.T) {
 		t.Parallel()
 		r := newRequest("example.com", "/")
-		r.AddCookie(&http.Cookie{Name: "tenant", Value: "acme"})
-		id, err := derive(r)
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		r.AddCookie(&http.Cookie{Name: "tenant", Value: "t_123"})
+		ident, ok := extract(r)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.Identifier{Kind: tenant.KindID, Value: "t_123"}, ident)
 	})
 
 	t.Run("absent", func(t *testing.T) {
 		t.Parallel()
-		id, err := derive(newRequest("example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
+		_, ok := extract(newRequest("example.com", "/"))
+		assert.False(t, ok)
 	})
 
-	t.Run("empty value reads as not resolved", func(t *testing.T) {
+	t.Run("empty value reads as not present", func(t *testing.T) {
 		t.Parallel()
 		r := newRequest("example.com", "/")
 		r.Header.Set("Cookie", "tenant=")
-		id, err := derive(r)
-		require.NoError(t, err)
-		assert.Empty(t, id)
+		_, ok := extract(r)
+		assert.False(t, ok)
 	})
 
 	t.Run("empty name panics", func(t *testing.T) {
@@ -367,28 +147,33 @@ func TestCookie(t *testing.T) {
 func TestQuery(t *testing.T) {
 	t.Parallel()
 
-	derive := tenant.Query("tenant")
+	extract := tenant.Query("tenant")
 
-	t.Run("present", func(t *testing.T) {
-		t.Parallel()
-		id, err := derive(newRequest("example.com", "/orders?tenant=acme"))
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
-	})
-
-	t.Run("absent", func(t *testing.T) {
-		t.Parallel()
-		id, err := derive(newRequest("example.com", "/orders"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
-
-	t.Run("empty value reads as not resolved", func(t *testing.T) {
-		t.Parallel()
-		id, err := derive(newRequest("example.com", "/orders?tenant="))
-		require.NoError(t, err)
-		assert.Empty(t, id)
-	})
+	tests := []struct{ name, query, want string }{
+		{"present", "tenant=t_123", "t_123"},
+		{"absent", "other=x", ""},
+		{"empty value", "tenant=", ""},
+		{"empty query", "", ""},
+		{"later pair", "a=1&tenant=t_123", "t_123"},
+		{"percent-decoded value", "tenant=t%5F123", "t_123"},
+		{"percent-decoded key", "%74enant=t_123", "t_123"},
+		{"plus decodes to space", "tenant=+t_123", " t_123"},
+		{"bad escape in value skipped", "tenant=%zz", ""},
+		{"bad escape in key skips pair only", "%zz=1&tenant=t_123", "t_123"},
+		{"semicolon pair skipped", "tenant=evil;tenant=alt", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ident, ok := extract(newRequest("example.com", "/orders?"+tt.query))
+			if tt.want == "" {
+				assert.False(t, ok)
+				return
+			}
+			assert.True(t, ok)
+			assert.Equal(t, tenant.Identifier{Kind: tenant.KindID, Value: tt.want}, ident)
+		})
+	}
 
 	t.Run("empty name panics", func(t *testing.T) {
 		t.Parallel()
@@ -401,7 +186,7 @@ func TestPathPrefix(t *testing.T) {
 
 	t.Run("with prefix", func(t *testing.T) {
 		t.Parallel()
-		derive := tenant.PathPrefix("/t")
+		extract := tenant.PathPrefix("/t")
 		tests := []struct{ name, path, want string }{
 			{"segment after prefix", "/t/acme/dashboard", "acme"},
 			{"segment only", "/t/acme", "acme"},
@@ -415,23 +200,26 @@ func TestPathPrefix(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
-				id, err := derive(newRequest("example.com", tt.path))
-				require.NoError(t, err)
-				assert.Equal(t, tt.want, id)
+				ident, ok := extract(newRequest("example.com", tt.path))
+				if tt.want == "" {
+					assert.False(t, ok)
+					return
+				}
+				assert.True(t, ok)
+				assert.Equal(t, tenant.Identifier{Kind: tenant.KindPath, Value: tt.want}, ident)
 			})
 		}
 	})
 
 	t.Run("empty prefix takes first segment", func(t *testing.T) {
 		t.Parallel()
-		derive := tenant.PathPrefix("")
-		id, err := derive(newRequest("example.com", "/acme/dashboard"))
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		extract := tenant.PathPrefix("")
+		ident, ok := extract(newRequest("example.com", "/acme/dashboard"))
+		assert.True(t, ok)
+		assert.Equal(t, "acme", ident.Value)
 
-		id, err = derive(newRequest("example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
+		_, ok = extract(newRequest("example.com", "/"))
+		assert.False(t, ok)
 	})
 
 	t.Run("invalid prefix panics", func(t *testing.T) {
@@ -444,21 +232,20 @@ func TestPathPrefix(t *testing.T) {
 func TestContextSource(t *testing.T) {
 	t.Parallel()
 
-	derive := tenant.Context()
+	extract := tenant.Context()
 
 	t.Run("stamped upstream", func(t *testing.T) {
 		t.Parallel()
 		r := newRequest("example.com", "/")
-		r = r.WithContext(tenant.NewContext(r.Context(), "acme"))
-		id, err := derive(r)
-		require.NoError(t, err)
-		assert.Equal(t, "acme", id)
+		r = r.WithContext(tenant.NewContext(r.Context(), "t_123"))
+		ident, ok := extract(r)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.Identifier{Kind: tenant.KindID, Value: "t_123"}, ident)
 	})
 
 	t.Run("absent", func(t *testing.T) {
 		t.Parallel()
-		id, err := derive(newRequest("example.com", "/"))
-		require.NoError(t, err)
-		assert.Empty(t, id)
+		_, ok := extract(newRequest("example.com", "/"))
+		assert.False(t, ok)
 	})
 }

@@ -3,68 +3,85 @@ package tenant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/forge/web/middleware"
 )
 
-// Validator checks that a resolved tenant ID identifies a tenant allowed to
-// serve traffic. It is the status seam: implementations consult whatever
-// system of record the consumer has (their tenants table, a cache, a control
-// plane) and return nil for a live tenant, ErrTenantNotFound when the ID
-// identifies no tenant, ErrTenantInactive when the tenant is soft-deleted,
-// disabled, or suspended, and any other error for infrastructure failure.
-// All non-nil errors fail resolution closed — a request with an invalid
-// tenant is rejected, never passed through untenanted.
-type Validator interface {
-	ValidateTenant(ctx context.Context, id string) error
+// Lookup is the single consumer seam: it translates an extracted Identifier
+// into a live canonical tenant ID, answering "which tenant" and "may it
+// serve traffic" in one call (typically one query). Implementations switch
+// on ident.Kind and return:
+//
+//   - the canonical tenant ID for a live tenant;
+//   - ErrTenantNotFound when the identifier maps to no live tenant — the
+//     Resolver continues with the next source (a request may legitimately
+//     carry a non-tenant host, e.g. the marketing site);
+//   - ErrTenantInactive when the tenant exists but must not serve traffic
+//     (soft-deleted, disabled, suspended) — resolution fails closed;
+//   - any other error for infrastructure failure — resolution fails closed.
+//
+// Implementations must be safe for concurrent use.
+type Lookup interface {
+	LookupTenant(ctx context.Context, ident Identifier) (string, error)
 }
 
-// ValidatorFunc adapts a plain function to the Validator interface.
-type ValidatorFunc func(ctx context.Context, id string) error
+// LookupFunc adapts a plain function to the Lookup interface.
+type LookupFunc func(ctx context.Context, ident Identifier) (string, error)
 
-// ValidateTenant calls f(ctx, id).
-func (f ValidatorFunc) ValidateTenant(ctx context.Context, id string) error { return f(ctx, id) }
+// LookupTenant implements Lookup.
+func (f LookupFunc) LookupTenant(ctx context.Context, ident Identifier) (string, error) {
+	return f(ctx, ident)
+}
 
 // ErrorHandler writes the HTTP response when Middleware fails to resolve a
 // tenant for a reason other than "nothing resolved". err is the error
-// returned by Resolve; match it with errors.Is against ErrTenantNotFound,
-// ErrTenantInactive, and infrastructure errors from sources and validators.
+// returned by Resolve; match it with errors.Is against ErrTenantInactive
+// and infrastructure errors from the Lookup.
 type ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
+
+// errEmptyID guards against a Lookup returning ("", nil) — a consumer bug;
+// resolution fails closed rather than admitting an empty tenant.
+var errEmptyID = errors.New("tenant: lookup returned an empty tenant id")
 
 // Resolver derives, validates, and returns the canonical tenant ID for HTTP
 // requests. Construct it with New; the zero value is not usable.
 type Resolver struct {
-	validate Validator
-	onError  ErrorHandler
-	log      *slog.Logger
-	sources  []Source
+	lookup  Lookup
+	onError ErrorHandler
+	log     *slog.Logger
+	sources []Source
 }
 
-// New builds a Resolver from options. At least one Source must be configured
-// via WithSources or New panics with ErrNoSources. Sources run in the order
-// given: the first one deriving a non-empty ID wins, and that ID is then
-// checked by the WithValidator seam when one is configured.
-func New(opts ...Option) *Resolver {
+// New builds a Resolver over the given Lookup. At least one Source must be
+// configured via WithSources or New panics with ErrNoSources; a nil lookup
+// panics with ErrNilLookup — both are wiring bugs. Sources run in the order
+// given: the first one extracting an identifier that the Lookup resolves to
+// a live tenant wins.
+func New(lookup Lookup, opts ...Option) *Resolver {
+	if lookup == nil {
+		panic(ErrNilLookup)
+	}
 	c := newConfig(opts...)
 	if len(c.sources) == 0 {
 		panic(ErrNoSources)
 	}
 	return &Resolver{
-		sources:  c.sources,
-		validate: c.validate,
-		onError:  c.onError,
-		log:      c.log,
+		lookup:  lookup,
+		onError: c.onError,
+		log:     c.log,
+		sources: c.sources,
 	}
 }
 
-// Resolve derives the tenant ID for r through the source chain and validates
-// it. The first source deriving a non-empty ID wins; the chain does not
-// continue past a validation failure — a resolved-but-invalid tenant fails
-// closed with the validator's error (ErrTenantNotFound, ErrTenantInactive,
-// or an infrastructure error). A source error also stops the chain. When no
-// source derives anything, Resolve returns ErrNoTenant.
+// Resolve derives the tenant ID for r: each source in turn extracts a
+// candidate identifier, and the Lookup translates it to a live canonical
+// ID. ErrTenantNotFound from the Lookup means "this identifier belongs to
+// no live tenant" and the chain continues with the next source; any other
+// Lookup error fails closed and stops the chain. When no source yields a
+// live tenant, Resolve returns ErrNoTenant.
 func (rv *Resolver) Resolve(r *http.Request) (string, error) {
 	id, resolved, err := rv.resolve(r)
 	if err == nil && !resolved {
@@ -74,22 +91,23 @@ func (rv *Resolver) Resolve(r *http.Request) (string, error) {
 }
 
 // resolve reports "nothing resolved" through the resolved flag rather than a
-// sentinel so Middleware's passthrough decision cannot be forged by a source
-// or validator returning ErrNoTenant — any error, whatever its identity,
-// fails closed.
+// sentinel so Middleware's passthrough decision cannot be forged by a Lookup
+// returning ErrNoTenant — any error, whatever its identity, fails closed.
 func (rv *Resolver) resolve(r *http.Request) (string, bool, error) {
 	for _, src := range rv.sources {
-		id, err := src(r)
+		ident, ok := src(r)
+		if !ok || ident.Value == "" {
+			continue
+		}
+		id, err := rv.lookup.LookupTenant(r.Context(), ident)
 		if err != nil {
+			if errors.Is(err, ErrTenantNotFound) {
+				continue
+			}
 			return "", false, err
 		}
 		if id == "" {
-			continue
-		}
-		if rv.validate != nil {
-			if err := rv.validate.ValidateTenant(r.Context(), id); err != nil {
-				return "", false, err
-			}
+			return "", false, fmt.Errorf("%w (%s %q)", errEmptyID, ident.Kind, ident.Value)
 		}
 		return id, true, nil
 	}
@@ -103,8 +121,8 @@ func (rv *Resolver) resolve(r *http.Request) (string, bool, error) {
 // stamped by an upstream middleware is preserved, and a request with none
 // stays untenanted so single-tenant routes coexist — add Require where
 // tenancy is mandatory. Any failure is delegated to the error handler
-// (default: 404 for ErrTenantNotFound/ErrTenantInactive, 500 otherwise) and
-// next is not called.
+// (default: 404 for ErrTenantInactive, 500 otherwise) and next is not
+// called.
 //
 // Because resolution overrides upstream identity, any client-controlled
 // source (Header, Cookie, Query, PathPrefix) placed before Context() lets a
@@ -122,7 +140,7 @@ func (rv *Resolver) Middleware() middleware.Middleware {
 				next.ServeHTTP(w, r)
 			default:
 				level := slog.LevelError
-				if errors.Is(err, ErrTenantNotFound) || errors.Is(err, ErrTenantInactive) {
+				if errors.Is(err, ErrTenantInactive) {
 					level = slog.LevelDebug
 				}
 				if rv.log.Enabled(r.Context(), level) {
@@ -154,7 +172,7 @@ func Require(next http.Handler) http.Handler {
 // defaultErrorHandler maps rejection errors to 404 (leaking nothing about
 // why the tenant is unavailable) and everything else to a generic 500.
 func defaultErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, ErrTenantNotFound) || errors.Is(err, ErrTenantInactive) {
+	if errors.Is(err, ErrTenantInactive) {
 		http.NotFound(w, r)
 		return
 	}
