@@ -111,8 +111,10 @@ func validateAbsoluteHTTPURL(u string) error {
 
 // WithSchemes replaces the allowed Target URL schemes (default "http",
 // "https"). Create rejects a Target whose macro-elided scheme is not in
-// this set; scheme comparison is case-insensitive, since [url.Parse] always
-// lowercases the parsed scheme.
+// this set, and [Manager.Handler] re-checks it before serving a Target-backed
+// redirect, so a row written to the Store directly cannot smuggle a
+// disallowed scheme past the allowlist. Scheme comparison is
+// case-insensitive, since [url.Parse] always lowercases the parsed scheme.
 func WithSchemes(s ...string) ManagerOption {
 	return func(c *managerConfig) {
 		schemes := slices.Clone(s)
@@ -140,12 +142,22 @@ func WithScope(f func(ctx context.Context) (string, error)) ManagerOption {
 	return func(c *managerConfig) { c.scope = f }
 }
 
-// WithLinkParamPolicy sets the [ParamPolicy] Create uses only to validate a
-// Target template against a degenerate [Spec]. Default [ParamsFill] — the
-// zero value [ParamsDrop] would validate a Target that silently drops
-// forwarded params at decide time.
+// WithLinkParamPolicy sets the [ParamPolicy] applied to Target-backed Links:
+// Create validates a Target template against it, and [Manager.Handler]
+// compiles every Target-link redirect with it, so it governs how visit
+// params (sub-IDs, click IDs) merge into the final URL on every hit. Default
+// [ParamsFill] — the zero value [ParamsDrop] would silently strip forwarded
+// params at decide time. An out-of-range value is a NewManager error, like
+// every other validated option, rather than a per-Create/per-hit failure.
 func WithLinkParamPolicy(p ParamPolicy) ManagerOption {
-	return func(c *managerConfig) { c.linkParamPolicy = p }
+	return func(c *managerConfig) {
+		switch p {
+		case ParamsDrop, ParamsFill, ParamsOverride:
+			c.linkParamPolicy = p
+		default:
+			c.errs = append(c.errs, fmt.Errorf("smartlink: unknown ParamPolicy %d", p))
+		}
+	}
 }
 
 // WithResolver sets the [Resolver] Create uses to confirm a Ref-backed
@@ -164,7 +176,9 @@ func WithVisitFunc(f VisitFunc) ManagerOption {
 // WithOnHit registers a callback [Manager.Handler] invokes synchronously
 // after each redirect is written. Hand the [Hit] to a bounded sink (queue
 // push, buffered channel) — never do work inline or spawn per-hit
-// goroutines, since a slow callback blocks every click.
+// goroutines, since a slow callback blocks every click. The callback's
+// context is cancellation-detached from the request: a client disconnecting
+// right after the redirect cannot cancel hit delivery mid-push.
 func WithOnHit(f func(context.Context, Hit)) ManagerOption {
 	return func(c *managerConfig) { c.onHit = f }
 }

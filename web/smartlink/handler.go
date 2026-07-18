@@ -43,7 +43,7 @@ func (m *Manager) Handler() http.Handler {
 			return
 		}
 
-		v := Visit{Params: firstQueryValues(r.URL.Query())}
+		v := Visit{Params: firstQueryValues(r.URL.RawQuery)}
 		if m.cfg.visitFunc != nil {
 			v = m.cfg.visitFunc(r, v)
 		}
@@ -62,7 +62,10 @@ func (m *Manager) Handler() http.Handler {
 		dec := d.Decide(v)
 		http.Redirect(w, r, dec.URL, m.cfg.redirectStatus)
 		if m.cfg.onHit != nil {
-			m.cfg.onHit(ctx, Hit{Link: l, Visit: v, Decision: dec})
+			// Cancellation-detached: a client that disconnects right after
+			// reading the redirect must not cancel hit delivery (a queue push
+			// with the request ctx would silently lose the click).
+			m.cfg.onHit(context.WithoutCancel(ctx), Hit{Link: l, Visit: v, Decision: dec})
 		}
 	})
 }
@@ -107,12 +110,22 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 }
 
 // compileTarget compiles the degenerate single-target Spec for a
-// Target-backed Link, using the configured link param policy. No caching in
-// v1: a single-template compile is a few µs (see bench_test.go), and an
-// unbounded per-code compiled cache is a memory liability at affiliate-code
-// cardinality.
+// Target-backed Link, salted by its code so split/Percent bucketing stays
+// per-link, using the configured link param policy. It re-applies
+// checkTargetURL so a row written to the Store outside this Manager (which
+// never went through Create's validation) cannot serve a disallowed scheme
+// like "javascript:" as a redirect. No caching in v1: a single-template
+// compile is a few µs (see bench_test.go), and an unbounded per-code
+// compiled cache is a memory liability at affiliate-code cardinality.
 func (m *Manager) compileTarget(l Link) (Decider, error) {
-	return Compile(Spec{Default: []Target{{URL: l.Target}}, Params: m.cfg.linkParamPolicy})
+	compiled, err := Compile(Spec{Salt: l.Code, Default: []Target{{URL: l.Target}}, Params: m.cfg.linkParamPolicy})
+	if err != nil {
+		return nil, err
+	}
+	if err := m.checkTargetURL(&compiled.def.targets[0].tmpl); err != nil {
+		return nil, err
+	}
+	return compiled, nil
 }
 
 // resolveFailed maps a Resolve error to the dead-link path (fallback
@@ -141,19 +154,41 @@ func internalServerError(w http.ResponseWriter) {
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 }
 
-// firstQueryValues flattens q to its first value per key — the shape Visit
-// wants for ParamEquals, {param.NAME} macros, and the link's param-merge
-// policy. A request with no query params yields a nil map, matching Visit's
-// zero value.
-func firstQueryValues(q url.Values) map[string]string {
-	if len(q) == 0 {
+// firstQueryValues extracts the first value per key from the raw query in a
+// single pass — the shape Visit wants for ParamEquals, {param.NAME} macros,
+// and the link's param-merge policy — without materializing an intermediate
+// url.Values (a map plus a slice per key, discarded immediately, on every
+// redirect). Pairs url.ParseQuery would reject (';' separators, undecodable
+// escapes) are skipped, matching r.URL.Query()'s partial-parse behavior;
+// empty-key pairs ("?=foo") are additionally dropped on purpose — no
+// consumer (ParamEquals, {param.NAME}, the param merge) can act on an
+// empty key. A request with no usable query params yields a nil map,
+// matching Visit's zero value.
+func firstQueryValues(rawQuery string) map[string]string {
+	if rawQuery == "" {
 		return nil
 	}
-	out := make(map[string]string, len(q))
-	for k, vals := range q {
-		if len(vals) > 0 {
-			out[k] = vals[0]
+	var out map[string]string
+	for pair := range strings.SplitSeq(rawQuery, "&") {
+		if pair == "" || strings.ContainsRune(pair, ';') {
+			continue
 		}
+		rawK, rawV, _ := strings.Cut(pair, "=")
+		k, err := url.QueryUnescape(rawK)
+		if err != nil || k == "" {
+			continue
+		}
+		if _, ok := out[k]; ok {
+			continue // first value per key wins, like url.Values ordering
+		}
+		v, err := url.QueryUnescape(rawV)
+		if err != nil {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, 4)
+		}
+		out[k] = v
 	}
 	return out
 }

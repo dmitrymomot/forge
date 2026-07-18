@@ -3,6 +3,7 @@ package smartlink
 import (
 	"fmt"
 	"math"
+	"net/url"
 
 	"github.com/dmitrymomot/forge/core/clock"
 )
@@ -31,13 +32,22 @@ type split struct {
 	targets []compiledTarget
 	cum     []int // cumulative weights, len == len(targets); nil for a single target
 	seed    uint64
-	total   uint64
 }
 
-// compiledTarget pairs the caller's raw target with its parsed URL template.
+// compiledTarget pairs the caller's raw target with its parsed URL template
+// and, for a literal (macro-free) template, the pre-parsed URL decomposition
+// param merges reuse instead of re-parsing an identical string per Decide.
 type compiledTarget struct {
+	lit  *litQuery
 	raw  Target
 	tmpl template
+}
+
+// litQuery is a literal target's URL parsed once at compile: the url.URL to
+// stamp a merged query onto and the pre-split original query pairs.
+type litQuery struct {
+	u     url.URL
+	pairs []qpair
 }
 
 // Compile validates a consumer-hydrated Spec fail-fast — missing default,
@@ -52,7 +62,7 @@ func Compile(spec Spec, opts ...Option) (*Compiled, error) {
 		return nil, fmt.Errorf("%w: unknown ParamPolicy %d", ErrInvalidRule, spec.Params)
 	}
 
-	def, err := compileSplit(spec.Default, "")
+	def, err := compileSplit(spec.Default, spec.Salt, "")
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +80,11 @@ func Compile(spec Spec, opts ...Option) (*Compiled, error) {
 		seen[r.Name] = struct{}{}
 
 		cr := compiledRule{name: r.Name, when: make([]matcher, 0, len(r.When))}
-		for _, m := range r.When {
+		for idx, m := range r.When {
 			if m == nil {
 				return nil, fmt.Errorf("%w: rule %q: nil matcher", ErrInvalidMatcher, r.Name)
 			}
-			cm, err := m.compile(r.Name)
+			cm, err := m.compile(spec.Salt, r.Name, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -83,7 +93,7 @@ func Compile(spec Spec, opts ...Option) (*Compiled, error) {
 			}
 			cr.when = append(cr.when, cm)
 		}
-		cr.targets, err = compileSplit(r.Targets, r.Name)
+		cr.targets, err = compileSplit(r.Targets, spec.Salt, r.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -93,8 +103,11 @@ func Compile(spec Spec, opts ...Option) (*Compiled, error) {
 }
 
 // compileSplit validates a target list (rule targets or the default list,
-// ruleName == "") and precomputes its templates and cumulative weights.
-func compileSplit(targets []Target, ruleName string) (split, error) {
+// ruleName == "") and precomputes its templates and cumulative weights. salt
+// namespaces the split's bucketing seed per Spec (see [Spec.Salt]) so two
+// links with identical rule names bucket independently. Weight is only
+// consulted for a multi-target list, per its contract.
+func compileSplit(targets []Target, salt, ruleName string) (split, error) {
 	where := "default targets"
 	if ruleName != "" {
 		where = fmt.Sprintf("rule %q", ruleName)
@@ -110,7 +123,7 @@ func compileSplit(targets []Target, ruleName string) (split, error) {
 		if t.URL == "" {
 			return split{}, fmt.Errorf("%w: %s: empty URL", ErrInvalidTarget, where)
 		}
-		if t.Weight < 0 || (len(targets) > 1 && t.Weight < 1) {
+		if len(targets) > 1 && t.Weight < 1 {
 			return split{}, fmt.Errorf("%w: %s: target %q weight %d", ErrInvalidTarget, where, t.URL, t.Weight)
 		}
 		tmpl, err := parseTemplate(t.URL, where)
@@ -118,9 +131,14 @@ func compileSplit(targets []Target, ruleName string) (split, error) {
 			return split{}, err
 		}
 		s.targets[i] = compiledTarget{raw: t, tmpl: tmpl}
+		if tmpl.segs == nil {
+			if u, err := url.Parse(tmpl.raw); err == nil {
+				s.targets[i].lit = &litQuery{u: *u, pairs: splitQuery(u.RawQuery)}
+			}
+		}
 	}
 	if len(targets) > 1 {
-		s.seed = hashString(fnvOffset, "s\x00"+ruleName)
+		s.seed = hashString(fnvOffset, "s\x00"+salt+"\x00"+ruleName)
 		s.cum = make([]int, len(targets))
 		var total int64
 		for i, t := range targets {
@@ -130,7 +148,6 @@ func compileSplit(targets []Target, ruleName string) (split, error) {
 			}
 			s.cum[i] = int(total)
 		}
-		s.total = uint64(total)
 	}
 	return s, nil
 }

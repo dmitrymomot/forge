@@ -7,7 +7,11 @@ import (
 	"maps"
 	"net/url"
 	"slices"
+	"sync/atomic"
 	"time"
+
+	"github.com/dmitrymomot/forge/resilience/cache"
+	"github.com/dmitrymomot/forge/resilience/singleflight"
 )
 
 // maxCodeAttempts caps how many times Create retries a colliding generated
@@ -22,7 +26,13 @@ const maxCodeAttempts = 5
 // in the Store.
 type Manager struct {
 	store Store
-	cfg   managerConfig
+	links *cache.Cache[Link] // typed facade over WithCache's store; nil without WithCache
+	// flight dedups concurrent cache-miss lookups per code, and cacheGen
+	// guards their write-backs against racing lifecycle mutations (see
+	// lookup and invalidateCache).
+	flight   singleflight.Group[Link]
+	cfg      managerConfig
+	cacheGen atomic.Uint64
 }
 
 // NewManager builds a Manager over store. It returns an error if any
@@ -39,7 +49,11 @@ func NewManager(store Store, opts ...ManagerOption) (*Manager, error) {
 	if len(cfg.errs) > 0 {
 		return nil, errors.Join(cfg.errs...)
 	}
-	return &Manager{store: store, cfg: *cfg}, nil
+	m := &Manager{store: store, cfg: *cfg}
+	if cfg.cacheStore != nil {
+		m.links = cache.New[Link](cfg.cacheStore, cache.WithPrefix(cachePrefix), cache.WithDefaultTTL(cfg.cacheTTL))
+	}
+	return m, nil
 }
 
 // Create validates p and inserts a new Link. Exactly one of Target or Ref
@@ -81,7 +95,14 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 	}
 	if p.Ref != "" && !p.SkipRefCheck && m.cfg.resolver != nil {
 		if _, err := m.cfg.resolver(ctx, Link{Ref: p.Ref, Tenant: p.Tenant}); err != nil {
-			return Link{}, fmt.Errorf("%w: ref %q: %w", ErrInvalidLink, p.Ref, err)
+			// Only a ref the resolver positively rejects is caller input error;
+			// anything else (consumer DB down, cache backend failing) is an
+			// infrastructure failure and must not read as ErrInvalidLink to an
+			// API layer mapping it to a 4xx.
+			if errors.Is(err, ErrRefNotFound) || errors.Is(err, ErrNoTarget) {
+				return Link{}, fmt.Errorf("%w: ref %q: %w", ErrInvalidLink, p.Ref, err)
+			}
+			return Link{}, fmt.Errorf("smartlink: check ref %q: %w", p.Ref, err)
 		}
 	}
 
@@ -92,7 +113,10 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 		Code:      p.Code,
 		Metadata:  maps.Clone(p.Metadata),
 		Tenant:    p.Tenant,
-		CreatedAt: time.Now().UTC(),
+		// Truncated to microseconds — Postgres timestamptz precision — so the
+		// returned Link carries the same instant a later Get reads back and
+		// List ordering agrees across Store implementations.
+		CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 	}
 
 	if l.Code != "" {
@@ -108,16 +132,26 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 }
 
 // createGenerated assigns l.Code from the configured code function and
-// creates it, retrying on ErrDuplicate up to maxCodeAttempts times. An empty
-// string from a broken [WithCodeFunc] is treated as a failed attempt (not
-// stored) and retried the same way — a misbehaving generator exhausts the
-// loop and surfaces the same error as an unlucky collision streak, rather
-// than silently persisting a Link with an empty code.
+// creates it, retrying on ErrDuplicate up to maxCodeAttempts times. Generated
+// codes face the same charset and reserved-word rules as vanity codes — a
+// short random generator can legitimately emit a reserved word like "api"
+// (retried like a collision), while a charset/length violation means the
+// generator itself is broken and fails immediately rather than looping. An
+// empty string is treated as a failed attempt (not stored) and retried, so a
+// misbehaving generator exhausts the loop and surfaces the same error as an
+// unlucky collision streak instead of silently persisting an empty code.
 func (m *Manager) createGenerated(ctx context.Context, l *Link) error {
 	lastErr := errors.New("generated code was empty")
 	for range maxCodeAttempts {
 		l.Code = m.cfg.codeFunc()
 		if l.Code == "" {
+			continue
+		}
+		if !validCodeChars(l.Code) {
+			return fmt.Errorf("%w: generated code %q must be 1-64 characters of [A-Za-z0-9_-]", ErrInvalidLink, l.Code)
+		}
+		if _, reserved := m.cfg.reserved[l.Code]; reserved {
+			lastErr = fmt.Errorf("%w: code %q", ErrCodeReserved, l.Code)
 			continue
 		}
 		err := m.store.Create(ctx, *l)
@@ -151,23 +185,32 @@ func (m *Manager) validateVanityCode(code string) error {
 
 // validateTarget compiles raw as the sole default target of a degenerate
 // Spec — surfacing template errors (bad macro, malformed template) as
-// ErrInvalidLink — then checks its macro-elided scheme is on the allowlist
-// and non-empty, and that its host is non-empty unless the authority is
-// itself (at least partly) a macro, in which case a dynamic-host template
-// stays legal.
+// ErrInvalidLink — then applies the URL policy checks via checkTargetURL.
 func (m *Manager) validateTarget(raw string) error {
-	if _, err := Compile(Spec{Default: []Target{{URL: raw}}, Params: m.cfg.linkParamPolicy}); err != nil {
+	compiled, err := Compile(Spec{Default: []Target{{URL: raw}}, Params: m.cfg.linkParamPolicy})
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidLink, err)
 	}
-	u, err := url.Parse(macroElide(raw))
+	return m.checkTargetURL(&compiled.def.targets[0].tmpl)
+}
+
+// checkTargetURL enforces the URL policy on a compiled template: its
+// macro-elided scheme must be on the allowlist and non-empty, and its host
+// non-empty unless the authority is itself (at least partly) a macro, in
+// which case a dynamic-host template stays legal. Shared by Create validation
+// and the per-hit compileTarget path, so a row written to the Store outside
+// this Manager faces the same scheme policy at serve time (defense in depth —
+// a directly-inserted "javascript:" target must not become a redirect).
+func (m *Manager) checkTargetURL(t *template) error {
+	u, err := url.Parse(t.elided)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidLink, err)
 	}
 	if u.Scheme == "" || !slices.Contains(m.cfg.schemes, u.Scheme) {
 		return fmt.Errorf("%w: scheme %q not allowed", ErrInvalidLink, u.Scheme)
 	}
-	if u.Host == "" && !authorityHasMacro(raw) {
-		return fmt.Errorf("%w: target %q has no host", ErrInvalidLink, raw)
+	if u.Host == "" && !t.authMacro {
+		return fmt.Errorf("%w: target %q has no host", ErrInvalidLink, t.raw)
 	}
 	return nil
 }
@@ -217,39 +260,37 @@ func (m *Manager) List(ctx context.Context, f Filter) ([]Link, error) {
 // untouched and reads back as [ErrNotFound]. On success it best-effort
 // evicts any cached entry for code (see [Manager.invalidateCache]).
 func (m *Manager) Deactivate(ctx context.Context, code string) error {
-	tenant, err := m.tenantScope(ctx)
-	if err != nil {
-		return err
-	}
-	if err := m.store.Deactivate(ctx, code, tenant, time.Now().UTC()); err != nil {
-		return err
-	}
-	m.invalidateCache(ctx, code)
-	return nil
+	return m.mutateLink(ctx, code, func(ctx context.Context, tenant string) error {
+		return m.store.Deactivate(ctx, code, tenant, time.Now().UTC())
+	})
 }
 
 // Activate clears a prior Deactivate. See [Manager.Deactivate] for scope
 // handling and cache invalidation.
 func (m *Manager) Activate(ctx context.Context, code string) error {
-	tenant, err := m.tenantScope(ctx)
-	if err != nil {
-		return err
-	}
-	if err := m.store.Activate(ctx, code, tenant); err != nil {
-		return err
-	}
-	m.invalidateCache(ctx, code)
-	return nil
+	return m.mutateLink(ctx, code, func(ctx context.Context, tenant string) error {
+		return m.store.Activate(ctx, code, tenant)
+	})
 }
 
 // Delete removes code. See [Manager.Deactivate] for scope handling and
 // cache invalidation.
 func (m *Manager) Delete(ctx context.Context, code string) error {
+	return m.mutateLink(ctx, code, func(ctx context.Context, tenant string) error {
+		return m.store.Delete(ctx, code, tenant)
+	})
+}
+
+// mutateLink is the shared lifecycle-mutation sequence — resolve the tenant
+// scope, run the store op with it, evict the cache entry on success — so the
+// tenant-safety and cache-consistency invariant is stated once, not per
+// method.
+func (m *Manager) mutateLink(ctx context.Context, code string, op func(ctx context.Context, tenant string) error) error {
 	tenant, err := m.tenantScope(ctx)
 	if err != nil {
 		return err
 	}
-	if err := m.store.Delete(ctx, code, tenant); err != nil {
+	if err := op(ctx, tenant); err != nil {
 		return err
 	}
 	m.invalidateCache(ctx, code)

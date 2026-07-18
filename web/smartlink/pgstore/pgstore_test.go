@@ -229,6 +229,10 @@ func TestPg_DeleteRecreate(t *testing.T) {
 	assert.Equal(t, "https://b.example.com/", got.Target)
 }
 
+// TestPg_MetadataNilVsEmpty pins the MemoryStore reference contract: nil
+// Metadata round-trips as nil (stored as jsonb 'null'), an explicit empty
+// map as a non-nil empty map — so `l.Metadata == nil` behaves identically
+// whichever Store backs the Manager.
 func TestPg_MetadataNilVsEmpty(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
@@ -237,12 +241,13 @@ func TestPg_MetadataNilVsEmpty(t *testing.T) {
 	require.NoError(t, s.Create(ctx, smartlink.Link{Code: cNil, CreatedAt: time.Now().UTC(), Metadata: nil}))
 	gotNil, err := s.Get(ctx, cNil)
 	require.NoError(t, err)
-	assert.Empty(t, gotNil.Metadata)
+	assert.Nil(t, gotNil.Metadata)
 
 	cEmpty := code()
 	require.NoError(t, s.Create(ctx, smartlink.Link{Code: cEmpty, CreatedAt: time.Now().UTC(), Metadata: map[string]string{}}))
 	gotEmpty, err := s.Get(ctx, cEmpty)
 	require.NoError(t, err)
+	assert.NotNil(t, gotEmpty.Metadata)
 	assert.Empty(t, gotEmpty.Metadata)
 }
 

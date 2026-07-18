@@ -3,6 +3,7 @@ package smartlink_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -176,6 +177,136 @@ func TestResolveCacheErrorFallsThrough(t *testing.T) {
 	}
 	if got.Code != created.Code {
 		t.Fatalf("Resolve().Code = %q, want %q", got.Code, created.Code)
+	}
+}
+
+// gateStore counts Gets and, for armCode, stalls the FIRST Get after the
+// underlying read has completed — simulating an in-flight lookup that read
+// the Store but has not yet written the cache.
+type gateStore struct {
+	smartlink.Store
+	entered chan struct{}
+	release chan struct{}
+	armCode string
+	gets    atomic.Int32
+	once    sync.Once
+}
+
+func (s *gateStore) Get(ctx context.Context, code string) (smartlink.Link, error) {
+	l, err := s.Store.Get(ctx, code)
+	s.gets.Add(1)
+	if code == s.armCode {
+		s.once.Do(func() {
+			close(s.entered)
+			<-s.release
+		})
+	}
+	return l, err
+}
+
+// TestResolveStaleWriteBackEvicted reproduces the delete/recreate race: an
+// in-flight Resolve reads the old record, the code is Deleted and re-Created
+// with a new target while that read is stalled, and the straggler's cache
+// write-back must not survive — otherwise the recreated code would serve the
+// previous owner's target for a full TTL.
+func TestResolveStaleWriteBackEvicted(t *testing.T) {
+	t.Parallel()
+	const code = "reuse1"
+	gs := &gateStore{
+		Store:   smartlink.NewMemoryStore(),
+		armCode: code,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	cs := cache.NewMemoryStore()
+	m, err := smartlink.NewManager(gs, smartlink.WithCache(cs, time.Minute))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	ctx := context.Background()
+
+	if _, err := m.Create(ctx, smartlink.CreateParams{Code: code, Target: "https://old.example.com/"}); err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The straggler read the old record; its result is correct for when
+		// the call began — only the cache write-back must be suppressed.
+		if _, err := m.Resolve(ctx, code); err != nil {
+			t.Errorf("straggler Resolve() error = %v", err)
+		}
+	}()
+
+	<-gs.entered // straggler holds the old record, cache still empty
+	if err := m.Delete(ctx, code); err != nil {
+		t.Fatalf("Delete() error = %v, want nil", err)
+	}
+	if _, err := m.Create(ctx, smartlink.CreateParams{Code: code, Target: "https://new.example.com/"}); err != nil {
+		t.Fatalf("Create() (code reuse) error = %v, want nil", err)
+	}
+	close(gs.release)
+	<-done
+
+	if _, err := cs.Get(ctx, "smartlink:code:"+code); !errors.Is(err, cache.ErrNotFound) {
+		t.Fatalf("cache Get() after raced fill = %v, want ErrNotFound (stale write-back must be evicted)", err)
+	}
+	got, err := m.Resolve(ctx, code)
+	if err != nil {
+		t.Fatalf("Resolve() after reuse error = %v, want nil", err)
+	}
+	if got.Target != "https://new.example.com/" {
+		t.Fatalf("Resolve().Target = %q, want the recreated link's target", got.Target)
+	}
+}
+
+// TestResolveMissSingleflight asserts concurrent cache misses for one code
+// share a single Store read instead of stampeding it: a leader Resolve is
+// parked inside Store.Get, the other workers are started while it is parked
+// (so their flight.Do joins the leader's registered call), and the total
+// Store reads must stay 1.
+func TestResolveMissSingleflight(t *testing.T) {
+	t.Parallel()
+	const code, workers = "hot1", 3
+	gs := &gateStore{
+		Store:   smartlink.NewMemoryStore(),
+		armCode: code,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m, err := smartlink.NewManager(gs, smartlink.WithCache(cache.NewMemoryStore(), time.Minute))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	ctx := context.Background()
+	if _, err := m.Create(ctx, smartlink.CreateParams{Code: code, Target: "https://example.com/"}); err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() { // leader: misses cache, parks inside Store.Get
+		if _, err := m.Resolve(ctx, code); err != nil {
+			t.Errorf("leader Resolve() error = %v", err)
+		}
+	})
+	<-gs.entered
+	for range workers {
+		wg.Go(func() {
+			if _, err := m.Resolve(ctx, code); err != nil {
+				t.Errorf("Resolve() error = %v", err)
+			}
+		})
+	}
+	// The workers' path from cache miss to flight join is a handful of
+	// non-blocking statements; this generous scheduling window lets them
+	// reach it while the leader is still parked, keeping the assertion
+	// deterministic in practice.
+	time.Sleep(100 * time.Millisecond)
+	close(gs.release)
+	wg.Wait()
+	if got := gs.gets.Load(); got != 1 {
+		t.Fatalf("store Gets under concurrent miss = %d, want 1 (singleflight)", got)
 	}
 }
 

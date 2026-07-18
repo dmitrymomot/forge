@@ -3,6 +3,7 @@ package smartlink
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,8 +14,11 @@ import (
 // DSL.
 type Matcher interface {
 	// compile validates and normalizes the matcher into its evaluated form,
-	// sealing the interface to this package.
-	compile(ruleName string) (matcher, error)
+	// sealing the interface to this package. salt is the Spec's bucketing salt
+	// and idx the matcher's position within the rule's conjunction — both feed
+	// Percent's seed so distinct links and distinct Percent gates in one rule
+	// bucket independently.
+	compile(salt, ruleName string, idx int) (matcher, error)
 }
 
 // matcherKind discriminates the compiled matcher union.
@@ -77,7 +81,7 @@ type Geo struct {
 	Countries []string
 }
 
-func (m Geo) compile(ruleName string) (matcher, error) {
+func (m Geo) compile(_, ruleName string, _ int) (matcher, error) {
 	if len(m.Countries) == 0 {
 		return matcher{}, fmt.Errorf("%w: rule %q: Geo needs at least one country", ErrInvalidMatcher, ruleName)
 	}
@@ -97,7 +101,7 @@ type Device struct {
 	Devices []string
 }
 
-func (m Device) compile(ruleName string) (matcher, error) {
+func (m Device) compile(_, ruleName string, _ int) (matcher, error) {
 	devices, err := nonEmptyLower(m.Devices, ruleName, "Device")
 	if err != nil {
 		return matcher{}, err
@@ -113,7 +117,7 @@ type Locale struct {
 	Locales []string
 }
 
-func (m Locale) compile(ruleName string) (matcher, error) {
+func (m Locale) compile(_, ruleName string, _ int) (matcher, error) {
 	locales, err := nonEmptyLower(m.Locales, ruleName, "Locale")
 	if err != nil {
 		return matcher{}, err
@@ -142,7 +146,7 @@ type ParamEquals struct {
 	Values []string
 }
 
-func (m ParamEquals) compile(ruleName string) (matcher, error) {
+func (m ParamEquals) compile(_, ruleName string, _ int) (matcher, error) {
 	if m.Key == "" {
 		return matcher{}, fmt.Errorf("%w: rule %q: ParamEquals needs a key", ErrInvalidMatcher, ruleName)
 	}
@@ -161,7 +165,7 @@ type TimeWindow struct {
 	Until time.Time
 }
 
-func (m TimeWindow) compile(ruleName string) (matcher, error) {
+func (m TimeWindow) compile(_, ruleName string, _ int) (matcher, error) {
 	if m.From.IsZero() && m.Until.IsZero() {
 		return matcher{}, fmt.Errorf("%w: rule %q: TimeWindow needs at least one bound", ErrInvalidMatcher, ruleName)
 	}
@@ -172,19 +176,23 @@ func (m TimeWindow) compile(ruleName string) (matcher, error) {
 }
 
 // Percent matches a deterministic Share percent of traffic, bucketed by hash
-// of the rule name and Visit.StickyKey — the same visitor always lands on the
-// same side. Share must be 1..99 (0 is a dead rule, 100 is no gate — both
-// compile errors). An empty StickyKey never matches (fails closed past this
-// rule).
+// of the Spec salt, rule name, the matcher's position in the rule, and
+// Visit.StickyKey — the same visitor always lands on the same side, distinct
+// links bucket independently (see [Spec.Salt]), and two Percent gates in one
+// rule compose as independent draws instead of collapsing into the wider one.
+// Reordering a rule's matchers therefore reassigns its Percent buckets.
+// Share must be 1..99 (0 is a dead rule, 100 is no gate — both compile
+// errors). An empty StickyKey never matches (fails closed past this rule).
 type Percent struct {
 	Share int
 }
 
-func (m Percent) compile(ruleName string) (matcher, error) {
+func (m Percent) compile(salt, ruleName string, idx int) (matcher, error) {
 	if m.Share < 1 || m.Share > 99 {
 		return matcher{}, fmt.Errorf("%w: rule %q: Percent share %d outside 1..99", ErrInvalidMatcher, ruleName, m.Share)
 	}
-	return matcher{kind: matchPercent, seed: hashString(fnvOffset, "p\x00"+ruleName), share: uint64(m.Share)}, nil
+	seed := hashString(fnvOffset, "p\x00"+salt+"\x00"+ruleName+"\x00"+strconv.Itoa(idx))
+	return matcher{kind: matchPercent, seed: seed, share: uint64(m.Share)}, nil
 }
 
 // isAlpha reports whether s is ASCII letters only.
