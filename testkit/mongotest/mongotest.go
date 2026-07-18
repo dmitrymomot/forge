@@ -84,7 +84,11 @@ func waitForPrimary(ctx context.Context, uri string) {
 	if err != nil {
 		panic(fmt.Sprintf("mongotest: connect: %v", err))
 	}
-	defer func() { _ = client.Disconnect(ctx) }()
+	defer func() {
+		dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer dcancel()
+		_ = client.Disconnect(dctx)
+	}()
 
 	var lastErr error
 	for {
