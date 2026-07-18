@@ -1,0 +1,28 @@
+{{define "title"}}New offer{{end}}
+
+{{define "content"}}
+<h1>New offer</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/offers">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <label>Name
+    <input name="name" value="{{.Name}}" placeholder="Summer promo" required>
+  </label>
+  <label>Default URL (used when no rule matches)
+    <input name="default_url" value="{{.DefaultURL}}" placeholder="https://example.com/global" required>
+  </label>
+  {{range .Rows}}
+  <fieldset>
+    <legend>Geo rule {{.Index}}</legend>
+    <label>Countries (comma-separated ISO codes)
+      <input name="rule_countries_{{.Index}}" value="{{.Countries}}" placeholder="DE, AT, CH">
+    </label>
+    <label>Destination URL
+      <input name="rule_url_{{.Index}}" value="{{.URL}}" placeholder="https://example.com/dach">
+    </label>
+  </fieldset>
+  {{end}}
+  <button type="submit">Create offer</button>
+</form>
+<p class="muted">Rules are evaluated top-down; the first matching country wins. Empty rows are ignored.</p>
+{{end}}
