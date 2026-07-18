@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"time"
 
@@ -104,19 +105,18 @@ func (s *Store) List(ctx context.Context, f smartlink.Filter) ([]smartlink.Link,
 	return out, rows.Err()
 }
 
-// deactivateSQL leaves deactivated_at untouched when $3 is NULL (a zero at),
-// so Deactivate never reactivates an already-deactivated link, while still
-// enforcing the tenant predicate atomically with the write.
 const deactivateSQL = `
-UPDATE forge_smart_links
-SET deactivated_at = CASE WHEN $3::timestamptz IS NULL THEN deactivated_at ELSE $3 END
+UPDATE forge_smart_links SET deactivated_at = $3
 WHERE code = $1 AND ($2 = '' OR tenant = $2)`
 
 // Deactivate sets DeactivatedAt to at on code, scoped to tenant. A zero at
-// leaves DeactivatedAt unchanged (never reactivates) but still enforces the
-// code/tenant predicate.
+// is rejected per the Store contract — it would write NULL and silently
+// reactivate the link.
 func (s *Store) Deactivate(ctx context.Context, code, tenant string, at time.Time) error {
-	return s.exec(ctx, deactivateSQL, code, tenant, nullTime(at))
+	if at.IsZero() {
+		return fmt.Errorf("%w: Deactivate needs a non-zero time", smartlink.ErrInvalidLink)
+	}
+	return s.exec(ctx, deactivateSQL, code, tenant, at)
 }
 
 const activateSQL = `

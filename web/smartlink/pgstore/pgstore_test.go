@@ -159,27 +159,16 @@ func TestPg_TenantPredicateMutators(t *testing.T) {
 		assert.True(t, got.DeactivatedAt.Equal(at))
 	})
 
-	t.Run("deactivate zero at leaves active", func(t *testing.T) {
-		s, c, owner := setup(t)
-		require.NoError(t, s.Deactivate(ctx, c, owner, time.Time{}))
-		got, err := s.Get(ctx, c)
-		require.NoError(t, err)
-		assert.True(t, got.DeactivatedAt.IsZero())
-	})
-
-	t.Run("deactivate zero at does not reactivate", func(t *testing.T) {
+	t.Run("deactivate zero at rejected", func(t *testing.T) {
 		s, c, owner := setup(t)
 		require.NoError(t, s.Deactivate(ctx, c, owner, at))
-		require.NoError(t, s.Deactivate(ctx, c, owner, time.Time{}))
+		// A zero at would write NULL and silently reactivate; the contract
+		// rejects it before the record is touched.
+		err := s.Deactivate(ctx, c, owner, time.Time{})
+		assert.ErrorIs(t, err, smartlink.ErrInvalidLink)
 		got, err := s.Get(ctx, c)
 		require.NoError(t, err)
 		assert.True(t, got.DeactivatedAt.Equal(at))
-	})
-
-	t.Run("deactivate zero at still enforces predicate", func(t *testing.T) {
-		s, c, _ := setup(t)
-		err := s.Deactivate(ctx, c, "intruder", time.Time{})
-		assert.ErrorIs(t, err, smartlink.ErrNotFound)
 	})
 
 	t.Run("activate wrong tenant", func(t *testing.T) {

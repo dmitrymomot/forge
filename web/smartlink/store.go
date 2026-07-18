@@ -27,9 +27,10 @@ type Store interface {
 	// Code ascending to break ties.
 	List(ctx context.Context, f Filter) ([]Link, error)
 
-	// Deactivate sets DeactivatedAt to at on code, scoped to tenant. A zero
-	// at leaves DeactivatedAt unchanged — it never activates or deactivates
-	// anything — while still enforcing the code/tenant predicate.
+	// Deactivate sets DeactivatedAt to at on code, scoped to tenant. at must
+	// be non-zero — a zero DeactivatedAt means "active", so storing it would
+	// silently reactivate — and implementations reject it with an error
+	// wrapping ErrInvalidLink before touching the record.
 	Deactivate(ctx context.Context, code, tenant string, at time.Time) error
 
 	// Activate clears DeactivatedAt on code, scoped to tenant.

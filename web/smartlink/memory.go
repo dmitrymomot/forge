@@ -3,6 +3,7 @@ package smartlink
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -73,15 +74,12 @@ func (s *MemoryStore) List(_ context.Context, f Filter) ([]Link, error) {
 	return out, nil
 }
 
-// Deactivate implements Store. A zero at is a no-op on DeactivatedAt (it
-// never reactivates an already-deactivated link), but the existence and
-// tenant predicate are still enforced.
+// Deactivate implements Store.
 func (s *MemoryStore) Deactivate(_ context.Context, code, tenant string, at time.Time) error {
-	return s.mutate(code, tenant, func(l *Link) {
-		if !at.IsZero() {
-			l.DeactivatedAt = at
-		}
-	})
+	if at.IsZero() {
+		return fmt.Errorf("%w: Deactivate needs a non-zero time", ErrInvalidLink)
+	}
+	return s.mutate(code, tenant, func(l *Link) { l.DeactivatedAt = at })
 }
 
 // Activate implements Store.
