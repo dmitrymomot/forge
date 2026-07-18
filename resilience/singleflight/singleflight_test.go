@@ -83,7 +83,7 @@ func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
 	var leaderShared bool
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+		v, shared, err := g.DoDetached(t.Context(), "k1", func(context.Context) (int, error) {
 			calls.Add(1)
 			close(entered)
 			time.Sleep(25 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
 	vals := make([]int, 10)
 	for i := range joined {
 		wg.Go(func() {
-			v, shared, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
+			v, shared, err := g.Do(t.Context(), "k1", func(context.Context) (int, error) {
 				calls.Add(1)
 				return 0, nil
 			})
@@ -115,7 +115,9 @@ func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
 		assert.Equal(t, 42, vals[i])
 	}
 
-	// Vice versa: a Do-led flight is joined by a DoDetached caller.
+	// Vice versa: a Do-led flight is joined by a DoDetached caller. A distinct
+	// key — the first flight's deregistration runs in a goroutine wg does not
+	// track, so reusing "k1" could racily join its completed call.
 	calls.Store(0)
 	entered = make(chan struct{})
 	var wg2 sync.WaitGroup
@@ -123,7 +125,7 @@ func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
 	var joinerVal int
 	wg2.Go(func() {
 		<-entered
-		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+		v, shared, err := g.DoDetached(t.Context(), "k2", func(context.Context) (int, error) {
 			calls.Add(1)
 			return 0, nil
 		})
@@ -131,7 +133,7 @@ func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
 		joinerShared = shared
 		joinerVal = v
 	})
-	v, shared, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
+	v, shared, err := g.Do(t.Context(), "k2", func(context.Context) (int, error) {
 		calls.Add(1)
 		close(entered)
 		time.Sleep(25 * time.Millisecond)
