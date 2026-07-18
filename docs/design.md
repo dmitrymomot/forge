@@ -99,7 +99,7 @@ go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
 test-only), `nats.go` (`queue/nats`), a Kafka client (`queue/kafka`),
 a cgo-free SQLite driver (`queue/sqlite`). **Postgres is the primary
 database**; the async engine is storage-agnostic with first-class drivers
-(postgres, sqlite, redis, nats, kafka); everything else outside `data/*`
+(postgres, sqlite, redis, mongo, nats, kafka); everything else outside `data/*`
 and the driver leaves stays stdlib.
 
 ## Repository layout rules
@@ -152,10 +152,11 @@ and the driver leaves stays stdlib.
   seam; `scheduler`, `eventbus`, and `outbox` ride it unchanged. The
   **engine, not the driver, owns the hard semantics** — retry/backoff,
   delayed jobs, max-attempts → dead-letter, idempotency inbox — so app
-  behavior is identical across postgres/sqlite/redis/nats/kafka; the engine
+  behavior is identical across postgres/sqlite/redis/mongo/nats/kafka; the engine
   uses a driver's native capability when declared. Transactional publish
-  (`PushTx`) is native on SQL drivers; non-SQL drivers get it via
-  `async/outbox`.
+  (`PushTx`) is native on drivers whose store has real multi-document ACID
+  transactions (postgres, sqlite, mongo); drivers without them (redis, nats,
+  kafka) get it via `async/outbox`.
 - **Authorization decision seam** — `rbac`, `acl`, and `abac` are composable
   bricks feeding one shared Allow/Deny decision interface consumed by
   `guard` / `RequirePermission` middleware (401-vs-403 split). External
