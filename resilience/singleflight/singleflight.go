@@ -26,18 +26,11 @@ type Group[V any] struct {
 // caller cancelling does not abort the shared work; each caller's own ctx still
 // bounds its wait via fn's returned error, not the wait itself.
 func (g *Group[V]) Do(ctx context.Context, key string, fn func(context.Context) (V, error)) (V, bool, error) {
-	g.mu.Lock()
-	if g.m == nil {
-		g.m = make(map[string]*call[V])
-	}
-	if c, ok := g.m[key]; ok {
-		g.mu.Unlock()
+	c, shared := g.join(key)
+	if shared {
 		<-c.done
 		return c.val, true, c.err
 	}
-	c := &call[V]{done: make(chan struct{})}
-	g.m[key] = c
-	g.mu.Unlock()
 
 	g.run(context.WithoutCancel(ctx), key, c, fn)
 	if c.panicVal != nil {
@@ -56,17 +49,10 @@ func (g *Group[V]) Do(ctx context.Context, key string, fn func(context.Context) 
 // every waiter observes; there is no caller to re-panic into. Do and
 // DoDetached share the per-key flight, so mixed callers coalesce too.
 func (g *Group[V]) DoDetached(ctx context.Context, key string, fn func(context.Context) (V, error)) (V, bool, error) {
-	g.mu.Lock()
-	if g.m == nil {
-		g.m = make(map[string]*call[V])
-	}
-	c, shared := g.m[key]
+	c, shared := g.join(key)
 	if !shared {
-		c = &call[V]{done: make(chan struct{})}
-		g.m[key] = c
 		go g.run(context.WithoutCancel(ctx), key, c, fn)
 	}
-	g.mu.Unlock()
 
 	select {
 	case <-c.done:
@@ -75,6 +61,26 @@ func (g *Group[V]) DoDetached(ctx context.Context, key string, fn func(context.C
 		var zero V
 		return zero, shared, ctx.Err()
 	}
+}
+
+// join returns key's in-flight call, or registers a fresh one when none
+// exists. shared reports whether the caller joined an existing flight rather
+// than leading a new one; the leader is responsible for running it.
+func (g *Group[V]) join(key string) (*call[V], bool) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*call[V])
+	}
+	// The c != nil arm is unreachable (only non-nil calls are registered) but
+	// lets nilaway prove join's result needs no guarding at the call sites.
+	if c, ok := g.m[key]; ok && c != nil {
+		g.mu.Unlock()
+		return c, true
+	}
+	c := &call[V]{done: make(chan struct{})}
+	g.m[key] = c
+	g.mu.Unlock()
+	return c, false
 }
 
 // run executes fn into c and closes c.done exactly once, converting a panic
