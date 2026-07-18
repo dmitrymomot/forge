@@ -1,0 +1,7 @@
+{
+  "items": {
+    "zero": "Your cart is empty",
+    "one": "1 item in your cart",
+    "other": "{{count}} items in your cart"
+  }
+}

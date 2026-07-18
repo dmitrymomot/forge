@@ -92,50 +92,10 @@ Deps: `web/cookie`, `resilience/cache`.
 
 Whole-form decode into structs (reflection confined to `structfields`),
 sticky `Values`, render-friendly `Errors` carrying `validate`'s i18n keys
-(translated by `i18n/catalog`), plus error-class/aria helpers. Backbone of
+(translated by `core/i18n`), plus error-class/aria helpers. Backbone of
 server-rendered CRUD.
 
-Deps: `core/structfields`, `core/validate`; `i18n/catalog` (planned).
-
-## i18n/
-
----
-
-**i18n/catalog**
-
-Message catalog with fs.FS/JSON loaders and curated CLDR plural rules;
-`T(loc, key, args...)` selects plural forms internally; fallback chains;
-translates `validate` violation keys. Zero deps — no x/text, no YAML.
-
-Deps: none (stdlib only).
-
----
-
-**i18n/locale**
-
-Accept-Language negotiation (q-values, region fallback), context carrier,
-middleware with a resolver chain (cookie → query → Accept-Language →
-default), and a logger context extractor.
-
-Deps: `ops/logger`.
-
----
-
-**i18n/numbers**
-
-Locale-aware number/currency/percent formatting; `Currency(money.Money)` —
-the locale rendering `core/money` defers by design.
-
-Deps: `core/money`.
-
----
-
-**i18n/dates**
-
-Locale + timezone date/time and relative-time ("3 hours ago") formatting
-with named presets. Gregorian only.
-
-Deps: none (stdlib only).
+Deps: `core/structfields`, `core/validate`, `core/i18n`.
 
 ## data/
 

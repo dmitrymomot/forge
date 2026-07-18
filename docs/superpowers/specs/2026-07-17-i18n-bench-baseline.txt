@@ -1,0 +1,43 @@
+go clean -testcache && go test -bench=. -benchmem ./core/i18n/...
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/core/i18n
+cpu: Apple M3 Max
+BenchmarkT-14                  	22342710	        44.95 ns/op	      16 B/op	       1 allocs/op
+BenchmarkTK-14                 	27089004	        42.92 ns/op	      16 B/op	       1 allocs/op
+BenchmarkTLiteral-14           	69876961	        17.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTViaLocalizer-14      	33768532	        35.24 ns/op	      16 B/op	       1 allocs/op
+BenchmarkTViaContext-14        	31073089	        38.25 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAppendT-14            	34775971	        34.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTN-14                 	30750602	        39.65 ns/op	      24 B/op	       1 allocs/op
+BenchmarkTNFallback-14         	28050135	        42.04 ns/op	      24 B/op	       1 allocs/op
+BenchmarkAppendTN-14           	39763682	        29.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNumber-14             	19510436	        60.68 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAppendNumber-14       	24097009	        49.91 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNumberInt-14          	36239178	        33.18 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAppendNumberInt-14    	52965614	        22.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPercent-14            	25119930	        48.23 ns/op	       4 B/op	       1 allocs/op
+BenchmarkAppendPercent-14      	33790006	        37.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCurrency-14           	 5620369	       209.0 ns/op	     200 B/op	      10 allocs/op
+BenchmarkAppendCurrency-14     	 6180333	       196.0 ns/op	     184 B/op	       9 allocs/op
+BenchmarkDate-14               	20894653	        55.87 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAppendDate-14         	27557091	        43.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTime-14               	27540859	        42.59 ns/op	       5 B/op	       1 allocs/op
+BenchmarkAppendTime-14         	38757446	        30.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDateTime-14           	14922542	        78.77 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAppendDateTime-14     	17701714	        67.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNegotiate-14          	 2446228	       487.9 ns/op	     320 B/op	      12 allocs/op
+BenchmarkMiddleware-14         	 1564497	       767.1 ns/op	    1320 B/op	      21 allocs/op
+BenchmarkNew-14                	    9050	    125683 ns/op	   32280 B/op	     410 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/core/i18n	31.028s
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/core/i18n/cldr
+cpu: Apple M3 Max
+BenchmarkRuleEn-14       	586972749	         1.931 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRuleUk-14       	615896149	         1.949 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRuleAr-14       	617443818	         1.956 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPluralFor-14    	26367806	        45.23 ns/op	       8 B/op	       1 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/core/i18n/cldr	4.926s

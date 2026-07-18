@@ -1,0 +1,6 @@
+{
+  "title": "Dashboard",
+  "greeting": "Hello, {{name}}!",
+  "buttons": { "save": "Save", "cancel": "Cancel" },
+  "only_en": "English only"
+}
