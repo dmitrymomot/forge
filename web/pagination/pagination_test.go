@@ -99,8 +99,9 @@ func TestParseMalformed(t *testing.T) {
 		key    string
 	}{
 		{name: "page", target: "/?page=wrong", key: "page"},
-		{name: "limit", target: "/?per_page=wrong", key: "per_page"},
+		{name: "per page", target: "/?per_page=wrong", key: "per_page"},
 		{name: "page exceeds int32", target: "/?page=2147483648", key: "page"},
+		{name: "per page exceeds int32", target: "/?per_page=2147483648", key: "per_page"},
 	}
 
 	for _, tt := range tests {
@@ -178,6 +179,13 @@ func TestParseCursor(t *testing.T) {
 				pagination.WithMaxLimit(25),
 			},
 			want: pagination.CursorParams{Limit: 25},
+		},
+		{
+			name: "empty parameter names keep defaults",
+			opts: []pagination.Option{
+				pagination.WithCursorParams("", ""),
+			},
+			want: pagination.CursorParams{Limit: 20},
 		},
 	}
 
