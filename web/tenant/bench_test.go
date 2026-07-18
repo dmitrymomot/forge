@@ -43,6 +43,17 @@ func BenchmarkHeader(b *testing.B) {
 	}
 }
 
+func BenchmarkQuery(b *testing.B) {
+	derive := tenant.Query("tenant")
+	r := newRequest("example.com", "/orders?tenant=acme")
+	b.ReportAllocs()
+	for b.Loop() {
+		if id, _ := derive(r); id == "" {
+			b.Fatal("expected resolution")
+		}
+	}
+}
+
 func BenchmarkPathPrefix(b *testing.B) {
 	derive := tenant.PathPrefix("/t")
 	r := newRequest("example.com", "/t/acme/dashboard")

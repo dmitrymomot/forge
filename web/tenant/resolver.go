@@ -77,7 +77,7 @@ func (rv *Resolver) Resolve(r *http.Request) (string, error) {
 // sentinel so Middleware's passthrough decision cannot be forged by a source
 // or validator returning ErrNoTenant — any error, whatever its identity,
 // fails closed.
-func (rv *Resolver) resolve(r *http.Request) (id string, resolved bool, err error) {
+func (rv *Resolver) resolve(r *http.Request) (string, bool, error) {
 	for _, src := range rv.sources {
 		id, err := src(r)
 		if err != nil {
