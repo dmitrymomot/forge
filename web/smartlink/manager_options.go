@@ -286,9 +286,11 @@ func WithRedirectStatus(code int) ManagerOption {
 // WithManagerClock sets the clock the Manager reads for every timestamp it
 // takes itself: the CreatedAt stamp in Create, the DeactivatedAt stamp in
 // Deactivate, and the ExpiresAt liveness check in [Manager.Resolve] (and so
-// [Manager.Handler]). Defaults to clock.System(). It is distinct from the
-// engine-level [WithClock], which governs TimeWindow matcher evaluation
-// inside a compiled Spec. A nil c is ignored.
+// [Manager.Handler]). Defaults to clock.System(). The Manager also passes it
+// as the engine-level [WithClock] to every Spec it compiles itself (Target
+// links), so under a mock the lifecycle checks and TimeWindow evaluation
+// read one time source; a [Cache]'s compiles are configured separately via
+// [WithCompileOptions]. A nil c is ignored.
 func WithManagerClock(c clock.Clock) ManagerOption {
 	return func(cfg *managerConfig) {
 		if c != nil {

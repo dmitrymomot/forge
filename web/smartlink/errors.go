@@ -50,3 +50,14 @@ var (
 	// ErrScope is returned when a required tenant scope is missing.
 	ErrScope = errors.New("smartlink: scope required")
 )
+
+// refGone reports whether a resolver error is a positive "this ref leads
+// nowhere" answer — [ErrNoTarget] (paused or deleted offer) or
+// [ErrRefNotFound] (ref names no known Spec) — as opposed to an
+// infrastructure failure. It is the single definition of that split:
+// Create's ref precheck maps it to [ErrInvalidLink] caller input and
+// [Manager.Handler] serves it as a dead link, while anything else must read
+// as an outage.
+func refGone(err error) bool {
+	return errors.Is(err, ErrNoTarget) || errors.Is(err, ErrRefNotFound)
+}

@@ -16,10 +16,19 @@ const cachePrefix = "smartlink:code:"
 // surfaces [ErrLinkDeactivated]; one whose ExpiresAt has passed surfaces
 // [ErrLinkExpired]; an unknown code surfaces [ErrNotFound] from the Store.
 //
+// A code that could never have been minted by [Manager.Create] — over 64
+// characters or outside [A-Za-z0-9_-] — is [ErrNotFound] without a Store
+// roundtrip, so scans and garbage input cost nothing. A row written to the
+// Store directly with a code outside that charset is unreachable through
+// Resolve by design; the code contract is Create's.
+//
 // Resolve is the public, unscoped read path: a code is a public URL, so
 // unlike the management ops it never consults [WithScope]. The returned
 // Link has ShortURL populated (see [Manager.ShortURL]).
 func (m *Manager) Resolve(ctx context.Context, code string) (Link, error) {
+	if !validCodeChars(code) {
+		return Link{}, ErrNotFound
+	}
 	l, err := m.lookup(ctx, code)
 	if err != nil {
 		return Link{}, err

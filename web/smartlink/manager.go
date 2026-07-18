@@ -102,11 +102,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 	if p.Ref != "" && !p.SkipRefCheck && m.cfg.resolver != nil {
 		d, err := m.cfg.resolver(ctx, Link{Ref: p.Ref, Tenant: p.Tenant})
 		if err != nil {
-			// Only a ref the resolver positively rejects is caller input error;
-			// anything else (consumer DB down, cache backend failing) is an
-			// infrastructure failure and must not read as ErrInvalidLink to an
-			// API layer mapping it to a 4xx.
-			if errors.Is(err, ErrRefNotFound) || errors.Is(err, ErrNoTarget) {
+			// Only a ref the resolver positively rejects (see refGone) is caller
+			// input error; anything else (consumer DB down, cache backend
+			// failing) must not read as ErrInvalidLink to an API layer mapping
+			// it to a 4xx.
+			if refGone(err) {
 				return Link{}, fmt.Errorf("%w: ref %q: %w", ErrInvalidLink, p.Ref, err)
 			}
 			return Link{}, fmt.Errorf("smartlink: check ref %q: %w", p.Ref, err)
@@ -207,7 +207,9 @@ func (m *Manager) validateVanityCode(code string) error {
 // (defense in depth — a directly-inserted "javascript:" target must not
 // become a redirect).
 func (m *Manager) compileLink(salt, target string) (*Compiled, error) {
-	compiled, err := Compile(Spec{Salt: salt, Default: []Target{{URL: target}}, Params: m.cfg.linkParamPolicy})
+	// The Manager's clock is the clock for everything it compiles itself, so
+	// a mocked WithManagerClock can never disagree with rule evaluation.
+	compiled, err := Compile(Spec{Salt: salt, Default: []Target{{URL: target}}, Params: m.cfg.linkParamPolicy}, WithClock(m.cfg.clock))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidLink, err)
 	}

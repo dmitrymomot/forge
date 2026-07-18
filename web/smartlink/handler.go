@@ -19,11 +19,10 @@ import (
 // otherwise it falls back to the trimmed request path, so the Handler also
 // works mounted bare at "/".
 //
-// A code that could never have been minted by [Manager.Create] — over 64
-// characters or outside [A-Za-z0-9_-] — is answered as a dead link without a
-// Store roundtrip, so scans and garbage paths cost nothing. A row written to
-// the Store directly with a code outside that charset is unreachable through
-// the Handler by design; the code contract is Create's.
+// A code that could never have been minted by [Manager.Create] is answered
+// as a dead link without a Store roundtrip — [Manager.Resolve] rejects it as
+// [ErrNotFound] before touching the Store — so scans and garbage paths cost
+// nothing.
 //
 // Every response — success, dead link, or error — carries
 // "Cache-Control: no-store": a redirect decision can change on the next
@@ -42,10 +41,6 @@ func (m *Manager) Handler() http.Handler {
 			code = strings.Trim(r.URL.Path, "/")
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		if !validCodeChars(code) {
-			m.deadLink(w, r)
-			return
-		}
 
 		ctx := r.Context()
 		l, err := m.Resolve(ctx, code)
@@ -59,12 +54,19 @@ func (m *Manager) Handler() http.Handler {
 			v = m.cfg.visitFunc(r, v)
 		}
 		if len(l.Metadata) > 0 {
-			// Merged into a fresh map — metadata wins, and the map a VisitFunc
-			// returned is never mutated behind the consumer's back.
-			merged := make(map[string]string, len(v.Params)+len(l.Metadata))
-			maps.Copy(merged, v.Params)
-			maps.Copy(merged, l.Metadata)
-			v.Params = merged
+			// Metadata wins. With a VisitFunc configured the merge goes into a
+			// fresh map — the map a VisitFunc returned is never mutated behind
+			// the consumer's back; without one v.Params is the handler's own
+			// map from firstQueryValues, merged in place to keep the hot path
+			// allocation-free.
+			if m.cfg.visitFunc != nil {
+				merged := make(map[string]string, len(v.Params)+len(l.Metadata))
+				maps.Copy(merged, v.Params)
+				v.Params = merged
+			} else if v.Params == nil {
+				v.Params = make(map[string]string, len(l.Metadata))
+			}
+			maps.Copy(v.Params, l.Metadata)
 		}
 
 		d, ok := m.decider(ctx, w, r, code, l)
@@ -114,11 +116,7 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 	default:
 		resolved, err := m.cfg.resolver(ctx, l)
 		if err != nil {
-			// ErrNoTarget (paused/deleted offer) and ErrRefNotFound (ref names
-			// no known Spec) are both positive "this link leads nowhere"
-			// answers — dead links, like Create maps them to caller error —
-			// while anything else is an outage and must read as one.
-			if errors.Is(err, ErrNoTarget) || errors.Is(err, ErrRefNotFound) {
+			if refGone(err) {
 				m.deadLink(w, r)
 				return nil, false
 			}
