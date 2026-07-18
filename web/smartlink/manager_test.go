@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/resilience/cache"
 	"github.com/dmitrymomot/forge/web/smartlink"
@@ -72,6 +73,72 @@ func TestNewManagerBadFallbackURL(t *testing.T) {
 	}
 	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithFallbackURL("https://fallback.example.com/")); err != nil {
 		t.Fatalf("NewManager(WithFallbackURL(valid)) error = %v, want nil", err)
+	}
+}
+
+// TestWithManagerClock asserts the Manager takes every timestamp it reads or
+// stamps — CreatedAt, DeactivatedAt, the Resolve expiry check — from the
+// configured clock, so link lifecycle is fully deterministic under test.
+func TestWithManagerClock(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	mock := clock.NewMock(start)
+	m := newTestManager(t, smartlink.WithManagerClock(mock))
+	ctx := context.Background()
+
+	l, err := m.Create(ctx, smartlink.CreateParams{
+		Target:    "https://dest.example.com/",
+		ExpiresAt: start.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	if !l.CreatedAt.Equal(start) {
+		t.Fatalf("CreatedAt = %v, want mock time %v", l.CreatedAt, start)
+	}
+	if _, err := m.Resolve(ctx, l.Code); err != nil {
+		t.Fatalf("Resolve() before expiry error = %v, want nil", err)
+	}
+
+	mock.Advance(2 * time.Hour)
+	if _, err := m.Resolve(ctx, l.Code); !errors.Is(err, smartlink.ErrLinkExpired) {
+		t.Fatalf("Resolve() after mock advance = %v, want ErrLinkExpired", err)
+	}
+
+	if err := m.Deactivate(ctx, l.Code); err != nil {
+		t.Fatalf("Deactivate() error = %v, want nil", err)
+	}
+	got, err := m.Get(ctx, l.Code)
+	if err != nil {
+		t.Fatalf("Get() error = %v, want nil", err)
+	}
+	if want := start.Add(2 * time.Hour); !got.DeactivatedAt.Equal(want) {
+		t.Fatalf("DeactivatedAt = %v, want mock time %v", got.DeactivatedAt, want)
+	}
+}
+
+// TestNewManagerRejectsEmptySchemes asserts WithSchemes fails construction
+// on an empty list or an empty entry — either would silently reject every
+// Target on Create instead of surfacing the misconfiguration.
+func TestNewManagerRejectsEmptySchemes(t *testing.T) {
+	t.Parallel()
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithSchemes()); err == nil {
+		t.Fatal("NewManager(WithSchemes()) error = nil, want error")
+	}
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithSchemes("https", "")); err == nil {
+		t.Fatal(`NewManager(WithSchemes("https", "")) error = nil, want error`)
+	}
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithSchemes("HTTPS")); err != nil {
+		t.Fatalf("NewManager(WithSchemes(valid)) error = %v, want nil", err)
+	}
+}
+
+// TestNewManagerRejectsNilCacheStore asserts WithCache fails construction on
+// a nil store rather than silently running uncached.
+func TestNewManagerRejectsNilCacheStore(t *testing.T) {
+	t.Parallel()
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithCache(nil, time.Minute)); err == nil {
+		t.Fatal("NewManager(WithCache(nil)) error = nil, want error")
 	}
 }
 

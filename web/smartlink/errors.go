@@ -37,10 +37,12 @@ var (
 	// ErrRefNotFound is the sentinel a consumer's [Cache] load func (or a
 	// custom [Resolver]) wraps when a ref names no known Spec. Create's ref
 	// precheck maps it (and ErrNoTarget) to ErrInvalidLink — caller input —
+	// and [Manager.Handler] serves both as dead links (fallback or 404),
 	// while any other resolver error propagates unwrapped as infrastructure
 	// failure.
 	ErrRefNotFound = errors.New("smartlink: ref not found")
-	// ErrInvalidLink is returned for a malformed Link or CreateParams.
+	// ErrInvalidLink is returned for a malformed Link, CreateParams, or
+	// Store argument (e.g. a zero Deactivate time).
 	ErrInvalidLink = errors.New("smartlink: invalid link")
 	// ErrCodeReserved is returned when a caller-supplied code collides with a
 	// reserved value.
@@ -48,3 +50,14 @@ var (
 	// ErrScope is returned when a required tenant scope is missing.
 	ErrScope = errors.New("smartlink: scope required")
 )
+
+// refGone reports whether a resolver error is a positive "this ref leads
+// nowhere" answer — [ErrNoTarget] (paused or deleted offer) or
+// [ErrRefNotFound] (ref names no known Spec) — as opposed to an
+// infrastructure failure. It is the single definition of that split:
+// Create's ref precheck maps it to [ErrInvalidLink] caller input and
+// [Manager.Handler] serves it as a dead link, while anything else must read
+// as an outage.
+func refGone(err error) bool {
+	return errors.Is(err, ErrNoTarget) || errors.Is(err, ErrRefNotFound)
+}

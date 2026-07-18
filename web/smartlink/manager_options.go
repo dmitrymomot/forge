@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/ops/logger"
 	"github.com/dmitrymomot/forge/resilience/cache"
@@ -42,6 +43,7 @@ type managerConfig struct {
 	onHit           func(context.Context, Hit)
 	cacheStore      cache.Store
 	logger          *slog.Logger
+	clock           clock.Clock
 	reserved        map[string]struct{}
 	baseURL         string
 	fallbackURL     string
@@ -66,6 +68,7 @@ func newManagerConfig() *managerConfig {
 		linkParamPolicy: ParamsFill,
 		redirectStatus:  http.StatusFound,
 		logger:          logger.NewNope(),
+		clock:           clock.System(),
 	}
 }
 
@@ -126,10 +129,20 @@ func validateAbsoluteHTTPURL(u string) error {
 // redirect, so a row written to the Store directly cannot smuggle a
 // disallowed scheme past the allowlist. Scheme comparison is
 // case-insensitive, since [url.Parse] always lowercases the parsed scheme.
+// An empty list or an empty entry is a NewManager error — it would silently
+// reject every Target on Create.
 func WithSchemes(s ...string) ManagerOption {
 	return func(c *managerConfig) {
-		schemes := slices.Clone(s)
-		for i, sch := range schemes {
+		if len(s) == 0 {
+			c.errs = append(c.errs, errors.New("smartlink: WithSchemes needs at least one scheme"))
+			return
+		}
+		schemes := make([]string, len(s))
+		for i, sch := range s {
+			if sch == "" {
+				c.errs = append(c.errs, errors.New("smartlink: WithSchemes has an empty scheme"))
+				return
+			}
 			schemes[i] = strings.ToLower(sch)
 		}
 		c.schemes = schemes
@@ -221,8 +234,14 @@ func WithOnHit(f func(context.Context, Hit)) ManagerOption {
 // entry that survives a failed eviction (see [Manager.invalidateCache])
 // serve forever instead of bounding its staleness — a non-positive ttl is a
 // NewManager error.
+// A nil cs is a NewManager error, not a silent fall-back to uncached: a
+// caller who asked for a cache must never run without one.
 func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 	return func(c *managerConfig) {
+		if cs == nil {
+			c.errs = append(c.errs, errors.New("smartlink: nil cache store"))
+			return
+		}
 		if ttl <= 0 {
 			c.errs = append(c.errs, fmt.Errorf("smartlink: cache ttl must be positive, got %s", ttl))
 			return
@@ -233,8 +252,9 @@ func WithCache(cs cache.Store, ttl time.Duration) ManagerOption {
 }
 
 // WithFallbackURL sets the destination [Manager.Handler] redirects to for a
-// dead link (unknown, expired, or deactivated code, or a Ref the resolver
-// reports as [ErrNoTarget]). Without it, dead links answer 404. Like
+// dead link (unknown, malformed, expired, or deactivated code, or a Ref the
+// resolver reports as [ErrNoTarget] or [ErrRefNotFound]). Without it, dead
+// links answer 404. Like
 // [WithBaseURL], it must be an absolute http(s) URL (scheme and host): a
 // typo'd relative value would silently redirect relative to the handler's
 // own path instead of failing construction.
@@ -260,6 +280,22 @@ func WithRedirectStatus(code int) ManagerOption {
 			return
 		}
 		c.redirectStatus = code
+	}
+}
+
+// WithManagerClock sets the clock the Manager reads for every timestamp it
+// takes itself: the CreatedAt stamp in Create, the DeactivatedAt stamp in
+// Deactivate, and the ExpiresAt liveness check in [Manager.Resolve] (and so
+// [Manager.Handler]). Defaults to clock.System(). The Manager also passes it
+// as the engine-level [WithClock] to every Spec it compiles itself (Target
+// links), so under a mock the lifecycle checks and TimeWindow evaluation
+// read one time source; a [Cache]'s compiles are configured separately via
+// [WithCompileOptions]. A nil c is ignored.
+func WithManagerClock(c clock.Clock) ManagerOption {
+	return func(cfg *managerConfig) {
+		if c != nil {
+			cfg.clock = c
+		}
 	}
 }
 

@@ -72,7 +72,10 @@
 // [Manager.Delete] drive its lifecycle. [Manager.Handler] serves the
 // uniform per-click pipeline for both Target and Ref links: resolve the
 // code (cache read-through via [WithCache], liveness checks) — a dead or
-// unknown code redirects to [WithFallbackURL] or answers 404 — build
+// unknown code, or a Ref the resolver reports gone ([ErrNoTarget],
+// [ErrRefNotFound]), redirects to [WithFallbackURL] or answers 404, and a
+// code that could never have been minted (over 64 chars, outside the vanity
+// charset) short-circuits there without a Store roundtrip — build
 // [Visit] from the query string and [WithVisitFunc], merge the link's
 // Metadata into Visit.Params (metadata wins — it identifies the link, not
 // the click), decide (a per-hit degenerate compile for Target links under

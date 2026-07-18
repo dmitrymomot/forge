@@ -134,30 +134,20 @@ func TestMemoryStoreTenantPredicate(t *testing.T) {
 		}
 	})
 
-	t.Run("deactivate zero at leaves active", func(t *testing.T) {
-		t.Parallel()
-		s := newStore(t)
-		if err := s.Deactivate(ctx, "code1", "owner", time.Time{}); err != nil {
-			t.Fatalf("Deactivate(zero at) = %v, want nil", err)
-		}
-		got, _ := s.Get(ctx, "code1")
-		if !got.DeactivatedAt.IsZero() {
-			t.Fatalf("DeactivatedAt = %v, want zero (still active)", got.DeactivatedAt)
-		}
-	})
-
-	t.Run("deactivate zero at does not reactivate", func(t *testing.T) {
+	t.Run("deactivate zero at rejected", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)
 		if err := s.Deactivate(ctx, "code1", "owner", at); err != nil {
 			t.Fatalf("Deactivate() = %v, want nil", err)
 		}
-		if err := s.Deactivate(ctx, "code1", "owner", time.Time{}); err != nil {
-			t.Fatalf("Deactivate(zero at) = %v, want nil", err)
+		// A zero at would store "active"; the contract rejects it before the
+		// record is touched, so it can never silently reactivate.
+		if err := s.Deactivate(ctx, "code1", "owner", time.Time{}); !errors.Is(err, smartlink.ErrInvalidLink) {
+			t.Fatalf("Deactivate(zero at) = %v, want ErrInvalidLink", err)
 		}
 		got, _ := s.Get(ctx, "code1")
 		if !got.DeactivatedAt.Equal(at) {
-			t.Fatalf("DeactivatedAt = %v, want unchanged %v (zero at must not reactivate)", got.DeactivatedAt, at)
+			t.Fatalf("DeactivatedAt = %v, want unchanged %v", got.DeactivatedAt, at)
 		}
 	})
 

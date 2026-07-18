@@ -44,13 +44,15 @@ type segment struct {
 }
 
 // template is a compiled URL template. A nil segs means the URL is a plain
-// literal and renders with zero work. elided is the macro-elided form (equal
-// to raw for a literal) and authMacro reports whether any macro sits in the
-// authority segment — both computed here once so validation layers never
+// literal and renders with zero work. elidedURL is the one url.Parse of the
+// macro-elided form (raw itself for a literal) — reused by checkTargetURL
+// and the literal-target query precompute instead of re-parsing the same
+// string per compile — and authMacro reports whether any macro sits in the
+// authority segment; all computed here once so validation layers never
 // re-scan the raw template with a second parser.
 type template struct {
+	elidedURL *url.URL
 	raw       string
-	elided    string
 	segs      []segment
 	authMacro bool
 }
@@ -60,10 +62,11 @@ type template struct {
 // validates the macro-elided template parses as a URL.
 func parseTemplate(raw, where string) (template, error) {
 	if !strings.ContainsRune(raw, '{') && !strings.ContainsRune(raw, '}') {
-		if _, err := url.Parse(raw); err != nil {
+		u, err := url.Parse(raw)
+		if err != nil {
 			return template{}, fmt.Errorf("%w: %s: %v", ErrInvalidTemplate, where, err)
 		}
-		return template{raw: raw, elided: raw}, nil
+		return template{raw: raw, elidedURL: u}, nil
 	}
 
 	var segs []segment
@@ -104,10 +107,11 @@ func parseTemplate(raw, where string) (template, error) {
 		segs = append(segs, segment{literal: rest})
 		elided.WriteString(rest)
 	}
-	if _, err := url.Parse(elided.String()); err != nil {
+	u, err := url.Parse(elided.String())
+	if err != nil {
 		return template{}, fmt.Errorf("%w: %s: %v", ErrInvalidTemplate, where, err)
 	}
-	return template{raw: raw, elided: elided.String(), segs: segs, authMacro: authMacro}, nil
+	return template{raw: raw, elidedURL: u, segs: segs, authMacro: authMacro}, nil
 }
 
 // escapeModeFor derives a macro's escaping from the macro-elided literal
@@ -179,7 +183,9 @@ func (t template) render(v *Visit) string {
 				b.WriteString(val)
 			}
 		case escPath:
-			writePathEscaped(&b, val)
+			// ':' additionally encoded: in the first segment of a relative
+			// template it would otherwise reparse as a scheme delimiter.
+			b.WriteString(strings.ReplaceAll(url.PathEscape(val), ":", "%3A"))
 		case escQuery:
 			b.WriteString(url.QueryEscape(val))
 		}
@@ -199,21 +205,4 @@ func isHostSafe(s string) bool {
 		return false
 	}
 	return true
-}
-
-// writePathEscaped writes url.PathEscape output with ':' additionally
-// encoded: a ':' in the first segment of a relative template would otherwise
-// reparse as a scheme delimiter.
-func writePathEscaped(b *strings.Builder, s string) {
-	escaped := url.PathEscape(s)
-	for {
-		i := strings.IndexByte(escaped, ':')
-		if i < 0 {
-			b.WriteString(escaped)
-			return
-		}
-		b.WriteString(escaped[:i])
-		b.WriteString("%3A")
-		escaped = escaped[i+1:]
-	}
 }

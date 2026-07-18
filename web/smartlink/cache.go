@@ -16,12 +16,13 @@ const defaultRefTTL = 5 * time.Minute
 
 // Resolver resolves a Ref-backed Link to a Decider ready for a click decision.
 // [Cache.Resolver] returns a ready-made one; [WithResolver] wires it into a
-// Manager. Resolver does not special-case ErrNoTarget: when the
-// consumer's load func returns it for a paused or deleted offer, Resolver
-// propagates the wrapped error and leaves the mapping to dead-link handling
-// to the caller. A load func should return an error wrapping [ErrRefNotFound]
-// for a ref that names no known Spec, so [Manager.Create]'s ref precheck can
-// tell caller error from infrastructure failure.
+// Manager. Resolver does not special-case the sentinels itself: a load func
+// returns an error wrapping [ErrNoTarget] for a paused or deleted offer and
+// [ErrRefNotFound] for a ref that names no known Spec, Resolver propagates
+// them wrapped, and the caller maps them — [Manager.Handler] serves both as
+// dead links, [Manager.Create]'s ref precheck reports both as [ErrInvalidLink]
+// caller input, and every other resolver error stays an infrastructure
+// failure (500 at serve time, unwrapped from Create).
 type Resolver func(ctx context.Context, l Link) (Decider, error)
 
 // Cache is a lazy compile cache for Ref-backed Links. Offers live in the

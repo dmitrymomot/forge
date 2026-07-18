@@ -242,6 +242,92 @@ func TestHandlerRefNoTarget(t *testing.T) {
 	})
 }
 
+// TestHandlerRefNotFound asserts a Resolver error wrapping ErrRefNotFound —
+// the ref names no known Spec anymore — is dead-link handling like
+// ErrNoTarget, not a 500: a hard-deleted offer must not turn every click
+// into an internal error.
+func TestHandlerRefNotFound(t *testing.T) {
+	t.Parallel()
+	resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) {
+		return nil, fmt.Errorf("offer lookup: %w", smartlink.ErrRefNotFound)
+	}
+	m := newTestManager(t, smartlink.WithResolver(resolver), smartlink.WithFallbackURL("https://fallback.example.com/"))
+	l, err := m.Create(context.Background(), smartlink.CreateParams{Ref: "gone-1", SkipRefCheck: true})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/r/"+l.Code, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d (ErrRefNotFound is a dead link, not an outage)", rec.Code, http.StatusFound)
+	}
+	if got, want := rec.Header().Get("Location"), "https://fallback.example.com/"; got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandlerImpossibleCodeSkipsStore asserts a code Create could never have
+// minted — over 64 chars or outside [A-Za-z0-9_-] — answers as a dead link
+// without hitting the Store.
+func TestHandlerImpossibleCodeSkipsStore(t *testing.T) {
+	t.Parallel()
+	store := &countingStore{Store: smartlink.NewMemoryStore()}
+	m, err := smartlink.NewManager(store)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	for _, code := range []string{"has%20space", "caf%C3%A9", strings.Repeat("x", 65)} {
+		req := httptest.NewRequest(http.MethodGet, "/r/"+code, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("code %q: status = %d, want %d", code, rec.Code, http.StatusNotFound)
+		}
+	}
+	if got := store.gets.Load(); got != 0 {
+		t.Fatalf("Store.Get calls = %d, want 0 (impossible codes must not reach the Store)", got)
+	}
+}
+
+// TestHandlerDoesNotMutateVisitFuncParams asserts the metadata merge builds a
+// fresh map instead of writing into whatever map the consumer's VisitFunc
+// returned — a consumer handing over a shared or reused map must not see it
+// change behind its back.
+func TestHandlerDoesNotMutateVisitFuncParams(t *testing.T) {
+	t.Parallel()
+	shared := map[string]string{"sub": "mine"}
+	visitFn := func(_ *http.Request, v smartlink.Visit) smartlink.Visit {
+		v.Params = shared
+		return v
+	}
+	m := newTestManager(t, smartlink.WithVisitFunc(visitFn))
+	l, err := m.Create(context.Background(), smartlink.CreateParams{
+		Target:   "https://dest.example.com/",
+		Metadata: map[string]string{"aff": "abc"},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/r/"+l.Code, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if len(shared) != 1 || shared["sub"] != "mine" {
+		t.Fatalf("VisitFunc's map was mutated by the handler: %v", shared)
+	}
+}
+
 // TestHandlerResolverNilDecider asserts a resolver that returns (nil, nil)
 // at serve time (its row admitted via SkipRefCheck) answers 500 instead of
 // panicking on Decide.
