@@ -62,7 +62,7 @@ func Negative[T number](v T) Violation {
 	return Violation{}
 }
 
-// MultipleOf requires value to be an integer multiple of n.
+// MultipleOf requires value to be an integer multiple of n. n == 0 always fails.
 func MultipleOf[T integer](n T) Rule[T] {
 	return func(v T) Violation {
 		if n == 0 || v%n != 0 {

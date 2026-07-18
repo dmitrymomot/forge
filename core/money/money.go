@@ -54,7 +54,8 @@ func Parse(s string, c Currency) (Money, error) {
 // Amount returns the exact decimal amount.
 func (m Money) Amount() decimal.Decimal { return m.amount }
 
-// Currency returns the currency.
+// Currency returns m's currency. It is the zero Currency for the zero Money
+// value or any Money otherwise never assigned a currency.
 func (m Money) Currency() Currency { return m.currency }
 
 // Minor returns the amount rounded to the currency's MinorUnits (banker's

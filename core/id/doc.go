@@ -9,24 +9,23 @@
 //   - Short: 80-bit, 16-char Crockford base32, compact and URL-safe (link
 //     shorteners and similar).
 //
-// The zero-argument free functions cover the common case:
-//
-//	u := id.NewUUID()
-//	l := id.NewULID()
-//	s := id.NewShort()
-//
-// For deterministic tests or strictly-increasing same-millisecond ordering, use
-// a Generator:
-//
-//	g := id.NewGenerator(id.WithClock(clk), id.WithMonotonic())
-//	a, b := g.Short(), g.Short() // strictly increasing
-//
-// Under heavy concurrent generation, a single shared Generator created with
-// WithMonotonic can outperform the free functions: the free functions call
-// crypto/rand on every call (which serializes internally), while monotonic mode
-// draws randomness once per millisecond and increments in between.
+// The zero-argument free functions (NewUUID, NewULID, NewShort) cover the
+// common case. For deterministic tests or strictly-increasing same-millisecond
+// ordering, construct a Generator instead: WithClock injects a test clock, and
+// WithMonotonic makes a single shared Generator strictly increasing — and,
+// under heavy concurrent generation, faster than the free functions, since it
+// draws randomness once per millisecond and increments it instead of calling
+// crypto/rand (which serializes internally) on every call.
 //
 // All generation reads crypto/rand and panics only if the OS RNG fails, an
 // unrecoverable condition. Parsing and Scan are case-insensitive; the Parse
 // functions and Scan return ErrMalformed (via errors.Is) on invalid input.
+//
+// # Usage
+//
+//	u := id.NewUUID()
+//	l := id.NewULID()
+//	s := id.NewShort()
+//	g := id.NewGenerator(id.WithMonotonic())
+//	first, second := g.Short(), g.Short() // strictly increasing
 package id

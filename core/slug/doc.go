@@ -14,7 +14,10 @@
 //
 // # Usage
 //
-//	slug.Make("Héllo, World!")                          // "hello-world"
-//	slug.Make("admin", slug.WithReservedSlugs("admin")) // "admin-<random>"
-//	slug.Unique("post", exists)                         // "post", "post-2", "post-3", …
+//	s := slug.Make("Héllo, World!")
+//	// s == "hello-world"
+//
+//	exists := func(candidate string) bool { return false } // e.g. a DB lookup
+//	u := slug.Unique("Hello World", exists)
+//	// u == "hello-world"
 package slug

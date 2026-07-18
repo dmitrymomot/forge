@@ -3,12 +3,13 @@
 //
 // It is data, not policy. core/i18n imports nothing from this package and
 // applies none of it automatically — the dependency arrow runs one way, and
-// the compiler enforces it. Wire what you want, explicitly:
+// the compiler enforces it. Wire what you want, explicitly.
+//
+// # Usage
 //
 //	bundle, err := i18n.New(
-//	    i18n.WithMessages(catalogFS),
+//	    i18n.WithTranslations("uk-UA", "app", map[string]any{"greeting": "Привіт"}),
 //	    i18n.WithPlural("uk", cldr.Uk),
-//	    i18n.WithPlural("pl", cldr.Pl),
 //	    i18n.WithFormat("uk-UA", cldr.FormatUkUA),
 //	)
 //

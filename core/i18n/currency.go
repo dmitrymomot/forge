@@ -8,9 +8,9 @@ import (
 // uint64's safe decimal range (10^19 < 2^64 <= 10^20). No real ISO-4217
 // currency has more than 4 minor units (CLF); this is a defensive backstop
 // against a pathological Currency value, not a realistic path. Without it, a
-// MinorUnits at or beyond 20 would overflow the repeated-multiply divisor —
-// which can silently wrap to exactly zero — turning the following division
-// into a panic.
+// MinorUnits of 20 or more would overflow the repeated-multiply divisor,
+// corrupting the rendered digits, and a MinorUnits of 64 or more would wrap
+// it to exactly zero, turning the following division into a panic.
 const maxCurrencyDigits = 19
 
 // Currency formats m for the locale. The amount and symbol come from money —
@@ -27,8 +27,8 @@ func (b *Bundle) AppendCurrency(dst []byte, loc Locale, m money.Money) []byte {
 	return appendCurrencySpec(dst, m, b.specFor(b.locIdx(loc)))
 }
 
-// appendCurrencySpec renders m under s. Shared by Bundle and Localizer
-// (Task 10), which must not re-implement this.
+// appendCurrencySpec renders m under s. Shared by Bundle and Localizer,
+// which must not re-implement this.
 func appendCurrencySpec(dst []byte, m money.Money, s *FormatSpec) []byte {
 	cur := m.Currency()
 	minor, ok := m.MinorOK()
@@ -43,7 +43,7 @@ func appendCurrencySpec(dst []byte, m money.Money, s *FormatSpec) []byte {
 	if minor < 0 {
 		dst = append(dst, '-')
 	}
-	mag := absU64(minor) // shared with Number/Percent; see format.go
+	mag := absU64(minor) // shared with NumberInt; see format.go
 
 	if s.CurrencyBefore {
 		dst = append(dst, cur.Symbol...)

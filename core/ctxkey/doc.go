@@ -10,7 +10,8 @@
 //
 // # Usage
 //
-//	var userIDKey = ctxkey.New[string]("userID")
+//	ctx := context.Background()
+//	userIDKey := ctxkey.New[string]("userID")
 //
 //	ctx = userIDKey.With(ctx, "u_123")
 //	id, ok := userIDKey.From(ctx) // (string, bool) — no assertion at the call site

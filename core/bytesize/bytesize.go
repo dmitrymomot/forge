@@ -37,7 +37,9 @@ var parseUnits = []struct {
 }
 
 // Parse converts a human byte-size string ("10MB", "1.5GiB", "512", "10 MB")
-// into a ByteSize. Suffixes are case-insensitive; a bare number is bytes.
+// into a ByteSize. Suffixes are case-insensitive; a bare number is bytes. It
+// returns an error wrapping ErrInvalidSize if s is empty, has an unrecognized
+// suffix or malformed number, or the resulting value overflows int64.
 func Parse(s string) (ByteSize, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
@@ -133,12 +135,13 @@ func format(n int64, base int64, units []string) string {
 	return sign + s + units[i]
 }
 
-// MarshalText renders b as its String form.
+// MarshalText renders b as its String form. It never returns an error.
 func (b ByteSize) MarshalText() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// UnmarshalText parses p into b.
+// UnmarshalText parses p as a byte size and stores the result in b. On
+// error, b is left unchanged.
 func (b *ByteSize) UnmarshalText(p []byte) error {
 	v, err := Parse(string(p))
 	if err != nil {

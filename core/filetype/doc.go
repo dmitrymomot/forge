@@ -16,11 +16,12 @@
 //
 // # Usage
 //
+//	head := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
 //	t, ok := filetype.Detect(head) // ok=false means genuinely unknown
 //	if ok && t.MIME == "image/png" {
-//		// ...
+//		// accept the upload
 //	}
 //
-//	// For an io.Reader whose bytes must stay intact for a later stage:
+//	src := bytes.NewReader(head)
 //	typ, stream, err := filetype.DetectReader(src) // stream replays src in full
 package filetype

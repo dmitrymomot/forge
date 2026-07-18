@@ -23,8 +23,9 @@ var deSpec = i18n.FormatSpec{
 	PercentSpace:   true,
 }
 
-// frSpec uses U+00A0 NO-BREAK SPACE as its group separator, written as an
-// escape so the distinction from a plain space stays visible in source.
+// frSpec uses U+00A0 NO-BREAK SPACE as its group separator: the raw NBSP
+// byte embedded directly below, not a plain space — the two are visually
+// indistinguishable in most editors and diffs.
 var frSpec = i18n.FormatSpec{
 	DecimalSep:     ",",
 	GroupSep:       " ",

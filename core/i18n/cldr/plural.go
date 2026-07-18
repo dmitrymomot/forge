@@ -16,8 +16,6 @@ func magnitude(n int) uint64 {
 	return uint64(n)
 }
 
-// --- shared rule bodies -----------------------------------------------------
-
 // oneOther: one for exactly 1 (or -1), other otherwise. The simple two-form
 // shape shared by Germanic, Uralic, and several unrelated languages whose
 // CLDR cardinal rule draws no further distinction.
@@ -235,7 +233,6 @@ func hebrew(n int) i18n.PluralCategory {
 	}
 }
 
-// --- per-language rules -----------------------------------------------------
 // One exported var per language. Never a family bucket: sharing a body is
 // fine, sharing an identifier is how uk/ru 21 and pt/it 0 got broken before.
 

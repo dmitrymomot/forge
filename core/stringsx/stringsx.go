@@ -41,7 +41,8 @@ func TruncateWords(s string, n int) string {
 }
 
 // Mask keeps the last keep runes of s and replaces the rest with '*'. When keep
-// >= len(s) or keep <= 0 the whole string is masked (never leaks characters).
+// is greater than or equal to the number of runes in s, or keep <= 0, the whole
+// string is masked (never leaks characters).
 func Mask(s string, keep int) string {
 	r := []rune(s)
 	if keep <= 0 || keep >= len(r) {
@@ -54,7 +55,7 @@ func Mask(s string, keep int) string {
 // best-effort helper for trusted, developer-facing strings only: append "s";
 // "es" after s/x/z/ch/sh; consonant + "y" -> "ies". It is NOT a linguistics
 // engine (no irregular plurals). Locale-aware pluralization belongs to the
-// future i18n package. Returns word unchanged when n == 1.
+// i18n package. Returns word unchanged when n == 1.
 func Pluralize(word string, n int) string {
 	if n == 1 || word == "" {
 		return word

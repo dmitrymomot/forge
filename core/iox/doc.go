@@ -6,10 +6,10 @@
 //
 // # Usage
 //
-//	body := iox.LimitReader(r.Body, maxBodySize)
-//	data, err := io.ReadAll(body)
+//	var body io.ReadCloser // from an *http.Request's Body
+//	limited := iox.LimitReader(body, 1<<20)
+//	data, err := io.ReadAll(limited)
 //	if errors.Is(err, iox.ErrLimitExceeded) {
-//		_ = iox.DrainClose(r.Body) // reject but keep the connection alive
-//		return errTooLarge
+//		_ = iox.DrainClose(body) // reject but keep the connection alive
 //	}
 package iox

@@ -16,71 +16,50 @@
 // edge-guards, enter-guards(to), then exit-hooks(from), edge-hooks,
 // enter-hooks(to); first error aborts.
 //
-// # Compile-time flows
+// # Usage
 //
 // Declare a typed lifecycle once at package init. The Define anchor binds
-// both type parameters so every part infers them:
+// both type parameters so every part infers them, then Fire validates and
+// applies a transition for the caller to persist:
 //
-//	type Status string
+//	type invoiceStatus string
 //
 //	const (
-//		StatusDraft  Status = "draft"
-//		StatusIssued Status = "issued"
-//		StatusPaid   Status = "paid"
-//		StatusVoid   Status = "void"
+//		invoiceDraft  invoiceStatus = "draft"
+//		invoiceIssued invoiceStatus = "issued"
 //	)
 //
-//	var d fsm.Define[Status, *Invoice]
+//	type invoice struct{ Status invoiceStatus }
 //
-//	var InvoiceFSM = fsm.MustNew(StatusDraft,
-//		d.Edge(StatusDraft, StatusIssued, d.Hook(assignNumber)),
-//		d.Edge(StatusIssued, StatusPaid),
-//		d.EdgeFromAny(StatusVoid, d.Guard(notPaid)),
-//		d.OnEnter(StatusIssued, d.Hook(stampIssuedAt)),
-//	)
+//	var d fsm.Define[invoiceStatus, *invoice]
+//	var invoiceFSM = fsm.MustNew(invoiceDraft, d.Edge(invoiceDraft, invoiceIssued))
 //
-//	func Transition(ctx context.Context, inv *Invoice, to Status) error {
-//		if err := InvoiceFSM.Fire(ctx, inv, inv.Status, to); err != nil {
-//			return err
-//		}
-//		inv.Status = to
-//		return saveInvoice(ctx, inv) // conditional write, see below
+//	inv := &invoice{Status: invoiceDraft}
+//	if err := invoiceFSM.Fire(context.Background(), inv, inv.Status, invoiceIssued); err == nil {
+//		inv.Status = invoiceIssued
 //	}
+//
+// Real flows attach Guard and Hook attachments to Edge, EdgeFromAny,
+// OnEnter, and OnExit, and build the machine with MustNew at package
+// scope (the regexp.MustCompile precedent) so a broken definition panics
+// at init instead of at first use.
 //
 // # Tenant-defined flows
 //
 // Runtime flows load a Definition (JSON) from the consumer's DB and
-// compile it against the app's registered guard/hook vocabulary. Compile
-// fails closed with every issue in one single-line error — validate at
-// flow-save time and a stored definition always fires cleanly. Cache
-// compiled machines by (tenant, flow, version); they are immutable, so a
-// version-keyed cache never needs invalidation:
+// compile it against the app's registered guard/hook vocabulary via a
+// Registry. Compile fails closed with every issue in one single-line
+// error — validate at flow-save time and a stored definition always
+// fires cleanly. Cache compiled machines by (tenant, flow, version); they
+// are immutable, so a version-keyed cache never needs invalidation:
 //
-//	reg := fsm.Registry[*Move]{
-//		Guards: map[string]fsm.Func[string, *Move]{
-//			"admin_only":      adminOnly,
-//			"subtasks_closed": subtasksClosed,
-//		},
-//		Hooks: map[string]fsm.Func[string, *Move]{
-//			"stamp_completed": stampCompleted,
-//		},
-//	}
+//	m, err := fsm.Compile(def, reg)
 //
-//	var def fsm.Definition
-//	if err := json.Unmarshal(row.FlowJSON, &def); err != nil {
-//		return err
-//	}
-//	m, err := fsm.Compile(def, reg) // cache under row.ProjectID + ":" + row.Version
-//
-//	err = m.Fire(ctx, &Move{Task: task, Actor: actor}, task.Status, target)
-//	switch {
-//	case errors.Is(err, fsm.ErrGuardDenied):
-//		// 422: err carries the human reason ("subtasks still open")
-//	case errors.Is(err, fsm.ErrIllegalTransition), errors.Is(err, fsm.ErrUnknownState):
-//		// 409: stale board — flow or task changed under the user
-//	case err != nil:
-//		// 500: a hook broke; nothing was persisted
-//	}
+// Map Fire's error into a response: ErrGuardDenied is a domain denial
+// (422 — the wrapped guard error carries the human reason);
+// ErrIllegalTransition or ErrUnknownState means the flow or task changed
+// under the caller (409 — stale board); any other error means a hook
+// failed and nothing was persisted (500).
 //
 // Allowed returns the targets the current entity may actually move to
 // (guards evaluated, hooks never run) — it renders per-user status

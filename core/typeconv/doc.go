@@ -1,6 +1,6 @@
 // Package typeconv converts strings to Go scalars and back without reflection.
 //
-// It is the scalar substrate that envconfig, form decoding, and featureflag
+// It is the scalar substrate that config, form decoding, and featureflag
 // build field decoders on: Parse[T] and the ParseInt/ParseUint/... helpers turn
 // a string into a typed value; Format is the lossless inverse. Struct-field
 // walking belongs to structfields; locale-aware parsing belongs to i18n.

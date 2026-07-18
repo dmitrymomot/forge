@@ -10,6 +10,18 @@
 // Invariant (ISO-8601, "." decimal). Neither is an error, and neither
 // pretends to know your language's grammar.
 //
+// # Usage
+//
+//	catalog := fstest.MapFS{"en/app.json": &fstest.MapFile{Data: []byte(`{"greeting": "Hello, {{name}}!"}`)}}
+//	bundle, err := i18n.New(i18n.WithMessages(catalog))
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	fmt.Println(bundle.T(bundle.Default(), "app.greeting", "name", "Ann"))
+//	// Output: Hello, Ann!
+//
+// # CLDR data
+//
 // Correct CLDR data lives in the sibling package core/i18n/cldr and is
 // never applied automatically:
 //

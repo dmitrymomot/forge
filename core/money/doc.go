@@ -33,5 +33,5 @@
 //	if err != nil {
 //		// price and shipping share a currency here, so this is unreachable
 //	}
-//	total.String() // "24.99 USD"
+//	_ = total.String() // "24.99 USD"
 package money

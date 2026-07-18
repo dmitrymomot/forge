@@ -144,7 +144,10 @@ func downsample(src *image.RGBA, ss int) *image.RGBA {
 	return dst
 }
 
-// PNG encodes data as a PNG image.
+// PNG encodes data as a PNG image and returns the raw file bytes. Returns
+// ErrTooLarge if data exceeds the QR capacity at the effective level, or one
+// of ErrInvalidScale, ErrInvalidBorder, ErrInvalidLogoSize, ErrInvalidColor if
+// opts are invalid.
 func PNG(data string, opts ...Option) ([]byte, error) {
 	c, err := newConfig(opts...)
 	if err != nil {
@@ -164,6 +167,7 @@ func PNG(data string, opts ...Option) ([]byte, error) {
 }
 
 // DataURI encodes data as a base64 PNG data URI ("data:image/png;base64,…").
+// Errors are the same as PNG's.
 func DataURI(data string, opts ...Option) (string, error) {
 	raw, err := PNG(data, opts...)
 	if err != nil {

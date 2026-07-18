@@ -21,8 +21,7 @@
 // is NULL) and JSON (zero Phone is null). What this is NOT: no per-country
 // length/pattern validation, no line-type or carrier lookup, no pretty
 // per-country grouping, and no area-code disambiguation of shared dial codes —
-// the libphonenumber swamp stays out. Cheap E.164 shape validation lives in
-// core/validate.
+// the libphonenumber swamp stays out.
 //
 // # Usage
 //

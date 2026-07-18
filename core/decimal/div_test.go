@@ -100,7 +100,6 @@ func ratRoundToScale(r *big.Rat, scale int32, mode decimal.RoundingMode) *big.Ra
 	if neg {
 		q.Neg(q)
 	}
-	// result = q / 10^scale
 	return new(big.Rat).SetFrac(q, pow)
 }
 
@@ -146,14 +145,16 @@ func TestDiv_NegativeScaleClamped(t *testing.T) {
 	assert.Equal(t, int32(0), got.Scale())
 }
 
-// TestDiv_BigRoundingHighScale drives Div's big.Int path with a non-terminating
-// quotient rounded at a high scale (exercises divRound on large values).
+// TestDiv_BigRoundingHighScale drives Div's big.Int path with a large-magnitude
+// dividend rounded at a high scale (exercises divRound on big.Int operands).
 func TestDiv_BigRoundingHighScale(t *testing.T) {
 	x := decimal.MustParse(bigVal)
 	y := decimal.MustParse("7")
 	got, err := x.Div(y, 20, decimal.HalfEven)
 	require.NoError(t, err)
-	// Verify against exact recomputation: got*7 rounded back should be near x.
+	// Smoke-checks the big.Int path only: the requested scale is honored and the
+	// output isn't the degenerate "0"; exact correctness is covered by
+	// TestDiv_RatOracle.
 	assert.Equal(t, int32(20), got.Scale())
 	assert.NotEqual(t, "0", got.String())
 }
@@ -220,13 +221,14 @@ func TestDiv_DirectedModesCeilUp(t *testing.T) {
 	}
 }
 
-// TestDiv_LargeNegativeExponent drives the exp<0 branch of Div (denominator
-// scaled by 10^-exp) with a divisor whose scale is large, producing a
-// big-magnitude quotient. TestDiv_NegativeExponentScalesDenominator only takes
-// this branch with a small result; these push it to int64-boundary magnitudes
-// and force a HalfEven round on the resulting large remainder.
+// TestDiv_LargeNegativeExponent divides by values with a large negative
+// exponent in scientific notation (1e-14, 3e-19). Because the divisor's scale
+// dwarfs the target scale, Div takes its exp>=0 branch — the numerator, not
+// the denominator, is scaled by 10^exp — producing a large intermediate
+// numerator; the second case also forces a HalfEven round on a
+// non-terminating remainder.
 func TestDiv_LargeNegativeExponent(t *testing.T) {
-	// 1 / 1e-14 = 1e14 exact; denominator multiplied by 10^14.
+	// 1 / 1e-14 = 1e14 exact; numerator multiplied by 10^14.
 	got, err := decimal.MustParse("1").Div(decimal.MustParse("0.00000000000001"), 0, decimal.HalfEven)
 	require.NoError(t, err)
 	assert.Equal(t, "100000000000000", got.String())

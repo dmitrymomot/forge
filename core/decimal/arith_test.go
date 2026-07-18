@@ -65,7 +65,8 @@ func TestSub_MinInt64OverflowPromotes(t *testing.T) {
 	got := decimal.Zero.Sub(decimal.New(math.MinInt64, 0))
 	assert.Equal(t, "9223372036854775808", got.String())
 
-	// Boundary: MinInt64 - (-1) also overflows and must promote.
+	// Boundary: MinInt64 - (-1) = MinInt64 + 1 fits back in int64, so this
+	// adjacent case stays on the fast path without promoting.
 	got2 := decimal.New(math.MinInt64, 0).Sub(decimal.FromInt(-1))
 	assert.Equal(t, "-9223372036854775807", got2.String())
 

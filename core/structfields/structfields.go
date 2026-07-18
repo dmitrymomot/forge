@@ -7,10 +7,10 @@ import (
 
 // Field is one exported struct field surfaced by Walk.
 type Field struct {
-	Set   func(v any) error
-	Value reflect.Value // settable when Walk received a non-nil *struct
-	Name  string        // Go field name
-	Tag   Tag           // parsed tagKey tag
+	Set   func(v any) error // assigns/converts v into the field; ErrNotSettable on a read-only (value-struct) walk
+	Value reflect.Value     // settable when Walk received a non-nil *struct
+	Name  string            // Go field name
+	Tag   Tag               // parsed tagKey tag
 }
 
 // Walk visits each exported field of a struct (or non-nil *struct) exactly

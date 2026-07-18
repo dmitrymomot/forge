@@ -11,22 +11,17 @@
 //
 // # Usage
 //
-//	// A 2FA enrollment QR as an <img src> value.
-//	uri, err := qrcode.DataURI("otpauth://totp/App:user?secret=ABC&issuer=App")
+//	var link string // e.g. a short link or otpauth:// URI
+//	var logo image.Image // decoded PNG/JPEG, e.g. via image.Decode
 //
-//	// A branded referral code: high error correction, rounded modules, logo.
+//	// A branded QR: high error correction, rounded modules, centered logo.
 //	png, err := qrcode.PNG(link,
 //		qrcode.WithLevel(qrcode.LevelH),
 //		qrcode.WithModuleShape(qrcode.ShapeRounded),
-//		qrcode.WithLogo(logoImg),
-//		qrcode.WithSize(512),
+//		qrcode.WithLogo(logo),
 //	)
 //
 //	// The raw grid, to render your own way.
 //	m, err := qrcode.Encode(link)
-//	for y := 0; y < m.Size(); y++ {
-//		for x := 0; x < m.Size(); x++ {
-//			_ = m.Module(x, y) // true = dark
-//		}
-//	}
+//	dark := m.Module(0, 0) // true = dark; iterate [0, m.Size()) for the rest
 package qrcode
