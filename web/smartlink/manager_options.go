@@ -2,6 +2,7 @@ package smartlink
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -45,6 +46,7 @@ type managerConfig struct {
 	baseURL         string
 	fallbackURL     string
 	schemes         []string
+	decorators      []Decorator
 	errs            []error
 	cacheTTL        time.Duration
 	linkParamPolicy ParamPolicy
@@ -79,14 +81,23 @@ func WithCodeFunc(f func() string) ManagerOption {
 }
 
 // WithBaseURL sets the base [Manager.ShortURL] renders a code onto. It must
-// be an absolute http(s) URL (scheme and host); any trailing slashes are
-// trimmed and exactly one is added back, so "https://s.example.com//" can't
-// produce a double slash in a rendered ShortURL. Without this option,
-// ShortURL always returns "".
+// be an absolute http(s) URL (scheme and host) without a query or fragment —
+// ShortURL appends the code as a path segment, so a base like
+// "https://s.example.com/?utm=x" would render unusable URLs such as
+// "...?utm=x/promo". Any trailing slashes are trimmed and exactly one is
+// added back, so "https://s.example.com//" can't produce a double slash in a
+// rendered ShortURL. Without this option, ShortURL always returns "".
 func WithBaseURL(u string) ManagerOption {
 	return func(c *managerConfig) {
 		if err := validateAbsoluteHTTPURL(u); err != nil {
 			c.errs = append(c.errs, fmt.Errorf("smartlink: base URL: %w", err))
+			return
+		}
+		// Checked on the raw string, not the parsed URL: a bare trailing "?"
+		// or "#" parses to empty RawQuery/Fragment yet would still survive
+		// into the rendered ShortURL text.
+		if strings.ContainsAny(u, "?#") {
+			c.errs = append(c.errs, fmt.Errorf("smartlink: base URL: must not carry a query or fragment: %q", u))
 			return
 		}
 		c.baseURL = strings.TrimRight(u, "/") + "/"
@@ -137,9 +148,27 @@ func WithReservedCodes(codes ...string) ManagerOption {
 // WithScope derives a tenant scope from the request context on every
 // management call, failing closed with [ErrScope] when the hook errors or
 // returns an empty string. Without this option, tenant strings pass through
-// verbatim — single-tenant zero ceremony.
+// verbatim — single-tenant zero ceremony. A nil f is a NewManager error, not
+// a silent fall-back to unscoped: a caller who asked for scoping must never
+// run without it.
 func WithScope(f func(ctx context.Context) (string, error)) ManagerOption {
-	return func(c *managerConfig) { c.scope = f }
+	return func(c *managerConfig) {
+		if f == nil {
+			c.errs = append(c.errs, errors.New("smartlink: nil scope func"))
+			return
+		}
+		c.scope = f
+	}
+}
+
+// WithDecorators sets the [Decorator] chain [Manager.Handler] wraps around
+// every link's Decider — Target- and Ref-backed alike — composed with [Chain]
+// (first argument outermost). This is the synchronous seam for Target links,
+// which have no [Resolver] to decorate; Ref-specific decorators can still
+// live in the Resolver (e.g. [Cache.Resolver]) and run inside this chain,
+// since this chain wraps the Decider the Resolver returns.
+func WithDecorators(ds ...Decorator) ManagerOption {
+	return func(c *managerConfig) { c.decorators = slices.Clone(ds) }
 }
 
 // WithLinkParamPolicy sets the [ParamPolicy] applied to Target-backed Links:

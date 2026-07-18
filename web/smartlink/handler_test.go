@@ -242,6 +242,64 @@ func TestHandlerRefNoTarget(t *testing.T) {
 	})
 }
 
+// TestHandlerResolverNilDecider asserts a resolver that returns (nil, nil)
+// at serve time (its row admitted via SkipRefCheck) answers 500 instead of
+// panicking on Decide.
+func TestHandlerResolverNilDecider(t *testing.T) {
+	t.Parallel()
+	resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) { return nil, nil }
+	m := newTestManager(t, smartlink.WithResolver(resolver))
+	l, err := m.Create(context.Background(), smartlink.CreateParams{Ref: "offer-1", SkipRefCheck: true})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/r/"+l.Code, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d (nil Decider is a consumer bug, not a dead link)", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+// TestHandlerDecoratorsWrapBothKinds asserts the WithDecorators chain runs
+// for Target- and Ref-backed links alike: a diverting decorator rewrites the
+// redirect destination for both.
+func TestHandlerDecoratorsWrapBothKinds(t *testing.T) {
+	t.Parallel()
+	const guardURL = "https://guard.example.com/"
+	divert := func(next smartlink.Decider) smartlink.Decider {
+		return smartlink.DecideFunc(func(v smartlink.Visit) smartlink.Decision {
+			d := next.Decide(v)
+			d.URL = guardURL
+			return d
+		})
+	}
+	m := newTestManager(t, smartlink.WithResolver(geoResolver()), smartlink.WithDecorators(divert))
+	ctx := context.Background()
+
+	target, err := m.Create(ctx, smartlink.CreateParams{Target: "https://dest.example.com/"})
+	if err != nil {
+		t.Fatalf("Create(target) error = %v, want nil", err)
+	}
+	ref, err := m.Create(ctx, smartlink.CreateParams{Ref: "offer-1"})
+	if err != nil {
+		t.Fatalf("Create(ref) error = %v, want nil", err)
+	}
+	h := newMuxHandler(m.Handler())
+
+	for name, code := range map[string]string{"target": target.Code, "ref": ref.Code} {
+		req := httptest.NewRequest(http.MethodGet, "/r/"+code, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Location"); got != guardURL {
+			t.Fatalf("%s link Location = %q, want %q (decorator must wrap every link's Decider)", name, got, guardURL)
+		}
+	}
+}
+
 // TestHandlerRefNoResolver asserts a Ref-backed Link with no configured
 // Resolver is a configuration error: 500, not a dead link.
 func TestHandlerRefNoResolver(t *testing.T) {

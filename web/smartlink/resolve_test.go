@@ -310,6 +310,48 @@ func TestResolveMissSingleflight(t *testing.T) {
 	}
 }
 
+// TestResolveMissWaitBoundedByContext asserts a coalesced cache-miss Resolve
+// whose context ends while the shared Store read is stuck returns the context
+// error instead of waiting indefinitely — a wedged Store must not pin
+// redirect requests past their deadlines.
+func TestResolveMissWaitBoundedByContext(t *testing.T) {
+	t.Parallel()
+	const code = "stuck1"
+	gs := &gateStore{
+		Store:   smartlink.NewMemoryStore(),
+		armCode: code,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m, err := smartlink.NewManager(gs, smartlink.WithCache(cache.NewMemoryStore(), time.Minute))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v, want nil", err)
+	}
+	if _, err := m.Create(context.Background(), smartlink.CreateParams{Code: code, Target: "https://example.com/"}); err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() { // leader: misses the cache, parks inside Store.Get
+		if _, err := m.Resolve(context.Background(), code); err != nil {
+			t.Errorf("leader Resolve() error = %v", err)
+		}
+	})
+	<-gs.entered // the coalesced Store read is registered and stuck
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.Resolve(ctx, code); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Resolve() with canceled ctx = %v, want context.Canceled", err)
+	}
+
+	close(gs.release)
+	wg.Wait()
+	if _, err := m.Resolve(context.Background(), code); err != nil {
+		t.Fatalf("Resolve() after release error = %v, want nil", err)
+	}
+}
+
 // TestLifecycleInvalidatesCache asserts Deactivate, Activate, and Delete
 // each best-effort evict the cache key after a successful Store mutation,
 // bounding staleness of a warmed cache entry to at most the configured TTL.

@@ -57,8 +57,10 @@
 // (or a [Cache]-backed [Resolver]) with concerns that must affect the
 // current click, composed left-to-right with [Chain]. [NewCache] is a lazy
 // compile-with-invalidation cache for Ref-backed links: it loads and
-// compiles a consumer's [Spec] on demand, keyed by ref string, and the
-// consumer calls [Cache.Invalidate] from its own offer-save path.
+// compiles a consumer's [Spec] on demand, keyed by ref string; the consumer
+// calls [Cache.Invalidate] from its own offer-save path, and every entry
+// also expires after [WithRefTTL] (default 5m), bounding both a missed
+// invalidation and the resident lifetime of refs that stop being clicked.
 //
 // # Manager and Handler
 //
@@ -89,7 +91,9 @@
 // Decorators (composed with [Chain]) are the synchronous seam: they run
 // inside Decide and can change the outcome of the current click — a fraud
 // guard diverting a suspicious visit, an A/B override, an inline metrics
-// tap. [WithOnHit] is the asynchronous observer: it runs after the redirect
+// tap. [WithDecorators] wraps every link's Decider — Target- and Ref-backed
+// alike — while a [Cache.Resolver] chain decorates Ref links only, inside
+// the manager chain. [WithOnHit] is the asynchronous observer: it runs after the redirect
 // is already written and cannot change it. It must hand the [Hit] to a
 // bounded sink — a queue push, a buffered channel — and never do work
 // inline or spawn a goroutine per hit; a slow or unbounded [WithOnHit]
