@@ -74,6 +74,78 @@ func TestDoDetachedCoalescesConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestMixedDoAndDoDetachedCoalesce(t *testing.T) {
+	var g singleflight.Group[int]
+	var calls atomic.Int32
+
+	// A DoDetached-led flight is joined by concurrent Do callers.
+	entered := make(chan struct{})
+	var leaderShared bool
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			calls.Add(1)
+			close(entered)
+			time.Sleep(25 * time.Millisecond)
+			return 42, nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 42, v)
+		leaderShared = shared
+	})
+	<-entered // the DoDetached flight is registered and running
+	joined := make([]bool, 10)
+	vals := make([]int, 10)
+	for i := range joined {
+		wg.Go(func() {
+			v, shared, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
+				calls.Add(1)
+				return 0, nil
+			})
+			assert.NoError(t, err)
+			joined[i] = shared
+			vals[i] = v
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, int32(1), calls.Load(), "mixed callers must share one execution")
+	assert.False(t, leaderShared, "the DoDetached initiator led the flight")
+	for i := range joined {
+		assert.True(t, joined[i], "Do caller %d must join the in-flight execution", i)
+		assert.Equal(t, 42, vals[i])
+	}
+
+	// Vice versa: a Do-led flight is joined by a DoDetached caller.
+	calls.Store(0)
+	entered = make(chan struct{})
+	var wg2 sync.WaitGroup
+	var joinerShared bool
+	var joinerVal int
+	wg2.Go(func() {
+		<-entered
+		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			calls.Add(1)
+			return 0, nil
+		})
+		assert.NoError(t, err)
+		joinerShared = shared
+		joinerVal = v
+	})
+	v, shared, err := g.Do(t.Context(), "k", func(context.Context) (int, error) {
+		calls.Add(1)
+		close(entered)
+		time.Sleep(25 * time.Millisecond)
+		return 7, nil
+	})
+	wg2.Wait()
+	assert.NoError(t, err)
+	assert.False(t, shared, "the Do leader ran fn itself")
+	assert.Equal(t, 7, v)
+	assert.Equal(t, int32(1), calls.Load(), "mixed callers must share one execution")
+	assert.True(t, joinerShared, "the DoDetached caller must join the Do-led flight")
+	assert.Equal(t, 7, joinerVal)
+}
+
 func TestDoDetachedWaitBoundedByCallerContext(t *testing.T) {
 	var g singleflight.Group[int]
 	release := make(chan struct{})
