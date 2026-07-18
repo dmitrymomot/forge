@@ -27,7 +27,13 @@ type KeyFunc[T any] func(T) []any
 // query's ORDER BY is reversed (Keyset.OrderBy with backward true), so rows
 // arrive in reverse display order; NewPage restores display order. key must
 // extract the same columns the keyset orders by.
+//
+// size must be at least 1 (ErrInvalidSize otherwise), so a size taken from an
+// unvalidated request fails closed rather than panicking on a slice bound.
 func NewPage[T any](rows []T, cur Cursor, size int, key KeyFunc[T], codec *Codec) (Page[T], error) {
+	if size < 1 {
+		return Page[T]{}, ErrInvalidSize
+	}
 	hasExtra := len(rows) > size
 	if hasExtra {
 		rows = rows[:size] // drop the sentinel (last row in the query's order)

@@ -34,4 +34,9 @@ var (
 	// ErrNilSigner is returned by NewCodec when WithSigner is given a nil
 	// signer.
 	ErrNilSigner = errors.New("pagination: nil signer")
+
+	// ErrInvalidSize is returned by NewPage when the page size is below 1 —
+	// a page must hold at least one row. Guarding it fails closed instead of
+	// panicking on a slice bound when size comes from an unvalidated request.
+	ErrInvalidSize = errors.New("pagination: invalid page size")
 )

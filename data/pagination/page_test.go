@@ -1,6 +1,7 @@
 package pagination_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dmitrymomot/forge/data/pagination"
@@ -190,6 +191,18 @@ func TestNewPageEncodeErrorPropagates(t *testing.T) {
 	}
 	if _, err := pagination.NewPage(rows(-1, 8), pagination.Cursor{Keys: []any{int64(11)}}, 2, condKey, codec); err == nil {
 		t.Error("forward prev: expected an encode error")
+	}
+}
+
+func TestNewPageInvalidSize(t *testing.T) {
+	t.Parallel()
+	codec := newCodec(t)
+	// A non-positive size (e.g. an unvalidated ?limit=-1) must fail closed,
+	// never panic on the rows[:size] slice bound.
+	for _, size := range []int{0, -1, -100} {
+		if _, err := pagination.NewPage(rows(3, 2, 1), pagination.Cursor{}, size, rowKey, codec); !errors.Is(err, pagination.ErrInvalidSize) {
+			t.Errorf("size %d: got %v, want ErrInvalidSize", size, err)
+		}
 	}
 }
 
