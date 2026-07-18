@@ -130,6 +130,11 @@ func Cookie(name string) Source {
 // allocate the full url.Values map per request (guard.Query precedent;
 // benchmark in the PR). Semicolon-separated pairs are skipped, matching
 // net/url's rejection of ";" in query strings.
+//
+// Unlike r.URL.Query(), the scan does not enforce net/url's 10,000-parameter
+// cap, so it still extracts an identifier from a pathologically long query
+// string (a benign divergence — the Lookup gates which tenants resolve, so
+// extraction is not a bypass).
 func Query(name string) Source {
 	if name == "" {
 		panic(ErrEmptyName)
@@ -200,9 +205,13 @@ func PathPrefix(prefix string) Source {
 // after verifying the key — as KindID. Middleware overrides any pre-existing
 // context tenant, so this source is how a context-derived tenant gets an
 // explicit slot in the precedence order; list it first so client-controlled
-// sources cannot override an authenticated identity. The ID still goes
-// through the Lookup: a KindID branch may fast-path a trusted upstream or
-// re-check status, the consumer decides.
+// sources cannot override an authenticated identity.
+//
+// The ID goes through the Lookup like any other KindID value — deliberately,
+// so a tenant suspended mid-session stops resolving on the next request even
+// though upstream auth already vouched for it. A consumer who wants to exempt
+// upstream-verified IDs from that re-check can wire a custom source with its
+// own Kind and fast-path it in their Lookup.
 func Context() Source {
 	return func(r *http.Request) (Identifier, bool) {
 		id, ok := FromContext(r.Context())
