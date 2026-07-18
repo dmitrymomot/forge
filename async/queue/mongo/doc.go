@@ -10,7 +10,10 @@
 // inside a multi-document transaction to honor the all-or-nothing contract;
 // every other operation — including single-job Push, the entire claim/ack
 // lifecycle, and the dead-letter ops — is a single atomic command and works
-// on a standalone server too. Tested against MongoDB 7.
+// on a standalone server too. Tested against MongoDB 8.3; this is a
+// tested-floor statement, not a feature dependency — every command this
+// driver uses (partial indexes, findAndModify, multi-document transactions)
+// has existed since MongoDB 4.2.
 //
 // # Single-collection layout
 //

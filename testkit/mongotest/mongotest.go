@@ -25,7 +25,7 @@ var (
 // URI returns a MongoDB connection string to test against.
 //
 // If FORGE_TEST_MONGO_URI is set it is returned verbatim, pointing the suite at
-// an existing server. Otherwise a throwaway mongo:7 container is started once
+// an existing server. Otherwise a throwaway mongo:8.3 container is started once
 // per test process as a single-node replica set — so multi-document
 // transactions work — shared across every test in the package and removed by
 // the testcontainers Ryuk reaper when the process exits.
@@ -46,7 +46,7 @@ func URI(tb testing.TB) string {
 // sharedURI empty and make every later caller dial "".
 func startShared() {
 	ctx := context.Background()
-	c, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
+	c, err := mongodb.Run(ctx, "mongo:8.3", mongodb.WithReplicaSet("rs0"))
 	if err != nil {
 		panic(fmt.Sprintf("mongotest: start container: %v", err))
 	}
