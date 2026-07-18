@@ -3,6 +3,7 @@ package smartlink
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +18,12 @@ import (
 // pattern with a {code} wildcard (e.g. mux.Handle("/{code}", m.Handler()));
 // otherwise it falls back to the trimmed request path, so the Handler also
 // works mounted bare at "/".
+//
+// A code that could never have been minted by [Manager.Create] — over 64
+// characters or outside [A-Za-z0-9_-] — is answered as a dead link without a
+// Store roundtrip, so scans and garbage paths cost nothing. A row written to
+// the Store directly with a code outside that charset is unreachable through
+// the Handler by design; the code contract is Create's.
 //
 // Every response — success, dead link, or error — carries
 // "Cache-Control: no-store": a redirect decision can change on the next
@@ -35,6 +42,10 @@ func (m *Manager) Handler() http.Handler {
 			code = strings.Trim(r.URL.Path, "/")
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		if !validCodeChars(code) {
+			m.deadLink(w, r)
+			return
+		}
 
 		ctx := r.Context()
 		l, err := m.Resolve(ctx, code)
@@ -47,11 +58,13 @@ func (m *Manager) Handler() http.Handler {
 		if m.cfg.visitFunc != nil {
 			v = m.cfg.visitFunc(r, v)
 		}
-		for k, val := range l.Metadata {
-			if v.Params == nil {
-				v.Params = make(map[string]string, len(l.Metadata))
-			}
-			v.Params[k] = val
+		if len(l.Metadata) > 0 {
+			// Merged into a fresh map — metadata wins, and the map a VisitFunc
+			// returned is never mutated behind the consumer's back.
+			merged := make(map[string]string, len(v.Params)+len(l.Metadata))
+			maps.Copy(merged, v.Params)
+			maps.Copy(merged, l.Metadata)
+			v.Params = merged
 		}
 
 		d, ok := m.decider(ctx, w, r, code, l)
@@ -77,7 +90,10 @@ func (m *Manager) Handler() http.Handler {
 func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Request, code string, l Link) (Decider, bool) {
 	switch {
 	case l.Target != "":
-		compiled, err := m.compileTarget(l)
+		// Per-hit degenerate compile, no caching in v1: a single-template
+		// compile is ~1µs (see bench_test.go), and an unbounded per-code
+		// compiled cache is a memory liability at affiliate-code cardinality.
+		compiled, err := m.compileLink(l.Code, l.Target)
 		if err != nil {
 			// Rows created through this Manager cannot fail here — Create
 			// validates Target with the same compile call. Rows written to the
@@ -98,7 +114,11 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 	default:
 		resolved, err := m.cfg.resolver(ctx, l)
 		if err != nil {
-			if errors.Is(err, ErrNoTarget) {
+			// ErrNoTarget (paused/deleted offer) and ErrRefNotFound (ref names
+			// no known Spec) are both positive "this link leads nowhere"
+			// answers — dead links, like Create maps them to caller error —
+			// while anything else is an outage and must read as one.
+			if errors.Is(err, ErrNoTarget) || errors.Is(err, ErrRefNotFound) {
 				m.deadLink(w, r)
 				return nil, false
 			}
@@ -123,25 +143,6 @@ func (m *Manager) decorated(d Decider) Decider {
 		return d
 	}
 	return m.decorate(d)
-}
-
-// compileTarget compiles the degenerate single-target Spec for a
-// Target-backed Link, salted by its code so split/Percent bucketing stays
-// per-link, using the configured link param policy. It re-applies
-// checkTargetURL so a row written to the Store outside this Manager (which
-// never went through Create's validation) cannot serve a disallowed scheme
-// like "javascript:" as a redirect. No caching in v1: a single-template
-// compile is a few µs (see bench_test.go), and an unbounded per-code
-// compiled cache is a memory liability at affiliate-code cardinality.
-func (m *Manager) compileTarget(l Link) (Decider, error) {
-	compiled, err := Compile(Spec{Salt: l.Code, Default: []Target{{URL: l.Target}}, Params: m.cfg.linkParamPolicy})
-	if err != nil {
-		return nil, err
-	}
-	if err := m.checkTargetURL(&compiled.def.targets[0].tmpl); err != nil {
-		return nil, err
-	}
-	return compiled, nil
 }
 
 // resolveFailed maps a Resolve error to the dead-link path (fallback

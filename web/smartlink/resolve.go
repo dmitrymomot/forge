@@ -3,9 +3,6 @@ package smartlink
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
-	"time"
 
 	"github.com/dmitrymomot/forge/resilience/cache"
 )
@@ -30,7 +27,7 @@ func (m *Manager) Resolve(ctx context.Context, code string) (Link, error) {
 	if !l.DeactivatedAt.IsZero() {
 		return Link{}, ErrLinkDeactivated
 	}
-	if !l.ExpiresAt.IsZero() && !l.ExpiresAt.After(time.Now()) {
+	if !l.ExpiresAt.IsZero() && !l.ExpiresAt.After(m.cfg.clock.Now()) {
 		return Link{}, ErrLinkExpired
 	}
 	l.ShortURL = m.ShortURL(l.Code)
@@ -44,16 +41,18 @@ func (m *Manager) Resolve(ctx context.Context, code string) (Link, error) {
 // source of truth, so a bad cache backend degrades to "always hit the
 // Store", not "links stop resolving".
 //
-// Concurrent misses on the same code share one Store read (see lookupFlight),
-// so a hot code whose entry just expired costs one query, not one per
-// waiting request. The write-back is guarded against racing lifecycle
-// mutations: the fill snapshots cacheGen before the Store read, writes the
-// entry, and re-checks — invalidateCache bumps cacheGen before its eviction,
-// so a fill that raced a mutation either sees the bump and evicts its own
-// (possibly stale) write, or wrote early enough that the mutation's eviction
-// removes it. Without this, an in-flight fill could re-cache a deleted
-// link's record after its code was reused by a new Create and serve the
-// previous owner's target for a full TTL.
+// Concurrent misses on the same code share one Store read — coalesced via
+// [singleflight.Group.DoDetached], so each waiting request's wait stays
+// bounded by its own ctx while the read completes once — and a hot code
+// whose entry just expired costs one query, not one per waiting request. The
+// write-back is guarded against racing lifecycle mutations: the fill
+// snapshots cacheGen before the Store read, writes the entry, and
+// re-checks — invalidateCache bumps cacheGen before its eviction, so a fill
+// that raced a mutation either sees the bump and evicts its own (possibly
+// stale) write, or wrote early enough that the mutation's eviction removes
+// it. Without this, an in-flight fill could re-cache a deleted link's record
+// after its code was reused by a new Create and serve the previous owner's
+// target for a full TTL.
 func (m *Manager) lookup(ctx context.Context, code string) (Link, error) {
 	if m.links == nil {
 		return m.store.Get(ctx, code)
@@ -63,7 +62,7 @@ func (m *Manager) lookup(ctx context.Context, code string) (Link, error) {
 		return l, nil
 	}
 
-	return m.flight.do(ctx, code, func(ctx context.Context) (Link, error) {
+	l, _, err := m.flight.DoDetached(ctx, code, func(ctx context.Context) (Link, error) {
 		gen := m.cacheGen.Load()
 		l, err := m.store.Get(ctx, code)
 		if err != nil {
@@ -77,69 +76,7 @@ func (m *Manager) lookup(ctx context.Context, code string) (Link, error) {
 		}
 		return l, nil
 	})
-}
-
-// lookupFlight coalesces concurrent cache-miss lookups per code. It exists
-// instead of resilience/singleflight because that Group's waiters block
-// without regard for their context: a stuck Store read would pin every
-// redirect request for that code indefinitely. Here the shared read runs
-// detached in one goroutine per key and every caller — leader and joiners
-// alike — selects on completion versus its own ctx, so each request's wait is
-// bounded by its own deadline while the read still completes once for the
-// callers that stay.
-type lookupFlight struct {
-	m  map[string]*lookupCall
-	mu sync.Mutex
-}
-
-// lookupCall is one in-flight coalesced lookup; done is closed after link and
-// err are set.
-type lookupCall struct {
-	err  error
-	done chan struct{}
-	link Link
-}
-
-// do returns the result of fn for key, starting one detached execution when
-// none is in flight and otherwise joining the existing one. A caller whose
-// ctx ends first gets its ctx error; the shared execution keeps running for
-// the others and is deregistered when it completes.
-func (f *lookupFlight) do(ctx context.Context, key string, fn func(context.Context) (Link, error)) (Link, error) {
-	f.mu.Lock()
-	if f.m == nil {
-		f.m = make(map[string]*lookupCall)
-	}
-	c, ok := f.m[key]
-	if !ok {
-		c = &lookupCall{done: make(chan struct{})}
-		f.m[key] = c
-		go f.run(context.WithoutCancel(ctx), key, c, fn)
-	}
-	f.mu.Unlock()
-
-	select {
-	case <-c.done:
-		return c.link, c.err
-	case <-ctx.Done():
-		return Link{}, ctx.Err()
-	}
-}
-
-// run executes fn into c and closes c.done exactly once, converting a panic
-// to an error every waiter observes (run has no caller to re-panic into).
-func (f *lookupFlight) run(ctx context.Context, key string, c *lookupCall, fn func(context.Context) (Link, error)) {
-	defer func() {
-		if r := recover(); r != nil {
-			c.link, c.err = Link{}, fmt.Errorf("smartlink: lookup %q: panic during coalesced fill: %v", key, r)
-		}
-		close(c.done)
-		f.mu.Lock()
-		if f.m[key] == c {
-			delete(f.m, key)
-		}
-		f.mu.Unlock()
-	}()
-	c.link, c.err = fn(ctx)
+	return l, err
 }
 
 // cacheGet attempts the cache read-through hit path, reporting ok == false

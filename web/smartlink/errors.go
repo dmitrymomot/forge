@@ -37,10 +37,12 @@ var (
 	// ErrRefNotFound is the sentinel a consumer's [Cache] load func (or a
 	// custom [Resolver]) wraps when a ref names no known Spec. Create's ref
 	// precheck maps it (and ErrNoTarget) to ErrInvalidLink — caller input —
+	// and [Manager.Handler] serves both as dead links (fallback or 404),
 	// while any other resolver error propagates unwrapped as infrastructure
 	// failure.
 	ErrRefNotFound = errors.New("smartlink: ref not found")
-	// ErrInvalidLink is returned for a malformed Link or CreateParams.
+	// ErrInvalidLink is returned for a malformed Link, CreateParams, or
+	// Store argument (e.g. a zero Deactivate time).
 	ErrInvalidLink = errors.New("smartlink: invalid link")
 	// ErrCodeReserved is returned when a caller-supplied code collides with a
 	// reserved value.

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/dmitrymomot/forge/resilience/cache"
+	"github.com/dmitrymomot/forge/resilience/singleflight"
 )
 
 // maxCodeAttempts caps how many times Create retries a colliding generated
@@ -29,10 +29,11 @@ type Manager struct {
 	// decorate is the precomputed WithDecorators chain the Handler wraps
 	// around every link's Decider; nil when none are configured.
 	decorate Decorator
-	// flight dedups concurrent cache-miss lookups per code, and cacheGen
-	// guards their write-backs against racing lifecycle mutations (see
-	// lookup and invalidateCache).
-	flight   lookupFlight
+	// flight dedups concurrent cache-miss lookups per code (DoDetached, so a
+	// stuck Store read never pins a request past its own deadline), and
+	// cacheGen guards their write-backs against racing lifecycle mutations
+	// (see lookup and invalidateCache).
+	flight   singleflight.Group[Link]
 	cfg      managerConfig
 	cacheGen atomic.Uint64
 }
@@ -94,7 +95,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 		}
 	}
 	if p.Target != "" {
-		if err := m.validateTarget(p.Target); err != nil {
+		if _, err := m.compileLink("", p.Target); err != nil {
 			return Link{}, err
 		}
 	}
@@ -128,7 +129,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 		// Truncated to microseconds — Postgres timestamptz precision — so the
 		// returned Link carries the same instant a later Get reads back and
 		// List ordering agrees across Store implementations.
-		CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
+		CreatedAt: m.cfg.clock.Now().UTC().Truncate(time.Microsecond),
 	}
 
 	if l.Code != "" {
@@ -195,29 +196,35 @@ func (m *Manager) validateVanityCode(code string) error {
 	return nil
 }
 
-// validateTarget compiles raw as the sole default target of a degenerate
-// Spec — surfacing template errors (bad macro, malformed template) as
-// ErrInvalidLink — then applies the URL policy checks via checkTargetURL.
-func (m *Manager) validateTarget(raw string) error {
-	compiled, err := Compile(Spec{Default: []Target{{URL: raw}}, Params: m.cfg.linkParamPolicy})
+// compileLink compiles target as the sole default target of a degenerate
+// Spec under the configured link param policy — surfacing template errors
+// (bad macro, malformed template) as ErrInvalidLink — then applies the URL
+// policy checks via checkTargetURL. It is the single definition of what a
+// valid Target-backed Link is: Create validates through it (salt irrelevant,
+// result discarded) and [Manager.decider] serves through it (salted by the
+// link code so split/Percent bucketing stays per-link), so a row written to
+// the Store outside this Manager faces the same scheme policy at serve time
+// (defense in depth — a directly-inserted "javascript:" target must not
+// become a redirect).
+func (m *Manager) compileLink(salt, target string) (*Compiled, error) {
+	compiled, err := Compile(Spec{Salt: salt, Default: []Target{{URL: target}}, Params: m.cfg.linkParamPolicy})
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidLink, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidLink, err)
 	}
-	return m.checkTargetURL(&compiled.def.targets[0].tmpl)
+	if err := m.checkTargetURL(&compiled.def.targets[0].tmpl); err != nil {
+		return nil, err
+	}
+	return compiled, nil
 }
 
-// checkTargetURL enforces the URL policy on a compiled template: its
-// macro-elided scheme must be on the allowlist and non-empty, and its host
-// non-empty unless the authority is itself (at least partly) a macro, in
-// which case a dynamic-host template stays legal. Shared by Create validation
-// and the per-hit compileTarget path, so a row written to the Store outside
-// this Manager faces the same scheme policy at serve time (defense in depth —
-// a directly-inserted "javascript:" target must not become a redirect).
+// checkTargetURL enforces the URL policy on a compiled template, reading the
+// parse Compile already did: the macro-elided scheme must be on the
+// allowlist and non-empty, and the host non-empty unless the authority is
+// itself (at least partly) a macro, in which case a dynamic-host template
+// stays legal. Reached through [Manager.compileLink] from both Create
+// validation and the per-hit serve path.
 func (m *Manager) checkTargetURL(t *template) error {
-	u, err := url.Parse(t.elided)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidLink, err)
-	}
+	u := t.elidedURL
 	if u.Scheme == "" || !slices.Contains(m.cfg.schemes, u.Scheme) {
 		return fmt.Errorf("%w: scheme %q not allowed", ErrInvalidLink, u.Scheme)
 	}
@@ -273,7 +280,7 @@ func (m *Manager) List(ctx context.Context, f Filter) ([]Link, error) {
 // evicts any cached entry for code (see [Manager.invalidateCache]).
 func (m *Manager) Deactivate(ctx context.Context, code string) error {
 	return m.mutateLink(ctx, code, func(ctx context.Context, tenant string) error {
-		return m.store.Deactivate(ctx, code, tenant, time.Now().UTC())
+		return m.store.Deactivate(ctx, code, tenant, m.cfg.clock.Now().UTC())
 	})
 }
 
