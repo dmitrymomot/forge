@@ -123,39 +123,34 @@ type jwksCache struct {
 	fetched bool
 }
 
-// needFetch reports whether resolving kid requires a network fetch given the
-// cache state at now: a cold cache, a set past its refresh TTL, or an unknown
-// kid past the refetch cooldown.
-func (c *jwksCache) needFetch(kid string, now time.Time) bool {
+// snapshot reads kid's resolution state under one lock acquisition: the key
+// (if present), whether the set was ever fetched, and whether resolving kid
+// requires a network fetch given now — a cold cache, a set past its refresh
+// TTL, or an unknown kid past the refetch cooldown.
+func (c *jwksCache) snapshot(kid string, now time.Time) (k Key, ok, fetched, need bool) {
 	c.mu.RLock()
-	_, ok := c.keys[kid]
+	k, ok = c.keys[kid]
 	fetched, fetchedAt := c.fetched, c.fetchedAt
 	c.mu.RUnlock()
 
-	if !fetched || now.Sub(fetchedAt) >= c.refresh {
-		return true
-	}
-	return !ok && now.Sub(fetchedAt) >= c.cooldown
+	need = !fetched || now.Sub(fetchedAt) >= c.refresh ||
+		(!ok && now.Sub(fetchedAt) >= c.cooldown)
+	return k, ok, fetched, need
 }
 
 func (c *jwksCache) get(ctx context.Context, kid string) (Key, error) {
-	c.mu.RLock()
-	k, ok := c.keys[kid]
-	fetched := c.fetched
-	c.mu.RUnlock()
-
-	need := c.needFetch(kid, c.clk.Now())
+	k, ok, fetched, need := c.snapshot(kid, c.clk.Now())
 	if ok && !need {
 		return k, nil
 	}
 	if need {
 		_, _, err := c.group.Do(ctx, "fetch", func(ctx context.Context) (struct{}, error) {
-			// Re-check under the flight: between a caller's staleness check and
-			// its admission here, a just-completed flight may already have
+			// Re-check under the flight: between a caller's staleness snapshot
+			// and its admission here, a just-completed flight may already have
 			// refreshed the set — this caller then becomes a fresh leader and,
 			// without the re-check, would repeat the network fetch it no longer
 			// needs.
-			if !c.needFetch(kid, c.clk.Now()) {
+			if _, _, _, need := c.snapshot(kid, c.clk.Now()); !need {
 				return struct{}{}, nil
 			}
 			keys, err := c.fetchSet(ctx)
