@@ -3,7 +3,7 @@
 // header, cookie, and form values (Query, Path, Header, Cookie, FormValue and
 // their Func/Slice/Split variants), strict body decoding (DecodeJSON, RawBody,
 // multipart File/Files), and focused readers (BearerToken, presence
-// predicates, QueryPage/QueryCursor).
+// predicates).
 //
 // The helpers are free functions — no constructor, no binder, no struct tags, no
 // global state. Each typed accessor returns the zero value of T and a nil error
