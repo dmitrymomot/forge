@@ -120,6 +120,13 @@ func (b *Bundle) Middleware(resolvers ...Resolver) func(http.Handler) http.Handl
 	}
 	vary := make([]string, 0, len(chain))
 	for _, res := range chain {
+		// Resolver is an exported struct, so a zero value (or NewResolver with
+		// a nil fn) can reach here; such a resolver reads no header and can
+		// resolve nothing, so it contributes neither a Vary entry below nor a
+		// call in the request loop — keeping the "never panics" guarantee.
+		if res.fn == nil {
+			continue
+		}
 		if res.vary != "" && !slices.Contains(vary, res.vary) {
 			vary = append(vary, res.vary)
 		}
@@ -128,6 +135,9 @@ func (b *Bundle) Middleware(resolvers ...Resolver) func(http.Handler) http.Handl
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			loc := b.Default()
 			for _, res := range chain {
+				if res.fn == nil {
+					continue
+				}
 				if l, ok := res.fn(b, r); ok {
 					loc = l
 					break

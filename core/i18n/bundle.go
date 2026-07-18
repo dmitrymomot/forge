@@ -179,12 +179,13 @@ func collect(cf *config) (map[string]*rawCatalog, error) {
 }
 
 // mergeCatalog folds src into dst, rejecting any key the two sources both
-// define. It routes through dst's own setters rather than writing the maps
-// directly, so that every collision shape catalog.go rejects within a single
-// source — message vs. message, message vs. plural, and a message shadowing a
-// plural's form ("x.one" against plural "x") — is rejected across sources too.
-// That is what keeps the rawCatalog invariant ("a key appears in exactly one
-// of messages or plurals") true of a merged catalog.
+// define. It routes through dst's own setters — setMessage and putPlural —
+// rather than writing the maps directly, so that every collision shape
+// catalog.go rejects within a single source (message vs. message, message vs.
+// plural, and a message shadowing a plural's form "x.one" against plural "x")
+// is rejected across sources too, from the identical code. That shared routing
+// is what keeps the rawCatalog invariant ("a key appears in exactly one of
+// messages or plurals") true of a merged catalog.
 func mergeCatalog(dst, src *rawCatalog) error {
 	for k, v := range src.messages {
 		if err := dst.setMessage(k, v); err != nil {
@@ -192,29 +193,10 @@ func mergeCatalog(dst, src *rawCatalog) error {
 		}
 	}
 	for k, forms := range src.plurals {
-		if err := mergePlural(dst, k, forms); err != nil {
+		if err := dst.putPlural(k, forms); err != nil {
 			return err
 		}
 	}
-	return nil
-}
-
-// mergePlural is rawCatalog.setPlural for an already-parsed form map, which is
-// the shape a loaded catalog holds; setPlural itself takes raw JSON values.
-func mergePlural(dst *rawCatalog, key string, forms map[PluralCategory]string) error {
-	if _, dup := dst.plurals[key]; dup {
-		return fmt.Errorf("%w: %q defined by two sources", ErrDuplicateKey, key)
-	}
-	if _, dup := dst.messages[key]; dup {
-		return fmt.Errorf("%w: %q defined as both a message and a plural", ErrDuplicateKey, key)
-	}
-	for cat := range forms {
-		sub := key + "." + cat.String()
-		if _, dup := dst.messages[sub]; dup {
-			return fmt.Errorf("%w: plural %q collides with message %q", ErrDuplicateKey, key, sub)
-		}
-	}
-	dst.plurals[key] = forms
 	return nil
 }
 
@@ -223,10 +205,10 @@ func mergePlural(dst *rawCatalog, key string, forms map[PluralCategory]string) e
 // German dates for a Vietnamese reader are worse than neutral ones.
 func resolveFormat(formats map[string]FormatSpec, tag, lang string) FormatSpec {
 	if s, ok := formats[tag]; ok {
-		return s
+		return completeSpec(s)
 	}
 	if s, ok := formats[lang]; ok {
-		return s
+		return completeSpec(s)
 	}
 	return Invariant
 }
@@ -313,19 +295,31 @@ func (b *Bundle) report(tag, key string) {
 	b.onMiss(Miss{Locale: Locale{tag: tag}, Key: key, Reason: MissingForm})
 }
 
+// resolveIdx maps a normalized Locale to a supported-locale index by the one
+// fallback rendering and negotiation must agree on: exact tag, then base
+// language. ok is false when the locale is zero or matches neither — locIdx
+// then substitutes the default, Parse then reports ErrUnknownLocale. Holding
+// this walk in a single place is what keeps those two callers from drifting.
+func (b *Bundle) resolveIdx(l Locale) (int, bool) {
+	if l.tag == "" {
+		return 0, false
+	}
+	if i, ok := b.byTag[l.tag]; ok {
+		return i, true
+	}
+	if lang := l.Lang(); lang != l.tag {
+		if i, ok := b.byTag[lang]; ok {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // locIdx resolves a Locale to a supported locale index: exact tag, then base
 // language, then the default. The zero Locale reads as unresolved.
 func (b *Bundle) locIdx(loc Locale) int {
-	if loc.tag == "" {
-		return b.defaultIdx
-	}
-	if i, ok := b.byTag[loc.tag]; ok {
+	if i, ok := b.resolveIdx(loc); ok {
 		return i
-	}
-	if lang := loc.Lang(); lang != loc.tag {
-		if i, ok := b.byTag[lang]; ok {
-			return i
-		}
 	}
 	return b.defaultIdx
 }
@@ -341,6 +335,23 @@ func (b *Bundle) lookupMsg(idx int, key string) *compiledMsg {
 	for _, i := range b.locales[idx].chain {
 		if m, ok := b.locales[i].messages[key]; ok {
 			return m
+		}
+	}
+	return nil
+}
+
+// lookupPluralOther walks idx's chain for a plural message and returns its
+// Other form — the count-independent fallback T uses when a key exists only as
+// a plural but is rendered without a count. This mirrors how tnAt falls through
+// a missing plural to a plain message: a key ValidateKeys accepts (present as
+// either a message or a plural) then renders under both T and TN rather than
+// echoing under one of them.
+func (b *Bundle) lookupPluralOther(idx int, key string) *compiledMsg {
+	for _, i := range b.locales[idx].chain {
+		if pm, ok := b.locales[i].plurals[key]; ok {
+			if m := pm.forms[Other]; m != nil {
+				return m
+			}
 		}
 	}
 	return nil
@@ -386,6 +397,9 @@ func (b *Bundle) tAt(idx int, key string, args ...any) string {
 	if m := b.lookupMsg(idx, key); m != nil {
 		return m.render(args, 0, false)
 	}
+	if m := b.lookupPluralOther(idx, key); m != nil {
+		return m.render(args, 0, false)
+	}
 	b.miss(idx, key, MissingKey)
 	return key
 }
@@ -393,6 +407,9 @@ func (b *Bundle) tAt(idx int, key string, args ...any) string {
 // appendTAt is tAt appending into dst.
 func (b *Bundle) appendTAt(dst []byte, idx int, key string, args ...any) []byte {
 	if m := b.lookupMsg(idx, key); m != nil {
+		return m.appendTo(dst, args, 0, false)
+	}
+	if m := b.lookupPluralOther(idx, key); m != nil {
 		return m.appendTo(dst, args, 0, false)
 	}
 	b.miss(idx, key, MissingKey)
@@ -424,8 +441,11 @@ func (b *Bundle) appendTNAt(dst []byte, idx int, key string, n int, args ...any)
 	return append(dst, key...)
 }
 
-// T renders a message. args are variadic key/value pairs. A key no catalog in
-// the chain defines echoes back and notifies the miss handler — T never fails.
+// T renders a message. args are variadic key/value pairs. A key present only
+// as a plural renders its "other" form — a count-less lookup degrading to real
+// text rather than the raw key, so ValidateKeys accepting a plural key never
+// leads to an echo here. A key no catalog in the chain defines at all echoes
+// back and notifies the miss handler — T never fails.
 func (b *Bundle) T(loc Locale, key string, args ...any) string {
 	return b.tAt(b.locIdx(loc), key, args...)
 }
@@ -455,13 +475,8 @@ func (b *Bundle) Parse(tag string) (Locale, error) {
 	if l.IsZero() {
 		return Locale{}, fmt.Errorf("%w: %q", ErrUnknownLocale, tag)
 	}
-	if _, ok := b.byTag[l.tag]; ok {
-		return l, nil
-	}
-	if lang := l.Lang(); lang != l.tag {
-		if _, ok := b.byTag[lang]; ok {
-			return Locale{tag: lang}, nil
-		}
+	if i, ok := b.resolveIdx(l); ok {
+		return Locale{tag: b.locales[i].tag}, nil
 	}
 	return Locale{}, fmt.Errorf("%w: %q", ErrUnknownLocale, tag)
 }

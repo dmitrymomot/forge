@@ -30,11 +30,23 @@ import (
 // "50%"), which FormatSpec has no field to express — PercentSpace only
 // controls a space before a trailing sign. FormatTrTR therefore renders "50%"
 // via the shared engine, not the canonical Turkish "%50".
+//
+// Dates follow each locale's CLDR SHORT pattern, which leaves the day and
+// month unpadded (en-US "M/d", es-ES and ar-AE "d/M"): those layouts render
+// 1/2/2006 and 2/1/2006, not zero-padded. Where a locale's own short pattern
+// pads a field, the padding is kept — es-CO, pl, and tr pad the month ("d/MM",
+// "d.MM"), and cs-CZ pads both ("dd.MM").
+//
+// Go's time layout has no unpadded 24-hour hour token — "15" is always two
+// digits — so a locale whose CLDR short time is unpadded 24-hour (es-ES and
+// cs-CZ: "H:mm") renders the padded "15:04" instead, the closest Go can
+// express. This is the same class of gap as the Turkish percent above and the
+// Korean AM/PM marker below.
 var (
 	// FormatEnUS is the CLDR format spec for en-US.
 	FormatEnUS = i18n.FormatSpec{
 		DecimalSep: ".", GroupSep: ",",
-		DateLayout: "01/02/2006", TimeLayout: "3:04 PM", DateTimeLayout: "01/02/2006 3:04 PM",
+		DateLayout: "1/2/2006", TimeLayout: "3:04 PM", DateTimeLayout: "1/2/2006 3:04 PM",
 		CurrencyBefore: true,
 	}
 	// FormatEnGB is the CLDR format spec for en-GB: day before month, 24-hour
@@ -61,10 +73,12 @@ var (
 	}
 
 	// FormatEsES is the CLDR format spec for es-ES: comma decimal, period
-	// group, symbol after with a space, 24-hour clock, space before "%".
+	// group, symbol after with a space, space before "%". Date is unpadded
+	// (CLDR short "d/M/y"); the 24-hour clock renders padded as "15:04" because
+	// Go has no unpadded 24-hour hour token, though CLDR's short time is "H:mm".
 	FormatEsES = i18n.FormatSpec{
 		DecimalSep: ",", GroupSep: ".",
-		DateLayout: "02/01/2006", TimeLayout: "15:04", DateTimeLayout: "02/01/2006 15:04",
+		DateLayout: "2/1/2006", TimeLayout: "15:04", DateTimeLayout: "2/1/2006 15:04",
 		CurrencySpace: true, PercentSpace: true,
 	}
 	// FormatEsMX is the CLDR format spec for es-MX: US-style separators and
@@ -79,13 +93,15 @@ var (
 	// and a 12-hour clock, like the rest of Spanish-speaking Latin America.
 	FormatEsAR = i18n.FormatSpec{
 		DecimalSep: ",", GroupSep: ".",
-		DateLayout: "02/01/2006", TimeLayout: "3:04 PM", DateTimeLayout: "02/01/2006 3:04 PM",
+		DateLayout: "2/1/2006", TimeLayout: "3:04 PM", DateTimeLayout: "2/1/2006 3:04 PM",
 		CurrencyBefore: true, CurrencySpace: true,
 	}
-	// FormatEsCO is the CLDR format spec for es-CO: same shape as es-AR.
+	// FormatEsCO is the CLDR format spec for es-CO: es-AR's currency and clock,
+	// but its CLDR short date pads the month while leaving the day unpadded
+	// ("d/MM/y"), unlike es-AR's fully-unpadded "d/M/y".
 	FormatEsCO = i18n.FormatSpec{
 		DecimalSep: ",", GroupSep: ".",
-		DateLayout: "02/01/2006", TimeLayout: "3:04 PM", DateTimeLayout: "02/01/2006 3:04 PM",
+		DateLayout: "2/01/2006", TimeLayout: "3:04 PM", DateTimeLayout: "2/01/2006 3:04 PM",
 		CurrencyBefore: true, CurrencySpace: true,
 	}
 	// FormatEsCL is the CLDR format spec for es-CL: Chile is the one Spanish
@@ -131,10 +147,11 @@ var (
 		CurrencyBefore: true, CurrencySpace: true,
 	}
 
-	// FormatPlPL is the CLDR format spec for pl-PL. GroupSep is U+00A0.
+	// FormatPlPL is the CLDR format spec for pl-PL. GroupSep is U+00A0. CLDR
+	// short date "d.MM.y" leaves the day unpadded but pads the month.
 	FormatPlPL = i18n.FormatSpec{
 		DecimalSep: ",", GroupSep: "\u00a0",
-		DateLayout: "02.01.2006", TimeLayout: "15:04", DateTimeLayout: "02.01.2006 15:04",
+		DateLayout: "2.01.2006", TimeLayout: "15:04", DateTimeLayout: "2.01.2006 15:04",
 		CurrencySpace: true,
 	}
 	// FormatCsCZ is the CLDR format spec for cs-CZ. GroupSep is U+00A0.
@@ -157,21 +174,24 @@ var (
 	}
 
 	// FormatTrTR is the CLDR format spec for tr-TR: German-shaped separators
-	// (comma decimal, period group), symbol first with no space. See the
-	// package doc comment for the percent-sign-placement gap this locale hits.
+	// (comma decimal, period group), symbol first with no space. CLDR short
+	// date "d.MM.y" leaves the day unpadded but pads the month. See the package
+	// doc comment for the percent-sign-placement gap this locale hits.
 	FormatTrTR = i18n.FormatSpec{
 		DecimalSep: ",", GroupSep: ".",
-		DateLayout: "02.01.2006", TimeLayout: "15:04", DateTimeLayout: "02.01.2006 15:04",
+		DateLayout: "2.01.2006", TimeLayout: "15:04", DateTimeLayout: "2.01.2006 15:04",
 		CurrencyBefore: true,
 	}
 
 	// FormatArAE is the CLDR format spec for ar-AE. The UAE's default
 	// numbering system is Western (latn), not Eastern Arabic-Indic digits, so
 	// English-shaped separators apply; the currency symbol trails the amount
-	// with a space, and the clock is 12-hour.
+	// with a space, and the clock is 12-hour. CLDR short date "d/M/y" is
+	// unpadded (the RTL marks CLDR interleaves are dropped: these layouts carry
+	// digits and plain "/", and directionality is the renderer's job).
 	FormatArAE = i18n.FormatSpec{
 		DecimalSep: ".", GroupSep: ",",
-		DateLayout: "02/01/2006", TimeLayout: "3:04 PM", DateTimeLayout: "02/01/2006 3:04 PM",
+		DateLayout: "2/1/2006", TimeLayout: "3:04 PM", DateTimeLayout: "2/1/2006 3:04 PM",
 		CurrencySpace: true,
 	}
 

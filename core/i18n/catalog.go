@@ -27,6 +27,15 @@ func newRawCatalog() *rawCatalog {
 // isPluralMap reports whether a JSON object is a plural message: every key is
 // a CLDR category name and every value is a string. Anything else is a nested
 // namespace, so {"save": "Save"} recurses and {"one": "x"} does not.
+//
+// This is a deterministic rule, not a guess, and it has one sharp edge: a
+// namespace whose keys are only category words with string values —
+// {"one": "One size", "other": "Other sizes"} used as picker labels — is a
+// plural by this rule, so its entries are reachable via TN, not T("...one").
+// The ambiguity is inherent: {"one","other"} is also English's real plural
+// shape, so no structural test can tell the two apart. To keep such a namespace
+// a namespace, give it one non-category key; and declaring rendered keys with
+// NewKey + ValidateKeys reports an unreachable "...one" at startup.
 func isPluralMap(m map[string]any) bool {
 	if len(m) == 0 {
 		return false
@@ -149,12 +158,6 @@ func (rc *rawCatalog) setMessage(key, tmpl string) error {
 }
 
 func (rc *rawCatalog) setPlural(key string, forms map[string]any) error {
-	if _, dup := rc.plurals[key]; dup {
-		return fmt.Errorf("%w: %q", ErrDuplicateKey, key)
-	}
-	if _, dup := rc.messages[key]; dup {
-		return fmt.Errorf("%w: %q defined as both a message and a plural", ErrDuplicateKey, key)
-	}
 	m := make(map[PluralCategory]string, len(forms))
 	for name, v := range forms {
 		cat, ok := categoryByName(name)
@@ -167,13 +170,39 @@ func (rc *rawCatalog) setPlural(key string, forms map[string]any) error {
 		}
 		m[cat] = s
 	}
-	// A plural key may not collide with an already-flattened "key.form"
-	// message set from the other iteration order.
-	for name := range forms {
-		if _, dup := rc.messages[key+"."+name]; dup {
-			return fmt.Errorf("%w: plural %q collides with message %q", ErrDuplicateKey, key, key+"."+name)
+	return rc.putPlural(key, m)
+}
+
+// putPlural stores an already-parsed plural form map after the collision checks
+// every plural must pass. setPlural (flattening one source's raw JSON) and
+// mergeCatalog (folding a second source's parsed catalog) both route through
+// it, so the two paths reject the identical set of collisions.
+func (rc *rawCatalog) putPlural(key string, forms map[PluralCategory]string) error {
+	if err := rc.checkPluralCollisions(key, forms); err != nil {
+		return err
+	}
+	rc.plurals[key] = forms
+	return nil
+}
+
+// checkPluralCollisions rejects every shape a plural at key can collide with:
+// an existing plural key, an existing plain message at the same key, or an
+// already-flattened "key.form" message a plural form would shadow (the last
+// catches the collision the other flatten iteration order would produce). One
+// definition serves both the single-source and cross-source paths, so a rule
+// added here can never apply to one and silently skip the other.
+func (rc *rawCatalog) checkPluralCollisions(key string, forms map[PluralCategory]string) error {
+	if _, dup := rc.plurals[key]; dup {
+		return fmt.Errorf("%w: %q", ErrDuplicateKey, key)
+	}
+	if _, dup := rc.messages[key]; dup {
+		return fmt.Errorf("%w: %q defined as both a message and a plural", ErrDuplicateKey, key)
+	}
+	for cat := range forms {
+		sub := key + "." + cat.String()
+		if _, dup := rc.messages[sub]; dup {
+			return fmt.Errorf("%w: plural %q collides with message %q", ErrDuplicateKey, key, sub)
 		}
 	}
-	rc.plurals[key] = m
 	return nil
 }

@@ -14,8 +14,13 @@ const (
 	// maxAcceptLangLen caps the header size. Real headers are well under 200
 	// bytes; 4 KB is generous.
 	maxAcceptLangLen = 4096
-	// maxAcceptLangTags caps how many tags are parsed. Beyond this the header
-	// is truncated, not rejected — the client keeps its top preferences.
+	// maxAcceptLangTags caps how many tags are parsed. Beyond it the header is
+	// truncated in header order — not rejected, and not sorted by q first: the
+	// cap has to run before the sort, or an attacker could force the sort to
+	// touch every tag it is meant to bound. Clients list ranges
+	// most-preferred-first, so in practice the kept prefix is the client's top
+	// preferences; only a client that both sends over 32 ranges and orders them
+	// against their own q values would drop a preference here.
 	maxAcceptLangTags = 32
 )
 

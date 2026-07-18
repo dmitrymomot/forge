@@ -32,6 +32,24 @@ func TestDateTimeWiredSpec(t *testing.T) {
 	assert.Equal(t, "17.07.2026 15:04", b.DateTime(de, ts))
 }
 
+// TestPartialFormatSpecCompletes covers a partial FormatSpec: a caller who
+// wires only the separators must still get real dates, not the empty string a
+// zero DateLayout would feed time.AppendFormat. The empty layout fields fall
+// back to Invariant while the separators the caller set are kept.
+func TestPartialFormatSpecCompletes(t *testing.T) {
+	t.Parallel()
+	b := newBundle(t, i18n.WithFormat("de", i18n.FormatSpec{DecimalSep: ",", GroupSep: "."}))
+	de := b.ParseOrDefault("de")
+	ts := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
+
+	// Layouts were empty, so they default to Invariant — real output, never "".
+	assert.Equal(t, "2026-01-02", b.Date(de, ts))
+	assert.Equal(t, "15:04", b.Time(de, ts))
+	assert.Equal(t, "2026-01-02 15:04", b.DateTime(de, ts))
+	// The separators the caller did wire are preserved.
+	assert.Equal(t, "1.234,5", b.Number(de, 1234.5))
+}
+
 func TestDateTimeUsesTimesOwnLocation(t *testing.T) {
 	t.Parallel()
 	b := fmtBundle(t)

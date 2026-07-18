@@ -55,6 +55,14 @@
 // few→many→other, zero/one/many→other. If the catalog defines a zero form,
 // it wins at n == 0 regardless of the rule — a convenience for translators.
 //
+// The rule is exact: a JSON object whose keys are all category names is always
+// a plural, so a namespace that uses only category words as keys ({"one": "One
+// size", "other": "Other sizes"}) is parsed as one too. Give such a namespace
+// one non-category key to keep it a namespace; declaring rendered keys with
+// NewKey and ValidateKeys catches an unreachable "size.one" at startup. A
+// plural-only key still renders its "other" form under T, so it degrades to
+// real text rather than echoing when called without a count.
+//
 // # HTTP
 //
 // Middleware resolves the locale (cookie → query → Accept-Language →

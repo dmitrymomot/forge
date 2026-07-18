@@ -154,6 +154,12 @@ func TestPercent(t *testing.T) {
 	// PercentSpace inserts a space before the sign.
 	assert.Equal(t, "50 %", b.Percent(b.ParseOrDefault("de"), 0.5))
 	assert.Equal(t, "-7,5 %", b.Percent(b.ParseOrDefault("de"), -0.075))
+	// ratio*100 in float64 is a near miss (0.29*100 == 28.999999999999996);
+	// rounding the scaled value collapses the artifact instead of printing it.
+	assert.Equal(t, "29%", b.Percent(b.Default(), 0.29))
+	assert.Equal(t, "7%", b.Percent(b.Default(), 0.07))
+	assert.Equal(t, "10%", b.Percent(b.Default(), 0.1))
+	assert.Equal(t, "81.5%", b.Percent(b.Default(), 0.815))
 }
 
 func TestNumberZeroLocaleUsesInvariant(t *testing.T) {

@@ -489,6 +489,29 @@ func TestNewMergeErrors(t *testing.T) {
 	}
 }
 
+// TestCategoryKeyedNamespaceIsPlural pins the deterministic plural-detection
+// rule and its one sharp edge: a namespace whose keys are only category words
+// is parsed as a plural, so its entries are reachable via TN, T degrades to the
+// "other" form rather than echoing, and ValidateKeys flags the unreachable
+// "app.size.one" at startup instead of letting it echo silently.
+func TestCategoryKeyedNamespaceIsPlural(t *testing.T) {
+	t.Parallel()
+	b, err := i18n.New(i18n.WithTranslations("en", "app", map[string]any{
+		"size": map[string]any{"one": "One size", "other": "Other sizes"},
+	}))
+	require.NoError(t, err)
+	en := b.Default()
+
+	// Detected as a plural: TN selects a form by count.
+	assert.Equal(t, "One size", b.TN(en, "app.size", 1))
+	assert.Equal(t, "Other sizes", b.TN(en, "app.size", 3))
+	// T carries no count, so it renders the "other" form, not an echo.
+	assert.Equal(t, "Other sizes", b.T(en, "app.size"))
+	// "app.size.one" is not a reachable message key; ValidateKeys surfaces the
+	// misfiled namespace at startup.
+	require.ErrorIs(t, b.ValidateKeys(i18n.NewKey("app.size.one")), i18n.ErrUnknownKey)
+}
+
 // TestNewMergesDistinctSources is the companion to TestNewMergeErrors: two
 // sources that do not collide must layer into one catalog.
 func TestNewMergesDistinctSources(t *testing.T) {

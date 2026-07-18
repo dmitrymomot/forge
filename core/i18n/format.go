@@ -38,6 +38,31 @@ var Invariant = FormatSpec{
 	CurrencyBefore: true,
 }
 
+// completeSpec fills a partial FormatSpec's empty layout and decimal-separator
+// fields from Invariant. A caller who wires only some fields — just the
+// separators, say — would otherwise feed a zero DateLayout straight into
+// time.AppendFormat, which renders the empty string with no error; completion
+// keeps such a spec producing real dates and numbers. GroupSep is deliberately
+// left untouched: an empty group separator is a valid choice (no digit
+// grouping), unlike an empty decimal separator, which would fuse a number's
+// integer and fraction digits. Fully-wired specs (every cldr.Format*) pass
+// through unchanged.
+func completeSpec(s FormatSpec) FormatSpec {
+	if s.DecimalSep == "" {
+		s.DecimalSep = Invariant.DecimalSep
+	}
+	if s.DateLayout == "" {
+		s.DateLayout = Invariant.DateLayout
+	}
+	if s.TimeLayout == "" {
+		s.TimeLayout = Invariant.TimeLayout
+	}
+	if s.DateTimeLayout == "" {
+		s.DateTimeLayout = Invariant.DateTimeLayout
+	}
+	return s
+}
+
 // specFor returns the resolved FormatSpec for the locale at index idx: exact
 // tag, then base language, then Invariant, as decided once at New (see
 // resolveFormat) and stored per locale. Bundle is immutable after New, so
@@ -188,9 +213,21 @@ func appendGroupedDigits(dst []byte, digits []byte, groupSep string) []byte {
 	return dst
 }
 
-// appendPercentSpec renders ratio*100 with a percent sign.
+// percentFractionScale rounds a scaled percentage to six fraction digits; see
+// appendPercentSpec.
+const percentFractionScale = 1e6
+
+// appendPercentSpec renders ratio*100 with a percent sign. Scaling the ratio by
+// 100 in float64 turns exact ratios into near misses — 0.29*100 is
+// 28.999999999999996, not 29 — which the shortest-round-trip renderer would
+// then print in full. Rounding the scaled value to a fixed decimal grid first
+// collapses that error back to the intended figure; a percentage is a display
+// quantity that never needs more than these few fraction digits, so unlike
+// Number this drops no precision anyone would want. NaN and ±Inf pass through
+// the arithmetic unchanged, so appendNumberSpec still renders them verbatim.
 func appendPercentSpec(dst []byte, ratio float64, s *FormatSpec) []byte {
-	dst = appendNumberSpec(dst, ratio*100, s)
+	p := math.Round(ratio*100*percentFractionScale) / percentFractionScale
+	dst = appendNumberSpec(dst, p, s)
 	if s.PercentSpace {
 		dst = append(dst, ' ')
 	}

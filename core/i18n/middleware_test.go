@@ -34,6 +34,34 @@ func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRe
 	return rec
 }
 
+// TestMiddlewareNilResolverDoesNotPanic pins the "never panics" guarantee
+// against a Resolver with a nil fn. Resolver is exported, so a zero value and
+// NewResolver(header, nil) both construct one; each resolves nothing and must
+// be skipped, not invoked.
+func TestMiddlewareNilResolverDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	b := newBundle(t)
+
+	// A zero-value Resolver and a nil-fn NewResolver ahead of a working one.
+	h := b.Middleware(
+		i18n.Resolver{},
+		i18n.NewResolver("X-Custom", nil),
+		i18n.FromHeader("X-Locale"),
+	)(echoHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Locale", "uk")
+	rec := serve(t, h, req)
+	assert.Equal(t, "uk|Панель", rec.Body.String(), "the real resolver still wins")
+	// A nil-fn resolver reads no header, so it contributes no Vary entry.
+	assert.NotContains(t, rec.Header().Values("Vary"), "X-Custom")
+
+	// A chain of only nil-fn resolvers falls through to the bundle default.
+	h2 := b.Middleware(i18n.Resolver{}, i18n.NewResolver("X-Custom", nil))(echoHandler())
+	rec2 := serve(t, h2, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, b.Default().Tag()+"|Dashboard", rec2.Body.String())
+}
+
 func TestMiddlewareDefaultChain(t *testing.T) {
 	t.Parallel()
 	b := newBundle(t)

@@ -46,6 +46,19 @@ func TestTNK(t *testing.T) {
 	assert.Equal(t, b.TN(en, "cart.items", 7), b.TNK(en, keyItems, 7))
 }
 
+// TestTKPluralKeyRendersOtherForm pins that a Key ValidateKeys accepts as a
+// plural (cart.items) does not echo when rendered with TK/T, which carry no
+// count: it falls through to the plural's "other" form.
+func TestTKPluralKeyRendersOtherForm(t *testing.T) {
+	t.Parallel()
+	b := newBundle(t)
+	en := b.Default()
+	require.NoError(t, b.ValidateKeys(keyItems))
+	assert.Equal(t, "{{count}} items in your cart", b.TK(en, keyItems))
+	assert.Equal(t, b.T(en, "cart.items"), b.TK(en, keyItems))
+	assert.NotEqual(t, "cart.items", b.TK(en, keyItems), "a validated plural key must not echo under TK")
+}
+
 func TestValidateKeys(t *testing.T) {
 	t.Parallel()
 	b := newBundle(t)

@@ -340,8 +340,10 @@ var (
 	Hi i18n.PluralRule = hindi
 	// Ar is the CLDR cardinal rule for Arabic: all six categories.
 	Ar i18n.PluralRule = arabic
-	// He is the CLDR cardinal rule for Hebrew: one, two, many (round tens
-	// above 10), other — no zero.
+	// He is the CLDR cardinal rule for Hebrew: one, two, other — no zero, and
+	// no round-tens "many". CLDR v42 removed Hebrew's "many" category; a
+	// translator must not author a dead "many" form (x/text v0.38 still reports
+	// it — see the staleExceptions note in plural_test.go).
 	He i18n.PluralRule = hebrew
 )
 
