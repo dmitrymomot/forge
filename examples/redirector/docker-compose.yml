@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: redirector
+      POSTGRES_PASSWORD: redirector
+      POSTGRES_DB: redirector
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redirector -d redirector"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    volumes:
+      # postgres:18 images moved the volume mount point from
+      # /var/lib/postgresql/data to /var/lib/postgresql.
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:

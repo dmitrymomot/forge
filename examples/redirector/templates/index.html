@@ -1,0 +1,39 @@
+{{define "title"}}Dashboard{{end}}
+
+{{define "content"}}
+<h1>Short links</h1>
+{{if .Links}}
+<table>
+  <tr><th>Code</th><th>Short URL</th><th>Destination</th><th>Clicks</th><th>Unique</th><th>Duplicates</th></tr>
+  {{range .Links}}
+  <tr>
+    <td><a href="/links/{{.Link.Code}}"><code>{{.Link.Code}}</code></a></td>
+    <td><a href="{{.Link.ShortURL}}">{{.Link.ShortURL}}</a></td>
+    <td>{{if .OfferName}}offer: {{.OfferName}}{{else}}{{.Link.Target}}{{end}}</td>
+    <td>{{.Stats.Total}}</td>
+    <td>{{.Stats.Unique}}</td>
+    <td>{{.Stats.Duplicates}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<p class="muted">No links yet. <a href="/links/new">Create one</a>.</p>
+{{end}}
+
+<h2>Offers</h2>
+{{if .Offers}}
+<table>
+  <tr><th>Ref</th><th>Name</th><th>Geo rules</th><th>Default URL</th></tr>
+  {{range .Offers}}
+  <tr>
+    <td><code>{{.Ref}}</code></td>
+    <td>{{.Name}}</td>
+    <td>{{len .Rules}}</td>
+    <td>{{.DefaultURL}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<p class="muted">No offers yet. <a href="/offers/new">Create one</a>.</p>
+{{end}}
+{{end}}

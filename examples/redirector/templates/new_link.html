@@ -1,0 +1,28 @@
+{{define "title"}}New link{{end}}
+
+{{define "content"}}
+<h1>New ref link</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/links">
+  <label>Offer (ref link)
+    <select name="ref">
+      <option value="">— none, use a direct URL —</option>
+      {{$ref := .Ref}}
+      {{range .Offers}}
+      <option value="{{.Ref}}" {{if eq .Ref $ref}}selected{{end}}>{{.Name}} ({{.Ref}})</option>
+      {{end}}
+    </select>
+  </label>
+  <label>Direct target URL (when no offer is selected)
+    <input name="target" value="{{.Target}}" placeholder="https://example.com/landing">
+  </label>
+  <label>Vanity code (optional, generated when empty)
+    <input name="code" value="{{.Code}}" placeholder="summer-sale">
+  </label>
+  <label>Campaign tag (optional, stamped into every click)
+    <input name="campaign" value="{{.Campaign}}" placeholder="newsletter-07">
+  </label>
+  <button type="submit">Create link</button>
+</form>
+<p class="muted">Pick an offer <em>or</em> fill a direct URL — exactly one is required.</p>
+{{end}}

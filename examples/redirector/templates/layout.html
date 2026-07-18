@@ -1,0 +1,45 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{template "title" .}} · redirector</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 60rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+  header { display: flex; align-items: baseline; gap: 1.5rem; border-bottom: 1px solid #8884; padding-bottom: .75rem; margin-bottom: 1.5rem; }
+  header nav { display: flex; gap: 1rem; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; }
+  th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #8883; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; opacity: .7; }
+  code { background: #8882; padding: .1rem .3rem; border-radius: 3px; }
+  form { max-width: 32rem; display: grid; gap: .75rem; }
+  label { display: grid; gap: .25rem; font-weight: 600; font-size: .9rem; }
+  input, select { font: inherit; padding: .4rem .5rem; border: 1px solid #8886; border-radius: 4px; background: transparent; color: inherit; }
+  button { font: inherit; font-weight: 600; padding: .45rem 1rem; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; justify-self: start; }
+  .error { background: #dc26261a; border: 1px solid #dc262666; color: #dc2626; padding: .5rem .75rem; border-radius: 4px; }
+  .tiles { display: flex; gap: 1rem; margin: 1rem 0; }
+  .tile { border: 1px solid #8884; border-radius: 6px; padding: .6rem 1rem; min-width: 7rem; }
+  .tile b { display: block; font-size: 1.4rem; }
+  .tile span { font-size: .8rem; opacity: .7; }
+  .muted { opacity: .6; }
+  fieldset { border: 1px solid #8884; border-radius: 6px; display: grid; gap: .75rem; }
+</style>
+</head>
+<body>
+<header>
+  <strong>redirector</strong>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/links/new">New link</a>
+    <a href="/offers/new">New offer</a>
+  </nav>
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}
