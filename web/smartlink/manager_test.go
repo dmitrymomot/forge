@@ -40,10 +40,15 @@ func TestNewManagerRejects301(t *testing.T) {
 	}
 }
 
-// TestNewManagerBadBaseURL asserts WithBaseURL requires an absolute http(s) URL.
+// TestNewManagerBadBaseURL asserts WithBaseURL requires an absolute http(s)
+// URL without a query or fragment — ShortURL appends the code as raw text, so
+// "https://s.example.com/?utm=x" would render "...?utm=x/promo".
 func TestNewManagerBadBaseURL(t *testing.T) {
 	t.Parallel()
-	cases := []string{"", "app.example.com/verify", "ftp://example.com/"}
+	cases := []string{
+		"", "app.example.com/verify", "ftp://example.com/",
+		"https://s.example.com/?utm=x", "https://s.example.com/#promo", "https://s.example.com/?",
+	}
 	for _, u := range cases {
 		if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithBaseURL(u)); err == nil {
 			t.Fatalf("NewManager(WithBaseURL(%q)) error = nil, want error", u)
@@ -82,6 +87,28 @@ func TestNewManagerRejectsNonPositiveCacheTTL(t *testing.T) {
 	}
 	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithCache(cache.NewMemoryStore(), time.Minute)); err != nil {
 		t.Fatalf("NewManager(WithCache(ttl=1m)) error = %v, want nil", err)
+	}
+}
+
+// TestNewManagerRejectsNilScope asserts WithScope(nil) is a construction
+// error: silently dropping the hook would run management ops unscoped,
+// violating the fail-closed tenancy contract.
+func TestNewManagerRejectsNilScope(t *testing.T) {
+	t.Parallel()
+	if _, err := smartlink.NewManager(smartlink.NewMemoryStore(), smartlink.WithScope(nil)); err == nil {
+		t.Fatal("NewManager(WithScope(nil)) error = nil, want error")
+	}
+}
+
+// TestCreateRefRejectsNilResolverDecider asserts the ref precheck rejects a
+// resolver that returns (nil, nil): such a link would store successfully and
+// then fail on its first hit.
+func TestCreateRefRejectsNilResolverDecider(t *testing.T) {
+	t.Parallel()
+	resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) { return nil, nil }
+	m := newTestManager(t, smartlink.WithResolver(resolver))
+	if _, err := m.Create(context.Background(), smartlink.CreateParams{Ref: "offer-1"}); err == nil {
+		t.Fatal("Create(ref) error = nil, want error when the resolver returns a nil Decider")
 	}
 }
 

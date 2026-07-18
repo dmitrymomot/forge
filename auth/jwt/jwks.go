@@ -123,20 +123,36 @@ type jwksCache struct {
 	fetched bool
 }
 
-func (c *jwksCache) get(ctx context.Context, kid string) (Key, error) {
+// snapshot reads kid's resolution state under one lock acquisition: the key
+// (if present), whether the set was ever fetched, and whether resolving kid
+// requires a network fetch given now — a cold cache, a set past its refresh
+// TTL, or an unknown kid past the refetch cooldown.
+func (c *jwksCache) snapshot(kid string, now time.Time) (k Key, ok, fetched, need bool) {
 	c.mu.RLock()
-	k, ok := c.keys[kid]
+	k, ok = c.keys[kid]
 	fetched, fetchedAt := c.fetched, c.fetchedAt
 	c.mu.RUnlock()
 
-	now := c.clk.Now()
-	fresh := fetched && now.Sub(fetchedAt) < c.refresh
-	if ok && fresh {
+	need = !fetched || now.Sub(fetchedAt) >= c.refresh ||
+		(!ok && now.Sub(fetchedAt) >= c.cooldown)
+	return k, ok, fetched, need
+}
+
+func (c *jwksCache) get(ctx context.Context, kid string) (Key, error) {
+	k, ok, fetched, need := c.snapshot(kid, c.clk.Now())
+	if ok && !need {
 		return k, nil
 	}
-	needFetch := !fetched || !fresh || (!ok && now.Sub(fetchedAt) >= c.cooldown)
-	if needFetch {
+	if need {
 		_, _, err := c.group.Do(ctx, "fetch", func(ctx context.Context) (struct{}, error) {
+			// Re-check under the flight: between a caller's staleness snapshot
+			// and its admission here, a just-completed flight may already have
+			// refreshed the set — this caller then becomes a fresh leader and,
+			// without the re-check, would repeat the network fetch it no longer
+			// needs.
+			if _, _, _, need := c.snapshot(kid, c.clk.Now()); !need {
+				return struct{}{}, nil
+			}
 			keys, err := c.fetchSet(ctx)
 			if err != nil {
 				return struct{}{}, err

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dmitrymomot/forge/resilience/cache"
-	"github.com/dmitrymomot/forge/resilience/singleflight"
 )
 
 // maxCodeAttempts caps how many times Create retries a colliding generated
@@ -27,10 +26,13 @@ const maxCodeAttempts = 5
 type Manager struct {
 	store Store
 	links *cache.Cache[Link] // typed facade over WithCache's store; nil without WithCache
+	// decorate is the precomputed WithDecorators chain the Handler wraps
+	// around every link's Decider; nil when none are configured.
+	decorate Decorator
 	// flight dedups concurrent cache-miss lookups per code, and cacheGen
 	// guards their write-backs against racing lifecycle mutations (see
 	// lookup and invalidateCache).
-	flight   singleflight.Group[Link]
+	flight   lookupFlight
 	cfg      managerConfig
 	cacheGen atomic.Uint64
 }
@@ -50,6 +52,9 @@ func NewManager(store Store, opts ...ManagerOption) (*Manager, error) {
 		return nil, errors.Join(cfg.errs...)
 	}
 	m := &Manager{store: store, cfg: *cfg}
+	if len(cfg.decorators) > 0 {
+		m.decorate = Chain(cfg.decorators...)
+	}
 	if cfg.cacheStore != nil {
 		m.links = cache.New[Link](cfg.cacheStore, cache.WithPrefix(cachePrefix), cache.WithDefaultTTL(cfg.cacheTTL))
 	}
@@ -94,7 +99,8 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 		}
 	}
 	if p.Ref != "" && !p.SkipRefCheck && m.cfg.resolver != nil {
-		if _, err := m.cfg.resolver(ctx, Link{Ref: p.Ref, Tenant: p.Tenant}); err != nil {
+		d, err := m.cfg.resolver(ctx, Link{Ref: p.Ref, Tenant: p.Tenant})
+		if err != nil {
 			// Only a ref the resolver positively rejects is caller input error;
 			// anything else (consumer DB down, cache backend failing) is an
 			// infrastructure failure and must not read as ErrInvalidLink to an
@@ -103,6 +109,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Link, error) {
 				return Link{}, fmt.Errorf("%w: ref %q: %w", ErrInvalidLink, p.Ref, err)
 			}
 			return Link{}, fmt.Errorf("smartlink: check ref %q: %w", p.Ref, err)
+		}
+		// A (nil, nil) resolver is a consumer bug, not caller input: reject it
+		// here rather than letting the link store successfully and panic (now
+		// 500) on its first hit.
+		if d == nil {
+			return Link{}, fmt.Errorf("smartlink: check ref %q: resolver returned nil Decider without error", p.Ref)
 		}
 	}
 

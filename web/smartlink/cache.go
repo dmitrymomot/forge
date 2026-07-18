@@ -5,7 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
+
+	"github.com/dmitrymomot/forge/core/clock"
 )
+
+// defaultRefTTL bounds how long a compiled ref stays cached without a reload
+// when [WithRefTTL] is not given.
+const defaultRefTTL = 5 * time.Minute
 
 // Resolver resolves a Ref-backed Link to a Decider ready for a click decision.
 // [Cache.Resolver] returns a ready-made one; [WithResolver] wires it into a
@@ -20,108 +27,183 @@ type Resolver func(ctx context.Context, l Link) (Decider, error)
 // Cache is a lazy compile cache for Ref-backed Links. Offers live in the
 // consumer's own database as [Spec] values; Cache loads and compiles them on
 // demand, keyed by ref string, and the consumer invalidates an entry from its
-// offer-save path. Safe for concurrent use.
+// offer-save path. Every entry also expires after the [WithRefTTL] duration,
+// so a missed invalidation (or another node's save in a multi-node
+// deployment) is stale for at most one TTL, and refs that stop being clicked
+// do not stay resident forever. Safe for concurrent use.
 type Cache struct {
-	load    func(ctx context.Context, ref string) (Spec, error)
-	entries map[string]*refEntry
-	opts    []Option
-	mu      sync.RWMutex
+	nextSweep time.Time
+	clock     clock.Clock
+	load      func(ctx context.Context, ref string) (Spec, error)
+	entries   map[string]*refEntry
+	opts      []Option
+	ttl       time.Duration
+	mu        sync.RWMutex
 }
 
-// refEntry is one ref's cache slot. The goroutine that inserts it (the
-// leader) loads and compiles while concurrent Gets for the same ref wait on
-// wg — one load per ref per miss window, never a thundering herd against the
-// consumer's database. Invalidate simply removes the entry from the map, so
-// an in-flight leader finishes into a detached entry: its waiters still get
-// the result (correct when their calls began), but the next Get misses and
-// reloads fresh. Entry lifetime doubles as the cache itself, so there is no
-// side bookkeeping to prune.
+// refEntry is one ref's cache slot. The goroutine that inserts it starts one
+// detached fill; concurrent Gets for the same ref wait on done — one load per
+// ref per miss window, never a thundering herd against the consumer's
+// database — with each caller's wait bounded by its own context. Invalidate
+// simply removes the entry from the map, so an in-flight load finishes into a
+// detached entry: its waiters still get the result (correct when their calls
+// began), but the next Get misses and reloads fresh. Entry lifetime doubles
+// as the cache itself, so there is no side bookkeeping to prune beyond the
+// TTL sweep.
 type refEntry struct {
-	compiled *Compiled
-	err      error
-	wg       sync.WaitGroup
+	done      chan struct{} // closed when the fill completes
+	compiled  *Compiled
+	err       error
+	expiresAt time.Time // set before done closes; zero while in flight
 }
 
-// NewCache returns a Cache that loads a Spec via load and compiles it with
-// compileOpts on a cache miss; a nil load is a construction error. ref must
-// be globally unique and load must be a pure function of ref — the cache is
-// keyed by the bare ref string with no tenant dimension, so a multi-tenant
-// consumer whose resolution differs per tenant must embed the tenant in ref
-// itself.
+// expired reports whether e finished filling and its TTL has passed. An
+// in-flight entry is never expired — joiners share the pending load.
+func (e *refEntry) expired(now time.Time) bool {
+	select {
+	case <-e.done:
+		return now.After(e.expiresAt)
+	default:
+		return false
+	}
+}
+
+// cacheConfig holds NewCache's resolved options, collecting validation
+// failures in errs the same way managerConfig does.
+type cacheConfig struct {
+	compileOpts []Option
+	errs        []error
+	ttl         time.Duration
+}
+
+// CacheOption configures [NewCache].
+type CacheOption func(*cacheConfig)
+
+// WithRefTTL bounds how long a successfully compiled ref is served before the
+// next Get reloads it (default 5m). ttl must be positive: an unbounded entry
+// would survive a missed [Cache.Invalidate] forever, and a multi-node
+// deployment has no way to invalidate another node's process-local cache. A
+// non-positive ttl is a NewCache error.
+func WithRefTTL(ttl time.Duration) CacheOption {
+	return func(c *cacheConfig) {
+		if ttl <= 0 {
+			c.errs = append(c.errs, fmt.Errorf("smartlink: ref ttl must be positive, got %s", ttl))
+			return
+		}
+		c.ttl = ttl
+	}
+}
+
+// WithCompileOptions sets the [Option] values (e.g. [WithClock]) the Cache
+// passes to every [Compile] of a loaded Spec.
+func WithCompileOptions(opts ...Option) CacheOption {
+	return func(c *cacheConfig) { c.compileOpts = append(c.compileOpts, opts...) }
+}
+
+// NewCache returns a Cache that loads a Spec via load and compiles it on a
+// cache miss; a nil load is a construction error. ref must be globally unique
+// and load must be a pure function of ref — the cache is keyed by the bare
+// ref string with no tenant dimension, so a multi-tenant consumer whose
+// resolution differs per tenant must embed the tenant in ref itself.
 //
 // A loaded Spec with an empty Salt gets the ref as its Salt, so distinct
 // refs bucket their splits and Percent matchers independently by default
 // (see [Spec.Salt]).
 //
 // Errors from load or Compile are never cached, so the next Get retries.
-func NewCache(load func(ctx context.Context, ref string) (Spec, error), compileOpts ...Option) (*Cache, error) {
+func NewCache(load func(ctx context.Context, ref string) (Spec, error), opts ...CacheOption) (*Cache, error) {
 	if load == nil {
 		return nil, errors.New("smartlink: nil load func")
 	}
+	cfg := cacheConfig{ttl: defaultRefTTL}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if len(cfg.errs) > 0 {
+		return nil, errors.Join(cfg.errs...)
+	}
 	return &Cache{
-		load:    load,
-		opts:    compileOpts,
+		load: load,
+		opts: cfg.compileOpts,
+		// TTL expiry shares the compile options' clock, so tests (and
+		// TimeWindow matchers) observe one consistent time source.
+		clock:   newConfig(cfg.compileOpts...).clock,
+		ttl:     cfg.ttl,
 		entries: make(map[string]*refEntry),
 	}, nil
 }
 
 // Get returns the Compiled engine for ref, loading and compiling it on a
-// cache miss. Concurrent misses on the same ref share one load. Errors from
-// load or Compile are wrapped, not cached.
+// cache miss (or after TTL expiry). Concurrent misses on the same ref share
+// one load, which runs detached from any single request's cancellation; each
+// caller's wait is still bounded by its own ctx, so a stuck load func cannot
+// pin callers past their deadlines. Errors from load or Compile are wrapped,
+// not cached.
 func (c *Cache) Get(ctx context.Context, ref string) (*Compiled, error) {
+	now := c.clock.Now()
 	c.mu.RLock()
 	e, ok := c.entries[ref]
 	c.mu.RUnlock()
-	if !ok {
-		var leader bool
+	if !ok || e.expired(now) {
 		c.mu.Lock()
-		if e, ok = c.entries[ref]; !ok {
-			e = &refEntry{}
-			e.wg.Add(1)
+		e, ok = c.entries[ref]
+		if !ok || e.expired(now) {
+			e = &refEntry{done: make(chan struct{})}
 			c.entries[ref] = e
-			leader = true
+			c.sweepLocked(now)
+			go c.fill(context.WithoutCancel(ctx), ref, e)
 		}
 		c.mu.Unlock()
-		if leader {
-			return c.fill(ctx, ref, e)
-		}
 	}
-	e.wg.Wait()
-	return e.compiled, e.err
+	select {
+	case <-e.done:
+		return e.compiled, e.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("smartlink: load ref %q: %w", ref, ctx.Err())
+	}
 }
 
-// fill loads and compiles ref into e, releasing waiters exactly once even if
-// load or Compile panics (the panic then propagates to the leader's caller;
-// waiters observe an error). load runs with cancellation detached so one
-// canceled request cannot fail the waiters sharing the flight
-// (resilience/singleflight precedent). An errored or panicked entry is
-// removed — if still current — so the next Get retries instead of caching
-// the failure.
-func (c *Cache) fill(ctx context.Context, ref string, e *refEntry) (*Compiled, error) {
-	finished := false
+// sweepLocked prunes expired entries, at most once per TTL period so a miss
+// burst never pays repeated full-map scans. Callers hold c.mu. Without this,
+// refs that stop being clicked would stay resident until a Get for that exact
+// ref happened to replace them.
+func (c *Cache) sweepLocked(now time.Time) {
+	if now.Before(c.nextSweep) {
+		return
+	}
+	c.nextSweep = now.Add(c.ttl)
+	for ref, e := range c.entries {
+		if e.expired(now) {
+			delete(c.entries, ref)
+		}
+	}
+}
+
+// fill loads and compiles ref into e and closes e.done exactly once, even if
+// load or Compile panics (the panic is converted to an error every waiter
+// observes — fill runs in its own goroutine, so there is no caller to
+// re-panic into). An errored or panicked entry is removed — if still
+// current — so the next Get retries instead of caching the failure; a
+// successful one gets its TTL stamped before waiters are released.
+func (c *Cache) fill(ctx context.Context, ref string, e *refEntry) {
 	defer func() {
-		if !finished {
-			e.err = fmt.Errorf("smartlink: load ref %q: panic during load or compile", ref)
-			e.wg.Done()
-			c.removeEntry(ref, e)
+		if r := recover(); r != nil {
+			e.compiled, e.err = nil, fmt.Errorf("smartlink: load ref %q: panic during load or compile: %v", ref, r)
 		}
+		if e.err != nil {
+			c.removeEntry(ref, e)
+		} else {
+			e.expiresAt = c.clock.Now().Add(c.ttl)
+		}
+		close(e.done)
 	}()
-
-	compiled, err := c.loadCompile(ctx, ref)
-	e.compiled, e.err = compiled, err
-	finished = true
-	e.wg.Done()
-	if err != nil {
-		c.removeEntry(ref, e)
-		return nil, err
-	}
-	return compiled, nil
+	e.compiled, e.err = c.loadCompile(ctx, ref)
 }
 
-// loadCompile loads ref's Spec (cancellation-detached — see fill) and
-// compiles it, defaulting an empty Salt to the ref.
+// loadCompile loads ref's Spec and compiles it, defaulting an empty Salt to
+// the ref. ctx is already cancellation-detached (see Get).
 func (c *Cache) loadCompile(ctx context.Context, ref string) (*Compiled, error) {
-	spec, err := c.load(context.WithoutCancel(ctx), ref)
+	spec, err := c.load(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("smartlink: load ref %q: %w", ref, err)
 	}

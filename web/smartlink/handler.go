@@ -71,8 +71,9 @@ func (m *Manager) Handler() http.Handler {
 }
 
 // decider resolves l to a Decider — a per-hit degenerate compile for a
-// Target link, or the configured Resolver for a Ref link — writing an error
-// response and reporting ok == false when it cannot produce one.
+// Target link, or the configured Resolver for a Ref link, either wrapped in
+// the [WithDecorators] chain — writing an error response and reporting
+// ok == false when it cannot produce one.
 func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Request, code string, l Link) (Decider, bool) {
 	switch {
 	case l.Target != "":
@@ -87,7 +88,7 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 			internalServerError(w)
 			return nil, false
 		}
-		return compiled, true
+		return m.decorated(compiled), true
 
 	case m.cfg.resolver == nil:
 		m.cfg.logger.ErrorContext(ctx, "smartlink: ref link with no resolver configured", "code", code)
@@ -105,8 +106,23 @@ func (m *Manager) decider(ctx context.Context, w http.ResponseWriter, r *http.Re
 			internalServerError(w)
 			return nil, false
 		}
-		return resolved, true
+		// A (nil, nil) resolver result would panic in Decide; treat it like a
+		// resolver error — a consumer bug is an internal error, not a dead link.
+		if resolved == nil {
+			m.cfg.logger.ErrorContext(ctx, "smartlink: resolver returned nil Decider without error", "code", code)
+			internalServerError(w)
+			return nil, false
+		}
+		return m.decorated(resolved), true
 	}
+}
+
+// decorated wraps d in the WithDecorators chain, if one is configured.
+func (m *Manager) decorated(d Decider) Decider {
+	if m.decorate == nil {
+		return d
+	}
+	return m.decorate(d)
 }
 
 // compileTarget compiles the degenerate single-target Spec for a
