@@ -132,9 +132,7 @@ func compileSplit(targets []Target, salt, ruleName string) (split, error) {
 		}
 		s.targets[i] = compiledTarget{raw: t, tmpl: tmpl}
 		if tmpl.segs == nil {
-			if u, err := url.Parse(tmpl.raw); err == nil {
-				s.targets[i].lit = &litQuery{u: *u, pairs: splitQuery(u.RawQuery)}
-			}
+			s.targets[i].lit = &litQuery{u: *tmpl.elidedURL, pairs: splitQuery(tmpl.elidedURL.RawQuery)}
 		}
 	}
 	if len(targets) > 1 {
