@@ -12,6 +12,7 @@
 //	import (
 //		"context"
 //		"log/slog"
+//		"os"
 //		"time"
 //
 //		"github.com/dmitrymomot/forge/data/migration"
@@ -23,8 +24,11 @@
 //	func main() {
 //		ctx := context.Background()
 //
+//		cfg := postgres.DefaultConfig()
+//		cfg.URL = os.Getenv("DATABASE_URL")
+//
 //		pool, err := postgres.Open(ctx,
-//			postgres.WithConfig(postgres.DefaultConfig()),
+//			postgres.WithConfig(cfg),
 //			postgres.WithMigrator(migration.New(pgstore.Migrations, migration.WithTable("forge_smartlink_schema"))),
 //		)
 //		if err != nil {
