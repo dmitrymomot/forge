@@ -5,21 +5,19 @@
 //
 // # Usage
 //
-//	type Status string
+//	type Priority string
 //
 //	const (
-//		StatusActive Status = "active"
-//		StatusPaused Status = "paused"
+//		PriorityLow  Priority = "low"
+//		PriorityHigh Priority = "high"
 //	)
 //
-//	var Statuses = enum.New(StatusActive, StatusPaused)
+//	var Priorities = enum.New(PriorityLow, PriorityHigh)
 //
-//	func Example() {
-//		Statuses.Valid(StatusActive) // true
+//	Priorities.Valid(PriorityLow) // true
 //
-//		v, err := Statuses.Parse("paused")
-//		// v == StatusPaused, err == nil
+//	v, err := Priorities.Parse("high")
+//	// v == PriorityHigh, err == nil
 //
-//		Statuses.Values() // []Status{StatusActive, StatusPaused}
-//	}
+//	Priorities.Values() // []Priority{PriorityLow, PriorityHigh}
 package enum

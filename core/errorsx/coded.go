@@ -7,7 +7,7 @@ import "fmt"
 type codedError struct {
 	err  error // wrapped error (nil for a leaf)
 	code string
-	msg  string // used when err == nil (leaf, from New/Errorf)
+	msg  string // used when err == nil (leaf, from New only)
 }
 
 func (e *codedError) Error() string {
@@ -24,8 +24,9 @@ func (e *codedError) Error() string {
 // Code reports this error's code. Satisfied by errors.As in the package Code func.
 func (e *codedError) Code() string { return e.code }
 
-// Unwrap exposes the wrapped error. It returns nil for a leaf (New/Errorf without
-// a %w arg), which stops the errors.Is/As walk at this error.
+// Unwrap exposes the wrapped error. It returns nil only for a leaf created via
+// New, which stops the errors.Is/As walk at this error; Errorf always sets it
+// (fmt.Errorf never returns nil), even without a %w verb.
 func (e *codedError) Unwrap() error { return e.err }
 
 // coder is the interface a coded error satisfies. Kept unexported: Code(err)

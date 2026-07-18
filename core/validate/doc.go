@@ -5,13 +5,7 @@
 //
 // Param-less rules are used bare (validate.Email, validate.Required); parameterized
 // rules are constructors that return a Rule[T] (validate.MinLen(2)). Apply runs a
-// field's rules against its value; Check aggregates to an error:
-//
-//	err := validate.Check(
-//		validate.Apply("age",   age,   validate.Required[int], validate.Between(18, 72)),
-//		validate.Apply("email", email, validate.Msg(validate.Email, "invalid {field}")),
-//		validate.Manual("email", "Email is taken"),
-//	)
+// field's rules against its value; Check aggregates the field Results into one error.
 //
 // Rules compose into rules via And/Or/Not/Each/Msg/WithKey/When; conditionals use
 // When (check-level) and WhenField (field-level).
@@ -23,4 +17,14 @@
 // verification is out of scope (it needs Keccak, which would end validate's
 // stdlib-only status). Untrusted-input normalization belongs to the sanitize
 // package; slug generation to the slug package.
+//
+// # Usage
+//
+//	age := 15
+//	email := "invalid"
+//	err := validate.Check(
+//		validate.Apply("age", age, validate.Min(18)),
+//		validate.Apply("email", email, validate.Msg(validate.Email, "invalid email")),
+//	)
+//	// err.Error() == "age: validation.min; email: invalid email"
 package validate

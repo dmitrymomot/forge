@@ -10,9 +10,9 @@ import (
 )
 
 func TestDotsRaisesLevel(t *testing.T) {
-	// A short input renders fine at M; with ShapeDots the encoder must use >=Q,
-	// so decoding proves nothing here — assert via SVG size/level indirectly:
-	// dots at level L request still produce a valid image without error.
+	// ShapeDots forces effectiveLevel to raise the requested LevelL to >=Q, so
+	// decoding the output wouldn't confirm LevelL took effect. This just checks
+	// the combination still produces a valid image without error.
 	if _, err := qrcode.PNG("dots", qrcode.WithLevel(qrcode.LevelL), qrcode.WithModuleShape(qrcode.ShapeDots), qrcode.WithScale(6)); err != nil {
 		t.Fatalf("PNG dots: %v", err)
 	}
@@ -45,7 +45,7 @@ func countForeground(t *testing.T, raw []byte) int {
 	n := 0
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			// Compare against opaque black in the 8-bit space RGBA() maps to.
+			// RGBA() scales components to 16 bits; opaque black is r=g=b=0, a=0xffff.
 			if r, g, bl, a := img.At(x, y).RGBA(); r == 0 && g == 0 && bl == 0 && a == 0xffff {
 				n++
 			}

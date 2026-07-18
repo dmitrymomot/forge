@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Domain: labels of [a-z0-9] with internal hyphens, 2+ labels, TLD is alphabetic.
+// reDomain matches labels of letters/digits with internal hyphens, 2+ labels, alphabetic TLD.
 var reDomain = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$`)
 
 // IP accepts any valid IPv4 or IPv6 address.
@@ -43,7 +43,7 @@ func MAC(s string) Violation {
 	return Violation{}
 }
 
-// Domain accepts a hostname with at least two labels and an alphabetic TLD.
+// Domain accepts a hostname of at most 253 characters with at least two labels and an alphabetic TLD.
 func Domain(s string) Violation {
 	if len(s) > 253 || !reDomain.MatchString(s) {
 		return Violation{Key: "validation.domain"}

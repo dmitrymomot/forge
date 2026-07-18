@@ -14,7 +14,9 @@ func Map[T, U any](s []T, fn func(T) U) []U {
 	return out
 }
 
-// Filter returns a new slice of the elements of s for which pred returns true.
+// Filter returns a new slice of the elements of s for which pred returns
+// true. A nil input yields a nil result; a non-nil input yields a non-nil
+// result even if no elements match.
 func Filter[T any](s []T, pred func(T) bool) []T {
 	if s == nil {
 		return nil
@@ -58,6 +60,7 @@ func KeyBy[T any, K comparable](s []T, key func(T) K) map[K]T {
 
 // Unique returns the elements of s with duplicates removed, preserving
 // first-seen order (unlike slices.Compact, which needs sorted input).
+// A nil input yields a nil result; a non-nil input yields a non-nil result.
 func Unique[T comparable](s []T) []T {
 	if s == nil {
 		return nil
@@ -74,7 +77,9 @@ func Unique[T comparable](s []T) []T {
 	return out
 }
 
-// Flatten concatenates the sub-slices of s into one slice.
+// Flatten concatenates the sub-slices of s into one slice. A nil input
+// yields a nil result; a non-nil input yields a non-nil result even if all
+// sub-slices are empty.
 func Flatten[T any](s [][]T) []T {
 	if s == nil {
 		return nil
@@ -93,7 +98,8 @@ func Flatten[T any](s [][]T) []T {
 // Chunk splits s into consecutive slices of at most n elements. The final
 // chunk may be shorter. Chunk panics if n < 1, matching slices.Chunk. Unlike
 // slices.Chunk it returns a materialized [][]T rather than an iterator; each
-// chunk has capacity clamped so appending to it cannot overwrite s.
+// chunk has capacity clamped so appending to it cannot overwrite s. A nil
+// input yields a nil result.
 func Chunk[T any](s []T, n int) [][]T {
 	if n < 1 {
 		panic("slicex: Chunk called with n < 1")

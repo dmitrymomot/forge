@@ -68,8 +68,8 @@ func allDigits(s string) bool {
 	return true
 }
 
-// MustParse is like Parse but panics on error. For package-level test/config
-// literals known to be valid.
+// MustParse is like Parse but panics on error. It is intended for
+// package-level test/config literals known to be valid.
 func MustParse(s string) Decimal {
 	d, err := Parse(s)
 	if err != nil {
@@ -80,7 +80,7 @@ func MustParse(s string) Decimal {
 
 // String renders d preserving its stored scale: 2.50 → "2.50", 0.001 → "0.001".
 func (d Decimal) String() string {
-	// Absolute-value coefficient digits, sign handled separately.
+	// digits holds the coefficient's absolute-value digits; neg tracks the sign separately.
 	var digits string
 	var neg bool
 	if d.big != nil {
@@ -117,8 +117,8 @@ func (d Decimal) String() string {
 	return out
 }
 
-// formatUint renders u in base 10 without importing strconv into this hot path
-// via a fixed buffer.
+// formatUint renders u in base 10 using a fixed buffer, avoiding a strconv
+// import in this hot path.
 func formatUint(u uint64) string {
 	if u == 0 {
 		return "0"

@@ -91,6 +91,8 @@ func NewCountingWriter(w io.Writer) *CountingWriter {
 	return &CountingWriter{w: w}
 }
 
+// Write writes p to the underlying writer and adds the bytes actually
+// written to the running count, even on a short write or error.
 func (c *CountingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
 	c.n += int64(n)

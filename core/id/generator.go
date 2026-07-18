@@ -68,7 +68,7 @@ func setUUIDBits(u *UUID) {
 	u[8] = (u[8] & 0x3f) | 0x80 // variant 0b10
 }
 
-// UUID returns a new version-7 UUID.
+// UUID returns a new version-7 UUID timestamped from g's clock.
 func (g *Generator) UUID() UUID {
 	if !g.monotonic {
 		var u UUID
@@ -94,7 +94,7 @@ func (g *Generator) UUID() UUID {
 	return g.uuidVal
 }
 
-// ULID returns a new ULID.
+// ULID returns a new ULID timestamped from g's clock.
 func (g *Generator) ULID() ULID {
 	if !g.monotonic {
 		var u ULID
@@ -117,7 +117,7 @@ func (g *Generator) ULID() ULID {
 	return g.ulidVal
 }
 
-// Short returns a new Short.
+// Short returns a new Short timestamped from g's clock.
 func (g *Generator) Short() Short {
 	if !g.monotonic {
 		var s Short

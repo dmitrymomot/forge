@@ -41,6 +41,10 @@ func svgFill(c color.Color) string {
 // finder ratio. This mirrors the PNG renderer. When both shapes are square
 // (the default) every module is a plain square and the whole matrix is a single
 // combined <path>.
+//
+// Returns ErrTooLarge if data exceeds the QR capacity at the effective level,
+// or one of ErrInvalidScale, ErrInvalidBorder, ErrInvalidLogoSize,
+// ErrInvalidColor if opts are invalid.
 func SVG(data string, opts ...Option) ([]byte, error) {
 	c, err := newConfig(opts...)
 	if err != nil {

@@ -6,7 +6,8 @@ import "sort"
 // at the currency's MinorUnits using the largest-remainder method so that the
 // returned parts always sum back to m exactly. It returns ErrInvalidAllocation
 // when no ratios are given, any ratio is negative, or the ratios sum to zero or
-// less.
+// less. It returns ErrOverflow when the amount's minor-unit count or an
+// intermediate product exceeds int64 range, or the ratio sum overflows int.
 func (m Money) Allocate(ratios ...int) ([]Money, error) {
 	if len(ratios) == 0 {
 		return nil, ErrInvalidAllocation
@@ -90,7 +91,8 @@ func (m Money) Allocate(ratios ...int) ([]Money, error) {
 }
 
 // Split divides the amount into n equal parts, distributing any remainder minor
-// units to the first parts. It returns ErrInvalidAllocation for n <= 0.
+// units to the first parts. It returns ErrInvalidAllocation for n <= 0, or
+// ErrOverflow if the amount's minor-unit count exceeds int64 range.
 func (m Money) Split(n int) ([]Money, error) {
 	if n <= 0 {
 		return nil, ErrInvalidAllocation

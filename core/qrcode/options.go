@@ -36,7 +36,8 @@ func WithBackground(col color.Color) Option { return func(c *config) { c.bg = co
 func WithLogo(img image.Image) Option { return func(c *config) { c.logo = img } }
 
 // WithLogoSize sets the logo width as a fraction of the code width (default
-// 0.2, capped at 0.3).
+// 0.2). Must be in (0, 0.3]; out-of-range values make the encode/render call
+// return ErrInvalidLogoSize.
 func WithLogoSize(frac float64) Option { return func(c *config) { c.logoSize = frac } }
 
 // WithModuleShape styles the data modules (default ShapeSquare).

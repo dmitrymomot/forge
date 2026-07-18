@@ -12,8 +12,8 @@ import (
 //
 // Note: the rules exercised here are pure (ASCII/NotBlank/MinLen). Rules backed by a
 // stdlib parser that allocates internally (e.g. Email via net/mail, or the regexp-
-// backed UUID/Numeric) are intentionally excluded — their non-zero allocs come from
-// the stdlib call, not from validate's Rule/Apply machinery, which this guards.
+// backed UUID) are intentionally excluded — their non-zero allocs come from the
+// stdlib call, not from validate's Rule/Apply machinery, which this guards.
 func TestZeroAllocHappyPath(t *testing.T) {
 	code := "ABC123"
 	name := "abc"
