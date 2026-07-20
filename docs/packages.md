@@ -148,7 +148,7 @@ Named retention policies run as batched delete/anonymize sweeps via
 audit events. Handles the two-sided GDPR constraint — minimum retention
 and erasure deadlines — as declared policy, not cron scripts.
 
-Deps: `async/scheduler` (planned), `async/queue`, `ops/auditlog` (planned).
+Deps: `async/scheduler`, `async/queue`, `ops/auditlog` (planned).
 
 ---
 
@@ -338,32 +338,6 @@ transactions (redis, nats, kafka) get transactional enqueue via
 
 Deps: `async/queue`; drivers: `data/sqlite` (planned), `data/nats`
 (planned), `data/kafka` (planned).
-
----
-
-**async/scheduler**
-
-Cron/interval `supervisor.Service` that *enqueues* into the engine when
-due; fires once per fleet via a `unique(name, scheduled_for)` insert race
-on SQL drivers; small local cron parser, no robfig/cron.
-
-Deps: `ops/supervisor`; `async/queue`.
-
----
-
-**async/collector**
-
-Write-behind ingestion for proven-hot fire-and-forget paths (click
-streams, beacons, telemetry): bounded in-memory buffer, batch flush by
-size+age into a `Sink` seam, explicit overload policy — drop-newest with
-counted, logged loss, never blocking the request path — and graceful
-drain as a `supervisor.Service`. No dedup — double-fires and unique-key
-rules are the downstream pipeline's concern. Reach for
-`outbox`/`eventbus` first: this package is justified only when per-event
-publish shows up in a profile (design.md §Performance — benchmark
-required).
-
-Deps: `ops/supervisor`.
 
 ## realtime/
 
