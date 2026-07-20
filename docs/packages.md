@@ -388,8 +388,8 @@ delivery (`Idempotency-Key` header / payload field) and receivers dedup
 — the Stripe contract (in-router suppression would trade duplicates for
 silent loss).
 
-Deps: `web/httpclient`; `async/eventbus`, `comms/webhook`,
-`comms/postback` (all planned).
+Deps: `web/httpclient`, `comms/postback`; `async/eventbus`,
+`comms/webhook` (both planned).
 
 ---
 
@@ -606,27 +606,6 @@ pluggable `Scheme` seam, so bespoke partner schemes register without
 forking the package.
 
 Deps: `web/httpclient`, `crypto/sign`; `async/queue`.
-
----
-
-**comms/postback**
-
-Tracker-style server-to-server postbacks — the affiliate/ad-network
-conversion ping: a destination is a URL template over a caller-registered
-macro vocabulary (`{click_id}`, `{payout}`, `{status}`, sub-IDs — the
-vocabulary is consumer data), parsed and validated at registration — an
-unknown macro is a construction error, never an empty substitution at
-fire time. `Send` renders the template against a per-event macro map
-(values URL-escaped), fires GET (or a configured method) via httpclient
-with timeout and bounded retry, and reports outcome by status class.
-Unsigned by design — trackers correlate by click ID, not signatures
-(HMAC-signed deliveries are `comms/webhook`); no dedup — stable event IDs
-ride as macros and receivers dedup. Per-tracker format tables are
-consumer data; durable delivery and per-destination fan-out come from
-`async/queue` / `async/eventrouter`, where this package slots in as a
-`Deliverer`.
-
-Deps: `web/httpclient`.
 
 ---
 
