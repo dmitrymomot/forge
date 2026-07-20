@@ -35,7 +35,9 @@
 // claimed the older ones. A tick whose claim or enqueue fails is retried
 // every Config.RetryInterval until it fires, another instance claims it, or
 // the next tick supersedes it. Claims expire from the store after
-// Config.Retention via a periodic sweep.
+// Config.Retention via a periodic sweep, and every store/broker interaction
+// is bounded by Config.OpTimeout (SCHEDULER_OP_TIMEOUT) so a wedged backend
+// cannot block shutdown.
 //
 // Multi-tenant apps: scheduled jobs are system-initiated, so a
 // scope-configured queue.Client would fail closed on the scheduler's
