@@ -376,18 +376,6 @@ required).
 
 Deps: `ops/supervisor`.
 
----
-
-**async/workflow**
-
-DB-checkpointed linear step sequences over the engine
-(onboarding/provisioning chains; resume after crash), with optional
-per-step compensation — on failure, completed steps' compensations run in
-reverse order (a payout pipeline that must undo its ledger debit). No DAG,
-no DSL, no timers — not a Temporal clone.
-
-Deps: `async/queue`.
-
 ## realtime/
 
 ---
