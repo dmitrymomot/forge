@@ -32,11 +32,11 @@
 //
 // # Usage
 //
-//	pct := decimal.MustParse
+//	d := decimal.MustParse
 //	sched, err := tariff.New(tariff.Graduated,
-//		tariff.UpTo(pct("1000"), pct("0.25")),
-//		tariff.UpTo(pct("5000"), pct("0.30")),
-//		tariff.Above(pct("0.35")),
+//		tariff.UpTo(d("1000"), d("0.25")),
+//		tariff.UpTo(d("5000"), d("0.30")),
+//		tariff.Above(d("0.35")),
 //	)
 //	if err != nil {
 //		// invalid band set: unordered bounds, negative rate, ...
@@ -47,6 +47,9 @@
 //		// negative base
 //	}
 //	// res.Lines: 1000×25% + 4000×30% + 5000×35%, exact
-//	settled, _ := res.Round(decimal.HalfEven)
+//	settled, err := res.Round(decimal.HalfEven)
+//	if err != nil {
+//		// unreachable: ApplyMoney results never mix currencies
+//	}
 //	_ = settled.Total // "3200.00 USD"
 package tariff
