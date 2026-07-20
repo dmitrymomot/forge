@@ -181,8 +181,10 @@ func TestPg_ScopedReads(t *testing.T) {
 	_, _, err = failing.List(context.Background(), pgsink.Filter{})
 	assert.ErrorIs(t, err, auditlog.ErrScope)
 	assert.ErrorIs(t, err, hookErr)
-	_, err = failing.Verify(context.Background(), "")
+	_, _, err = failing.Verify(context.Background(), "")
 	assert.ErrorIs(t, err, auditlog.ErrScope, "Verify fails closed too")
+	_, err = failing.ChainHead(context.Background(), "")
+	assert.ErrorIs(t, err, auditlog.ErrScope, "ChainHead fails closed too")
 }
 
 func TestPg_ChainHeadAndResume(t *testing.T) {
@@ -204,9 +206,35 @@ func TestPg_ChainHeadAndResume(t *testing.T) {
 	rec2 := auditlog.New(sink, auditlog.WithChain())
 	record(t, rec2, tenant, 2)
 
-	n, err := sink.Verify(context.Background(), tenant)
+	n, verifiedHead, err := sink.Verify(context.Background(), tenant)
 	require.NoError(t, err)
 	assert.Equal(t, 4, n, "chain verifies across recorder restarts")
+
+	head, err = sink.ChainHead(context.Background(), tenant)
+	require.NoError(t, err)
+	assert.Equal(t, head, verifiedHead, "Verify returns the anchorable head")
+}
+
+func TestPg_TailTruncationCaughtByAnchoredHead(t *testing.T) {
+	pool := newPool(t)
+	sink := pgsink.New(pool)
+	tenant := tenantFor(t)
+	events := record(t, auditlog.New(sink, auditlog.WithChain()), tenant, 3)
+
+	_, anchored, err := sink.Verify(context.Background(), tenant)
+	require.NoError(t, err)
+
+	// An attacker deletes the newest event: the shorter chain still
+	// verifies — only the externally anchored head exposes the loss.
+	_, err = pool.Exec(context.Background(),
+		`DELETE FROM forge_audit_events WHERE id = $1`, events[2].ID)
+	require.NoError(t, err)
+
+	n, head, err := sink.Verify(context.Background(), tenant)
+	require.NoError(t, err, "truncation is invisible to chain verification alone")
+	assert.Equal(t, 2, n)
+	assert.NotEqual(t, anchored, head, "anchored-head comparison detects the truncation")
+	assert.Equal(t, events[1].Hash, head)
 }
 
 func TestPg_VerifyDetectsTampering(t *testing.T) {
@@ -215,7 +243,7 @@ func TestPg_VerifyDetectsTampering(t *testing.T) {
 	tenant := tenantFor(t)
 	events := record(t, auditlog.New(sink, auditlog.WithChain()), tenant, 3)
 
-	n, err := sink.Verify(context.Background(), tenant)
+	n, _, err := sink.Verify(context.Background(), tenant)
 	require.NoError(t, err)
 	require.Equal(t, 3, n)
 
@@ -224,7 +252,7 @@ func TestPg_VerifyDetectsTampering(t *testing.T) {
 		`UPDATE forge_audit_events SET actor = 'attacker' WHERE id = $1`, events[1].ID)
 	require.NoError(t, err)
 
-	_, err = sink.Verify(context.Background(), tenant)
+	_, _, err = sink.Verify(context.Background(), tenant)
 	assert.ErrorIs(t, err, auditlog.ErrChainBroken)
 	assert.ErrorContains(t, err, events[1].ID.String(), "names the first bad event")
 
@@ -236,7 +264,7 @@ func TestPg_VerifyDetectsTampering(t *testing.T) {
 	_, err = pool.Exec(context.Background(),
 		`DELETE FROM forge_audit_events WHERE id = $1`, events[0].ID)
 	require.NoError(t, err)
-	_, err = sink.Verify(context.Background(), tenant)
+	_, _, err = sink.Verify(context.Background(), tenant)
 	assert.ErrorIs(t, err, auditlog.ErrChainBroken)
 }
 
@@ -247,14 +275,16 @@ func TestPg_VerifyCrossesBatchBoundary(t *testing.T) {
 	// across batches.
 	record(t, auditlog.New(sink, auditlog.WithChain()), tenant, 501)
 
-	n, err := sink.Verify(context.Background(), tenant)
+	n, head, err := sink.Verify(context.Background(), tenant)
 	require.NoError(t, err)
 	assert.Equal(t, 501, n)
+	assert.NotEmpty(t, head)
 }
 
 func TestPg_VerifyEmptyStream(t *testing.T) {
 	sink := pgsink.New(newPool(t))
-	n, err := sink.Verify(context.Background(), tenantFor(t))
+	n, head, err := sink.Verify(context.Background(), tenantFor(t))
 	require.NoError(t, err)
 	assert.Zero(t, n)
+	assert.Empty(t, head)
 }

@@ -61,6 +61,27 @@ func TestRecord_InvalidEvent(t *testing.T) {
 	assert.ErrorIs(t, err, auditlog.ErrInvalidEvent, "missing outcome")
 }
 
+func TestRecord_RejectsNULBytes(t *testing.T) {
+	t.Parallel()
+	sink := auditlog.NewMemorySink()
+	rec := auditlog.New(sink)
+
+	events := []auditlog.Event{
+		{Action: "a\x00b", Outcome: "ok"},
+		{Action: "a", Outcome: "ok", Actor: "u\x00"},
+		{Action: "a", Outcome: "ok", Tenant: "t\x00"},
+		{Action: "a", Outcome: "ok", Resource: "r\x00"},
+		{Action: "a", Outcome: auditlog.Outcome("o\x00k")},
+		{Action: "a", Outcome: "ok", Meta: map[string]string{"k\x00": "v"}},
+		{Action: "a", Outcome: "ok", Meta: map[string]string{"k": "v\x00"}},
+	}
+	for _, e := range events {
+		_, err := rec.Record(context.Background(), e)
+		assert.ErrorIs(t, err, auditlog.ErrInvalidEvent, "NUL bytes cannot be stored by Postgres and must fail at the audit point")
+	}
+	assert.Empty(t, sink.Events())
+}
+
 func TestRecord_IDsAreTimeOrdered(t *testing.T) {
 	t.Parallel()
 	sink := auditlog.NewMemorySink()

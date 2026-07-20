@@ -19,7 +19,7 @@ import (
 // hashed with sha256.Sum256 — 1.7x faster and 33 -> 8 allocs versus the
 // streaming sha256.New form (see BenchmarkComputeHash).
 func ComputeHash(e Event) string {
-	size := 9*8 + 8 + // nine length prefixes + the meta pair count
+	size := 8*8 + 8 + // eight field length prefixes + the meta pair count
 		len(e.PrevHash) + len(e.ID) + 8 + // 8 = encoded Time
 		len(e.Tenant) + len(e.Actor) + len(e.Action) + len(e.Resource) + len(e.Outcome)
 	for k, v := range e.Meta {

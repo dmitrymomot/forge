@@ -31,9 +31,12 @@
 // WithChain links each event to its predecessor within a stream (stream =
 // tenant): Hash = SHA-256(PrevHash, payload). Rewriting, deleting, or
 // reordering any persisted event breaks every hash after it, which
-// VerifyChain (or pgsink's Verify) detects. Chained writes serialize per
-// stream and require a single writer per stream; sinks implementing
-// ChainHead (pgsink, MemorySink) let the chain resume across restarts.
+// VerifyChain (or pgsink's Verify) detects. The chain is unkeyed, so an
+// attacker who can rewrite the entire suffix after an edit — or truncate
+// the tail — defeats it; anchoring the verified head outside the database
+// closes that gap. Chained writes serialize per stream and require a
+// single writer per stream; sinks implementing ChainHead (pgsink,
+// MemorySink) let the chain resume across restarts.
 //
 //	rec := auditlog.New(sink, auditlog.WithChain())
 //	head, err := auditlog.VerifyChain("", events) // events in id-ascending order

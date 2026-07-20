@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,9 @@ func New(sink Sink, opts ...Option) *Recorder {
 func (r *Recorder) Record(ctx context.Context, e Event) (Event, error) {
 	if e.Action == "" || e.Outcome == "" {
 		return Event{}, fmt.Errorf("%w: action and outcome are required", ErrInvalidEvent)
+	}
+	if err := checkNUL(e); err != nil {
+		return Event{}, err
 	}
 	if r.cfg.scope != nil {
 		tenant, err := r.cfg.scope(ctx)
@@ -122,6 +126,26 @@ func (r *Recorder) recordChained(ctx context.Context, e Event) (Event, error) {
 	}
 	head.hash = e.Hash
 	return e, nil
+}
+
+// checkNUL rejects events carrying NUL bytes: Postgres text and jsonb
+// cannot store them, and silently stripping them after hashing would make
+// the persisted event fail verification. Rejecting up front keeps the
+// failure at the audit point instead of an opaque driver error —
+// consumers must sanitize untrusted input before putting it in an event.
+func checkNUL(e Event) error {
+	fields := [...]string{e.Tenant, e.Actor, e.Action, e.Resource, string(e.Outcome)}
+	for _, f := range fields {
+		if strings.ContainsRune(f, 0) {
+			return fmt.Errorf("%w: NUL byte in field", ErrInvalidEvent)
+		}
+	}
+	for k, v := range e.Meta {
+		if strings.ContainsRune(k, 0) || strings.ContainsRune(v, 0) {
+			return fmt.Errorf("%w: NUL byte in meta", ErrInvalidEvent)
+		}
+	}
+	return nil
 }
 
 // head returns the chain state for stream, creating it on first use. The

@@ -6,16 +6,6 @@ import (
 	"github.com/dmitrymomot/forge/core/clock"
 )
 
-type config struct {
-	scope func(context.Context) (string, error)
-	clock clock.Clock
-	chain bool
-}
-
-func defaultConfig() config {
-	return config{clock: clock.System()}
-}
-
 // Option configures New.
 type Option func(*config)
 
@@ -34,9 +24,16 @@ func WithScope(fn func(context.Context) (string, error)) Option {
 // trail tamper-evident (stream = tenant; "" is the single-tenant stream).
 // Chained writes serialize per stream, and the recorder must be the only
 // writer of its streams — run one chained Recorder per stream, not one
-// per replica. If the Sink implements ChainHead, the chain resumes from
-// the persisted head on first write; otherwise every process restart
-// starts a new chain.
+// per replica. A stream must be chained from its very first event and
+// stay chained: an unchained event in the middle both breaks
+// verification and resets ChainHead seeding. If the Sink implements
+// ChainHead, the chain resumes from the persisted head on first write;
+// otherwise every process restart starts a new chain.
+//
+// The chain is unkeyed, so it detects tampering by anyone who cannot
+// rewrite every later event — to also catch a full suffix rewrite or
+// tail truncation, periodically anchor the head (pgsink Verify returns
+// it) outside the database.
 func WithChain() Option {
 	return func(c *config) { c.chain = true }
 }

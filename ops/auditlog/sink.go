@@ -73,7 +73,11 @@ func (s *SlogSink) Write(ctx context.Context, e Event) error {
 
 // JSONLSink appends one JSON object per line to w — a file-backed audit
 // trail. Writes are serialized so lines never interleave; the caller owns
-// w's lifecycle (open with O_APPEND, close after the recorder stops).
+// w's lifecycle (open with O_APPEND, close after the recorder stops). It
+// does not implement ChainHead, so a chained recorder restarted onto an
+// existing file starts a new chain and a whole-file VerifyChain will
+// report ErrChainBroken at the restart boundary — chaining across
+// restarts needs a ChainHead-capable sink (pgsink).
 type JSONLSink struct {
 	enc *json.Encoder
 	mu  sync.Mutex

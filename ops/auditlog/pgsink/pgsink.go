@@ -80,12 +80,18 @@ func (s *Sink) Write(ctx context.Context, e auditlog.Event) error {
 }
 
 // ChainHead returns the hash of the newest event in stream, or "" for an
-// empty stream, letting a chained Recorder resume across restarts.
+// empty stream, letting a chained Recorder resume across restarts. Like
+// every read it honors WithScope: the hook's tenant selects the stream,
+// failing closed.
 func (s *Sink) ChainHead(ctx context.Context, stream string) (string, error) {
+	tenant, err := s.scoped(ctx, stream)
+	if err != nil {
+		return "", err
+	}
 	var hash string
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`SELECT hash FROM forge_audit_events WHERE tenant = $1 ORDER BY id DESC LIMIT 1`,
-		stream).Scan(&hash)
+		tenant).Scan(&hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -93,8 +99,12 @@ func (s *Sink) ChainHead(ctx context.Context, stream string) (string, error) {
 }
 
 // Filter narrows List. Zero-value fields do not filter; a zero Limit
-// defaults to 50 (capped at 500). Cursor is the NextCursor of the
-// previous page.
+// defaults to 50 (capped at 500). Cursor is the next-page cursor returned
+// by the previous List call. Only (tenant, id) is indexed — the
+// actor/action/resource/outcome/time filters scan within the tenant's
+// history, which is fine for a paged UI but not for hot-path lookups; add
+// a purpose-built index in the consumer schema if a filtered query
+// becomes hot.
 type Filter struct {
 	From     time.Time
 	To       time.Time
@@ -166,13 +176,21 @@ const verifyBatch = 500
 
 // Verify walks stream's events in id-ascending (chain) order and checks
 // the hash chain from its genesis, returning the number of events
-// verified. A tampered, deleted, or reordered event fails with
-// auditlog.ErrChainBroken naming the first bad event. Under WithScope the
-// hook's tenant selects the stream, failing closed like List.
-func (s *Sink) Verify(ctx context.Context, stream string) (int, error) {
+// verified and the final head hash. A tampered, deleted, or reordered
+// event fails with auditlog.ErrChainBroken naming the first bad event.
+// Under WithScope the hook's tenant selects the stream, failing closed
+// like List.
+//
+// An intact chain proves no one modified the middle of the trail, but an
+// attacker who can rewrite rows can also recompute every hash after the
+// edit, and truncating the tail leaves a shorter chain that still
+// verifies. Compare the returned head (and count) against a copy anchored
+// outside the database — exported after each backup, or shipped to
+// another system — to detect those.
+func (s *Sink) Verify(ctx context.Context, stream string) (int, string, error) {
 	tenant, err := s.scoped(ctx, stream)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	var (
 		prev  string
@@ -185,22 +203,22 @@ func (s *Sink) Verify(ctx context.Context, stream string) (int, error) {
 			ORDER BY id ASC
 			LIMIT $3`, tenant, after, verifyBatch)
 		if err != nil {
-			return count, err
+			return count, prev, err
 		}
 		events, err := scanEvents(rows, verifyBatch)
 		if err != nil {
-			return count, err
+			return count, prev, err
 		}
 		if len(events) == 0 {
-			return count, nil
+			return count, prev, nil
 		}
 		if prev, err = auditlog.VerifyChain(prev, events); err != nil {
-			return count, err
+			return count, prev, err
 		}
 		count += len(events)
 		after = events[len(events)-1].ID
 		if len(events) < verifyBatch {
-			return count, nil
+			return count, prev, nil
 		}
 	}
 }
