@@ -371,17 +371,6 @@ Deps: `web/httpclient`, `comms/postback`, `comms/webhook`,
 
 ---
 
-**async/outbox**
-
-Transactional outbox: intent rows committed inside the business DB
-transaction plus a relay `supervisor.Service` that forwards committed rows
-into any `Broker` — the bridge from a Postgres/SQLite transaction to
-redis/nats/kafka delivery.
-
-Deps: `ops/supervisor`; `async/queue`.
-
----
-
 **async/collector**
 
 Write-behind ingestion for proven-hot fire-and-forget paths (click
