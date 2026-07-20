@@ -86,9 +86,11 @@ func (r Result) Final() decimal.Decimal {
 // cause. Evaluation is deterministic: no clocks, no randomness, exact decimal
 // arithmetic with rounding only where the spec says so.
 func (c *Compiled) Eval(inputs map[string]decimal.Decimal) (Result, error) {
-	for name := range inputs {
-		if _, clash := c.stageIndex[name]; clash {
-			return Result{}, fmt.Errorf("%w: %q", ErrMetricCollision, name)
+	// Scan stages in spec order so the reported name is deterministic when
+	// several inputs collide.
+	for _, st := range c.stages {
+		if _, clash := inputs[st.name]; clash {
+			return Result{}, fmt.Errorf("%w: %q", ErrMetricCollision, st.name)
 		}
 	}
 
