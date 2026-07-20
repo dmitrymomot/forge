@@ -535,6 +535,46 @@ func TestClearDuringOpenBatchNeverDuplicatesKeys(t *testing.T) {
 	}
 }
 
+func TestClearUnrelatedKeyLeavesOpenBatchAlone(t *testing.T) {
+	t.Parallel()
+	cf := &countingFetch{}
+	l := dataloader.New(cf.fetch, dataloader.WithWait(time.Hour), dataloader.WithMaxBatchSize(2))
+	l.Prime("a", "cached")
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if _, err := l.Load(t.Context(), "b"); err != nil {
+			t.Errorf("Load b: %v", err)
+		}
+	})
+	time.Sleep(5 * time.Millisecond) // let b land in the open batch
+	l.Clear("a")                     // evicts the cached key; "a" is not in the batch
+	wg.Go(func() {
+		if _, err := l.Load(t.Context(), "c"); err != nil {
+			t.Errorf("Load c: %v", err)
+		}
+	})
+	wg.Wait()
+
+	// The open batch fetched only its own keys, exactly once each.
+	cf.mu.Lock()
+	batches := len(cf.batches)
+	cf.mu.Unlock()
+	if batches != 1 {
+		t.Fatalf("fetch calls = %d, want 1", batches)
+	}
+
+	// And the Clear still evicted "a": the next lookup refetches it ("d"
+	// rides along so the two-key cap fires the batch under the hour window).
+	got, err := l.LoadMany(t.Context(), []string{"a", "d"})
+	if err != nil {
+		t.Fatalf("LoadMany after Clear: %v", err)
+	}
+	if got["a"] != "v:a" {
+		t.Fatalf(`LoadMany["a"] = %q, want refetched %q`, got["a"], "v:a")
+	}
+}
+
 func TestLoadManySurfacesBatchErrorWrappingNotFound(t *testing.T) {
 	t.Parallel()
 	batchErr := fmt.Errorf("upstream 404: %w", dataloader.ErrNotFound)
