@@ -432,19 +432,6 @@ Deps: `auth/guard`.
 
 ---
 
-**auth/rbac**
-
-Role-based access control: predefined roles, role nesting/inheritance (a
-role inherits another role's permissions and adds its own),
-out-of-hierarchy standalone roles, wildcard grants; resolves subject →
-effective permission set. Implements the `access` decision seam consumed
-by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
-assignment behind a storage-agnostic Store.
-
-Deps: `auth/access`.
-
----
-
 **auth/acl**
 
 Per-subject / per-resource grant and deny overrides (deny wins) layered
