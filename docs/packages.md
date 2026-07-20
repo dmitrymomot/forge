@@ -298,27 +298,6 @@ named Go functions with per-deal parameters as data.
 
 Deps: `core/decimal`.
 
----
-
-**finance/invoice**
-
-The invoice document model — invariants, not rendering: numbering via a
-per-series `Sequence` with two explicit modes (strict-gapless
-transactional counter vs monotonic-with-gaps — the requirement is
-jurisdictional); immutable once issued, corrections are credit notes
-back-referencing the original (the corrections-post-forward rule shared
-with `ledger`); line items → tax lines → totals in `money` with per-line
-vs per-total rounding policy via `Allocate`; draft → issued →
-paid/partially-paid/void/overdue over `fsm`, paid-matching by `ledger`
-posting refs; self-billing direction (platform issues on the supplier's
-behalf — affiliate/agent payouts); multi-currency with the `fxrate`
-snapshot recorded. Tax rates are caller-supplied data — never
-determined; rendering stays out (HTML is a `render` recipe, PDF
-consumer-side); no dunning, no e-invoicing formats, no subscription or
-pricing logic (the billing anti-scope stands).
-
-Deps: `core/money`; `core/fsm`.
-
 ## async/
 
 ---
