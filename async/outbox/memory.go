@@ -67,20 +67,33 @@ func (s *MemoryStore) Claim(_ context.Context, n int, lease time.Duration) ([]En
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clk.Now().UTC()
-	due := make([]*memEntry, 0, min(n, len(s.entries)))
-	for _, e := range s.entries {
-		if !e.availableAt.After(now) {
-			due = append(due, e)
-		}
-	}
-	slices.SortFunc(due, func(a, b *memEntry) int {
+	byOverdue := func(a, b *memEntry) int {
 		if r := a.availableAt.Compare(b.availableAt); r != 0 {
 			return r
 		}
 		return cmp.Compare(a.job.ID, b.job.ID)
-	})
-	if len(due) > n {
-		due = due[:n]
+	}
+	// Bounded selection: keep only the n most-overdue due entries in a sorted
+	// buffer instead of sorting the whole due set. Once the buffer is full,
+	// entries worse than its current worst are rejected in O(1), so cost stays
+	// ~O(len(entries)) with a small insertion tail instead of O(N log N).
+	due := make([]*memEntry, 0, min(n, len(s.entries))+1)
+	for _, e := range s.entries {
+		if e.availableAt.After(now) {
+			continue
+		}
+		i, _ := slices.BinarySearchFunc(due, e, byOverdue)
+		if i == len(due) {
+			if len(due) >= n {
+				continue
+			}
+			due = append(due, e)
+			continue
+		}
+		due = slices.Insert(due, i, e)
+		if len(due) > n {
+			due = due[:n]
+		}
 	}
 	claimed := make([]Entry, 0, len(due))
 	for _, e := range due {

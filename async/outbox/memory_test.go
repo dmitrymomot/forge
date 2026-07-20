@@ -113,6 +113,39 @@ func TestMemoryStore_FailReschedules(t *testing.T) {
 	assert.Equal(t, "boom", got[0].LastError)
 }
 
+func TestMemoryStore_PickByOverdueReturnByCreated(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clk := clock.NewMock(testEpoch)
+	s := outbox.NewMemoryStore(outbox.WithMemoryClock(clk))
+
+	// Three rows in created order r1 < r2 < r3, then a retry backlog that
+	// reverses their availability: r3 most overdue, r1 least.
+	require.NoError(t, s.Add(ctx, nil,
+		makeJob("r1", testEpoch),
+		makeJob("r2", testEpoch.Add(time.Second)),
+		makeJob("r3", testEpoch.Add(2*time.Second)),
+	))
+	_, err := s.Claim(ctx, 3, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, s.Fail(ctx, "r1", testEpoch.Add(30*time.Second), "later"))
+	require.NoError(t, s.Fail(ctx, "r2", testEpoch.Add(20*time.Second), "later"))
+	require.NoError(t, s.Fail(ctx, "r3", testEpoch.Add(10*time.Second), "later"))
+	clk.Advance(31 * time.Second) // all due again
+
+	// Pick order is most-overdue first (r3, r2); return order is (created, id).
+	got, err := s.Claim(ctx, 2, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "r2", got[0].Job.ID)
+	assert.Equal(t, "r3", got[1].Job.ID)
+
+	got, err = s.Claim(ctx, 2, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "r1 was least overdue and must not have been picked")
+	assert.Equal(t, "r1", got[0].Job.ID)
+}
+
 func TestMemoryStore_FailUnknownIgnored(t *testing.T) {
 	t.Parallel()
 	s := outbox.NewMemoryStore()

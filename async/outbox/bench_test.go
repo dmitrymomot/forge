@@ -56,6 +56,24 @@ func BenchmarkMemoryStore_ClaimDelete(b *testing.B) {
 	}
 }
 
+func BenchmarkMemoryStore_ClaimFromLargeBacklog(b *testing.B) {
+	ctx := context.Background()
+	s := outbox.NewMemoryStore()
+	if err := s.Add(ctx, nil, benchJobs(10_000, "backlog")...); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		got, err := s.Claim(ctx, 100, 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != 100 {
+			b.Fatalf("claimed %d, want 100", len(got))
+		}
+	}
+}
+
 func BenchmarkBroker_PushTx(b *testing.B) {
 	ctx := context.Background()
 	s := outbox.NewMemoryStore()

@@ -221,6 +221,37 @@ func TestPgOutbox_FailReschedules(t *testing.T) {
 	require.NoError(t, s.Fail(ctx, id.NewUUID().String(), time.Now().UTC(), "ghost"), "unknown id is ignored")
 }
 
+func TestPgOutbox_PickByOverdueReturnByCreated(t *testing.T) {
+	pool := openPool(t)
+	s := newStore(t, pool)
+	ctx := context.Background()
+
+	// Three rows in created order r1 < r2 < r3, then a retry backlog that
+	// reverses their availability: r3 most overdue, r1 least. Offsets are in
+	// minutes so a lagging container DB clock cannot push them into the future.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	r1 := makeJob(now)
+	r2 := makeJob(now.Add(time.Second))
+	r3 := makeJob(now.Add(2 * time.Second))
+	addCommitted(t, pool, s, r1, r2, r3)
+	claimN(t, s, 3, time.Minute)
+	require.NoError(t, s.Fail(ctx, r1.ID, now.Add(-10*time.Minute), "later"))
+	require.NoError(t, s.Fail(ctx, r2.ID, now.Add(-20*time.Minute), "later"))
+	require.NoError(t, s.Fail(ctx, r3.ID, now.Add(-30*time.Minute), "later"))
+
+	// Pick order is most-overdue first (r3, r2); return order is (created, id).
+	got, err := s.Claim(ctx, 2, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, r2.ID, got[0].Job.ID)
+	assert.Equal(t, r3.ID, got[1].Job.ID)
+
+	got, err = s.Claim(ctx, 2, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "r1 was least overdue and must not have been picked")
+	assert.Equal(t, r1.ID, got[0].Job.ID)
+}
+
 func TestPgOutbox_Delete(t *testing.T) {
 	pool := openPool(t)
 	s := newStore(t, pool)
