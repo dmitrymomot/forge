@@ -224,6 +224,7 @@ func TestNonFiniteValuesRenderNull(t *testing.T) {
 	rec.Gauge("ratio", "r.").Set(math.NaN())
 	rec.Gauge("lratio", "r.", "q").Set(math.Inf(1), "a")
 	rec.Counter("boom_total", "b.").Add(math.Inf(1)) // +Inf passes the negative-delta check
+	rec.Histogram("h_seconds", "h.", []float64{1}).Observe(math.Inf(1))
 
 	m := snap() // snap fails outright if the document is not valid JSON
 	require.Contains(t, m, "ratio")
@@ -233,6 +234,13 @@ func TestNonFiniteValuesRenderNull(t *testing.T) {
 	require.True(t, ok)
 	require.Contains(t, lm, `q="a"`)
 	assert.Nil(t, lm[`q="a"`])
+	hm, ok := m["h_seconds"].(map[string]any)
+	require.True(t, ok)
+	assert.Nil(t, hm["sum"], "non-finite histogram sum renders null")
+	assert.InDelta(t, 1, hm["count"], 1e-9)
+	buckets, ok := hm["buckets"].(map[string]any)
+	require.True(t, ok)
+	assert.InDelta(t, 1, buckets["+Inf"], 1e-9)
 }
 
 func TestLabelValueQuoting(t *testing.T) {
