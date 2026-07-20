@@ -2,6 +2,7 @@ package acl
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/dmitrymomot/forge/auth/access"
@@ -67,6 +68,14 @@ func (s *memoryStore) ListFor(_ context.Context, tenant, subject string) ([]Entr
 }
 
 func (s *memoryStore) Put(_ context.Context, tenant string, entries []Entry) error {
+	// validate before writing anything so a bad entry can't leave a partial
+	// batch behind — pgstore's implicit batch transaction gives the same
+	// all-or-nothing behavior
+	for _, e := range entries {
+		if e.Effect != access.Allow && e.Effect != access.Deny {
+			return fmt.Errorf("%w: effect %v", ErrInvalidEntry, e.Effect)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, e := range entries {

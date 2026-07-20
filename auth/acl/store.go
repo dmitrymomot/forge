@@ -21,7 +21,9 @@ type Store interface {
 	// ListFor returns all of subject's entries within tenant — the admin
 	// "what exactly can this subject touch" surface.
 	ListFor(ctx context.Context, tenant, subject string) ([]Entry, error)
-	// Put upserts entries by key (idempotent).
+	// Put upserts entries by key (idempotent). It rejects an entry whose
+	// Effect is neither Allow nor Deny (ErrInvalidEntry) without writing
+	// anything.
 	Put(ctx context.Context, tenant string, entries []Entry) error
 	// Delete removes subject's entries on the resource for the given actions,
 	// whatever their effect. Missing keys are not an error.

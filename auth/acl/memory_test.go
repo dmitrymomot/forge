@@ -45,6 +45,21 @@ func TestMemoryEntriesForFiltering(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestMemoryPutRejectsInvalidEffect(t *testing.T) {
+	s := acl.NewMemoryStore()
+	ctx := context.Background()
+	err := s.Put(ctx, "", []acl.Entry{
+		{Subject: "u1", ResourceType: "agent", ResourceID: "42", Action: "agents:read", Effect: access.Allow},
+		{Subject: "u1", ResourceType: "agent", ResourceID: "13", Action: "agents:read"}, // zero Effect
+	})
+	assert.ErrorIs(t, err, acl.ErrInvalidEntry)
+
+	// nothing written — validation happens before the first write
+	entries, err := s.ListFor(ctx, "", "u1")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
 func TestMemoryDeleteReclaims(t *testing.T) {
 	s := acl.NewMemoryStore()
 	ctx := context.Background()
