@@ -28,7 +28,10 @@
 - **Composition seams:** `http.Handler`, `supervisor.Service`,
   `middleware.Middleware`, `ctxkey.Key[T]`, `logger.ContextExtractor`, and
   pluggable `Store`/`Broker`/`Sender` interfaces.
-- Single-responsibility packages (~250–850 LOC); black-box tests only.
+- Single-responsibility packages (~250–850 LOC); black-box tests only —
+  white-box (`package foo`) test files are the narrow exception for pinning
+  unexported primitives' behavior directly (differential/oracle tests of
+  internal fast paths, decoder primitives).
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
   store, queue's in-memory broker) — there is no central fakes package.
 - **Two test tiers.** The default `go test ./...` is unit-only: fast, no

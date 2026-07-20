@@ -128,7 +128,10 @@ func roundInt64(coef int64, drop int32, mode RoundingMode) (int64, bool) {
 // roundAwayFromZeroInt64 mirrors roundAwayFromZero for a positive magnitude
 // quotient q with nonzero remainder r (0 < r < div ≤ 10^18): it decides
 // whether to increment the magnitude by one. neg is the sign of the original
-// value, used by the sign-aware modes.
+// value, used by the sign-aware modes. The mode dispatch is duplicated from
+// roundAwayFromZero on purpose (sharing it would cost the allocations this
+// fast path removes) — any RoundingMode change must be made in both, and the
+// differential tests in roundfast_test.go enforce they agree.
 func roundAwayFromZeroInt64(q, r, div int64, mode RoundingMode, neg bool) bool {
 	switch mode {
 	case Down:
@@ -214,7 +217,8 @@ func divRound(num, den *big.Int, mode RoundingMode) *big.Int {
 
 // roundAwayFromZero decides, for a positive magnitude quotient q with nonzero
 // remainder r (0 < r < div), whether to increment the magnitude by one. neg is
-// the sign of the original value, used by the sign-aware modes.
+// the sign of the original value, used by the sign-aware modes. Kept manually
+// in sync with roundAwayFromZeroInt64 (see its comment).
 func roundAwayFromZero(q, r, div *big.Int, mode RoundingMode, neg bool) bool {
 	switch mode {
 	case Down:
