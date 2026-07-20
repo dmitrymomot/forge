@@ -26,7 +26,9 @@
 //		return tenantFromCtx(ctx), nil // empty or error aborts the read
 //	}))
 //
-// A compliance audit is one Verify call per stream:
+// A compliance audit is one Verify call per stream; compare the returned
+// head against an externally anchored copy to also catch tail truncation
+// and full-suffix rewrites:
 //
-//	n, err := sink.Verify(ctx, "org_7") // ErrChainBroken names the first bad event
+//	n, head, err := sink.Verify(ctx, "org_7") // ErrChainBroken names the first bad event
 package pgsink
