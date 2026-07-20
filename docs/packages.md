@@ -101,15 +101,6 @@ Deps: `core/structfields`, `core/validate`, `core/i18n`.
 
 ---
 
-**data/dataloader**
-
-Generic per-request batch-and-cache loader collapsing N+1 lookups; pure
-generics, no DB imports; the batch fn is caller-owned.
-
-Deps: none (stdlib only).
-
----
-
 **data/objectstore**
 
 Blob `Store` seam with a path-traversal-safe disk adapter;
