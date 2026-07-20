@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/dmitrymomot/forge/async/queue"
 )
@@ -233,7 +234,17 @@ func (e *Engine) checkpoint(ctx context.Context, run *Run) error {
 // the run from its checkpoint. The write is best-effort — the DLQ entry
 // carries the same reason.
 func (e *Engine) abandon(ctx context.Context, run *Run, err error) error {
-	run.Error = err.Error()
+	// A compensating run's Error holds the business failure that triggered
+	// the unwind — the one signal explaining a stuck saga — so append the
+	// abandon note instead of replacing it. The suffix check keeps repeated
+	// requeue-and-abandon cycles from growing the note unboundedly.
+	note := "abandoned: " + err.Error()
+	switch {
+	case run.Error == "":
+		run.Error = note
+	case !strings.HasSuffix(run.Error, note):
+		run.Error += "; " + note
+	}
 	if cerr := e.checkpoint(ctx, run); cerr != nil {
 		e.log.WarnContext(ctx, "workflow abandon note not persisted", runAttrs(run, slog.Any("error", cerr))...)
 	}

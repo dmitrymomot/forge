@@ -546,6 +546,48 @@ func TestRun_UndecodableStateIsAbandonedWithReason(t *testing.T) {
 	assert.Contains(t, run.Error, "decode state")
 }
 
+// TestRun_AbandonedCompensatingRunKeepsOriginalError guards the abandon note:
+// a compensating run's Error holds the business failure that triggered the
+// unwind, and abandoning it over undecodable state must append — not replace
+// — that one signal explaining the stuck saga.
+func TestRun_AbandonedCompensatingRunKeepsOriginalError(t *testing.T) {
+	t.Parallel()
+	wf := workflow.New("wf.badstate.comp",
+		workflow.Step[state]{
+			Name:       "a",
+			Run:        func(context.Context, *state) error { return nil },
+			Compensate: func(context.Context, *state) error { return nil },
+		})
+	broker := queue.NewMemoryBroker()
+	store := workflow.NewMemoryStore()
+	eng := workflow.NewEngine(broker, store)
+	workflow.Register(eng, wf)
+	svc, err := workflow.NewService(eng, queue.WithConfig(fastConfig()))
+	require.NoError(t, err)
+	runService(t, svc)
+
+	ctx := context.Background()
+	require.NoError(t, store.Create(ctx, workflow.Run{
+		ID: "r-comp-bad", Workflow: wf.Name(), Status: workflow.StatusCompensating,
+		Error: "workflow: permanent failure: recipient rejected",
+		State: []byte(`{"log":123}`), Version: 1,
+	}))
+	client := queue.NewClient(broker)
+	require.NoError(t, client.PushRaw(ctx, wf.Name(), []byte(`{"run_id":"r-comp-bad","v":1}`), queue.WithQueue(wf.Name())))
+
+	require.Eventually(t, func() bool {
+		dead, derr := client.ListDead(ctx, wf.Name(), 10)
+		require.NoError(t, derr)
+		return len(dead) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+	run, err := store.Get(ctx, "r-comp-bad")
+	require.NoError(t, err)
+	assert.Equal(t, workflow.StatusCompensating, run.Status)
+	assert.Contains(t, run.Error, "recipient rejected", "the original saga trigger must survive")
+	assert.Contains(t, run.Error, "abandoned: ")
+	assert.Contains(t, run.Error, "decode state")
+}
+
 func TestRun_DuplicateDeliveryOfFinishedRunIsNoop(t *testing.T) {
 	t.Parallel()
 	rec := newRecorder()
