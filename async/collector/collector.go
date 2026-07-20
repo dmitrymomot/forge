@@ -120,8 +120,8 @@ func (c *Collector[T]) Stats() Stats {
 func (c *Collector[T]) Run(ctx context.Context) error {
 	c.log.InfoContext(ctx, "collector started", slog.String("service", c.name), slog.Int("buffer", c.cfg.BufferSize), slog.Int("batch", c.cfg.BatchSize), slog.Duration("interval", c.cfg.FlushInterval))
 	batch := make([]entry[T], 0, c.cfg.BatchSize)
-	timer := time.NewTimer(c.cfg.FlushInterval)
-	defer timer.Stop()
+	ticker := time.NewTicker(c.cfg.FlushInterval)
+	defer ticker.Stop()
 	var reported uint64
 	for {
 		select {
@@ -130,15 +130,16 @@ func (c *Collector[T]) Run(ctx context.Context) error {
 			if len(batch) >= c.cfg.BatchSize {
 				c.flush(ctx, batch)
 				batch = batch[:0]
-				timer.Reset(c.cfg.FlushInterval)
 			}
-		case <-timer.C:
+		case <-ticker.C:
+			// The tick fires every interval even under sustained size-triggered
+			// flushing, so an event waits at most one interval and drop deltas
+			// keep getting reported under exactly the load that causes drops.
 			if len(batch) > 0 {
 				c.flush(ctx, batch)
 				batch = batch[:0]
 			}
 			reported = c.reportDrops(ctx, reported)
-			timer.Reset(c.cfg.FlushInterval)
 		case <-ctx.Done():
 			c.closed.Store(true)
 			c.log.InfoContext(ctx, "collector draining", slog.String("service", c.name))
