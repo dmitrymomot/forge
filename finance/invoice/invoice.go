@@ -238,8 +238,12 @@ func (inv *Invoice) ApplyPayment(ctx context.Context, p Payment) error {
 	if c == 0 {
 		target = StatusPaid
 	}
-	if err := lifecycle.Fire(ctx, inv, inv.Status, target); err != nil {
-		return err
+	// A further partial payment on a partially paid document is not a state
+	// transition; only actual moves fire the machine.
+	if target != inv.Status {
+		if err := lifecycle.Fire(ctx, inv, inv.Status, target); err != nil {
+			return err
+		}
 	}
 	inv.Payments = append(inv.Payments, p)
 	inv.Status = target

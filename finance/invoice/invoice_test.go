@@ -1,6 +1,7 @@
 package invoice_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -215,6 +216,16 @@ func TestApplyPayment(t *testing.T) {
 		paid, err := inv.Paid()
 		require.NoError(t, err)
 		assertMoney(t, "119.00", paid)
+	})
+	t.Run("successive partial payments stay partially paid", func(t *testing.T) {
+		t.Parallel()
+		inv := issued(t)
+		for i, amount := range []string{"19.00", "30.00", "20.00"} {
+			require.NoError(t, inv.ApplyPayment(t.Context(), payment(fmt.Sprintf("ledger:%d", i), amount)))
+			assert.Equal(t, invoice.StatusPartiallyPaid, inv.Status)
+		}
+		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:final", "50.00")))
+		assert.Equal(t, invoice.StatusPaid, inv.Status)
 	})
 	t.Run("exact single payment pays in full", func(t *testing.T) {
 		t.Parallel()
