@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,7 +56,14 @@ type Collector[T any] struct {
 	dropped atomic.Uint64
 	flushed atomic.Uint64
 	lost    atomic.Uint64
-	closed  atomic.Bool
+
+	// mu makes the closed check and the buffer send atomic against shutdown:
+	// Add holds the read side, Run's shutdown takes the write side to flip
+	// closed, so once drain starts no accepted event can still be in flight
+	// into the buffer. A bare WaitGroup would race Add(1) against Wait on a
+	// zero counter (documented misuse) for Adds arriving after shutdown.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // New builds a Collector delivering into sink. The default configuration is
@@ -95,7 +103,9 @@ func (c *Collector[T]) Add(ctx context.Context, event T) error {
 		}
 		scope = s
 	}
-	if c.closed.Load() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
 		return ErrClosed
 	}
 	select {
@@ -116,7 +126,9 @@ func (c *Collector[T]) Stats() Stats {
 // Run is the flusher loop: it accumulates buffered events and flushes when a
 // batch reaches Config.BatchSize or Config.FlushInterval elapses, whichever
 // comes first. On ctx cancellation it stops accepting (Add returns ErrClosed),
-// drains everything already buffered through the sink, and returns nil.
+// drains everything already buffered through the sink, and returns nil: after
+// Run returns, every accepted event is accounted for — Stats.Added equals
+// Stats.Flushed plus Stats.Lost.
 func (c *Collector[T]) Run(ctx context.Context) error {
 	c.log.InfoContext(ctx, "collector started", slog.String("service", c.name), slog.Int("buffer", c.cfg.BufferSize), slog.Int("batch", c.cfg.BatchSize), slog.Duration("interval", c.cfg.FlushInterval))
 	batch := make([]entry[T], 0, c.cfg.BatchSize)
@@ -141,7 +153,9 @@ func (c *Collector[T]) Run(ctx context.Context) error {
 			}
 			reported = c.reportDrops(ctx, reported)
 		case <-ctx.Done():
-			c.closed.Store(true)
+			c.mu.Lock()
+			c.closed = true
+			c.mu.Unlock()
 			c.log.InfoContext(ctx, "collector draining", slog.String("service", c.name))
 			c.drain(ctx, batch)
 			c.reportDrops(ctx, reported)
