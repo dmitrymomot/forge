@@ -6,11 +6,11 @@ import (
 )
 
 // Inject writes the trace context from ctx onto h as W3C traceparent (and
-// tracestate, when present) headers. It is a no-op when ctx carries no valid
-// span context, so it is always safe to call.
+// tracestate, when present) headers. It is a no-op when h is nil or ctx
+// carries no valid span context, so it is always safe to call.
 func Inject(ctx context.Context, h http.Header) {
 	sc := SpanContextFromContext(ctx)
-	if !sc.IsValid() {
+	if h == nil || !sc.IsValid() {
 		return
 	}
 	h.Set(TraceparentHeader, sc.Traceparent())

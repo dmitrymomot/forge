@@ -43,6 +43,11 @@ func TestInject(t *testing.T) {
 	tracing.Inject(t.Context(), h)
 	assert.Empty(t, h)
 
+	tr := tracing.New()
+	ctx, span := tr.Start(t.Context(), "s")
+	defer span.End()
+	assert.NotPanics(t, func() { tracing.Inject(ctx, nil) }, "nil header is a no-op")
+
 	remote, err := tracing.ParseTraceparent(sampleTraceparent)
 	require.NoError(t, err)
 	remote.TraceState = "vendor=state"

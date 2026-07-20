@@ -151,7 +151,21 @@ func TestMiddlewareNonStandardMethodNormalized(t *testing.T) {
 
 	serve(h, httptest.NewRequest("PROPFIND", "/x", nil))
 
-	assert.Equal(t, "OTHER", tr.last(t).name)
+	span := tr.last(t)
+	assert.Equal(t, "OTHER", span.name)
+	assert.Equal(t, "OTHER", span.attr(t, "http.request.method").String())
+	assert.Equal(t, "PROPFIND", span.attr(t, "http.request.method_original").String(), "raw verb stays debuggable")
+}
+
+func TestMiddlewareStandardMethodNoOriginalAttr(t *testing.T) {
+	tr := &recordingTracer{}
+	h := tracing.NewMiddleware(tr)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+	serve(h, httptest.NewRequest(http.MethodGet, "/x", nil))
+
+	for _, a := range tr.last(t).attrs {
+		assert.NotEqual(t, "http.request.method_original", a.Key)
+	}
 }
 
 func TestMiddlewareContinuesInboundTrace(t *testing.T) {

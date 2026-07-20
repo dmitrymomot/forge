@@ -112,13 +112,17 @@ func NewMiddleware(tr Tracer, opts ...MiddlewareOption) middleware.Middleware {
 				}
 			}
 			method := normalizeMethod(r.Method)
-			ctx, span := tr.Start(ctx, method,
-				WithKind(KindServer),
-				WithAttributes(
-					slog.String("http.request.method", method),
-					slog.String("url.path", r.URL.Path),
-				),
+			startAttrs := make([]slog.Attr, 0, 3)
+			startAttrs = append(startAttrs,
+				slog.String("http.request.method", method),
+				slog.String("url.path", r.URL.Path),
 			)
+			if method != r.Method {
+				// Cardinality control folded the verb to "OTHER"; keep the raw
+				// method debuggable per OTel semconv.
+				startAttrs = append(startAttrs, slog.String("http.request.method_original", r.Method))
+			}
+			ctx, span := tr.Start(ctx, method, WithKind(KindServer), WithAttributes(startAttrs...))
 			defer span.End()
 
 			rw := middleware.WrapWriter(w)
