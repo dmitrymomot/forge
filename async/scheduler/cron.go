@@ -40,6 +40,10 @@ func Cron(spec string) (Schedule, error) {
 // day-of-week combine with the standard vixie OR rule: when both are
 // restricted, a day matching either fires. Sunday is 0 or 7.
 //
+// `@every <duration>` (a positive Go duration, e.g. `@every 1h30m`) is the
+// spec-string form of Every: the same Truncate-aligned interval ticks, with
+// loc ignored — interval ticks are absolute instants, not wall times.
+//
 // Think twice before reaching for a zone with DST: ticks falling inside a
 // spring-forward gap are skipped that day, and wall times repeated by a
 // fall-back fire at both occurrences. UTC (Cron) avoids DST entirely.
@@ -47,8 +51,15 @@ func CronIn(spec string, loc *time.Location) (Schedule, error) {
 	if loc == nil {
 		return nil, fmt.Errorf("%w: %q: nil location", ErrInvalidSpec, spec)
 	}
-	expr := strings.TrimSpace(spec)
-	if alias, ok := cronAliases[strings.ToLower(expr)]; ok {
+	expr := strings.ToLower(strings.TrimSpace(spec))
+	if rest, ok := strings.CutPrefix(expr, "@every"); ok {
+		d, err := time.ParseDuration(strings.TrimSpace(rest))
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("%w: %q: @every wants a positive Go duration (e.g. @every 1h30m)", ErrInvalidSpec, spec)
+		}
+		return intervalSchedule{d: d}, nil
+	}
+	if alias, ok := cronAliases[expr]; ok {
 		expr = alias
 	}
 	fields := strings.Fields(expr)

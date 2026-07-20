@@ -41,6 +41,11 @@ func TestCronParseErrors(t *testing.T) {
 		"* * * * mon-sun",
 		"@nope",
 		"0 8 * * * ; DROP",
+		"@every",
+		"@every nope",
+		"@every -5m",
+		"@every 0s",
+		"@every 1h extra",
 	}
 	for _, spec := range specs {
 		_, err := scheduler.Cron(spec)
@@ -137,6 +142,42 @@ func TestCronSequence(t *testing.T) {
 		at("2026-07-21T09:00:00Z"),
 	}
 	assert.Equal(t, want, got)
+}
+
+func TestCronEvery(t *testing.T) {
+	t.Parallel()
+
+	t.Run("same schedule as Every", func(t *testing.T) {
+		t.Parallel()
+		from := at("2026-07-20T10:23:45Z")
+		sched, err := scheduler.Cron("@every 1h")
+		require.NoError(t, err)
+		assert.Equal(t, scheduler.Every(time.Hour).Next(from), sched.Next(from))
+		assert.Equal(t, at("2026-07-20T11:00:00Z"), sched.Next(from).UTC())
+	})
+
+	t.Run("compound duration", func(t *testing.T) {
+		t.Parallel()
+		sched, err := scheduler.Cron("@every 1h30m")
+		require.NoError(t, err)
+		assert.Equal(t, scheduler.Every(90*time.Minute).Next(at("2026-07-20T10:00:00Z")), sched.Next(at("2026-07-20T10:00:00Z")))
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		t.Parallel()
+		sched, err := scheduler.Cron("@EVERY 15M")
+		require.NoError(t, err)
+		assert.Equal(t, at("2026-07-20T10:15:00Z"), sched.Next(at("2026-07-20T10:03:00Z")).UTC())
+	})
+
+	t.Run("location ignored", func(t *testing.T) {
+		t.Parallel()
+		loc := time.FixedZone("plus3", 3*3600)
+		sched, err := scheduler.CronIn("@every 10m", loc)
+		require.NoError(t, err)
+		utc := at("2026-07-20T10:03:00Z")
+		assert.True(t, sched.Next(utc).Equal(sched.Next(utc.In(loc))))
+	})
 }
 
 func TestCronIn(t *testing.T) {
