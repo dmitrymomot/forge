@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dmitrymomot/forge/core/decimal"
+	"github.com/dmitrymomot/forge/core/fsm"
 	"github.com/dmitrymomot/forge/core/money"
 )
 
@@ -123,7 +124,7 @@ func (inv *Invoice) Issue(ctx context.Context, seq *Sequence, at time.Time) erro
 		return err
 	}
 	if at.IsZero() {
-		return ErrIssueTime
+		return ErrZeroTime
 	}
 	kind := inv.Kind
 	if kind == "" {
@@ -207,11 +208,20 @@ func (inv *Invoice) ApplyPayment(ctx context.Context, p Payment) error {
 		return ErrPaymentRef
 	}
 	if !p.Amount.IsPositive() {
-		return ErrPaymentAmount
+		return fmt.Errorf("%w: must be positive", ErrPaymentAmount)
+	}
+	// Totals are minor-unit precise, so a sub-minor-unit payment (33.333 on
+	// a 100.00 invoice) could satisfy Outstanding visually yet never reach
+	// paid. Reject instead of rounding: the recorded amount must stay equal
+	// to the ledger posting the ref points at.
+	if !moneyEq(p.Amount, p.Amount.Round(decimal.HalfEven)) {
+		return fmt.Errorf("%w: not representable in %s minor units", ErrPaymentAmount, inv.Currency.Code)
 	}
 	if p.Amount.Currency().Code != inv.Currency.Code {
 		return fmt.Errorf("invoice: payment %q: %w", p.Ref, money.ErrCurrencyMismatch)
 	}
+	// The replay check runs before the status check so an at-least-once feed
+	// redelivering the final payment of a now-paid document still no-ops.
 	for _, applied := range inv.Payments {
 		if applied.Ref == p.Ref {
 			if eq, err := applied.Amount.Equal(p.Amount); err == nil && eq {
@@ -219,6 +229,11 @@ func (inv *Invoice) ApplyPayment(ctx context.Context, p Payment) error {
 			}
 			return fmt.Errorf("%w: %q", ErrPaymentConflict, p.Ref)
 		}
+	}
+	switch inv.Status {
+	case StatusIssued, StatusPartiallyPaid, StatusOverdue:
+	default:
+		return fmt.Errorf("%w: cannot pay a %s document", fsm.ErrIllegalTransition, inv.Status)
 	}
 	paid, err := inv.Paid()
 	if err != nil {
@@ -271,6 +286,9 @@ func (inv *Invoice) MarkOverdue(ctx context.Context, now time.Time) error {
 // voided (the lifecycle guard denies with ErrHasPayments); once money moved,
 // the correction is a credit note.
 func (inv *Invoice) Void(ctx context.Context, at time.Time) error {
+	if at.IsZero() {
+		return ErrZeroTime
+	}
 	if err := lifecycle.Fire(ctx, inv, inv.Status, StatusVoid); err != nil {
 		return err
 	}
@@ -378,13 +396,17 @@ func NewCreditNote(original *Invoice, lines []LineItem) (*Invoice, error) {
 	if over {
 		return nil, ErrCreditExceeds
 	}
+	issuer := original.Issuer
+	issuer.Address = slices.Clone(issuer.Address)
+	recipient := original.Recipient
+	recipient.Address = slices.Clone(recipient.Address)
 	return &Invoice{
 		Series:    original.Series,
 		Kind:      KindCreditNote,
 		Direction: original.Direction,
 		Status:    StatusDraft,
-		Issuer:    original.Issuer,
-		Recipient: original.Recipient,
+		Issuer:    issuer,
+		Recipient: recipient,
 		Currency:  original.Currency,
 		Lines:     lines,
 		Rounding:  original.Rounding,

@@ -20,8 +20,8 @@ var (
 	ErrCorrects = errors.New("invoice: corrects reference mismatch")
 	// ErrParty reports a missing issuer or recipient name at issue time.
 	ErrParty = errors.New("invoice: missing party name")
-	// ErrIssueTime reports a zero issue timestamp.
-	ErrIssueTime = errors.New("invoice: zero issue time")
+	// ErrZeroTime reports a zero timestamp passed to Issue or Void.
+	ErrZeroTime = errors.New("invoice: zero timestamp")
 	// ErrDueBeforeIssue reports a due date earlier than the issue date.
 	ErrDueBeforeIssue = errors.New("invoice: due date before issue date")
 	// ErrFX reports an FX snapshot with a missing base currency or a
@@ -51,8 +51,10 @@ var (
 	// ErrPaymentConflict reports a payment Ref replayed with a different
 	// amount. An identical replay (same Ref, same amount) is a no-op.
 	ErrPaymentConflict = errors.New("invoice: payment ref reused with different amount")
-	// ErrPaymentAmount reports a non-positive payment amount.
-	ErrPaymentAmount = errors.New("invoice: payment amount must be positive")
+	// ErrPaymentAmount reports a non-positive payment amount, or one not
+	// representable in the currency's minor units (totals are minor-unit
+	// precise; a sub-minor-unit payment could never reconcile against them).
+	ErrPaymentAmount = errors.New("invoice: invalid payment amount")
 	// ErrOverpayment reports a payment that would push the paid sum above the
 	// invoice total.
 	ErrOverpayment = errors.New("invoice: payments exceed total")

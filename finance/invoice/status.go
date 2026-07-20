@@ -69,6 +69,10 @@ var lifecycle = fsm.MustNew(StatusDraft,
 	def.Edge(StatusOverdue, StatusVoid, def.Guard(noPayments)),
 	def.Edge(StatusPartiallyPaid, StatusPaid),
 	def.Edge(StatusPartiallyPaid, StatusOverdue),
+	// The guard always denies here (partially paid implies payments); the
+	// edge exists so every void-with-payments path uniformly reports
+	// fsm.ErrGuardDenied wrapping ErrHasPayments.
+	def.Edge(StatusPartiallyPaid, StatusVoid, def.Guard(noPayments)),
 )
 
 func noPayments(_ context.Context, inv *Invoice, _, _ Status) error {

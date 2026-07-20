@@ -30,8 +30,8 @@ func newSequence(t *testing.T, opts ...invoice.Option) *invoice.Sequence {
 func draft(t *testing.T) *invoice.Invoice {
 	t.Helper()
 	inv := invoice.New("INV-2026", money.EUR)
-	inv.Issuer = invoice.Party{Name: "Forge GmbH", TaxID: "DE123456789"}
-	inv.Recipient = invoice.Party{Name: "ACME Ltd"}
+	inv.Issuer = invoice.Party{Name: "Forge GmbH", TaxID: "DE123456789", Address: []string{"Foundry Lane 1"}}
+	inv.Recipient = invoice.Party{Name: "ACME Ltd", Address: []string{"Acme Plaza 9"}}
 	inv.Lines = []invoice.LineItem{line(t, "1", "100.00", "0.19", money.EUR)}
 	inv.DueAt = dueTime
 	return inv
@@ -151,7 +151,7 @@ func TestIssue_Validation(t *testing.T) {
 		mutate func(*invoice.Invoice)
 		want   error
 	}{
-		{"zero issue time is ErrIssueTime", nil, invoice.ErrIssueTime},
+		{"zero issue time is ErrZeroTime", nil, invoice.ErrZeroTime},
 		{"unknown kind", func(i *invoice.Invoice) { i.Kind = "receipt" }, invoice.ErrKind},
 		{"unknown direction", func(i *invoice.Invoice) { i.Direction = "sideways" }, invoice.ErrDirection},
 		{"invoice with corrects ref", func(i *invoice.Invoice) { i.Corrects = "INV-1" }, invoice.ErrCorrects},
@@ -267,6 +267,19 @@ func TestApplyPayment(t *testing.T) {
 		assert.ErrorIs(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "0")), invoice.ErrPaymentAmount)
 		assert.ErrorIs(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "-5.00")), invoice.ErrPaymentAmount)
 	})
+	t.Run("sub-minor-unit amount is rejected", func(t *testing.T) {
+		t.Parallel()
+		// Three 33.333 installments would sum to 99.999 against a rounded
+		// total and strand the document in partially_paid forever.
+		inv := issued(t)
+		err := inv.ApplyPayment(t.Context(), payment("ledger:1", "33.333"))
+		assert.ErrorIs(t, err, invoice.ErrPaymentAmount)
+		assert.Empty(t, inv.Payments)
+
+		// A scale-heavy but minor-unit-exact amount is fine.
+		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:2", "33.330")))
+		assert.Equal(t, invoice.StatusPartiallyPaid, inv.Status)
+	})
 	t.Run("currency mismatch", func(t *testing.T) {
 		t.Parallel()
 		inv := issued(t)
@@ -276,16 +289,23 @@ func TestApplyPayment(t *testing.T) {
 	t.Run("paying a draft is illegal", func(t *testing.T) {
 		t.Parallel()
 		inv := draft(t)
-		inv.Totals.Total = money.FromMinor(11900, money.EUR)
 		err := inv.ApplyPayment(t.Context(), payment("ledger:1", "10.00"))
 		assert.ErrorIs(t, err, fsm.ErrIllegalTransition)
 	})
-	t.Run("paying a paid document overpays", func(t *testing.T) {
+	t.Run("paying a paid document is illegal", func(t *testing.T) {
 		t.Parallel()
 		inv := issued(t)
 		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "119.00")))
 		err := inv.ApplyPayment(t.Context(), payment("ledger:2", "1.00"))
-		assert.ErrorIs(t, err, invoice.ErrOverpayment)
+		assert.ErrorIs(t, err, fsm.ErrIllegalTransition)
+	})
+	t.Run("replay on a paid document stays idempotent", func(t *testing.T) {
+		t.Parallel()
+		inv := issued(t)
+		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "119.00")))
+		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "119.00")))
+		assert.Len(t, inv.Payments, 1)
+		assert.Equal(t, invoice.StatusPaid, inv.Status)
 	})
 	t.Run("paying a void document is illegal", func(t *testing.T) {
 		t.Parallel()
@@ -330,6 +350,15 @@ func TestMarkOverdue(t *testing.T) {
 		require.NoError(t, inv.Issue(t.Context(), newSequence(t), issueTime))
 		assert.ErrorIs(t, inv.MarkOverdue(t.Context(), issueTime.AddDate(1, 0, 0)), invoice.ErrNoDueDate)
 	})
+	t.Run("already overdue cannot be re-marked", func(t *testing.T) {
+		t.Parallel()
+		// The caller's sweep selects by status; a naive re-sweep gets a
+		// clean illegal-transition error, not silent success.
+		inv := issued(t)
+		require.NoError(t, inv.MarkOverdue(t.Context(), dueTime.Add(time.Hour)))
+		err := inv.MarkOverdue(t.Context(), dueTime.Add(2*time.Hour))
+		assert.ErrorIs(t, err, fsm.ErrIllegalTransition)
+	})
 	t.Run("draft cannot go overdue", func(t *testing.T) {
 		t.Parallel()
 		inv := draft(t)
@@ -346,6 +375,12 @@ func TestVoid(t *testing.T) {
 		require.NoError(t, inv.Void(t.Context(), issueTime))
 		assert.Equal(t, invoice.StatusVoid, inv.Status)
 		assert.Equal(t, issueTime, inv.VoidedAt)
+	})
+	t.Run("zero timestamp", func(t *testing.T) {
+		t.Parallel()
+		inv := draft(t)
+		assert.ErrorIs(t, inv.Void(t.Context(), time.Time{}), invoice.ErrZeroTime)
+		assert.Equal(t, invoice.StatusDraft, inv.Status)
 	})
 	t.Run("issued without payments", func(t *testing.T) {
 		t.Parallel()
@@ -364,7 +399,8 @@ func TestVoid(t *testing.T) {
 		inv := issued(t)
 		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "19.00")))
 		err := inv.Void(t.Context(), dueTime)
-		assert.ErrorIs(t, err, fsm.ErrIllegalTransition) // no partially_paid → void edge at all
+		assert.ErrorIs(t, err, fsm.ErrGuardDenied)
+		assert.ErrorIs(t, err, invoice.ErrHasPayments)
 	})
 	t.Run("overdue with payments the guard denies", func(t *testing.T) {
 		t.Parallel()
@@ -401,6 +437,13 @@ func TestNewCreditNote(t *testing.T) {
 		// Copied lines are independent of the original document.
 		note.Lines[0].Description = "mutated"
 		assert.Equal(t, "test line", orig.Lines[0].Description)
+
+		// Party address slices are cloned too: editing the draft note must
+		// never reach into the issued, immutable original.
+		note.Issuer.Address[0] = "mutated"
+		note.Recipient.Address[0] = "mutated"
+		assert.Equal(t, "Foundry Lane 1", orig.Issuer.Address[0])
+		assert.Equal(t, "Acme Plaza 9", orig.Recipient.Address[0])
 
 		require.NoError(t, note.Issue(t.Context(), newSequence(t), issueTime.AddDate(0, 0, 30)))
 		assert.Equal(t, invoice.StatusIssued, note.Status)
