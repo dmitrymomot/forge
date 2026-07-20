@@ -45,4 +45,11 @@ func TestConfigValidate(t *testing.T) {
 		cfg.RetryInterval = 0
 		assert.ErrorIs(t, cfg.Validate(), scheduler.ErrInvalidConfig)
 	})
+
+	t.Run("zero op timeout", func(t *testing.T) {
+		t.Parallel()
+		cfg := scheduler.DefaultConfig()
+		cfg.OpTimeout = 0
+		assert.ErrorIs(t, cfg.Validate(), scheduler.ErrInvalidConfig)
+	})
 }

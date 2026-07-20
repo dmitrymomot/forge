@@ -360,6 +360,35 @@ func TestRetriesFailedTick(t *testing.T) {
 	<-done
 }
 
+// wedgedStore blocks Claim until its context ends — a partitioned backend.
+type wedgedStore struct{}
+
+func (wedgedStore) Claim(ctx context.Context, _ string, _ time.Time) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (wedgedStore) Release(context.Context, string, time.Time) error    { return nil }
+func (wedgedStore) PurgeBefore(context.Context, time.Time) (int, error) { return 0, nil }
+
+func TestOpTimeoutBoundsWedgedStore(t *testing.T) {
+	t.Parallel()
+
+	// Claims run under context.WithoutCancel, so OpTimeout is the only bound:
+	// without it this Run never returns and the test times out.
+	cfg := fastConfig()
+	cfg.OpTimeout = 30 * time.Millisecond
+	s, err := scheduler.New(queue.NewClient(queue.NewMemoryBroker()),
+		scheduler.WithStore(wedgedStore{}), scheduler.WithConfig(cfg))
+	require.NoError(t, err)
+	scheduler.Add(s, "job", scheduler.Every(10*time.Millisecond), kindTick, tickPayload{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	require.ErrorIs(t, s.Run(ctx), context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second, "wedged store blocked shutdown")
+}
+
 type scopeKey struct{}
 
 func TestPushContextScopesJobs(t *testing.T) {

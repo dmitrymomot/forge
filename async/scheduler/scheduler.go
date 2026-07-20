@@ -184,21 +184,18 @@ func (s *Scheduler) Run(ctx context.Context) error {
 				kept = append(kept, e)
 				continue
 			}
-			// Skip past missed ticks: fire only the latest due one.
-			tick := e.next
-			for {
-				n := e.sched.Next(tick)
-				if n.IsZero() || n.After(now) {
-					break
-				}
-				tick = n
+			// Skip past missed ticks: fire only the latest due one. The walk
+			// leaves next as the first tick strictly after now (or zero).
+			tick, next := e.next, e.sched.Next(e.next)
+			for !next.IsZero() && !next.After(now) {
+				tick, next = next, e.sched.Next(next)
 			}
 			if s.fireTick(ctx, opCtx, e, tick) {
-				e.next = e.sched.Next(now)
-				if e.next.IsZero() {
+				if next.IsZero() {
 					s.log.WarnContext(ctx, "schedule exhausted, job parked", slog.String("service", s.name), slog.String("job", e.name))
 					continue
 				}
+				e.next = next
 			} else {
 				e.next = tick
 				retry = true
@@ -233,6 +230,10 @@ func (s *Scheduler) fireTick(ctx, opCtx context.Context, e *entry, tick time.Tim
 	if s.pushCtx != nil {
 		pctx = s.pushCtx(opCtx)
 	}
+	// One deadline over claim+enqueue+release: opCtx survives shutdown, so
+	// this is the only bound keeping a wedged backend from blocking drain.
+	pctx, cancel := context.WithTimeout(pctx, s.cfg.OpTimeout)
+	defer cancel()
 	tick = tick.UTC()
 	attrs := []slog.Attr{slog.String("service", s.name), slog.String("job", e.name), slog.Time("scheduled_for", tick)}
 	switch err := s.store.Claim(pctx, e.name, tick); {
@@ -273,6 +274,8 @@ func (s *Scheduler) waitFor(active []*entry, now time.Time, retry bool) time.Dur
 
 // sweep deletes claims older than the retention window.
 func (s *Scheduler) sweep(ctx, opCtx context.Context) {
+	opCtx, cancel := context.WithTimeout(opCtx, s.cfg.OpTimeout)
+	defer cancel()
 	cutoff := s.clk.Now().UTC().Add(-s.cfg.Retention)
 	n, err := s.store.PurgeBefore(opCtx, cutoff)
 	if err != nil {
