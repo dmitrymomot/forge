@@ -200,6 +200,27 @@ func TestDoDetachedPanicBecomesErrorForAllWaiters(t *testing.T) {
 	assert.Equal(t, 7, v)
 }
 
+func TestCompletedFlightDeregistersBeforeReleasingWaiters(t *testing.T) {
+	var g singleflight.Group[int]
+	// Regression: run used to close c.done before deleting the key from the
+	// map, so a caller woken by the close could immediately re-call the same
+	// key, join the already-completed flight still sitting in the map, and
+	// get its stale error with shared=true. A few hundred iterations hit
+	// that window reliably under the old ordering.
+	for i := range 2000 {
+		_, _, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			panic("boom")
+		})
+		assert.ErrorContains(t, err, "panic in fn")
+		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			return 7, nil
+		})
+		if err != nil || shared || v != 7 {
+			t.Fatalf("iteration %d joined a dead flight: v=%d shared=%v err=%v", i, v, shared, err)
+		}
+	}
+}
+
 func TestPanicInFnRePanicsAndDoesNotPoisonKey(t *testing.T) {
 	var g singleflight.Group[int]
 	assert.Panics(t, func() {
