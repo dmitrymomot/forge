@@ -179,7 +179,9 @@ func (l *Loader[K, V]) Clear(key K) {
 	}
 	l.mu.Lock()
 	delete(l.cache, key)
-	if l.current != nil {
+	// Flag the open batch only when this key is actually pending in it, so
+	// unrelated Clears never tax later scheduling with rejoin scans.
+	if l.current != nil && slices.Contains(l.current.keys, key) {
 		l.current.cleared = true
 	}
 	l.mu.Unlock()
