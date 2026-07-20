@@ -640,15 +640,6 @@ Deps: `ops/supervisor`, `auth/guard`.
 
 ---
 
-**ops/metrics**
-
-Counter/Gauge/Histogram `Recorder` facade with an expvar default and
-request middleware; `metrics/prometheus` is the only adapter.
-
-Deps: none (stdlib only).
-
----
-
 **ops/auditlog**
 
 Append-only structured audit events (actor/action/resource/outcome) over a
