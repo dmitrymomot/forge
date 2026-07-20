@@ -339,17 +339,6 @@ transactions (redis, nats, kafka) get transactional enqueue via
 Deps: `async/queue`; drivers: `data/sqlite` (planned), `data/nats`
 (planned), `data/kafka` (planned).
 
----
-
-**async/outbox**
-
-Transactional outbox: intent rows committed inside the business DB
-transaction plus a relay `supervisor.Service` that forwards committed rows
-into any `Broker` — the bridge from a Postgres/SQLite transaction to
-redis/nats/kafka delivery.
-
-Deps: `ops/supervisor`; `async/queue`.
-
 ## realtime/
 
 ---
