@@ -39,7 +39,7 @@ func TestFetch(t *testing.T) {
 		_, _ = w.Write([]byte(`{"base":"EUR","date":"2026-07-18","rates":{"USD":1.0850,"GBP":0.8425}}`))
 	})
 
-	snap, err := src.Fetch(t.Context(), "eur", []string{"usd", "gbp"})
+	snap, err := src.Fetch(t.Context(), "eur", []string{" usd", "gbp ", "  "})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}

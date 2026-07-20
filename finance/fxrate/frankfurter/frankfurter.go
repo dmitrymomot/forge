@@ -89,7 +89,15 @@ func (s *Source) Fetch(ctx context.Context, base string, quotes []string) (fxrat
 
 	q := url.Values{"base": []string{base}}
 	if len(quotes) > 0 {
-		q.Set("symbols", strings.ToUpper(strings.Join(quotes, ",")))
+		symbols := make([]string, 0, len(quotes))
+		for _, code := range quotes {
+			if code = strings.ToUpper(strings.TrimSpace(code)); code != "" {
+				symbols = append(symbols, code)
+			}
+		}
+		if len(symbols) > 0 {
+			q.Set("symbols", strings.Join(symbols, ","))
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/latest?"+q.Encode(), nil)
 	if err != nil {
