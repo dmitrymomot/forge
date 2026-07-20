@@ -351,26 +351,6 @@ Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
-**async/eventrouter**
-
-Event egress over `eventbus`: each destination is its own named
-subscription (slow-destination isolation for free), filter/remap as
-registered Go functions — no mapping DSL — and batched delivery with
-size+age flush, batch-level retry, and poison-event handling. Reference
-`Deliverer` adapters: generic JSON-batch HTTP, signed postbacks via
-`comms/webhook`, and tracker macro-URL postbacks via `comms/postback`.
-Destination configs are consumer data; forge ships the
-engine, never a Segment-style connector catalog. Delivery is
-at-least-once and the router never dedups: stable event IDs ride every
-delivery (`Idempotency-Key` header / payload field) and receivers dedup
-— the Stripe contract (in-router suppression would trade duplicates for
-silent loss).
-
-Deps: `web/httpclient`, `comms/postback`, `comms/webhook`,
-`async/eventbus`.
-
----
-
 **async/outbox**
 
 Transactional outbox: intent rows committed inside the business DB
@@ -379,18 +359,6 @@ into any `Broker` — the bridge from a Postgres/SQLite transaction to
 redis/nats/kafka delivery.
 
 Deps: `ops/supervisor`; `async/queue`.
-
----
-
-**async/workflow**
-
-DB-checkpointed linear step sequences over the engine
-(onboarding/provisioning chains; resume after crash), with optional
-per-step compensation — on failure, completed steps' compensations run in
-reverse order (a payout pipeline that must undo its ledger debit). No DAG,
-no DSL, no timers — not a Temporal clone.
-
-Deps: `async/queue`.
 
 ## realtime/
 
