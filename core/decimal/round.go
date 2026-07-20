@@ -1,6 +1,10 @@
 package decimal
 
-import "math/big"
+import (
+	"fmt"
+	"math"
+	"math/big"
+)
 
 // RoundingMode selects how discarded low-order digits are handled when reducing
 // scale. HalfEven (banker's rounding) is the default and zero value.
@@ -22,6 +26,50 @@ const (
 	// Floor always rounds toward -∞.
 	Floor
 )
+
+// roundingModeNames maps each RoundingMode to its canonical text form. The
+// names are part of the serialized representation of any config or spec that
+// stores a mode, so they are frozen.
+var roundingModeNames = [...]string{
+	HalfEven: "half_even",
+	HalfUp:   "half_up",
+	HalfDown: "half_down",
+	Up:       "up",
+	Down:     "down",
+	Ceil:     "ceil",
+	Floor:    "floor",
+}
+
+// String returns the canonical text form of m ("half_even", "up", ...), or
+// "invalid" for a value outside the defined modes.
+func (m RoundingMode) String() string {
+	if m < 0 || int(m) >= len(roundingModeNames) {
+		return "invalid"
+	}
+	return roundingModeNames[m]
+}
+
+// MarshalText implements encoding.TextMarshaler, emitting the same form as
+// String. A mode outside the defined range is an error.
+func (m RoundingMode) MarshalText() ([]byte, error) {
+	if m < 0 || int(m) >= len(roundingModeNames) {
+		return nil, fmt.Errorf("%w: rounding mode %d", ErrSyntax, int(m))
+	}
+	return []byte(roundingModeNames[m]), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler, parsing the form produced
+// by MarshalText. Unknown input returns ErrSyntax.
+func (m *RoundingMode) UnmarshalText(p []byte) error {
+	s := string(p)
+	for i, name := range roundingModeNames {
+		if s == name {
+			*m = RoundingMode(i)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: rounding mode %q", ErrSyntax, s)
+}
 
 // Round returns d rounded to places fractional digits using mode. It is an alias
 // for Rescale(places, mode).
@@ -47,8 +95,63 @@ func (d Decimal) Rescale(scale int32, mode RoundingMode) Decimal {
 	}
 	// Reduce scale: drop (d.scale - scale) low digits with rounding.
 	drop := d.scale - scale
+	// Int64 fast path: same semantics as roundBig without big.Int allocation.
+	// MinInt64 is excluded because its magnitude is not representable.
+	if d.big == nil && d.coef != math.MinInt64 && int(drop) < len(pow10Int64) {
+		return Decimal{coef: roundInt64(d.coef, pow10Int64[drop], mode), scale: scale}
+	}
 	rounded := roundBig(d.bigCoef(), drop, mode)
 	return fromBig(rounded, scale)
+}
+
+// roundInt64 divides coef by div (a positive power of ten), applying mode to
+// the remainder — the int64 mirror of roundBig. coef must not be MinInt64.
+func roundInt64(coef, div int64, mode RoundingMode) int64 {
+	neg := coef < 0
+	abs := coef
+	if neg {
+		abs = -abs
+	}
+	q, r := abs/div, abs%div
+	if r != 0 && roundAwayFromZeroInt64(q, r, div, mode, neg) {
+		q++
+	}
+	if neg {
+		q = -q
+	}
+	return q
+}
+
+// roundAwayFromZeroInt64 mirrors roundAwayFromZero on int64 magnitudes:
+// for a nonzero remainder r (0 < r < div), it decides whether the magnitude
+// quotient q gains one. 2*r cannot overflow because div ≤ 10^18.
+func roundAwayFromZeroInt64(q, r, div int64, mode RoundingMode, neg bool) bool {
+	switch mode {
+	case Down:
+		return false
+	case Up:
+		return true
+	case Ceil:
+		return !neg
+	case Floor:
+		return neg
+	default:
+		switch twice := 2 * r; {
+		case twice < div:
+			return false
+		case twice > div:
+			return true
+		default:
+			switch mode {
+			case HalfUp:
+				return true
+			case HalfDown:
+				return false
+			default: // HalfEven
+				return q&1 == 1
+			}
+		}
+	}
 }
 
 // RescaleExact is like Rescale but also reports whether the operation was
