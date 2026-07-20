@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/forge/async/eventbus"
 	"github.com/dmitrymomot/forge/async/eventrouter"
+	"github.com/dmitrymomot/forge/async/queue"
 	"github.com/dmitrymomot/forge/comms/postback"
 	"github.com/dmitrymomot/forge/comms/webhook"
 )
@@ -225,7 +227,7 @@ func TestPostbackDeliverer_Deliver(t *testing.T) {
 		return map[string]string{"event_id": e.ID, "value": p.V}, nil
 	}
 
-	t.Run("renders macros per event", func(t *testing.T) {
+	t.Run("renders macros", func(t *testing.T) {
 		t.Parallel()
 		var mu sync.Mutex
 		var urls []string
@@ -240,10 +242,24 @@ func TestPostbackDeliverer_Deliver(t *testing.T) {
 		require.NoError(t, err)
 		d := eventrouter.NewPostbackDeliverer(postback.New(), dest, values)
 
-		require.NoError(t, d.Deliver(context.Background(), testEvents(2)))
+		require.NoError(t, d.Deliver(context.Background(), testEvents(1)))
 		mu.Lock()
 		defer mu.Unlock()
-		assert.ElementsMatch(t, []string{"/pb?eid=evt_a&v=a", "/pb?eid=evt_b&v=b"}, urls)
+		assert.Equal(t, []string{"/pb?eid=evt_a&v=a"}, urls)
+	})
+
+	t.Run("multi-event batch is refused without firing", func(t *testing.T) {
+		t.Parallel()
+		srv, c := captureServer(t, http.StatusOK)
+		dest, err := postback.NewDestination(srv.URL+"/pb?eid={event_id}", vocab)
+		require.NoError(t, err)
+		d := eventrouter.NewPostbackDeliverer(postback.New(), dest, values)
+
+		err = d.Deliver(context.Background(), testEvents(2))
+		assert.ErrorIs(t, err, eventrouter.ErrPermanent, "refusal routes the batch through poison isolation")
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		assert.Empty(t, c.method, "no ping fires for a refused batch")
 	})
 
 	t.Run("status mapping", func(t *testing.T) {
@@ -280,20 +296,48 @@ func TestPostbackDeliverer_Deliver(t *testing.T) {
 		assert.Nil(t, c.body, "no request fired for an unmappable event")
 	})
 
-	t.Run("permanent outranks transient in mixed batches", func(t *testing.T) {
+	// The scenario the batch refusal exists for: a batched destination with a
+	// mixed per-event outcome must never re-fire an accepted ping. The refused
+	// batch goes through the router's isolation pass, so every event fires
+	// exactly once and each carries its own verdict.
+	t.Run("routed batch pings each event exactly once with precise verdicts", func(t *testing.T) {
 		t.Parallel()
-		srv, _ := captureServer(t, http.StatusOK)
-		dest, err := postback.NewDestination(srv.URL+"/pb?eid={event_id}", vocab)
+		var mu sync.Mutex
+		pings := make(map[string]int)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			v := r.URL.Query().Get("v")
+			mu.Lock()
+			pings[v]++
+			mu.Unlock()
+			if v == "bad" {
+				// Permanent (4xx) so neither the router nor the sender's own
+				// GET-retrying httpclient re-fires it: ping counts stay exact.
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+		pbDest, err := postback.NewDestination(srv.URL+"/pb?eid={event_id}&v={value}", vocab)
 		require.NoError(t, err)
-		d := eventrouter.NewPostbackDeliverer(postback.New(), dest,
-			func(e eventrouter.Event) (map[string]string, error) {
-				if e.ID == "evt_a" {
-					return nil, context.Canceled
-				}
-				return map[string]string{"event_id": e.ID}, nil
-			})
-		err = d.Deliver(context.Background(), testEvents(2))
-		assert.ErrorIs(t, err, eventrouter.ErrPermanent, "isolation splits the batch into per-event verdicts")
+
+		routerDest := eventrouter.NewDestination("tracker", eventrouter.NewPostbackDeliverer(postback.New(), pbDest, values),
+			eventrouter.WithBatchSize(3), eventrouter.WithBatchAge(time.Hour))
+		bus := eventbus.NewSync()
+		evt := eventbus.NewEvent[payload]("postback.batched")
+		eventrouter.Route(bus, evt, routerDest)
+
+		errs := publishAll(context.Background(), bus, evt, "ok1", "bad", "ok2")
+		assert.NoError(t, errs["ok1"])
+		assert.NoError(t, errs["ok2"])
+		require.Error(t, errs["bad"])
+		assert.True(t, queue.IsSkipRetry(errs["bad"]), "the rejected ping dead-letters alone")
+		assert.ErrorIs(t, errs["bad"], postback.ErrClientStatus)
+
+		mu.Lock()
+		defer mu.Unlock()
+		assert.Equal(t, map[string]int{"ok1": 1, "bad": 1, "ok2": 1}, pings,
+			"accepted pings are never re-fired by a batchmate's failure")
 	})
 
 	t.Run("validation", func(t *testing.T) {
