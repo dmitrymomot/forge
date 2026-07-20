@@ -53,7 +53,12 @@ func CronIn(spec string, loc *time.Location) (Schedule, error) {
 	}
 	expr := strings.ToLower(strings.TrimSpace(spec))
 	if rest, ok := strings.CutPrefix(expr, "@every"); ok {
-		d, err := time.ParseDuration(strings.TrimSpace(rest))
+		dur := strings.TrimSpace(rest)
+		// Require the separating space: "@every1h" is a typo, not a spec.
+		if dur == rest || dur == "" {
+			return nil, fmt.Errorf("%w: %q: @every wants a space-separated positive Go duration (e.g. @every 1h30m)", ErrInvalidSpec, spec)
+		}
+		d, err := time.ParseDuration(dur)
 		if err != nil || d <= 0 {
 			return nil, fmt.Errorf("%w: %q: @every wants a positive Go duration (e.g. @every 1h30m)", ErrInvalidSpec, spec)
 		}

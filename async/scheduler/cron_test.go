@@ -42,6 +42,7 @@ func TestCronParseErrors(t *testing.T) {
 		"@nope",
 		"0 8 * * * ; DROP",
 		"@every",
+		"@every1h",
 		"@every nope",
 		"@every -5m",
 		"@every 0s",
