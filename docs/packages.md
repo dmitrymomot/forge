@@ -388,8 +388,8 @@ delivery (`Idempotency-Key` header / payload field) and receivers dedup
 — the Stripe contract (in-router suppression would trade duplicates for
 silent loss).
 
-Deps: `web/httpclient`, `comms/postback`; `async/eventbus`,
-`comms/webhook` (both planned).
+Deps: `web/httpclient`, `comms/postback`, `comms/webhook`;
+`async/eventbus` (planned).
 
 ---
 
@@ -591,21 +591,6 @@ transactional format; goldmark confined there. Provider adapters
 (SES/Postmark/…) are consumer-side or isolated subpackages.
 
 Deps: none forge-internal (goldmark external, isolated).
-
----
-
-**comms/webhook**
-
-The complete webhooks/postbacks package, both directions: outbound
-HMAC-signed deliveries (Stripe-style `t=,v1=`) with timeout, bounded
-retry, and idempotency keys — durable delivery rides `async/queue` —
-and inbound signature-verification middleware (Stripe/GitHub/Slack HMAC
-schemes, constant-time, timestamp tolerance, reads and restores
-`r.Body`). Signing and verifying share one scheme implementation behind a
-pluggable `Scheme` seam, so bespoke partner schemes register without
-forking the package.
-
-Deps: `web/httpclient`, `crypto/sign`; `async/queue`.
 
 ---
 
