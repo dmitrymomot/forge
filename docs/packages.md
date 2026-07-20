@@ -351,26 +351,6 @@ Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
-**async/eventrouter**
-
-Event egress over `eventbus`: each destination is its own named
-subscription (slow-destination isolation for free), filter/remap as
-registered Go functions — no mapping DSL — and batched delivery with
-size+age flush, batch-level retry, and poison-event handling. Reference
-`Deliverer` adapters: generic JSON-batch HTTP, signed postbacks via
-`comms/webhook`, and tracker macro-URL postbacks via `comms/postback`.
-Destination configs are consumer data; forge ships the
-engine, never a Segment-style connector catalog. Delivery is
-at-least-once and the router never dedups: stable event IDs ride every
-delivery (`Idempotency-Key` header / payload field) and receivers dedup
-— the Stripe contract (in-router suppression would trade duplicates for
-silent loss).
-
-Deps: `web/httpclient`, `comms/postback`, `comms/webhook`,
-`async/eventbus`.
-
----
-
 **async/outbox**
 
 Transactional outbox: intent rows committed inside the business DB
