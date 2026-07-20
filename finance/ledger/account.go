@@ -111,7 +111,9 @@ func (l *Ledger) EnsureAccount(ctx context.Context, tx pgx.Tx, key AccountKey, o
 	// A concurrent creator makes both arms come back empty: ON CONFLICT DO
 	// NOTHING skips the insert, but the row committed after this statement's
 	// snapshot, so the fallback select misses it too. The statement does not
-	// abort the transaction, and a re-run's fresh snapshot sees the row.
+	// abort the transaction, and a re-run's fresh snapshot sees the row
+	// (under READ COMMITTED, pgx's default; a REPEATABLE READ caller keeps
+	// its snapshot and surfaces the wrapped no-rows error instead).
 	for attempt := 0; ; attempt++ {
 		err = tx.QueryRow(ctx, ensureAccountSQL,
 			id.NewUUID(), tenant, key.Owner, key.Purpose, key.Currency.Code, floorParam, l.clk.Now().UTC(),

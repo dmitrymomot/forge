@@ -416,6 +416,22 @@ func TestIntegration_HoldSettleVoid(t *testing.T) {
 			return nil
 		})
 		requireBalance(t, l, pool, wallet.ID, 30_00, 10_00) // replay reserved once
+
+		// Nanosecond-precision expiry survives the timestamptz microsecond
+		// truncation: an identical replay must not read as a conflict.
+		nano := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+		nr := ref("nano")
+		inTx(t, pool, func(tx pgx.Tx) error {
+			_, err := l.Hold(ctx, tx, ledger.Hold{Ref: nr, Account: wallet.ID, Amount: eur(1_00), ExpiresAt: nano})
+			require.NoError(t, err)
+			return nil
+		})
+		inTx(t, pool, func(tx pgx.Tx) error {
+			again, err := l.Hold(ctx, tx, ledger.Hold{Ref: nr, Account: wallet.ID, Amount: eur(1_00), ExpiresAt: nano})
+			require.NoError(t, err, "same nanosecond expiry must replay cleanly")
+			assert.Equal(t, ledger.HoldOpen, again.Status)
+			return nil
+		})
 	})
 
 	t.Run("hold on floor-free account", func(t *testing.T) {

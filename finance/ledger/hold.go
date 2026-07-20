@@ -100,7 +100,10 @@ func (l *Ledger) Hold(ctx context.Context, tx pgx.Tx, h Hold) (Hold, error) {
 
 	var expires *time.Time
 	if !h.ExpiresAt.IsZero() {
-		expires = new(h.ExpiresAt.UTC())
+		// timestamptz stores microseconds; truncate up front so a replay
+		// carrying the same nanosecond-precision value matches the stored row.
+		h.ExpiresAt = h.ExpiresAt.UTC().Truncate(time.Microsecond)
+		expires = new(h.ExpiresAt)
 	}
 	now := l.clk.Now().UTC()
 	var (
@@ -140,16 +143,15 @@ func (l *Ledger) Hold(ctx context.Context, tx pgx.Tx, h Hold) (Hold, error) {
 	h.Status = HoldOpen
 	h.CreatedAt = now
 	h.ResolvedAt = time.Time{}
-	if expires != nil {
-		h.ExpiresAt = *expires
-	}
 	return h, nil
 }
 
 // matchHoldReplay verifies a replayed Hold carries the original parameters.
+// h.ExpiresAt was truncated to microseconds before the statement ran, so the
+// comparison against the stored timestamptz is exact.
 func matchHoldReplay(orig, h Hold) error {
 	eq, err := orig.Amount.Equal(h.Amount)
-	if err != nil || !eq || orig.Account != h.Account || !orig.ExpiresAt.Equal(h.ExpiresAt.UTC()) {
+	if err != nil || !eq || orig.Account != h.Account || !orig.ExpiresAt.Equal(h.ExpiresAt) {
 		return fmt.Errorf("%w: ref %q", ErrRefConflict, h.Ref)
 	}
 	return nil
@@ -238,8 +240,9 @@ LEFT JOIN existing e ON true`
 // not a settle gate.
 //
 // Settle is idempotent: settling a settled hold returns the original posting
-// (ErrRefConflict if dst or amount differ). A voided hold returns
-// ErrAlreadyVoided.
+// (ErrRefConflict if dst or amount differ — a partial settle must replay with
+// the same SettleAmount, or the default full amount will not match the
+// original posting). A voided hold returns ErrAlreadyVoided.
 func (l *Ledger) Settle(ctx context.Context, tx pgx.Tx, ref string, dst id.UUID, opts ...SettleOption) (Posting, error) {
 	if ref == "" {
 		return Posting{}, fmt.Errorf("%w: hold ref is required", ErrInvalidRef)
