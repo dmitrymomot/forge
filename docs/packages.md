@@ -351,19 +351,6 @@ Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
-**async/eventbus**
-
-Typed events over the same `Broker` drivers, two modes: sync in-process
-observer (no durability) and durable mode — each named subscription is its
-own queue, publish fans out one message per subscription, competing
-consumers within one, at-least-once. Transactional publish on SQL drivers;
-exports the `Seen(ctx, tx, id)` idempotency inbox. Handlers must be
-idempotent.
-
-Deps: `async/queue`.
-
----
-
 **async/eventrouter**
 
 Event egress over `eventbus`: each destination is its own named
@@ -379,8 +366,8 @@ delivery (`Idempotency-Key` header / payload field) and receivers dedup
 — the Stripe contract (in-router suppression would trade duplicates for
 silent loss).
 
-Deps: `web/httpclient`, `comms/postback`, `comms/webhook`;
-`async/eventbus` (planned).
+Deps: `web/httpclient`, `comms/postback`, `comms/webhook`,
+`async/eventbus`.
 
 ---
 
