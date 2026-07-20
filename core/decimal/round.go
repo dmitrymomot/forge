@@ -1,6 +1,9 @@
 package decimal
 
-import "math/big"
+import (
+	"math"
+	"math/big"
+)
 
 // RoundingMode selects how discarded low-order digits are handled when reducing
 // scale. HalfEven (banker's rounding) is the default and zero value.
@@ -47,6 +50,11 @@ func (d Decimal) Rescale(scale int32, mode RoundingMode) Decimal {
 	}
 	// Reduce scale: drop (d.scale - scale) low digits with rounding.
 	drop := d.scale - scale
+	if d.big == nil {
+		if q, ok := roundInt64(d.coef, drop, mode); ok {
+			return Decimal{coef: q, scale: scale}
+		}
+	}
 	rounded := roundBig(d.bigCoef(), drop, mode)
 	return fromBig(rounded, scale)
 }
@@ -81,6 +89,79 @@ func (d Decimal) Floor() Decimal { return d.Rescale(0, Floor) }
 // Ceil returns the least integer value greater than or equal to d (rounding
 // toward +∞), at scale 0.
 func (d Decimal) Ceil() Decimal { return d.Rescale(0, Ceil) }
+
+// pow10Int64 holds 10^0 … 10^18, every power of ten that fits int64.
+var pow10Int64 = [19]int64{
+	1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
+	1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
+}
+
+// roundInt64 is the allocation-free counterpart of roundBig for int64
+// coefficients: it divides coef by 10^drop (drop ≥ 0), applying mode to the
+// remainder. ok=false defers to the big path when drop exceeds the int64
+// power-of-ten table or coef is MinInt64 (whose magnitude overflows int64).
+func roundInt64(coef int64, drop int32, mode RoundingMode) (int64, bool) {
+	if drop <= 0 {
+		return coef, true
+	}
+	if int(drop) >= len(pow10Int64) || coef == math.MinInt64 {
+		return 0, false
+	}
+	div := pow10Int64[drop]
+
+	neg := coef < 0
+	abs := coef
+	if neg {
+		abs = -abs
+	}
+
+	q, r := abs/div, abs%div
+	if r != 0 && roundAwayFromZeroInt64(q, r, div, mode, neg) {
+		q++ // cannot overflow: q ≤ |coef|/10
+	}
+	if neg {
+		q = -q
+	}
+	return q, true
+}
+
+// roundAwayFromZeroInt64 mirrors roundAwayFromZero for a positive magnitude
+// quotient q with nonzero remainder r (0 < r < div ≤ 10^18): it decides
+// whether to increment the magnitude by one. neg is the sign of the original
+// value, used by the sign-aware modes.
+func roundAwayFromZeroInt64(q, r, div int64, mode RoundingMode, neg bool) bool {
+	switch mode {
+	case Down:
+		return false
+	case Up:
+		return true
+	case Ceil:
+		// toward +∞: increase magnitude only for positive values.
+		return !neg
+	case Floor:
+		// toward -∞: increase magnitude only for negative values.
+		return neg
+	default:
+		// Half modes: compare 2*r against div; 2*r < 2×10^18 never overflows.
+		switch twice := 2 * r; {
+		case twice < div:
+			return false // below half → toward zero
+		case twice > div:
+			return true // above half → away from zero
+		default:
+			// Exactly half.
+			switch mode {
+			case HalfUp:
+				return true
+			case HalfDown:
+				return false
+			default: // HalfEven
+				// Round to even: increment if current last digit of q is odd.
+				return q&1 == 1
+			}
+		}
+	}
+}
 
 // roundBig divides coef by 10^drop (drop ≥ 0), applying mode to the remainder,
 // and returns the rounded quotient. Sign handling is exact for every mode.
