@@ -53,6 +53,11 @@ func newConfig(opts []Option) (config, error) {
 	if !tableNameRe.MatchString(c.table) {
 		return config{}, fmt.Errorf("pgeventbus: invalid table name %q", c.table)
 	}
+	// Postgres truncates identifiers past 63 bytes: two longer names sharing a
+	// prefix would silently collide on one physical table.
+	if len(c.table) > 63 {
+		return config{}, fmt.Errorf("pgeventbus: table name %q exceeds the 63-byte identifier limit", c.table)
+	}
 	return c, nil
 }
 

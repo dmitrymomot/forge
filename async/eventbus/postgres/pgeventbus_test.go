@@ -4,6 +4,7 @@ package pgeventbus_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,12 @@ func TestNewInbox(t *testing.T) {
 	t.Run("invalid table", func(t *testing.T) {
 		t.Parallel()
 		_, err := pgeventbus.NewInbox("c", pgeventbus.WithTable("bad; DROP TABLE x"))
+		assert.Error(t, err)
+	})
+
+	t.Run("table name over the identifier limit", func(t *testing.T) {
+		t.Parallel()
+		_, err := pgeventbus.NewInbox("c", pgeventbus.WithTable(strings.Repeat("x", 64)))
 		assert.Error(t, err)
 	})
 }
