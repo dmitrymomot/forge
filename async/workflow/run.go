@@ -27,9 +27,10 @@ const (
 // attempts so far; while compensating, Step walks backwards over the steps
 // whose compensations still have to run. State is the JSON-encoded workflow
 // state as of the last checkpoint. Error records the permanent failure that
-// triggered compensation — or, on a non-terminal run whose driving job was
-// dead-lettered over unprocessable state, the reason it was abandoned.
-// Version implements optimistic locking — see Store.
+// triggered compensation; when a non-terminal run's driving job is
+// dead-lettered (unprocessable state, an exhausted compensation), the reason
+// is appended so the row alone explains a stuck run. Version implements
+// optimistic locking — see Store.
 type Run struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time

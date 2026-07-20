@@ -78,7 +78,7 @@ func decodeState[S any](raw json.RawMessage) (*S, error) {
 func forward[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run, state *S) error {
 	steps := wf.steps
 	if run.Step < 0 {
-		return queue.SkipRetry(fmt.Errorf("workflow: run %q: inconsistent checkpoint step %d", run.ID, run.Step))
+		return e.abandon(ctx, run, fmt.Errorf("workflow: run %q: inconsistent checkpoint step %d", run.ID, run.Step))
 	}
 	for run.Step < len(steps) {
 		if err := ctx.Err(); err != nil {
@@ -201,8 +201,11 @@ func compensate[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run
 			return fmt.Errorf("workflow: run %q compensation %q attempt %d: %w", run.ID, st.Name, failed, err)
 		}
 		// Exhausted: reset the counter so a Requeue retries this compensation
-		// with a fresh budget instead of dead-lettering again immediately.
+		// with a fresh budget instead of dead-lettering again immediately, and
+		// note why the run is parked next to the original trigger — the store
+		// must explain a stuck saga without the DLQ or logs at hand.
 		run.Attempt = 0
+		appendErrorNote(run, fmt.Sprintf("compensation %q exhausted: %v", st.Name, err))
 		if cerr := e.checkpoint(ctx, run); cerr != nil {
 			return cerr
 		}
@@ -234,22 +237,26 @@ func (e *Engine) checkpoint(ctx context.Context, run *Run) error {
 // the run from its checkpoint. The write is best-effort — the DLQ entry
 // carries the same reason.
 func (e *Engine) abandon(ctx context.Context, run *Run, err error) error {
-	// A compensating run's Error holds the business failure that triggered
-	// the unwind — the one signal explaining a stuck saga — so append the
-	// abandon note instead of replacing it. The suffix check keeps repeated
-	// requeue-and-abandon cycles from growing the note unboundedly.
-	note := "abandoned: " + err.Error()
+	appendErrorNote(run, "abandoned: "+err.Error())
+	if cerr := e.checkpoint(ctx, run); cerr != nil {
+		e.log.WarnContext(ctx, "workflow abandon note not persisted", runAttrs(run, slog.Any("error", cerr))...)
+	}
+	e.log.ErrorContext(ctx, "workflow run abandoned, driving job dead-lettered", runAttrs(run, slog.String("error", run.Error))...)
+	return queue.SkipRetry(err)
+}
+
+// appendErrorNote records why a live run's driving job was dead-lettered
+// without clobbering what Run.Error already holds — on a compensating run
+// that is the business failure that triggered the unwind, the one signal
+// explaining a stuck saga. The suffix check keeps repeated
+// requeue-and-dead-letter cycles from growing the note unboundedly.
+func appendErrorNote(run *Run, note string) {
 	switch {
 	case run.Error == "":
 		run.Error = note
 	case !strings.HasSuffix(run.Error, note):
 		run.Error += "; " + note
 	}
-	if cerr := e.checkpoint(ctx, run); cerr != nil {
-		e.log.WarnContext(ctx, "workflow abandon note not persisted", runAttrs(run, slog.Any("error", cerr))...)
-	}
-	e.log.ErrorContext(ctx, "workflow run abandoned, driving job dead-lettered", runAttrs(run, slog.String("error", run.Error))...)
-	return queue.SkipRetry(err)
 }
 
 // invokeStep runs one step (or compensation) with panic recovery: a panicking

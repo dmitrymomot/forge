@@ -445,6 +445,8 @@ func TestRun_CompensationExhaustionDeadLettersAndRequeueResumes(t *testing.T) {
 	assert.Equal(t, workflow.StatusCompensating, run.Status)
 	assert.Equal(t, 0, run.Attempt, "attempt counter must reset so a requeue gets a fresh budget")
 	assert.Equal(t, 2, rec.count("undo:a"))
+	assert.Contains(t, run.Error, "nope", "the original saga trigger must survive")
+	assert.Contains(t, run.Error, `compensation "a" exhausted`, "the parked run must explain itself")
 
 	// Requeue resumes the unwind from the checkpoint.
 	allow.Store("ok", true)
@@ -544,6 +546,39 @@ func TestRun_UndecodableStateIsAbandonedWithReason(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, workflow.StatusRunning, run.Status, "abandonment must not fake a terminal status")
 	assert.Contains(t, run.Error, "decode state")
+}
+
+// TestRun_NegativeCheckpointStepIsAbandonedWithReason guards the
+// inconsistent-checkpoint poison path: a corrupt Step index dead-letters the
+// driving job AND records why on the run, like every other abandonment.
+func TestRun_NegativeCheckpointStepIsAbandonedWithReason(t *testing.T) {
+	t.Parallel()
+	wf := workflow.New("wf.badstep",
+		workflow.Step[state]{Name: "a", Run: func(context.Context, *state) error { return nil }})
+	broker := queue.NewMemoryBroker()
+	store := workflow.NewMemoryStore()
+	eng := workflow.NewEngine(broker, store)
+	workflow.Register(eng, wf)
+	svc, err := workflow.NewService(eng, queue.WithConfig(fastConfig()))
+	require.NoError(t, err)
+	runService(t, svc)
+
+	ctx := context.Background()
+	require.NoError(t, store.Create(ctx, workflow.Run{
+		ID: "r-badstep", Workflow: wf.Name(), Status: workflow.StatusRunning,
+		State: []byte(`{}`), Step: -1, Version: 1,
+	}))
+	client := queue.NewClient(broker)
+	require.NoError(t, client.PushRaw(ctx, wf.Name(), []byte(`{"run_id":"r-badstep","v":1}`), queue.WithQueue(wf.Name())))
+
+	require.Eventually(t, func() bool {
+		dead, derr := client.ListDead(ctx, wf.Name(), 10)
+		require.NoError(t, derr)
+		return len(dead) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+	run, err := store.Get(ctx, "r-badstep")
+	require.NoError(t, err)
+	assert.Contains(t, run.Error, "inconsistent checkpoint step")
 }
 
 // TestRun_AbandonedCompensatingRunKeepsOriginalError guards the abandon note:
