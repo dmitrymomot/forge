@@ -119,6 +119,28 @@ func TestStore_CreateGetUpdate(t *testing.T) {
 		assert.ErrorIs(t, store.Update(ctx, testRun("r-update-missing")), workflow.ErrRunNotFound)
 	})
 
+	t.Run("state with a NUL escape survives the roundtrip", func(t *testing.T) {
+		// The json (not jsonb) column choice: user data captured into
+		// workflow state may contain U+0000, and a checkpoint that cannot be
+		// written would wedge the run.
+		nul, merr := json.Marshal(map[string]string{"s": "a\x00b"})
+		require.NoError(t, merr)
+		run := testRun("r-nul")
+		run.State = nul
+		require.NoError(t, store.Create(ctx, run))
+		got, err := store.Get(ctx, "r-nul")
+		require.NoError(t, err)
+		assert.JSONEq(t, string(nul), string(got.State))
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		assert.ErrorIs(t, store.Delete(ctx, "r-del-missing"), workflow.ErrRunNotFound)
+		require.NoError(t, store.Create(ctx, testRun("r-del")))
+		require.NoError(t, store.Delete(ctx, "r-del"))
+		_, err := store.Get(ctx, "r-del")
+		assert.ErrorIs(t, err, workflow.ErrRunNotFound)
+	})
+
 	t.Run("update bumps version and stale write is rejected", func(t *testing.T) {
 		require.NoError(t, store.Create(ctx, testRun("r-version")))
 

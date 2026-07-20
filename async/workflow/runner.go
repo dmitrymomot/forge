@@ -39,7 +39,7 @@ func newRunner[S any](e *Engine, wf *Workflow[S]) func(ctx context.Context, env 
 		}
 		state, err := decodeState[S](run.State)
 		if err != nil {
-			return queue.SkipRetry(fmt.Errorf("workflow: run %q: decode state: %w", run.ID, err))
+			return e.abandon(ctx, &run, fmt.Errorf("workflow: run %q: decode state: %w", run.ID, err))
 		}
 		if run.Status == StatusRunning {
 			if err := forward(ctx, e, wf, &run, state); err != nil {
@@ -52,7 +52,7 @@ func newRunner[S any](e *Engine, wf *Workflow[S]) func(ctx context.Context, env 
 			// compensations must see the last checkpoint, not those leftovers.
 			state, err = decodeState[S](run.State)
 			if err != nil {
-				return queue.SkipRetry(fmt.Errorf("workflow: run %q: decode state: %w", run.ID, err))
+				return e.abandon(ctx, &run, fmt.Errorf("workflow: run %q: decode state: %w", run.ID, err))
 			}
 		}
 		return compensate(ctx, e, wf, &run, state)
@@ -88,11 +88,12 @@ func forward[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run, s
 		if err == nil {
 			raw, merr := json.Marshal(state)
 			if merr != nil {
-				return queue.SkipRetry(fmt.Errorf("workflow: run %q: marshal state after step %q: %w", run.ID, st.Name, merr))
+				return e.abandon(ctx, run, fmt.Errorf("workflow: run %q: marshal state after step %q: %w", run.ID, st.Name, merr))
 			}
 			run.State = raw
 			run.Step++
 			run.Attempt = 0
+			run.Error = "" // a resumed abandoned run is making progress again
 			if run.Step == len(steps) {
 				run.Status = StatusCompleted
 			}
@@ -101,8 +102,14 @@ func forward[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run, s
 			}
 			continue
 		}
-		if ctx.Err() != nil {
-			return err // cancelled mid-step: redeliver without burning an attempt
+		// Permanent verdicts outrank cancellation: letting queue.Cancel or
+		// queue.SkipRetry through raw would ack or dead-letter the driving job
+		// while the run still looks alive. A plain error with the handler ctx
+		// cancelled means the lease was lost mid-step — the new claim owns the
+		// run now, so leave the checkpoint alone; a deadline expiry is the
+		// step's own timeout and burns an attempt like any other failure.
+		if !isPermanent(err) && errors.Is(ctx.Err(), context.Canceled) {
+			return err
 		}
 		failed := run.Attempt + 1
 		if !isPermanent(err) && failed < e.stepBudget(st.MaxAttempts) {
@@ -165,7 +172,7 @@ func compensate[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run
 		if err == nil {
 			raw, merr := json.Marshal(state)
 			if merr != nil {
-				return queue.SkipRetry(fmt.Errorf("workflow: run %q: marshal state after compensation %q: %w", run.ID, st.Name, merr))
+				return e.abandon(ctx, run, fmt.Errorf("workflow: run %q: marshal state after compensation %q: %w", run.ID, st.Name, merr))
 			}
 			run.State = raw
 			run.Attempt = 0
@@ -178,7 +185,10 @@ func compensate[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run
 			}
 			continue
 		}
-		if ctx.Err() != nil {
+		// Same classification as forward: permanent verdicts outrank
+		// cancellation, lease loss (Canceled) yields without burning an
+		// attempt, a deadline expiry burns one.
+		if !isPermanent(err) && errors.Is(ctx.Err(), context.Canceled) {
 			return err
 		}
 		failed := run.Attempt + 1
@@ -202,14 +212,33 @@ func compensate[S any](ctx context.Context, e *Engine, wf *Workflow[S], run *Run
 	return nil
 }
 
-// checkpoint persists run and tracks the version bump locally.
+// checkpoint persists run and tracks the version bump locally. It writes
+// under a non-cancelable context: a state transition that was decided must
+// commit even when the handler ctx died mid-step (timeout expiry racing a
+// permanent verdict), mirroring the queue engine's post-claim broker ops. A
+// worker that lost its lease is stopped by the version guard instead.
 func (e *Engine) checkpoint(ctx context.Context, run *Run) error {
 	run.UpdatedAt = e.clk.Now().UTC()
-	if err := e.store.Update(ctx, *run); err != nil {
+	if err := e.store.Update(context.WithoutCancel(ctx), *run); err != nil {
 		return fmt.Errorf("workflow: checkpoint run %q: %w", run.ID, err)
 	}
 	run.Version++
 	return nil
+}
+
+// abandon dead-letters the driving job over unprocessable input (state that
+// no longer decodes or marshals — schema drift of S across a deploy),
+// recording the reason on Run.Error so the store stays diagnosable. The
+// status is left as is: after a fixed deploy, queue.Client.Requeue resumes
+// the run from its checkpoint. The write is best-effort — the DLQ entry
+// carries the same reason.
+func (e *Engine) abandon(ctx context.Context, run *Run, err error) error {
+	run.Error = err.Error()
+	if cerr := e.checkpoint(ctx, run); cerr != nil {
+		e.log.WarnContext(ctx, "workflow abandon note not persisted", runAttrs(run, slog.Any("error", cerr))...)
+	}
+	e.log.ErrorContext(ctx, "workflow run abandoned, driving job dead-lettered", runAttrs(run, slog.String("error", run.Error))...)
+	return queue.SkipRetry(err)
 }
 
 // invokeStep runs one step (or compensation) with panic recovery: a panicking

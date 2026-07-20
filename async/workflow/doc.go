@@ -35,9 +35,12 @@
 //
 // A step error is transient by default: the run checkpoints the failed
 // attempt and the job retries with the worker's backoff, re-entering at the
-// same step. A step fails permanently when it returns workflow.Fail(err)
-// (business failure — no retry can help) or when its attempt budget
-// (Step.MaxAttempts, default WithStepAttempts) is spent. Permanent failure
+// same step. A handler-timeout expiry mid-step counts as a transient failure
+// of that step (a chronically slow step eventually spends its budget); a
+// lost queue lease does not — the new claim owns the run. A step fails
+// permanently when it returns workflow.Fail(err) (business failure — no
+// retry can help) or when its attempt budget (Step.MaxAttempts, default
+// WithStepAttempts) is spent. Permanent failure
 // flips the run to compensating: completed steps' Compensate funcs run newest
 // first, with the same checkpoint, retry, and budget rules; steps without a
 // Compensate are skipped. When compensation finishes — or no completed step

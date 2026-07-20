@@ -48,6 +48,17 @@ func (s *MemoryStore) Get(_ context.Context, id string) (Run, error) {
 	return run, nil
 }
 
+// Delete implements Store.
+func (s *MemoryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.runs[id]; !ok {
+		return ErrRunNotFound
+	}
+	delete(s.runs, id)
+	return nil
+}
+
 // Update implements Store.
 func (s *MemoryStore) Update(_ context.Context, run Run) error {
 	s.mu.Lock()

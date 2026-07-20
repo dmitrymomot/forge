@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -208,27 +209,38 @@ func TestStart_Validation(t *testing.T) {
 		assert.ErrorIs(t, err, workflow.ErrScopeMissing)
 	})
 
-	t.Run("push failure marks the run failed", func(t *testing.T) {
+	t.Run("push failure rolls the run back and does not consume the id", func(t *testing.T) {
 		t.Parallel()
 		store := workflow.NewMemoryStore()
-		eng := workflow.NewEngine(&failingPushBroker{Broker: queue.NewMemoryBroker()}, store)
+		broker := &failingPushBroker{Broker: queue.NewMemoryBroker()}
+		broker.fail.Store(true)
+		eng := workflow.NewEngine(broker, store)
 		wf := workflow.New("wf.pushfail", workflow.Step[state]{Name: "a", Run: func(context.Context, *state) error { return nil }})
 		workflow.Register(eng, wf)
 		_, err := workflow.Start(ctx, eng, wf, state{}, workflow.WithRunID("r1"))
 		require.Error(t, err)
+		assert.NotErrorIs(t, err, workflow.ErrRunAlreadyExists)
 
-		run, gerr := store.Get(ctx, "r1")
-		require.NoError(t, gerr)
-		assert.Equal(t, workflow.StatusFailed, run.Status)
-		assert.Contains(t, run.Error, "enqueue failed")
+		_, gerr := store.Get(ctx, "r1")
+		assert.ErrorIs(t, gerr, workflow.ErrRunNotFound, "the rolled-back run must not linger")
+
+		// The broker recovers: retrying the same business key succeeds.
+		broker.fail.Store(false)
+		_, err = workflow.Start(ctx, eng, wf, state{}, workflow.WithRunID("r1"))
+		require.NoError(t, err)
 	})
 }
 
+// failingPushBroker fails Push until fail is flipped to false.
 type failingPushBroker struct {
 	queue.Broker
+	fail atomic.Bool
 }
 
-func (b *failingPushBroker) Push(context.Context, ...queue.Job) error {
+func (b *failingPushBroker) Push(ctx context.Context, jobs ...queue.Job) error {
+	if !b.fail.Load() {
+		return b.Broker.Push(ctx, jobs...)
+	}
 	return errors.New("broker down")
 }
 
@@ -439,6 +451,99 @@ func TestRun_CompensationExhaustionDeadLettersAndRequeueResumes(t *testing.T) {
 	require.NoError(t, client.Requeue(context.Background(), dead[0].ID))
 	run = waitStatus(t, store, runID, workflow.StatusFailed)
 	assert.Equal(t, []string{"a", "undo:a"}, decodeLog(t, run))
+}
+
+// TestRun_PermanentVerdictUnderCancelledContextStillCompensates guards the
+// verdict-vs-cancellation ordering: a step returning queue.Cancel just as its
+// handler timeout fires must take the permanent path (compensation), not leak
+// the verdict to the queue engine — which would ack the driving job and
+// orphan the run as running forever.
+func TestRun_PermanentVerdictUnderCancelledContextStillCompensates(t *testing.T) {
+	t.Parallel()
+	rec := newRecorder()
+	wf := workflow.New("wf.cancelrace",
+		step(rec, "a", nil, comp(rec, "a", nil)),
+		workflow.Step[state]{
+			Name: "b",
+			Run: func(ctx context.Context, _ *state) error {
+				rec.hit("b")
+				<-ctx.Done() // outlive the handler timeout, then verdict
+				return queue.Cancel
+			},
+		},
+	)
+	store, client, runID := startAndDrive(t, wf, workflow.WithHandlerTimeout(50*time.Millisecond))
+	run := waitStatus(t, store, runID, workflow.StatusFailed)
+
+	assert.Equal(t, []string{"a", "undo:a"}, decodeLog(t, run))
+	dead, err := client.ListDead(context.Background(), wf.Name(), 10)
+	require.NoError(t, err)
+	assert.Empty(t, dead)
+}
+
+// TestRun_ChronicTimeoutSpendsBudgetAndCompensates guards the deadline rule:
+// a step that reliably outlives its handler timeout burns its attempt budget
+// like any other failure and eventually compensates, instead of dead-lettering
+// with the run stuck running.
+func TestRun_ChronicTimeoutSpendsBudgetAndCompensates(t *testing.T) {
+	t.Parallel()
+	rec := newRecorder()
+	wf := workflow.New("wf.slowstep",
+		step(rec, "a", nil, comp(rec, "a", nil)),
+		workflow.Step[state]{
+			Name:        "b",
+			MaxAttempts: 2,
+			Run: func(ctx context.Context, _ *state) error {
+				rec.hit("b")
+				<-ctx.Done()
+				return ctx.Err()
+			},
+		},
+	)
+	store, client, runID := startAndDrive(t, wf, workflow.WithHandlerTimeout(50*time.Millisecond))
+	run := waitStatus(t, store, runID, workflow.StatusFailed)
+
+	assert.Equal(t, 2, rec.count("b"))
+	assert.Equal(t, []string{"a", "undo:a"}, decodeLog(t, run))
+	dead, err := client.ListDead(context.Background(), wf.Name(), 10)
+	require.NoError(t, err)
+	assert.Empty(t, dead)
+}
+
+// TestRun_UndecodableStateIsAbandonedWithReason guards the poison path: state
+// that no longer decodes (schema drift) dead-letters the driving job AND
+// records why on the run, keeping the store diagnosable.
+func TestRun_UndecodableStateIsAbandonedWithReason(t *testing.T) {
+	t.Parallel()
+	wf := workflow.New("wf.badstate",
+		workflow.Step[state]{Name: "a", Run: func(context.Context, *state) error { return nil }})
+	broker := queue.NewMemoryBroker()
+	store := workflow.NewMemoryStore()
+	eng := workflow.NewEngine(broker, store)
+	workflow.Register(eng, wf)
+	svc, err := workflow.NewService(eng, queue.WithConfig(fastConfig()))
+	require.NoError(t, err)
+	runService(t, svc)
+
+	// A run whose checkpoint no longer matches the state schema, delivered by
+	// hand — as after a deploy that changed S incompatibly.
+	ctx := context.Background()
+	require.NoError(t, store.Create(ctx, workflow.Run{
+		ID: "r-bad", Workflow: wf.Name(), Status: workflow.StatusRunning,
+		State: []byte(`{"log":123}`), Version: 1,
+	}))
+	client := queue.NewClient(broker)
+	require.NoError(t, client.PushRaw(ctx, wf.Name(), []byte(`{"run_id":"r-bad","v":1}`), queue.WithQueue(wf.Name())))
+
+	require.Eventually(t, func() bool {
+		dead, derr := client.ListDead(ctx, wf.Name(), 10)
+		require.NoError(t, derr)
+		return len(dead) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+	run, err := store.Get(ctx, "r-bad")
+	require.NoError(t, err)
+	assert.Equal(t, workflow.StatusRunning, run.Status, "abandonment must not fake a terminal status")
+	assert.Contains(t, run.Error, "decode state")
 }
 
 func TestRun_DuplicateDeliveryOfFinishedRunIsNoop(t *testing.T) {

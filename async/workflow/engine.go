@@ -110,9 +110,14 @@ func (e *Engine) stepBudget(n int) int {
 
 // Start creates a run of wf with the given initial state and enqueues its
 // driving job; it returns the run id to poll the Store with. The workflow
-// must be Registered on this engine (ErrNotRegistered otherwise). A run whose
-// job cannot be enqueued is marked failed in the Store before Start returns
-// the push error, so it never lingers looking alive.
+// must be Registered on this engine (ErrNotRegistered otherwise).
+//
+// Start is create-then-enqueue, rolled back on failure: a run whose driving
+// job cannot be pushed is deleted again before Start returns the push error,
+// so a retried Start — including one reusing a WithRunID business key — can
+// succeed. In the rare double failure (push and delete both fail) and after
+// a process crash between create and push, the run lingers running with no
+// driving job; repair via Store.Delete.
 func Start[S any](ctx context.Context, e *Engine, wf *Workflow[S], state S, opts ...StartOption) (string, error) {
 	reg, ok := e.workflows[wf.Name()]
 	if !ok {
@@ -174,11 +179,11 @@ func Start[S any](ctx context.Context, e *Engine, wf *Workflow[S], state S, opts
 	}
 	if err := e.broker.Push(ctx, job); err != nil {
 		pushErr := fmt.Errorf("workflow: enqueue run %q for %q: %w", runID, wf.Name(), err)
-		run.Status = StatusFailed
-		run.Error = "workflow: enqueue failed: " + err.Error()
-		run.UpdatedAt = e.clk.Now().UTC()
-		if uerr := e.store.Update(ctx, run); uerr != nil {
-			return "", errors.Join(pushErr, fmt.Errorf("workflow: mark run %q failed: %w", runID, uerr))
+		// Roll back under a non-cancelable context: the push often failed
+		// BECAUSE ctx died, and the rollback must still land or the run id
+		// stays consumed with no driving job.
+		if derr := e.store.Delete(context.WithoutCancel(ctx), runID); derr != nil {
+			return "", errors.Join(pushErr, fmt.Errorf("workflow: roll back run %q: %w", runID, derr))
 		}
 		return "", pushErr
 	}

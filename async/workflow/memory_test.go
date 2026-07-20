@@ -43,6 +43,16 @@ func TestMemoryStore(t *testing.T) {
 		assert.ErrorIs(t, s.Update(ctx, workflow.Run{ID: "nope", Version: 1}), workflow.ErrRunNotFound)
 	})
 
+	t.Run("delete", func(t *testing.T) {
+		t.Parallel()
+		s := workflow.NewMemoryStore()
+		assert.ErrorIs(t, s.Delete(ctx, "nope"), workflow.ErrRunNotFound)
+		require.NoError(t, s.Create(ctx, workflow.Run{ID: "r1", Version: 1}))
+		require.NoError(t, s.Delete(ctx, "r1"))
+		_, err := s.Get(ctx, "r1")
+		assert.ErrorIs(t, err, workflow.ErrRunNotFound)
+	})
+
 	t.Run("update bumps version and stale write is rejected", func(t *testing.T) {
 		t.Parallel()
 		s := workflow.NewMemoryStore()

@@ -19,7 +19,6 @@ func Example() {
 	broker := queue.NewMemoryBroker()
 	store := workflow.NewMemoryStore()
 
-	done := make(chan struct{})
 	wf := workflow.New("payout.execute",
 		workflow.Step[payout]{
 			Name: "debit_ledger",
@@ -36,7 +35,6 @@ func Example() {
 		workflow.Step[payout]{
 			Name: "send_transfer",
 			Run: func(_ context.Context, p *payout) error {
-				defer close(done)
 				// A business failure no retry can fix: unwind the debit.
 				return workflow.Fail(errors.New("recipient account closed"))
 			},
@@ -60,14 +58,19 @@ func Example() {
 	if err != nil {
 		panic(err)
 	}
-	<-done
+	// The store is the source of truth: poll the run until it is terminal.
+	var run workflow.Run
+	for {
+		if run, err = store.Get(ctx, runID); err != nil {
+			panic(err)
+		}
+		if run.Status == workflow.StatusCompleted || run.Status == workflow.StatusFailed {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	<-stopped
-
-	run, err := store.Get(context.Background(), runID)
-	if err != nil {
-		panic(err)
-	}
 	fmt.Println("status:", run.Status)
 
 	// Output:

@@ -26,8 +26,10 @@ const (
 // index of the next step to execute and Attempt counts that step's failed
 // attempts so far; while compensating, Step walks backwards over the steps
 // whose compensations still have to run. State is the JSON-encoded workflow
-// state as of the last checkpoint. Version implements optimistic locking —
-// see Store.
+// state as of the last checkpoint. Error records the permanent failure that
+// triggered compensation — or, on a non-terminal run whose driving job was
+// dead-lettered over unprocessable state, the reason it was abandoned.
+// Version implements optimistic locking — see Store.
 type Run struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -59,4 +61,8 @@ type Store interface {
 	// Update persists run if the stored version equals run.Version (see
 	// above); ErrRunNotFound when absent, ErrStaleRun on a version mismatch.
 	Update(ctx context.Context, run Run) error
+	// Delete removes a run; ErrRunNotFound when absent. Start uses it to roll
+	// back a run whose driving job could not be enqueued; consumers may use
+	// it to repair orphans.
+	Delete(ctx context.Context, id string) error
 }

@@ -73,6 +73,7 @@ type Store struct {
 	getSQL    string
 	updateSQL string
 	existsSQL string
+	deleteSQL string
 }
 
 // New builds a Store over pool. Errors on a nil pool or an invalid table name.
@@ -93,6 +94,7 @@ func New(pool *pgxpool.Pool, opts ...Option) (*Store, error) {
 		updateSQL: fmt.Sprintf(`UPDATE %s SET status = $3, error = $4, state = $5, step = $6, attempt = $7,
 			version = version + 1, updated_at = $8 WHERE id = $1 AND version = $2`, c.table),
 		existsSQL: fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s WHERE id = $1)`, c.table),
+		deleteSQL: fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, c.table),
 	}, nil
 }
 
@@ -152,6 +154,18 @@ func (s *Store) Update(ctx context.Context, run workflow.Run) error {
 		return workflow.ErrRunNotFound
 	}
 	return workflow.ErrStaleRun
+}
+
+// Delete implements workflow.Store.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, s.deleteSQL, id)
+	if err != nil {
+		return fmt.Errorf("pgworkflow: delete run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return workflow.ErrRunNotFound
+	}
+	return nil
 }
 
 // purgeBatch bounds one PurgeTerminalBefore statement, keeping each delete a
