@@ -169,16 +169,22 @@ func TestDoDetachedWaitBoundedByCallerContext(t *testing.T) {
 func TestDoDetachedExecutionSurvivesCallerCancel(t *testing.T) {
 	var g singleflight.Group[int]
 	done := make(chan struct{})
+	release := make(chan struct{})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, _, err := g.DoDetached(ctx, "k", func(fnCtx context.Context) (int, error) {
 		defer close(done)
+		// Hold the flight open until the caller has returned: with an instant
+		// fn, the result and the cancelled ctx race in DoDetached's select and
+		// either arm may win, making the Canceled assertion below a coin flip.
+		<-release
 		// The detached fn must not observe the initiator's cancellation.
 		assert.NoError(t, fnCtx.Err())
 		return 1, nil
 	})
 	assert.ErrorIs(t, err, context.Canceled)
+	close(release)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
