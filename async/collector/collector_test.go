@@ -269,6 +269,29 @@ func TestAddAfterShutdown(t *testing.T) {
 	}
 }
 
+func TestAddAfterShutdownSkipsScopeHook(t *testing.T) {
+	t.Parallel()
+	sink := newRecordSink[int]()
+	hookCalled := false
+	c, err := collector.New(sink, collector.WithScope(func(context.Context) (string, error) {
+		hookCalled = true
+		return "", errors.New("hook must not run after shutdown")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCollector(t, c)()
+
+	// ErrClosed takes precedence over the failing scope hook, which is never
+	// invoked once shutdown has begun.
+	if err := c.Add(context.Background(), 1); !errors.Is(err, collector.ErrClosed) {
+		t.Fatalf("Add after shutdown: got %v, want ErrClosed", err)
+	}
+	if hookCalled {
+		t.Fatal("scope hook ran after shutdown")
+	}
+}
+
 func TestSinkErrorLosesBatchAndRecovers(t *testing.T) {
 	t.Parallel()
 	sink := newRecordSink[int]()

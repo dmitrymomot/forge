@@ -58,7 +58,8 @@ type Collector[T any] struct {
 	lost    atomic.Uint64
 
 	// mu makes the closed check and the buffer send atomic against shutdown:
-	// Add holds the read side, Run's shutdown takes the write side to flip
+	// Add holds the read side (across the scope hook too, which is a trivial
+	// context read by contract), Run's shutdown takes the write side to flip
 	// closed, so once drain starts no accepted event can still be in flight
 	// into the buffer. A bare WaitGroup would race Add(1) against Wait on a
 	// zero counter (documented misuse) for Adds arriving after shutdown.
@@ -90,8 +91,14 @@ func (c *Collector[T]) Name() string { return c.name }
 // performs I/O. On a full buffer the event is dropped (drop-newest), counted,
 // and ErrBufferFull returned; fire-and-forget callers may ignore the error.
 // Returns ErrScopeMissing when a configured scope hook errors or yields an
-// empty scope, and ErrClosed once shutdown has begun.
+// empty scope, and ErrClosed once shutdown has begun; ErrClosed takes
+// precedence, so shutdown never pays for scope hook calls.
 func (c *Collector[T]) Add(ctx context.Context, event T) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return ErrClosed
+	}
 	var scope string
 	if c.scope != nil {
 		s, err := c.scope(ctx)
@@ -102,11 +109,6 @@ func (c *Collector[T]) Add(ctx context.Context, event T) error {
 			return ErrScopeMissing
 		}
 		scope = s
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return ErrClosed
 	}
 	select {
 	case c.buf <- entry[T]{event: event, scope: scope}:
