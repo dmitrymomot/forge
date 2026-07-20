@@ -415,7 +415,9 @@ func TestVoid(t *testing.T) {
 		t.Parallel()
 		inv := issued(t)
 		require.NoError(t, inv.ApplyPayment(t.Context(), payment("ledger:1", "119.00")))
-		assert.ErrorIs(t, inv.Void(t.Context(), dueTime), fsm.ErrIllegalTransition)
+		err := inv.Void(t.Context(), dueTime)
+		assert.ErrorIs(t, err, fsm.ErrGuardDenied)
+		assert.ErrorIs(t, err, invoice.ErrHasPayments)
 	})
 }
 
