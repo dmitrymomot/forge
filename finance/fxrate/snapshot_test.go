@@ -38,6 +38,7 @@ func TestNewSnapshotValidation(t *testing.T) {
 		{"empty base", "", "test", asOf, valid, fxrate.ErrInvalidSnapshot},
 		{"blank base", "   ", "test", asOf, valid, fxrate.ErrInvalidSnapshot},
 		{"empty provider", "EUR", "", asOf, valid, fxrate.ErrInvalidSnapshot},
+		{"whitespace provider", "EUR", "   ", asOf, valid, fxrate.ErrInvalidSnapshot},
 		{"zero asOf", "EUR", "test", time.Time{}, valid, fxrate.ErrInvalidSnapshot},
 		{"nil rates", "EUR", "test", asOf, nil, fxrate.ErrInvalidSnapshot},
 		{"empty rates", "EUR", "test", asOf, map[string]decimal.Decimal{}, fxrate.ErrInvalidSnapshot},

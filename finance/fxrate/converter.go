@@ -93,7 +93,9 @@ func (c *Converter) Snapshot(ctx context.Context) (Snapshot, error) {
 	if snap, ok := c.cached(); ok {
 		return snap, nil
 	}
-	snap, _, err := c.group.Do(ctx, "refresh", func(ctx context.Context) (Snapshot, error) {
+	// DoDetached, not Do: a caller joining an in-flight refresh waits only
+	// until its own ctx ends; the shared fetch keeps running for the rest.
+	snap, _, err := c.group.DoDetached(ctx, "refresh", func(ctx context.Context) (Snapshot, error) {
 		// Re-check after winning the flight: a refresh that completed while
 		// this caller was deciding to fetch already did the work.
 		if snap, ok := c.cached(); ok {

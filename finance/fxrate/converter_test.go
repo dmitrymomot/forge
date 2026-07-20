@@ -206,6 +206,41 @@ func TestConverterRejectsBadSourceResults(t *testing.T) {
 	}
 }
 
+func TestConverterFollowerWaitBoundedByOwnContext(t *testing.T) {
+	t.Parallel()
+
+	snap := testSnapshot(t)
+	src := &fakeSource{results: []func() (fxrate.Snapshot, error){snapResult(snap)}, delay: 400 * time.Millisecond}
+	conv, err := fxrate.New(src, "EUR", fxrate.WithClock(clock.NewMock(asOf)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := conv.Snapshot(context.Background())
+		leaderDone <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // let the leader's slow fetch start
+
+	// A caller with a short deadline joining the in-flight refresh must be
+	// released by its own context, not pinned until the leader's fetch ends.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = conv.Snapshot(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("follower got %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
+		t.Fatalf("follower blocked %v — pinned to the leader's fetch", elapsed)
+	}
+
+	if err := <-leaderDone; err != nil {
+		t.Fatalf("leader: %v", err)
+	}
+}
+
 func TestConverterCoalescesConcurrentRefreshes(t *testing.T) {
 	t.Parallel()
 

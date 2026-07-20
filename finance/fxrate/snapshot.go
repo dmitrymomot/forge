@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/dmitrymomot/forge/core/decimal"
@@ -31,7 +32,7 @@ func NewSnapshot(base, provider string, asOf time.Time, rates map[string]decimal
 	if base == "" {
 		return Snapshot{}, fmt.Errorf("%w: empty base currency", ErrInvalidSnapshot)
 	}
-	if provider == "" {
+	if provider = strings.TrimSpace(provider); provider == "" {
 		return Snapshot{}, fmt.Errorf("%w: empty provider", ErrInvalidSnapshot)
 	}
 	if asOf.IsZero() {
