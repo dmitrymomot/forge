@@ -85,19 +85,22 @@ func (g *Group[V]) join(key string) (*call[V], bool) {
 
 // run executes fn into c and closes c.done exactly once, converting a panic
 // to an error and deregistering the flight so the next call for key starts
-// fresh.
+// fresh. The flight is deleted from the map BEFORE done is closed (matching
+// x/sync/singleflight): a waiter woken by the close may immediately re-call
+// the same key, and it must start a fresh execution, never rejoin this dead
+// flight. The close stays outside the lock (no mutex across channel ops).
 func (g *Group[V]) run(ctx context.Context, key string, c *call[V], fn func(context.Context) (V, error)) {
 	defer func() {
 		if r := recover(); r != nil {
 			c.panicVal = r
 			c.err = fmt.Errorf("singleflight: panic in fn: %v", r)
 		}
-		close(c.done)
 		g.mu.Lock()
 		if g.m[key] == c {
 			delete(g.m, key)
 		}
 		g.mu.Unlock()
+		close(c.done)
 	}()
 	c.val, c.err = fn(ctx)
 }

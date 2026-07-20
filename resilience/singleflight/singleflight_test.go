@@ -2,6 +2,7 @@ package singleflight_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -198,6 +199,66 @@ func TestDoDetachedPanicBecomesErrorForAllWaiters(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, shared)
 	assert.Equal(t, 7, v)
+}
+
+func TestCompletedFlightDeregistersBeforeReleasingWaiters(t *testing.T) {
+	var g singleflight.Group[int]
+	// Regression: run used to close c.done before deleting the key from the
+	// map, so a caller woken by the close could immediately re-call the same
+	// key, join the already-completed flight still sitting in the map, and
+	// get its stale error with shared=true. A few hundred iterations hit
+	// that window reliably under the old ordering.
+	for i := range 2000 {
+		_, _, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			panic("boom")
+		})
+		assert.ErrorContains(t, err, "panic in fn")
+		v, shared, err := g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+			return 7, nil
+		})
+		if err != nil || shared || v != 7 {
+			t.Fatalf("iteration %d joined a dead flight: v=%d shared=%v err=%v", i, v, shared, err)
+		}
+	}
+}
+
+func TestDoJoinerImmediateRetryStartsFreshFlight(t *testing.T) {
+	var g singleflight.Group[int]
+	errBoom := errors.New("boom")
+	// Companion to the regression above, driving the same window through a
+	// Do joiner: a caller that waited out a shared flight and immediately
+	// re-calls the key must lead a fresh execution, never rejoin the dead
+	// flight (the synchronous Do leader path was always safe; its joiners
+	// shared run's close-before-delete window).
+	for i := range 2000 {
+		started := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, _, _ = g.DoDetached(t.Context(), "k", func(context.Context) (int, error) {
+				close(started) // flight is registered and running
+				return 0, errBoom
+			})
+		})
+		var retryV int
+		var retryShared bool
+		retryErr := errBoom
+		wg.Go(func() {
+			<-started // the detached flight is registered: this Do joins it (or, harmlessly, leads fresh after its cleanup)
+			_, _, _ = g.Do(t.Context(), "k", func(context.Context) (int, error) {
+				return 0, errBoom
+			})
+			retryV, retryShared, retryErr = g.Do(t.Context(), "k", func(context.Context) (int, error) {
+				return 7, nil
+			})
+		})
+		wg.Wait()
+		// Once the first flight resolves no other caller touches "k", so the
+		// retry must lead its own execution — even when the first Do joined
+		// the dead flight's completed call.
+		if retryErr != nil || retryShared || retryV != 7 {
+			t.Fatalf("iteration %d: Do retry joined a dead flight: v=%d shared=%v err=%v", i, retryV, retryShared, retryErr)
+		}
+	}
 }
 
 func TestPanicInFnRePanicsAndDoesNotPoisonKey(t *testing.T) {
