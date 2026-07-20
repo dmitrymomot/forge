@@ -20,14 +20,14 @@
 //
 // Wiring (composed with rbac under the documented precedence):
 //
-//	policy, err := abac.New(
+//	policy, err := abac.New(abac.WithRules(
 //		abac.Allow("own-document", "documents:*", "document", abac.Owner("owner_id")),
 //		abac.Deny("archived-write", "documents:write", "document",
 //			func(ctx context.Context, s access.Subject, r access.Resource) (bool, error) {
 //				archived, _ := abac.Attr[bool](r.Attrs, "archived")
 //				return archived, nil
 //			}),
-//	)
+//	))
 //	if err != nil { ... }
 //	decider := access.FirstDecisive(access.TenantMatch(), policy, rbacDecider)
 //	mux.Handle("PUT /docs/{id}", authn(docs.Handle(decider, "documents:write", updateDoc)))

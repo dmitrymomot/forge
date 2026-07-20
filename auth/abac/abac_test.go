@@ -21,7 +21,7 @@ func falsePred(_ context.Context, _ access.Subject, _ access.Resource) (bool, er
 
 func mustPolicy(t *testing.T, rules ...abac.Rule) *abac.Policy {
 	t.Helper()
-	p, err := abac.New(rules...)
+	p, err := abac.New(abac.WithRules(rules...))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestNewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := abac.New(tt.rule); !errors.Is(err, tt.want) {
+			if _, err := abac.New(abac.WithRules(tt.rule)); !errors.Is(err, tt.want) {
 				t.Fatalf("New error = %v, want %v", err, tt.want)
 			}
 		})
@@ -62,9 +62,10 @@ func TestNewValidation(t *testing.T) {
 
 	t.Run("duplicate name", func(t *testing.T) {
 		t.Parallel()
+		// Accumulation across WithRules calls still detects the duplicate.
 		_, err := abac.New(
-			abac.Allow("dup", "documents:read", "document", truePred),
-			abac.Deny("dup", "documents:write", "*", truePred),
+			abac.WithRules(abac.Allow("dup", "documents:read", "document", truePred)),
+			abac.WithRules(abac.Deny("dup", "documents:write", "*", truePred)),
 		)
 		if !errors.Is(err, abac.ErrDuplicateRule) {
 			t.Fatalf("New error = %v, want ErrDuplicateRule", err)

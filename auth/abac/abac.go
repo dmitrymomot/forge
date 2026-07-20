@@ -87,13 +87,17 @@ type Policy struct {
 	allows []compiledRule
 }
 
-// New validates the rules and compiles them into a Policy. Errors:
-// ErrUnnamedRule, ErrDuplicateRule, ErrNilPredicate, ErrEmptyAction,
+// New validates the rules added via WithRules and compiles them into a Policy.
+// Errors: ErrUnnamedRule, ErrDuplicateRule, ErrNilPredicate, ErrEmptyAction,
 // ErrEmptyResource.
-func New(rules ...Rule) (*Policy, error) {
+func New(opts ...Option) (*Policy, error) {
+	cfg := config{}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	p := &Policy{}
-	seen := make(map[string]struct{}, len(rules))
-	for _, r := range rules {
+	seen := make(map[string]struct{}, len(cfg.rules))
+	for _, r := range cfg.rules {
 		if r.name == "" {
 			return nil, ErrUnnamedRule
 		}

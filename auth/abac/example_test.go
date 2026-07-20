@@ -23,7 +23,7 @@ func Example() {
 		return false
 	}
 
-	policy, err := abac.New(
+	policy, err := abac.New(abac.WithRules(
 		abac.Allow("own-subtree", "agents:read", "agent",
 			func(_ context.Context, s access.Subject, r access.Resource) (bool, error) {
 				return inSubtree(s.ID, r.ID), nil
@@ -33,7 +33,7 @@ func Example() {
 				agentID, _ := abac.Attr[string](r.Attrs, "agent_id")
 				return agentID != s.ID && inSubtree(s.ID, agentID), nil
 			}),
-	)
+	))
 	if err != nil {
 		panic(err)
 	}

@@ -11,7 +11,7 @@ import (
 
 func benchPolicy(b *testing.B) *abac.Policy {
 	b.Helper()
-	p, err := abac.New(
+	p, err := abac.New(abac.WithRules(
 		abac.Deny("archived-write", "documents:write", "document",
 			func(_ context.Context, _ access.Subject, r access.Resource) (bool, error) {
 				archived, _ := abac.Attr[bool](r.Attrs, "archived")
@@ -23,7 +23,7 @@ func benchPolicy(b *testing.B) *abac.Policy {
 				public, _ := abac.Attr[bool](r.Attrs, "public")
 				return public, nil
 			}),
-	)
+	))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func BenchmarkDecideWidePolicy(b *testing.B) {
 		typ := "type" + string(rune('a'+i%20))
 		rules = append(rules, abac.Allow(fmt.Sprintf("rule-%d", i), fmt.Sprintf("noun%d:read", i), typ, truePredBench))
 	}
-	p, err := abac.New(rules...)
+	p, err := abac.New(abac.WithRules(rules...))
 	if err != nil {
 		b.Fatal(err)
 	}
