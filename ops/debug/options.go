@@ -58,7 +58,8 @@ func WithBasicAuth(users map[string]string, opts ...guard.Option) Option {
 // chain, ipfilter, requestlog, ...). The first middleware is the outermost
 // layer. Any middleware registered this way counts as the auth guard for Run's
 // non-loopback check — pass only middleware that actually gates access when the
-// server binds beyond loopback. A nil middleware is rejected (ErrInvalidConfig).
+// server binds beyond loopback. A nil middleware is rejected
+// (ErrInvalidConfig): Run returns it, Handler panics.
 func WithMiddleware(mws ...middleware.Middleware) Option {
 	return func(c *config) {
 		for _, mw := range mws {

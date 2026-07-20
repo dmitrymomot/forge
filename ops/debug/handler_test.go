@@ -153,6 +153,16 @@ func TestWithBasicAuthEmptyUsersPanics(t *testing.T) {
 	debug.Handler(debug.WithBasicAuth(nil))
 }
 
+func TestHandlerNilMiddlewarePanics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic on nil middleware — a dropped gate must not fail open")
+		}
+	}()
+	debug.Handler(debug.WithMiddleware(nil))
+}
+
 func TestHandlerCustomMiddleware(t *testing.T) {
 	t.Parallel()
 	var mw middleware.Middleware = func(next http.Handler) http.Handler {

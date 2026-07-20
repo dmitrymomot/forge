@@ -1,6 +1,7 @@
 package debug
 
 import (
+	"errors"
 	"expvar"
 	"net/http"
 	"net/http/pprof"
@@ -20,9 +21,14 @@ import (
 // WithBasicAuth/WithMiddleware around the whole surface and ignores the
 // server-only options (Config, listener, WithoutAuth) — exposure is the
 // caller's responsibility here; the fail-closed non-loopback check lives in
-// Server.Run.
+// Server.Run. Handler has no error return, so an invalid option value (a nil
+// middleware or listener) panics: silently dropping a broken gate would leave
+// the surface unguarded.
 func Handler(opts ...Option) http.Handler {
 	c := newConfig(opts...)
+	if err := errors.Join(c.errs...); err != nil {
+		panic(err)
+	}
 	return buildHandler(&c)
 }
 
