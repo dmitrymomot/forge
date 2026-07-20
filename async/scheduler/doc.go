@@ -25,7 +25,8 @@
 //	// run sched under ops/supervisor next to the queue worker Service
 //
 // Cron specs are standard 5-field vixie expressions evaluated in UTC (CronIn
-// for another zone); Every fires on epoch-aligned interval ticks. Both are
+// for another zone); Every fires on interval-aligned ticks (time.Truncate
+// boundaries, identical on every instance). Both are
 // Schedule implementations — bring a custom one for anything else.
 //
 // Missed ticks are not replayed: an instance that was down (or woke late)
