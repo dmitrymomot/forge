@@ -593,16 +593,6 @@ Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ---
 
-**ops/debug**
-
-One internal diagnostics surface: `/debug/pprof/*`, `/debug/stats`
-(runtime/GC/goroutines JSON), `/debug/vars`, with an auth guard and a
-dedicated-port `supervisor.Service`.
-
-Deps: `ops/supervisor`, `auth/guard`.
-
----
-
 **ops/auditlog**
 
 Append-only structured audit events (actor/action/resource/outcome) over a
