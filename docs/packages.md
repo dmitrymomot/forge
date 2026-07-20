@@ -267,19 +267,6 @@ Deps: `core/decimal`, `web/httpclient`.
 
 ---
 
-**finance/tariff**
-
-Tiered/banded rate calculation over `core/money`/`core/decimal`:
-graduated vs volume band semantics ("25% up to 10, 30% to 50, 35%
-above") with deterministic rounding, as a pure calculator — bands are
-caller-supplied values; effective-dating is the caller choosing which
-band set applies (composes `data/settings` for deal changes). Consumers:
-usage-billing overage tiers, revenue-share deals, commission plans.
-
-Deps: `core/money`, `core/decimal`.
-
----
-
 **finance/formula**
 
 Formulas as structured, versioned data — never text: a spec of named
