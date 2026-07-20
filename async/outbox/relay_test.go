@@ -3,6 +3,8 @@ package outbox_test
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/dmitrymomot/forge/async/outbox"
 	"github.com/dmitrymomot/forge/async/queue"
+	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/resilience/backoff"
 )
 
@@ -180,6 +183,59 @@ func TestRelay_PoisonRowIsolated(t *testing.T) {
 		return brokerPending(t, broker, "default") == 2
 	}, 3*time.Second, 5*time.Millisecond, "healthy rows pass despite the poison batch member")
 	assert.Equal(t, 1, storePending(t, store), "poison row stays parked in backoff")
+}
+
+func TestRelay_BackoffUsesInjectedClock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clk := clock.NewMock(testEpoch)
+	store := outbox.NewMemoryStore(outbox.WithMemoryClock(clk))
+	broker := &flakyBroker{Broker: queue.NewMemoryBroker()}
+	broker.setFail(func(queue.Job) error { return errors.New("down") })
+
+	require.NoError(t, store.Add(ctx, nil, makeJob("a", testEpoch)))
+
+	// retryAt = mock now + 10s: with the mock frozen, the row must stay in
+	// backoff no matter how much wall time the fast poll loop burns.
+	r, err := outbox.NewRelay(store, broker, outbox.WithConfig(fastConfig()),
+		outbox.WithClock(clk), outbox.WithBackoff(backoff.Constant(10*time.Second)))
+	require.NoError(t, err)
+	runRelay(t, r)
+
+	// One failed cycle costs two Push calls (batch, then per-row fallback).
+	require.Eventually(t, func() bool { return broker.pushCalls() >= 1 },
+		3*time.Second, 5*time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // let the in-flight cycle finish; row is now parked
+	settled := broker.pushCalls()
+	time.Sleep(50 * time.Millisecond) // many poll cycles at 5ms
+	assert.Equal(t, settled, broker.pushCalls(), "row stays in backoff until the injected clock advances")
+
+	clk.Advance(10 * time.Second)
+	require.Eventually(t, func() bool { return broker.pushCalls() > settled },
+		3*time.Second, 5*time.Millisecond, "row is due again once the clock passes retryAt")
+}
+
+func TestRelay_WithLogger(t *testing.T) {
+	t.Parallel()
+	var buf strings.Builder
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	store := outbox.NewMemoryStore()
+	require.NoError(t, store.Add(context.Background(), nil, makeJob("a", testEpoch)))
+	broker := queue.NewMemoryBroker()
+	r, err := outbox.NewRelay(store, broker, outbox.WithConfig(fastConfig()), outbox.WithLogger(log))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = r.Run(ctx); close(done) }()
+	require.Eventually(t, func() bool { return brokerPending(t, broker, "default") == 1 },
+		3*time.Second, 5*time.Millisecond)
+	cancel()
+	<-done // stop the relay before reading buf: strings.Builder is not synchronized
+
+	assert.Contains(t, buf.String(), "outbox relay started")
+	assert.Contains(t, buf.String(), "outbox forwarded")
 }
 
 func TestRelay_StopsOnCancel(t *testing.T) {

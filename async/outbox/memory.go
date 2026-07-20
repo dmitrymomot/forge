@@ -74,7 +74,7 @@ func (s *MemoryStore) Claim(_ context.Context, n int, lease time.Duration) ([]En
 		}
 	}
 	slices.SortFunc(due, func(a, b *memEntry) int {
-		if r := a.job.CreatedAt.Compare(b.job.CreatedAt); r != 0 {
+		if r := a.availableAt.Compare(b.availableAt); r != 0 {
 			return r
 		}
 		return cmp.Compare(a.job.ID, b.job.ID)
@@ -88,6 +88,12 @@ func (s *MemoryStore) Claim(_ context.Context, n int, lease time.Duration) ([]En
 		e.attempts++
 		claimed = append(claimed, Entry{Job: e.job, Attempts: e.attempts, LastError: e.lastError})
 	}
+	slices.SortFunc(claimed, func(a, b Entry) int {
+		if r := a.Job.CreatedAt.Compare(b.Job.CreatedAt); r != 0 {
+			return r
+		}
+		return cmp.Compare(a.Job.ID, b.Job.ID)
+	})
 	return claimed, nil
 }
 

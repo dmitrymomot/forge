@@ -94,10 +94,14 @@ func New(pool *pgxpool.Pool, opts ...Option) (*Store, error) {
 SELECT u.id, u.queue, u.type, u.payload::json, u.scope, u.max_attempts, u.run_at, u.created_at, now()
 FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::int[], $7::timestamptz[], $8::timestamptz[])
 AS u(id, queue, type, payload, scope, max_attempts, run_at, created_at)`, s.table)
+	// picked orders by (available_at, id) — the claim index — so selection is
+	// a pure bounded index range scan with no sort, even when a retry backlog
+	// leaves many rows with future available_at. The outer ORDER BY re-sorts
+	// only the claimed batch (<= n rows) into (created_at, id).
 	s.claimSQL = fmt.Sprintf(`WITH picked AS (
 SELECT id FROM %[1]s
 WHERE available_at <= now()
-ORDER BY created_at, id LIMIT $1
+ORDER BY available_at, id LIMIT $1
 FOR UPDATE SKIP LOCKED
 ), claimed AS (
 UPDATE %[1]s o SET available_at = now() + $2, attempts = o.attempts + 1

@@ -15,9 +15,11 @@ import (
 //   - Add inserts one row per job inside the caller's transaction; tx is
 //     driver-specific (the postgres store asserts pgx.Tx). An empty batch is
 //     a no-op. Rows become claimable only when the transaction commits.
-//   - Claim returns up to n committed rows that are due (not leased, not in
-//     retry backoff), ordered by (created_at, id), increments each row's
-//     Attempts, and hides claimed rows from other relays for lease.
+//   - Claim picks up to n committed rows that are due (not leased, not in
+//     retry backoff), most-overdue first — smallest (available time, id), so
+//     fresh rows go in insert order and failed rows re-enter at their retry
+//     time — returns the batch ordered by (created_at, id), increments each
+//     row's Attempts, and hides claimed rows from other relays for lease.
 //   - Delete removes rows by id; unknown ids are ignored — a row already
 //     forwarded and deleted by a competing relay must not fail the batch.
 //   - Fail reschedules a row: claimable again no earlier than retryAt, with
