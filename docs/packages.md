@@ -148,7 +148,7 @@ Named retention policies run as batched delete/anonymize sweeps via
 audit events. Handles the two-sided GDPR constraint — minimum retention
 and erasure deadlines — as declared policy, not cron scripts.
 
-Deps: `async/scheduler` (planned), `async/queue`, `ops/auditlog` (planned).
+Deps: `async/scheduler`, `async/queue`, `ops/auditlog` (planned).
 
 ---
 
@@ -338,16 +338,6 @@ transactions (redis, nats, kafka) get transactional enqueue via
 
 Deps: `async/queue`; drivers: `data/sqlite` (planned), `data/nats`
 (planned), `data/kafka` (planned).
-
----
-
-**async/scheduler**
-
-Cron/interval `supervisor.Service` that *enqueues* into the engine when
-due; fires once per fleet via a `unique(name, scheduled_for)` insert race
-on SQL drivers; small local cron parser, no robfig/cron.
-
-Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
