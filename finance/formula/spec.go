@@ -139,7 +139,7 @@ func validateStage(st Stage, idx int, order map[string]int) error {
 		if st.Round.Scale < 0 {
 			return fmt.Errorf("%w: stage %q: negative round scale", ErrInvalidSpec, st.Name)
 		}
-		if st.Round.Mode < decimal.HalfEven || st.Round.Mode > decimal.Floor {
+		if _, err := st.Round.Mode.MarshalText(); err != nil {
 			return fmt.Errorf("%w: stage %q: unknown rounding mode %d", ErrInvalidSpec, st.Name, int(st.Round.Mode))
 		}
 	}
