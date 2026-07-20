@@ -382,22 +382,6 @@ Deps: `ops/supervisor`; `async/queue`.
 
 ---
 
-**async/collector**
-
-Write-behind ingestion for proven-hot fire-and-forget paths (click
-streams, beacons, telemetry): bounded in-memory buffer, batch flush by
-size+age into a `Sink` seam, explicit overload policy — drop-newest with
-counted, logged loss, never blocking the request path — and graceful
-drain as a `supervisor.Service`. No dedup — double-fires and unique-key
-rules are the downstream pipeline's concern. Reach for
-`outbox`/`eventbus` first: this package is justified only when per-event
-publish shows up in a profile (design.md §Performance — benchmark
-required).
-
-Deps: `ops/supervisor`.
-
----
-
 **async/workflow**
 
 DB-checkpointed linear step sequences over the engine
