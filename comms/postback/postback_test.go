@@ -129,6 +129,18 @@ func TestSenderSend(t *testing.T) {
 		}
 	})
 
+	t.Run("nil WithHTTPClient falls back to the default client", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+		sender := postback.New(postback.WithHTTPClient(nil))
+		if _, err := sender.Send(t.Context(), destFor(t, srv.URL+"/pb?cid={click_id}"), nil); err != nil {
+			t.Fatalf("Send with defaulted client: %v", err)
+		}
+	})
+
 	t.Run("zero sender fails closed", func(t *testing.T) {
 		t.Parallel()
 		var sender postback.Sender

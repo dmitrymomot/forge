@@ -49,6 +49,23 @@ func BenchmarkRender(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderPathMacro(b *testing.B) {
+	vocab := benchVocab(b)
+	dest, err := postback.NewDestination("https://tracker.example.com/pb/{click_id}/{status}?s1={sub1}", vocab)
+	if err != nil {
+		b.Fatal(err)
+	}
+	values := map[string]string{
+		"click_id": "8f14e45fceea167a",
+		"status":   "approved",
+		"sub1":     "campaign-7",
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = dest.Render(values)
+	}
+}
+
 func BenchmarkSend(b *testing.B) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

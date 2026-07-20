@@ -171,8 +171,9 @@ func (d Destination) Render(values map[string]string) string {
 			case "..":
 				b.WriteString("%2E%2E")
 			default:
-				// ':' additionally encoded: in the first path segment it would
-				// otherwise reparse as a scheme delimiter.
+				// ':' additionally encoded everywhere in path position: in the
+				// first segment it would otherwise reparse as a scheme delimiter,
+				// and over-encoding it elsewhere is harmless.
 				b.WriteString(strings.ReplaceAll(url.PathEscape(val), ":", "%3A"))
 			}
 		case escAuthority:
