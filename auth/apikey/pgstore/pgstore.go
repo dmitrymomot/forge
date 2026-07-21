@@ -5,6 +5,8 @@ import (
 	"embed"
 	"errors"
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -85,10 +87,32 @@ func (s *Store) GetByHash(ctx context.Context, hash string) (apikey.Key, error) 
 // List returns records matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order).
 func (s *Store) List(ctx context.Context, f apikey.Filter) ([]apikey.Key, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT `+cols+` FROM forge_api_keys
-		 WHERE ($1 = '' OR tenant = $1) AND ($2 = '' OR subject = $2)
-		 ORDER BY id DESC`, f.Tenant, f.Subject)
+	// The WHERE clause carries only the filters actually set, rather than
+	// the static `($n = '' OR col = $n)` idiom: once a prepared statement
+	// switches to a generic plan (pgx prepares every query, and Postgres
+	// goes generic after five executions) those ORs cannot be pruned and
+	// the planner stops using forge_api_keys_list_idx. The filter
+	// combinations bound the statement cache at 4 shapes.
+	var (
+		conds []string
+		args  []any
+	)
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if f.Tenant != "" {
+		conds = append(conds, "tenant = "+arg(f.Tenant))
+	}
+	if f.Subject != "" {
+		conds = append(conds, "subject = "+arg(f.Subject))
+	}
+	sql := `SELECT ` + cols + ` FROM forge_api_keys`
+	if len(conds) > 0 {
+		sql += " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql += " ORDER BY id DESC"
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

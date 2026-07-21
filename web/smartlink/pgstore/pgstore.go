@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -79,13 +80,20 @@ func (s *Store) Get(ctx context.Context, code string) (smartlink.Link, error) {
 // ascending on ties). An empty Filter.Tenant matches every tenant; a zero
 // Filter.Limit applies no cap.
 func (s *Store) List(ctx context.Context, f smartlink.Filter) ([]smartlink.Link, error) {
-	sql := `SELECT ` + cols + ` FROM forge_smart_links
-	        WHERE ($1 = '' OR tenant = $1)
-	        ORDER BY created_at DESC, code ASC`
-	args := []any{f.Tenant}
+	// The tenant predicate is added only when set, rather than the static
+	// `($1 = '' OR tenant = $1)` idiom: under a generic plan (which
+	// pgx-prepared statements reach after five executions) Postgres cannot
+	// prune that OR and stops using forge_smart_links_tenant_created_idx.
+	sql := `SELECT ` + cols + ` FROM forge_smart_links`
+	var args []any
+	if f.Tenant != "" {
+		args = append(args, f.Tenant)
+		sql += ` WHERE tenant = $1`
+	}
+	sql += ` ORDER BY created_at DESC, code ASC`
 	if f.Limit > 0 {
-		sql += ` LIMIT $2`
 		args = append(args, f.Limit)
+		sql += ` LIMIT $` + strconv.Itoa(len(args))
 	}
 	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -105,9 +113,15 @@ func (s *Store) List(ctx context.Context, f smartlink.Filter) ([]smartlink.Link,
 	return out, rows.Err()
 }
 
-const deactivateSQL = `
-UPDATE forge_smart_links SET deactivated_at = $3
-WHERE code = $1 AND ($2 = '' OR tenant = $2)`
+// The point statements come in unscoped/tenant-scoped pairs instead of the
+// optional-tenant OR idiom List used to share. Perf is not the driver here
+// — code is the primary key, so these are index point lookups under any
+// plan — but the pair keeps the package free of the OR idiom so it cannot
+// be copied back into a query where it does defeat an index (see List).
+const (
+	deactivateSQL       = `UPDATE forge_smart_links SET deactivated_at = $2 WHERE code = $1`
+	deactivateTenantSQL = deactivateSQL + ` AND tenant = $3`
+)
 
 // Deactivate sets DeactivatedAt to at on code, scoped to tenant. A zero at
 // is rejected per the Store contract — it would write NULL and silently
@@ -116,28 +130,41 @@ func (s *Store) Deactivate(ctx context.Context, code, tenant string, at time.Tim
 	if at.IsZero() {
 		return fmt.Errorf("%w: Deactivate needs a non-zero time", smartlink.ErrInvalidLink)
 	}
-	return s.exec(ctx, deactivateSQL, code, tenant, at)
+	if tenant == "" {
+		return s.exec(ctx, deactivateSQL, code, at)
+	}
+	return s.exec(ctx, deactivateTenantSQL, code, at, tenant)
 }
 
-const activateSQL = `
-UPDATE forge_smart_links SET deactivated_at = NULL
-WHERE code = $1 AND ($2 = '' OR tenant = $2)`
+const (
+	activateSQL       = `UPDATE forge_smart_links SET deactivated_at = NULL WHERE code = $1`
+	activateTenantSQL = activateSQL + ` AND tenant = $2`
+)
 
 // Activate clears DeactivatedAt on code, scoped to tenant.
 func (s *Store) Activate(ctx context.Context, code, tenant string) error {
-	return s.exec(ctx, activateSQL, code, tenant)
+	if tenant == "" {
+		return s.exec(ctx, activateSQL, code)
+	}
+	return s.exec(ctx, activateTenantSQL, code, tenant)
 }
 
-const deleteSQL = `DELETE FROM forge_smart_links WHERE code = $1 AND ($2 = '' OR tenant = $2)`
+const (
+	deleteSQL       = `DELETE FROM forge_smart_links WHERE code = $1`
+	deleteTenantSQL = deleteSQL + ` AND tenant = $2`
+)
 
 // Delete removes code, scoped to tenant.
 func (s *Store) Delete(ctx context.Context, code, tenant string) error {
-	return s.exec(ctx, deleteSQL, code, tenant)
+	if tenant == "" {
+		return s.exec(ctx, deleteSQL, code)
+	}
+	return s.exec(ctx, deleteTenantSQL, code, tenant)
 }
 
-// exec runs sql and maps a zero-row result to smartlink.ErrNotFound: the
-// tenant predicate is inline in sql, so a mismatch and a missing code are
-// indistinguishable and both surface the same error.
+// exec runs sql and maps a zero-row result to smartlink.ErrNotFound: when a
+// tenant is set its predicate is inline in sql, so a mismatch and a missing
+// code are indistinguishable and both surface the same error.
 func (s *Store) exec(ctx context.Context, sql string, args ...any) error {
 	tag, err := s.pool.Exec(ctx, sql, args...)
 	if err != nil {
