@@ -1,0 +1,56 @@
+package approval
+
+import (
+	"github.com/dmitrymomot/forge/core/clock"
+)
+
+type config struct {
+	clk        clock.Clock
+	kinds      map[string]Policy
+	maxRetries int
+}
+
+// Option configures New.
+type Option func(*config)
+
+// WithKind registers an action name and the policy that governs it. It is
+// the only way a kind enters a Manager — the registry is immutable after
+// New, so the read path needs no lock and no caller can register a weaker
+// policy at runtime. Repeat it once per action.
+//
+// New panics on a duplicate name, a quorum below 1, or a negative duration.
+func WithKind[T any](k Kind[T], p Policy) Option {
+	return func(c *config) {
+		name := k.Name()
+		if _, dup := c.kinds[name]; dup {
+			panic("approval: duplicate kind " + name)
+		}
+		if err := p.validate(name); err != nil {
+			panic(err.Error())
+		}
+		c.kinds[name] = p
+	}
+}
+
+// WithClock injects a clock for deterministic tests. Defaults to
+// clock.System().
+func WithClock(clk clock.Clock) Option {
+	return func(c *config) {
+		if clk != nil {
+			c.clk = clk
+		}
+	}
+}
+
+// WithMaxRetries caps how many times a transition re-reads and retries
+// after losing a version race (default 3). Each retry re-validates from a
+// fresh read, so a retry can still legitimately fail with ErrAlreadyVoted.
+// Values below zero are clamped to zero (a single attempt).
+func WithMaxRetries(n int) Option {
+	return func(c *config) {
+		if n < 0 {
+			n = 0
+		}
+		c.maxRetries = n
+	}
+}
