@@ -108,13 +108,8 @@ func pow10Big(n int32) *big.Int {
 	return new(big.Int).Exp(bigTen, big.NewInt(int64(n)), nil)
 }
 
-// pow10Int64 holds the powers of ten representable in an int64 (10^0..10^18).
-var pow10Int64 = [...]int64{
-	1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
-	1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
-}
-
-// mulPow10Int64 returns v × 10^n if it fits in an int64, reporting overflow
+// mulPow10Int64 returns v × 10^n if it fits in an int64 (n indexes the
+// pow10Int64 table in round.go), reporting overflow
 // (or n beyond the table) as ok == false.
 func mulPow10Int64(v int64, n int32) (int64, bool) {
 	if n < 0 || int(n) >= len(pow10Int64) {
