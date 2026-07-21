@@ -84,6 +84,10 @@ func TestScope(t *testing.T) {
 		err = hub.Publish(context.Background(), "orders", []byte("x"))
 		assert.ErrorIs(t, err, fanout.ErrClosed)
 		assert.NotErrorIs(t, err, fanout.ErrScopeMissing)
+
+		_, err = hub.Subscribe(context.Background(), []string{"orders"})
+		assert.ErrorIs(t, err, fanout.ErrClosed)
+		assert.NotErrorIs(t, err, fanout.ErrScopeMissing)
 	})
 
 	t.Run("reserved bytes in scope rejected", func(t *testing.T) {

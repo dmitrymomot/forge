@@ -114,6 +114,11 @@ func (h *Hub) Publish(ctx context.Context, topic string, payload []byte) error {
 //	if err != nil { ... }
 //	defer sub.Close()
 func (h *Hub) Subscribe(ctx context.Context, topics []string, opts ...SubscribeOption) (*Subscription, error) {
+	// Closed wins over every other error, mirroring Publish; the check under
+	// h.mu below remains the authoritative one.
+	if h.closed.Load() {
+		return nil, ErrClosed
+	}
 	if len(topics) == 0 {
 		return nil, ErrNoTopics
 	}
