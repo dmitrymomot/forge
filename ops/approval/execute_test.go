@@ -12,6 +12,7 @@ import (
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/ops/approval"
+	"github.com/dmitrymomot/forge/ops/auditlog"
 )
 
 // approved returns a manager and a request that has reached quorum.
@@ -239,6 +240,42 @@ func TestExecuteFailsOnActionError(t *testing.T) {
 		func(context.Context, approval.Request) error { return boom })
 	assert.ErrorIs(t, err, boom)
 	assert.Equal(t, approval.Failed, got.Status, "the failure is recorded, not swallowed")
+}
+
+// TestExecuteRunsFnWhenClaimAuditFails guards the fix: Claim returns
+// (r, m.audit(...)), so a durable claim whose trail write failed used to
+// look like a failed claim to Execute, which returned Request{} without
+// ever calling fn — wedging the request in Executing with no way for the
+// caller to recover it. fn must still run and Complete must still apply,
+// with ErrAuditFailed surfacing on the final error rather than vanishing.
+func TestExecuteRunsFnWhenClaimAuditFails(t *testing.T) {
+	t.Parallel()
+	m := newManager(t, approval.Policy{Quorum: 1},
+		approval.WithAuditor(auditlog.New(failingSink{})))
+	ctx := context.Background()
+
+	r, err := approval.Submit(ctx, m, kindPayout,
+		payoutPayload{PayoutID: "po_88", Amount: 250000},
+		approval.SubmitParams{Requester: "alice"})
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+
+	_, err = m.Approve(ctx, r.ID, actor("bob"))
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+
+	var ran bool
+	var sawPayload payoutPayload
+	got, err := m.Execute(ctx, r.ID, "worker-1", func(_ context.Context, req approval.Request) error {
+		ran = true
+		p, perr := approval.PayloadOf(kindPayout, req)
+		sawPayload = p
+		return perr
+	})
+	assert.ErrorIs(t, err, approval.ErrAuditFailed,
+		"a durable claim whose own audit write failed must stay visible, not vanish")
+	assert.True(t, ran, "fn must run even though the claim's own audit write failed")
+	assert.Equal(t, approval.Executed, got.Status,
+		"the claim was durable, so Complete must still have applied")
+	assert.Equal(t, "po_88", sawPayload.PayoutID)
 }
 
 func TestExecuteYieldsToTheClaimHolder(t *testing.T) {

@@ -133,6 +133,12 @@ func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request,
 // with any transition error. ErrAlreadyClaimed is returned unwrapped when
 // another executor holds the claim, and fn never runs.
 //
+// A claim that is durable but whose own audit write failed is not a claim
+// failure: fn still runs against the claimed Request, and Complete or Fail
+// still applies normally. The returned error is joined with ErrAuditFailed
+// so the gap in the trail stays visible via errors.Is instead of being
+// silently swallowed by treating the claim as if it had never happened.
+//
 // fn runs exactly once per successful claim. Under a non-zero ClaimTTL a
 // stale claim can be taken over, so fn may run more than once across
 // executor deaths — make it idempotent, or leave ClaimTTL at 0.
@@ -141,15 +147,16 @@ func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request,
 // Executing (consistent with the crashed-executor philosophy — Release or
 // a ClaimTTL takeover is what recovers it).
 func (m *Manager) Execute(ctx context.Context, reqID id.UUID, executor string, fn func(context.Context, Request) error) (Request, error) {
-	r, err := m.Claim(ctx, reqID, executor)
-	if err != nil {
-		return Request{}, err
+	r, claimErr := m.Claim(ctx, reqID, executor)
+	if claimErr != nil && !errors.Is(claimErr, ErrAuditFailed) {
+		return Request{}, claimErr
 	}
 	if err := fn(ctx, r); err != nil {
 		failed, ferr := m.Fail(ctx, reqID, executor, err.Error())
-		return failed, errors.Join(err, ferr)
+		return failed, errors.Join(err, ferr, claimErr)
 	}
-	return m.Complete(ctx, reqID, executor)
+	completed, err := m.Complete(ctx, reqID, executor)
+	return completed, errors.Join(err, claimErr)
 }
 
 // checkHolder gates Complete and Fail on the claim.
