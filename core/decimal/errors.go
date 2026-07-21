@@ -2,7 +2,9 @@ package decimal
 
 import "errors"
 
-// ErrSyntax is returned by Parse for input that is not a valid decimal literal.
+// ErrSyntax is returned by Parse for input that is not a valid decimal literal,
+// and by RoundingMode text (un)marshaling for a value or name outside the
+// defined modes.
 var ErrSyntax = errors.New("decimal: invalid syntax")
 
 // ErrDivByZero is returned by Div, QuoRem, and Mod when the divisor is zero.
