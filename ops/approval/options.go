@@ -69,6 +69,11 @@ func WithMaxRetries(n int) Option {
 // requester's manager") and value-aware rules ("over 10 days needs the
 // department head") both work.
 //
+// The decider may be consulted more than once per call: eligible() re-runs
+// on every mutate CAS retry, so a decider that hits a database is called
+// once per retry, not once per Approve/Reject/Cancel. Do not build a rate
+// limiter or any other side-effecting hook into a decider.
+//
 // Without it, any principal other than the requester may decide — the
 // correct single-team default. The structural invariants (no self-approval,
 // one vote per approver) hold either way.

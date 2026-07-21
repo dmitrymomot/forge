@@ -105,6 +105,13 @@ func (m *Manager) Fail(ctx context.Context, reqID id.UUID, executor, reason stri
 // re-claim and re-run the action — genuine double execution — and the true
 // holder's later Complete then returns ErrNotExecuting, silently discarding
 // a successful completion. Every call is audited.
+//
+// Release does not touch ExpiresAt. A request released past its kind's TTL
+// goes back to Approved in the stored row, but the next read still derives
+// Expired from the unchanged ExpiresAt (see Manager.applyExpiry) and every
+// further transition refuses with ErrExpired — the rescue hatch quietly
+// no-ops for exactly the long-wedged requests it exists for. There is no
+// workaround: submit a new request instead.
 func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request, error) {
 	if a.Subject.ID == "" {
 		return Request{}, ErrActorRequired

@@ -19,8 +19,9 @@
 //
 // Three rules are structural and cannot be configured off: the requester
 // may never decide their own request (at any quorum — Quorum 1 is still
-// dual control), an approver counts once however many times they vote, and
-// a rejected request never becomes approved.
+// dual control), a second decision from an approver who already voted is
+// rejected with ErrAlreadyVoted, and a rejected request never becomes
+// approved.
 //
 // # Executing once
 //
