@@ -253,8 +253,8 @@ events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/access`; `auth/session`, `ops/approval` (both planned);
-`ops/auditlog`.
+Deps: `auth/access`, `ops/approval`, `ops/auditlog`; `auth/session`
+(planned).
 
 ---
 
@@ -394,18 +394,6 @@ schemas, no reflection; official MCP go-sdk isolated here.
 Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ## ops/
-
----
-
-**ops/approval**
-
-Maker-checker dual control: typed approval requests (action + payload) a
-second person approves or rejects over a storage-agnostic Store; decisions
-emit `auditlog` events and approver eligibility rides the `auth/access`
-decision seam. The two-person rule for payouts, limit overrides, and
-config changes.
-
-Deps: `auth/access`; `ops/auditlog`.
 
 ---
 

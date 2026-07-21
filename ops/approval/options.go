@@ -95,6 +95,11 @@ func WithAuditor(rec *auditlog.Recorder) Option {
 // Fail-closed: a hook error or an empty tenant fails the operation with
 // ErrScope. A nil fn leaves the manager unscoped, which is the correct
 // single-tenant default.
+//
+// A disagreement between the requested and scoped tenant wraps ErrScope
+// with text naming both tenant ids. That text is diagnostic-only — match
+// the error with errors.Is and return callers something opaque, not the
+// wrapped message.
 func WithScope(fn func(context.Context) (string, error)) Option {
 	return func(c *config) { c.scope = fn }
 }

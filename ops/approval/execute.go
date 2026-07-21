@@ -17,6 +17,11 @@ import (
 // has gone stale under the kind's ClaimTTL. With ClaimTTL 0 — the default —
 // a claim is never stale, so an executor that dies mid-action wedges the
 // request until Release is called.
+//
+// Claim is not idempotent for the current holder: retrying after an
+// ambiguous response (e.g. a timeout that hid a successful write) returns
+// ErrAlreadyClaimed rather than reconfirming the caller's own claim, so
+// that error alone does not mean another executor has it.
 func (m *Manager) Claim(ctx context.Context, reqID id.UUID, executor string) (Request, error) {
 	if executor == "" {
 		return Request{}, ErrExecutorRequired
@@ -96,7 +101,10 @@ func (m *Manager) Fail(ctx context.Context, reqID id.UUID, executor, reason stri
 // take it. It is the administrative escape hatch for a request wedged by a
 // dead executor, so it is deliberately NOT holder-checked — the holder is
 // precisely the party that cannot call it. Gate access to it in your own
-// application; every call is audited.
+// application: releasing a live executor's claim lets another executor
+// re-claim and re-run the action — genuine double execution — and the true
+// holder's later Complete then returns ErrNotExecuting, silently discarding
+// a successful completion. Every call is audited.
 func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request, error) {
 	if a.Subject.ID == "" {
 		return Request{}, ErrActorRequired
@@ -128,6 +136,10 @@ func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request,
 // fn runs exactly once per successful claim. Under a non-zero ClaimTTL a
 // stale claim can be taken over, so fn may run more than once across
 // executor deaths — make it idempotent, or leave ClaimTTL at 0.
+//
+// There is no panic recovery: if fn panics, the request stays wedged in
+// Executing (consistent with the crashed-executor philosophy — Release or
+// a ClaimTTL takeover is what recovers it).
 func (m *Manager) Execute(ctx context.Context, reqID id.UUID, executor string, fn func(context.Context, Request) error) (Request, error) {
 	r, err := m.Claim(ctx, reqID, executor)
 	if err != nil {
