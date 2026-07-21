@@ -62,9 +62,6 @@ func (r *Recorder) Record(ctx context.Context, e Event) (Event, error) {
 	if e.Action == "" || e.Outcome == "" {
 		return Event{}, fmt.Errorf("%w: action and outcome are required", ErrInvalidEvent)
 	}
-	if err := checkNUL(e); err != nil {
-		return Event{}, err
-	}
 	if r.cfg.scope != nil {
 		tenant, err := r.cfg.scope(ctx)
 		if err != nil {
@@ -77,6 +74,10 @@ func (r *Recorder) Record(ctx context.Context, e Event) (Event, error) {
 			return Event{}, ErrTenantMismatch
 		}
 		e.Tenant = tenant
+	}
+	// After the scope hook, so a hook-derived tenant is validated too.
+	if err := checkNUL(e); err != nil {
+		return Event{}, err
 	}
 	if e.Time.IsZero() {
 		e.Time = r.cfg.clock.Now()

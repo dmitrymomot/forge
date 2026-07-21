@@ -29,7 +29,8 @@ type ChainHead interface {
 // SlogSink writes audit events to a slog.Logger as level-Info "audit"
 // records with structured attributes. It is an observability sink — logs
 // are typically rotated and unqueryable per tenant — so pair it with a
-// durable sink (pgsink, JSONL) when the trail must be retained.
+// durable sink when the trail must be retained: pgsink, or JSONLSink for
+// unchained trails (see its restart caveat).
 type SlogSink struct {
 	log *slog.Logger
 }

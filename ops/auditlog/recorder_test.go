@@ -80,6 +80,15 @@ func TestRecord_RejectsNULBytes(t *testing.T) {
 		assert.ErrorIs(t, err, auditlog.ErrInvalidEvent, "NUL bytes cannot be stored by Postgres and must fail at the audit point")
 	}
 	assert.Empty(t, sink.Events())
+
+	// A NUL smuggled in by the scope hook is caught too — validation runs
+	// after the hook stamps the tenant.
+	scoped := auditlog.New(sink, auditlog.WithScope(func(context.Context) (string, error) {
+		return "org\x007", nil
+	}))
+	_, err := scoped.Record(context.Background(), auditlog.Event{Action: "a", Outcome: "ok"})
+	assert.ErrorIs(t, err, auditlog.ErrInvalidEvent)
+	assert.Empty(t, sink.Events())
 }
 
 func TestRecord_IDsAreTimeOrdered(t *testing.T) {
