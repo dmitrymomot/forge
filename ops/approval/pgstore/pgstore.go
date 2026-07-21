@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -116,30 +118,57 @@ func (s *Store) Update(ctx context.Context, r approval.Request, expect int64) er
 	return approval.ErrConflict
 }
 
-const listSQL = `
-SELECT ` + cols + ` FROM forge_approval_requests
-WHERE ($1 = '' OR tenant = $1)
-  AND ($2 = '' OR kind = $2)
-  AND ($3 = '' OR requester = $3)
-  AND (cardinality($4::smallint[]) = 0 OR status = ANY($4))
-  AND ($5::timestamptz IS NULL OR (expires_at IS NOT NULL AND expires_at < $5))
-ORDER BY id DESC
-LIMIT $6`
-
 // List returns requests matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order). A zero f.Limit defaults to
 // approval.DefaultListLimit, matching the memory store.
+//
+// The WHERE clause carries only the filters actually set, rather than the
+// static `($n = ” OR col = $n)` idiom: once a prepared statement switches
+// to a generic plan (pgx prepares every query, and Postgres goes generic
+// after five executions) those ORs cannot be pruned and the planner stops
+// using the indexes. The distinct filter combinations bound the statement
+// cache at 32 entries.
 func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request, error) {
-	statuses := make([]int16, 0, len(f.Statuses))
-	for _, st := range f.Statuses {
-		statuses = append(statuses, int16(st))
+	var (
+		conds []string
+		args  []any
+	)
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if f.Tenant != "" {
+		conds = append(conds, "tenant = "+arg(f.Tenant))
+	}
+	if f.Kind != "" {
+		conds = append(conds, "kind = "+arg(f.Kind))
+	}
+	if f.Requester != "" {
+		conds = append(conds, "requester = "+arg(f.Requester))
+	}
+	if len(f.Statuses) > 0 {
+		statuses := make([]int16, 0, len(f.Statuses))
+		for _, st := range f.Statuses {
+			statuses = append(statuses, int16(st))
+		}
+		conds = append(conds, "status = ANY("+arg(statuses)+"::smallint[])")
+	}
+	if !f.ExpiresBefore.IsZero() {
+		// A NULL expires_at never satisfies the comparison, which is exactly
+		// the contract: rows with no expiry never match an expiry bound.
+		conds = append(conds, "expires_at < "+arg(f.ExpiresBefore))
 	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = approval.DefaultListLimit
 	}
-	rows, err := s.pool.Query(ctx, listSQL,
-		f.Tenant, f.Kind, f.Requester, statuses, nullTime(f.ExpiresBefore), limit)
+	sql := `SELECT ` + cols + ` FROM forge_approval_requests`
+	if len(conds) > 0 {
+		sql += " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql += " ORDER BY id DESC LIMIT " + arg(limit)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
