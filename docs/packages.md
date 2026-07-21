@@ -199,63 +199,6 @@ Deps: none (stdlib only).
 
 ---
 
-**finance/ledger**
-
-Double-entry money ledger over `core/money`, Postgres-native by design:
-every invariant is a SQL predicate inside the caller's `pgx.Tx` — no
-storage seam (a faithful second implementation would be a second ledger;
-`testkit/dbtest` precedent). `Post(ctx, tx, …)` composes with sqlc
-repositories and `eventbus.Seen` in one commit; the package owns its
-schema via embedded migrations — consumers never write ledger tables,
-reads go through the query API or exported views.
-
-Pairwise postings (src, dst, amount, one currency) — balanced by
-construction, one row per movement — with `group_ref` correlating
-multi-part events (deposit = wallet +97, fee +3; FX = one balanced pair
-per currency); idempotent by unique external ref (replay returns the
-original entry). Holds are rows, not shadow accounts: accounts carry
-`balance` and `held` (available = balance − held), authorize opens a
-hold without a posting, settle writes the single real posting, void
-writes none; optional `expires_at` with an `ExpiredHolds` query — sweep
-policy is consumer-side (a bet hold auto-voids, a CPA hold
-auto-settles). `Void` after settle errors; post-settlement corrections
-are forward entries with an `adjusts` back-reference. Rows change
-status; money history only ever grows.
-
-Accounts are an explicit registry — unique (tenant, owner, purpose,
-currency), idempotent `EnsureAccount`, never created implicitly by a
-posting (a typo must fail, not mint an account). Per-account floor,
-NULL = floor-free (house/mint: bonus grants, commission expense,
-jackpot seeds). The floor drives locking: floored accounts carry
-materialized `balance`/`held`, checked and moved by one conditional
-`UPDATE … RETURNING` (floor predicate in the WHERE; zero rows =
-insufficient funds), multi-account entries updating in sorted order;
-floor-free hot accounts have no materialized balance — derived via a
-snapshots table (snapshot + sum-since), so no house-row bottleneck. A
-drift-check job recomputes materialized balances from postings: balance
-is a verified cache, postings are the truth. `Hold`/`Settle`/`Void`/
-`Post` each execute as one data-modifying-CTE statement (replay-gated
-inside; a unique-ref race aborts the whole statement atomically), so
-the contested row lock lives for server-side execution only.
-
-Custom currencies (points, coins) are ordinary `money.Currency` values;
-a nullable lot dimension is reserved in schema for expiring balances
-(FIFO loyalty — not in v1). Not owned: limit rules (domain code in the
-same tx — the ledger supplies the tx and available-balance primitives;
-`quota` stays a drift-tolerant shadow, never the regulatory gate), FX
-conversion math (`fxrate` records the rate), statements/invoices
-(readers), carry-over policy (`formula` input), and process history —
-deposits, game rounds, provider calls including rejected ones live in
-consumer tables with their own balance snapshots, linked 1:1 by posting
-ref; the ledger records money that moved, never attempts. Mongo-only
-stacks give the ledger its own Postgres and bridge with idempotent refs
-+ a reconcile sweep (recipe owed).
-
-Deps: `core/money`, `core/clock`, `data/postgres`, `data/migration`;
-tests: `testkit/dbtest` (planned).
-
----
-
 **finance/fxrate**
 
 Exchange rates behind a `RateSource` seam with stored snapshots; `Convert`
@@ -264,19 +207,6 @@ time". Math is multiply-and-round via `core/decimal`; providers are thin
 JSON adapters over httpclient — no provider SDKs, no live streaming.
 
 Deps: `core/decimal`, `web/httpclient`.
-
----
-
-**finance/tariff**
-
-Tiered/banded rate calculation over `core/money`/`core/decimal`:
-graduated vs volume band semantics ("25% up to 10, 30% to 50, 35%
-above") with deterministic rounding, as a pure calculator — bands are
-caller-supplied values; effective-dating is the caller choosing which
-band set applies (composes `data/settings` for deal changes). Consumers:
-usage-billing overage tiers, revenue-share deals, commission plans.
-
-Deps: `core/money`, `core/decimal`.
 
 ---
 
@@ -297,27 +227,6 @@ registered Go function; for fixed deal shapes the documented default is
 named Go functions with per-deal parameters as data.
 
 Deps: `core/decimal`.
-
----
-
-**finance/invoice**
-
-The invoice document model — invariants, not rendering: numbering via a
-per-series `Sequence` with two explicit modes (strict-gapless
-transactional counter vs monotonic-with-gaps — the requirement is
-jurisdictional); immutable once issued, corrections are credit notes
-back-referencing the original (the corrections-post-forward rule shared
-with `ledger`); line items → tax lines → totals in `money` with per-line
-vs per-total rounding policy via `Allocate`; draft → issued →
-paid/partially-paid/void/overdue over `fsm`, paid-matching by `ledger`
-posting refs; self-billing direction (platform issues on the supplier's
-behalf — affiliate/agent payouts); multi-currency with the `fxrate`
-snapshot recorded. Tax rates are caller-supplied data — never
-determined; rendering stays out (HTML is a `render` recipe, PDF
-consumer-side); no dunning, no e-invoicing formats, no subscription or
-pricing logic (the billing anti-scope stands).
-
-Deps: `core/money`; `core/fsm`.
 
 ## async/
 
@@ -429,19 +338,6 @@ checkbox next to SSO; SAML stays out (`oauthclient` OIDC covers modern
 IdPs).
 
 Deps: `auth/guard`.
-
----
-
-**auth/rbac**
-
-Role-based access control: predefined roles, role nesting/inheritance (a
-role inherits another role's permissions and adds its own),
-out-of-hierarchy standalone roles, wildcard grants; resolves subject →
-effective permission set. Implements the `access` decision seam consumed
-by `guard`/`RequirePermission` (401-vs-403 split). Subject→role
-assignment behind a storage-agnostic Store.
-
-Deps: `auth/access`.
 
 ---
 
@@ -582,16 +478,6 @@ Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ---
 
-**ops/debug**
-
-One internal diagnostics surface: `/debug/pprof/*`, `/debug/stats`
-(runtime/GC/goroutines JSON), `/debug/vars`, with an auth guard and a
-dedicated-port `supervisor.Service`.
-
-Deps: `ops/supervisor`, `auth/guard`.
-
----
-
 **ops/auditlog**
 
 Append-only structured audit events (actor/action/resource/outcome) over a
@@ -624,15 +510,6 @@ auto help; no cobra, no global registry. Covers
 serve/migrate/worker/seed/version.
 
 Deps: none (stdlib only).
-
----
-
-**ops/tracing**
-
-`Tracer` seam, W3C traceparent middleware, trace_id log extractor;
-`tracing/otel` driver isolated. Pairs with httpclient propagation.
-
-Deps: none forge-internal (otel external, isolated).
 
 ---
 

@@ -1,6 +1,7 @@
 package decimal_test
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,15 @@ func TestCmp_Equal_ScaleNormalized(t *testing.T) {
 		// crosses int64 during alignment
 		{"9223372036854775807.0", "9223372036854775807", 0, true},
 		{"9223372036854775808", "9223372036854775807", 1, false},
+		// mixed scales where both int64-aligned coefficients still fit
+		{"92233720368547758.07", "92233720368547758.0", 1, false},
+		{"1000", "1234.56", -1, false},
+		{"0", "0.000000", 0, true},
+		// mixed scales where aligning overflows int64 (falls back to big)
+		{"9223372036854775807", "0.01", 1, false},
+		{"0.01", "9223372036854775807", -1, false},
+		{"-9223372036854775808", "-0.5", -1, false},
+		{"-9223372036854775808", "0.5", -1, false}, // cross-sign, settled by Sign
 	}
 	for _, tc := range tests {
 		t.Run(tc.a+"_vs_"+tc.b, func(t *testing.T) {
@@ -66,4 +76,15 @@ func TestNeg_MinInt64PromotesToBig(t *testing.T) {
 	// -(-9223372036854775808) has no int64 representation, so Neg must promote.
 	d := decimal.New(-9223372036854775808, 0)
 	assert.Equal(t, "9223372036854775808", d.Neg().String())
+}
+
+func TestCmp_RatOracle(t *testing.T) {
+	// Random mixed-scale pairs (including near-int64-boundary coefficients that
+	// force the big fallback) must agree with the exact big.Rat oracle.
+	rng := rand.New(rand.NewPCG(9, 11))
+	for range 20000 {
+		a := randDecimal(rng)
+		b := randDecimal(rng)
+		assert.Equal(t, toRat(a).Cmp(toRat(b)), a.Cmp(b), "Cmp(%s, %s)", a.String(), b.String())
+	}
 }
