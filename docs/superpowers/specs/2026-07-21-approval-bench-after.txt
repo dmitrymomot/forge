@@ -1,0 +1,104 @@
+# ops/approval benchmark results — AFTER review-fix pass on Task 13
+# Baseline: docs/superpowers/specs/2026-07-21-approval-bench-baseline.txt
+# (commit 28c535a). This file's commit is the one that adds it, landed
+# together with the bench_test.go fix described below (test-only; see
+# `git log --oneline -- ops/approval/bench_test.go` for the exact SHA).
+# Apple M3 Max, darwin/arm64, go1.26.5, macOS 15.7.7
+# Captured: 2026-07-21 via `go test -run=^$ -bench=. -benchmem -benchtime=1s ./ops/approval/`
+# In-memory store only (approval.NewMemoryStore); pgstore has its own suite.
+# Single-sample (-count=1) for the full-suite run below; the contention
+# redesign is additionally backed by repeated, multi-scale samples further
+# down, since a single sample cannot demonstrate sustained-across-scale
+# behavior on its own.
+
+## No production code changed — this is a benchmark-only fix
+#
+# ops/approval production code is untouched by this task. Comparing every
+# benchmark EXCEPT BenchmarkApproveContended against the baseline file:
+# every number below sits within ordinary run-to-run noise of its baseline
+# counterpart (B/op and allocs/op are identical or off by rounding; ns/op
+# varies by the same shared-machine-load amount you'd see re-running the
+# baseline twice in a row). There is no optimization to report here, and
+# none was attempted — this file exists so the numbers ship with the PR
+# per the task brief, not to claim a perf win that didn't happen.
+
+pkg: github.com/dmitrymomot/forge/ops/approval
+BenchmarkSubmit-14                	 2169258	       556.6 ns/op	     639 B/op	       5 allocs/op
+BenchmarkApproveQuorum2-14        	 2492959	       504.7 ns/op	     480 B/op	       5 allocs/op
+BenchmarkApproveQuorum5-14        	 2845634	       493.6 ns/op	     480 B/op	       5 allocs/op
+BenchmarkApproveContended-14      	 1330050	       917.8 ns/op	    1157 B/op	       9 allocs/op
+BenchmarkGet-14                   	13912840	        86.08 ns/op	      32 B/op	       1 allocs/op
+BenchmarkList100-14               	   72523	     16875 ns/op	   30824 B/op	     104 allocs/op
+BenchmarkPayloadOf-14             	 2707274	       434.5 ns/op	     248 B/op	       6 allocs/op
+BenchmarkApproveWithDecider-14    	 1676247	       777.1 ns/op	     944 B/op	      12 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/ops/approval	18.977s
+
+# ===========================================================================
+# BenchmarkApproveContended: redesigned, not optimized — this IS a real
+# before/after, but of the benchmark's methodology, not of production code
+# ===========================================================================
+#
+# The baseline's BenchmarkApproveContended (one Pending request, Quorum: 100)
+# stops sustaining contention after ~100 votes: every later call in the run
+# is a cheap Get+early-reject, not a real CAS race (see baseline file for
+# the reproduced 6981 vs 6872 B/op flatness at a 100x iteration spread).
+#
+# Fix: BenchmarkApproveContended now pre-creates a pool of many low-quorum
+# (Quorum: 4) Pending requests, sized to b.N/quorum plus headroom, and every
+# parallel worker routes through one shared "current" index. All live
+# workers hammer the SAME request at once (quorum 4 is far below the
+# 14-way worker count, so simultaneous CAS conflicts are close to
+# guaranteed), and the instant it fills, whichever worker notices advances
+# the shared index so every worker rotates onto a fresh Pending request
+# together. Because the pool is sized off b.N, this keeps the ENTIRE run
+# inside the contended CAS path regardless of -benchtime, instead of
+# degenerating into cheap rejects after the first ~100 votes.
+#
+# Proof the redesign genuinely sustains contention across scale (the same
+# 100x spread used to catch the original bug, plus a -count=3 repeat at
+# each scale to separate signal from machine-load noise):
+#
+# Command: go test -run=^$ -bench='^BenchmarkApproveContended$' -benchmem -benchtime=2000x -count=3 ./ops/approval/
+#   BenchmarkApproveContended-14    2000    1215 ns/op    1210 B/op    9 allocs/op
+#   BenchmarkApproveContended-14    2000    1073 ns/op    1174 B/op    9 allocs/op
+#   BenchmarkApproveContended-14    2000     897.2 ns/op  1172 B/op    9 allocs/op
+#
+# Command: go test -run=^$ -bench='^BenchmarkApproveContended$' -benchmem -benchtime=200000x -count=3 ./ops/approval/
+#   BenchmarkApproveContended-14  200000    1045 ns/op    1172 B/op    9 allocs/op
+#   BenchmarkApproveContended-14  200000     979.7 ns/op  1131 B/op    9 allocs/op
+#   BenchmarkApproveContended-14  200000    1538 ns/op    1039 B/op    8 allocs/op
+#
+# B/op: 1039-1217 across BOTH scales (100x spread in iteration count) and
+# allocs/op: 8-9 throughout. This is the same shape of stability the
+# baseline showed (~6.9KB flat) but for the OPPOSITE reason: here it is
+# flat because the pool scales with b.N so every iteration keeps doing the
+# same genuinely-contended work, not because most iterations degenerated
+# into a cheap reject tail. The distinguishing evidence against the
+# baseline's degenerate flatness is the elevated, stable cost itself:
+#
+# Command: go test -run=^$ -bench='^BenchmarkApproveQuorum2$' -benchmem -benchtime=200000x ./ops/approval/
+#   BenchmarkApproveQuorum2-14     200000     924.1 ns/op    480 B/op    5 allocs/op   (uncontended control: one Approve, no racing goroutines)
+#
+# BenchmarkApproveContended's 1039-1217 B/op and 8-9 allocs/op are ~2.2-2.5x
+# the bytes and ~1.6-1.8x the allocations of the uncontended control, at
+# BOTH the 2000x and 200000x scale - consistent with the extra Get+clone
+# cycles mutate's retry loop performs when it actually re-reads after a
+# losing CAS, and inconsistent with the baseline's regime where almost
+# every call at large N was a single cheap Get+reject indistinguishable
+# from the uncontended path's cost shape.
+#
+# Also re-ran the full suite under `-race` at -benchtime=200x to confirm no
+# hang/panic in the new rotating-pool design (the b.RunParallel + shared
+# atomic index is new concurrent code, even though it's test-only):
+#
+# Command: go test -run=^$ -bench=. -benchmem -benchtime=200x -race ./ops/approval/
+#   BenchmarkApproveContended-14    200    9649 ns/op    1226 B/op    9 allocs/op
+# PASS, no race detected.
+#
+# CORRECTED CLAIM replacing the Task 13 report's inaccurate one: the report
+# previously described BenchmarkApproveContended as "parallel Approve calls
+# racing on one request's CAS (mutate's optimistic-concurrency retry loop)
+# under Quorum: 100" without noting that this design only contends for the
+# first ~100 votes of any run. It does NOT measure sustained contention as
+# shipped in 28c535a. The redesign above is what makes that name accurate.

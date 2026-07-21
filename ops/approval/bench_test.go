@@ -2,6 +2,7 @@ package approval_test
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dmitrymomot/forge/auth/access"
 	"github.com/dmitrymomot/forge/core/clock"
+	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/ops/approval"
 )
 
@@ -70,26 +72,68 @@ func benchmarkApprove(b *testing.B, quorum int) {
 func BenchmarkApproveQuorum2(b *testing.B) { benchmarkApprove(b, 2) }
 func BenchmarkApproveQuorum5(b *testing.B) { benchmarkApprove(b, 5) }
 
+// BenchmarkApproveContended measures Approve's CAS-retry path (mutate's
+// optimistic-concurrency loop) under contention that is SUSTAINED across the
+// whole run, not just an initial ramp-up.
+//
+// A single Pending request cannot sustain this alone: once its quorum is
+// met it goes terminal, and every later Approve call on it costs only a
+// cheap Get+early-reject — no CAS, no retry. That was this benchmark's
+// original shape (one request, Quorum: 100) and it does not measure what
+// its name claims: B/op at -benchtime=2000x (7016 B/op) was statistically
+// indistinguishable from a 1,000,000-iteration run (6872 B/op), which is
+// only possible if the ~100-vote contended ramp-up is a negligible sliver
+// of both runs and nearly every iteration in either run was the cheap
+// rejected path, not a real CAS race.
+//
+// Fix: pre-create a pool of many low-quorum Pending requests, sized to
+// b.N/quorum plus headroom, and route every parallel worker through one
+// shared "current" index. All live workers hammer the SAME request at
+// once — quorum is far below the worker count, so simultaneous CAS
+// conflicts are all but guaranteed — and the instant it fills, whichever
+// worker notices advances the shared index so every worker rotates onto a
+// fresh Pending request together. Because the pool is sized off b.N, this
+// keeps the entire run inside the contended CAS path regardless of
+// -benchtime, instead of degenerating into cheap rejects after ~100 votes.
 func BenchmarkApproveContended(b *testing.B) {
-	m := benchManager(b, approval.Policy{Quorum: 100}, approval.WithMaxRetries(1000))
+	const quorum = 4 // well below the worker count: guarantees real simultaneous CAS conflicts per request
+	m := benchManager(b, approval.Policy{Quorum: quorum}, approval.WithMaxRetries(1000))
 	ctx := context.Background()
-	r, err := approval.Submit(ctx, m, kindPayout, payoutPayload{},
-		approval.SubmitParams{Requester: "alice"})
-	if err != nil {
-		b.Fatal(err)
+
+	poolSize := b.N/quorum + 64 // headroom absorbs tail races so the pool never runs dry mid-run
+	reqs := make([]id.UUID, poolSize)
+	for i := range reqs {
+		r, err := approval.Submit(ctx, m, kindPayout, payoutPayload{},
+			approval.SubmitParams{Requester: "alice"})
+		if err != nil {
+			b.Fatal(err)
+		}
+		reqs[i] = r.ID
 	}
 
-	var next atomic.Int64
+	var cur atomic.Int64 // index into reqs of the request every worker is currently contending
+	var approverSeq atomic.Int64
 
 	b.ReportAllocs()
+	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			// A shared counter keeps approver ids distinct across goroutines,
-			// not just within one. ErrAlreadyVoted/ErrNotPending are the
-			// expected steady state once quorum is met, so ignore errors and
-			// measure the CAS path itself.
-			i := next.Add(1)
-			_, _ = m.Approve(ctx, r.ID, actor("approver-"+strconv.FormatInt(i, 10)))
+			approver := actor("approver-" + strconv.FormatInt(approverSeq.Add(1), 10))
+			for {
+				i := cur.Load()
+				if i >= int64(len(reqs)) {
+					break // pool exhausted; headroom keeps this vanishingly rare
+				}
+				_, err := m.Approve(ctx, reqs[i], approver)
+				if err == nil {
+					break
+				}
+				if errors.Is(err, approval.ErrNotPending) || errors.Is(err, approval.ErrExpired) {
+					cur.CompareAndSwap(i, i+1) // whoever notices first rotates every worker forward together
+					continue
+				}
+				b.Fatal(err)
+			}
 		}
 	})
 }
