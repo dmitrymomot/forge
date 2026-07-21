@@ -50,3 +50,41 @@ func TestNewKind(t *testing.T) {
 	require.Equal(t, "payout.release", k.Name())
 	assert.Panics(t, func() { approval.NewKind[int]("") }, "empty name is a wiring bug")
 }
+
+func TestRequestApprovals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no decisions", func(t *testing.T) {
+		t.Parallel()
+		r := approval.Request{}
+		assert.Equal(t, 0, r.Approvals())
+	})
+
+	t.Run("approvals only", func(t *testing.T) {
+		t.Parallel()
+		r := approval.Request{Decisions: []approval.Decision{
+			{Approver: "bob", Vote: approval.VoteApprove},
+			{Approver: "carol", Vote: approval.VoteApprove},
+		}}
+		assert.Equal(t, 2, r.Approvals())
+	})
+
+	t.Run("rejections only", func(t *testing.T) {
+		t.Parallel()
+		r := approval.Request{Decisions: []approval.Decision{
+			{Approver: "bob", Vote: approval.VoteReject},
+			{Approver: "carol", Vote: approval.VoteReject},
+		}}
+		assert.Equal(t, 0, r.Approvals())
+	})
+
+	t.Run("mixed counts only approvals", func(t *testing.T) {
+		t.Parallel()
+		r := approval.Request{Decisions: []approval.Decision{
+			{Approver: "bob", Vote: approval.VoteApprove},
+			{Approver: "carol", Vote: approval.VoteReject},
+			{Approver: "dave", Vote: approval.VoteApprove},
+		}}
+		assert.Equal(t, 2, r.Approvals())
+	})
+}
