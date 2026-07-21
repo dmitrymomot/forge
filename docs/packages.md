@@ -569,16 +569,6 @@ Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ---
 
-**ops/debug**
-
-One internal diagnostics surface: `/debug/pprof/*`, `/debug/stats`
-(runtime/GC/goroutines JSON), `/debug/vars`, with an auth guard and a
-dedicated-port `supervisor.Service`.
-
-Deps: `ops/supervisor`, `auth/guard`.
-
----
-
 **ops/auditlog**
 
 Append-only structured audit events (actor/action/resource/outcome) over a
@@ -611,15 +601,6 @@ auto help; no cobra, no global registry. Covers
 serve/migrate/worker/seed/version.
 
 Deps: none (stdlib only).
-
----
-
-**ops/tracing**
-
-`Tracer` seam, W3C traceparent middleware, trace_id log extractor;
-`tracing/otel` driver isolated. Pairs with httpclient propagation.
-
-Deps: none forge-internal (otel external, isolated).
 
 ---
 
