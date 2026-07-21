@@ -1,6 +1,7 @@
 package decimal
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 )
@@ -25,6 +26,50 @@ const (
 	// Floor always rounds toward -∞.
 	Floor
 )
+
+// roundingModeNames maps each RoundingMode to its canonical text form. The
+// names are part of the serialized representation of any config or spec that
+// stores a mode, so they are frozen.
+var roundingModeNames = [...]string{
+	HalfEven: "half_even",
+	HalfUp:   "half_up",
+	HalfDown: "half_down",
+	Up:       "up",
+	Down:     "down",
+	Ceil:     "ceil",
+	Floor:    "floor",
+}
+
+// String returns the canonical text form of m ("half_even", "up", ...), or
+// "invalid" for a value outside the defined modes.
+func (m RoundingMode) String() string {
+	if m < 0 || int(m) >= len(roundingModeNames) {
+		return "invalid"
+	}
+	return roundingModeNames[m]
+}
+
+// MarshalText implements encoding.TextMarshaler, emitting the same form as
+// String. A mode outside the defined range is an error.
+func (m RoundingMode) MarshalText() ([]byte, error) {
+	if m < 0 || int(m) >= len(roundingModeNames) {
+		return nil, fmt.Errorf("%w: rounding mode %d", ErrSyntax, int(m))
+	}
+	return []byte(roundingModeNames[m]), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler, parsing the form produced
+// by MarshalText. Unknown input returns ErrSyntax.
+func (m *RoundingMode) UnmarshalText(p []byte) error {
+	s := string(p)
+	for i, name := range roundingModeNames {
+		if s == name {
+			*m = RoundingMode(i)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: rounding mode %q", ErrSyntax, s)
+}
 
 // Round returns d rounded to places fractional digits using mode. It is an alias
 // for Rescale(places, mode).

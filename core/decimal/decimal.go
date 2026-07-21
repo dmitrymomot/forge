@@ -107,3 +107,18 @@ func (d Decimal) mulPow10(n int32) Decimal {
 func pow10Big(n int32) *big.Int {
 	return new(big.Int).Exp(bigTen, big.NewInt(int64(n)), nil)
 }
+
+// mulPow10Int64 returns v × 10^n if it fits in an int64 (n indexes the
+// pow10Int64 table in round.go), reporting overflow
+// (or n beyond the table) as ok == false.
+func mulPow10Int64(v int64, n int32) (int64, bool) {
+	if n < 0 || int(n) >= len(pow10Int64) {
+		return 0, false
+	}
+	p := pow10Int64[n]
+	hi := v * p
+	if v != 0 && hi/p != v {
+		return 0, false
+	}
+	return hi, true
+}

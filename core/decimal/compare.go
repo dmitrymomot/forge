@@ -27,12 +27,47 @@ func (d Decimal) Cmp(e Decimal) int {
 	if ds, es := d.Sign(), e.Sign(); ds != es {
 		return cmp.Compare(ds, es)
 	}
+	// Both int64 at different scales: align on int64 when it cannot overflow.
+	if d.big == nil && e.big == nil {
+		if c, ok := cmpInt64(d, e); ok {
+			return c
+		}
+	}
 	da, eb := alignBig(d, e)
 	return da.Cmp(eb)
 }
 
 // Equal reports whether d and e are numerically equal (scale-normalized).
 func (d Decimal) Equal(e Decimal) bool { return d.Cmp(e) == 0 }
+
+// cmpInt64 compares two int64-mode decimals by aligning the lower-scale
+// coefficient up on int64. ok is false when the alignment would overflow,
+// sending the caller to the big path.
+func cmpInt64(d, e Decimal) (int, bool) {
+	dc, ec := d.coef, e.coef
+	switch {
+	case d.scale < e.scale:
+		v, ok := mulPow10Int64(dc, e.scale-d.scale)
+		if !ok {
+			return 0, false
+		}
+		dc = v
+	case e.scale < d.scale:
+		v, ok := mulPow10Int64(ec, d.scale-e.scale)
+		if !ok {
+			return 0, false
+		}
+		ec = v
+	}
+	switch {
+	case dc < ec:
+		return -1, true
+	case dc > ec:
+		return 1, true
+	default:
+		return 0, true
+	}
+}
 
 // alignBig returns the two coefficients scaled to a common (maximum) scale as
 // *big.Int, so comparison/addition never overflows.
