@@ -15,6 +15,16 @@ tagged `(planned)` are elsewhere in this file and define build order.
 External module deps stay in the entry prose. Composition partners
 (packages a consumer wires alongside) are not deps and are not listed.
 
+## core/
+
+---
+
+**core/bizcal**
+
+Business-calendar arithmetic, stdlib-only and data-free: consumer-declared working-hours schedules (per-weekday windows, timezone-aware) and holiday sets compose into a `Calendar` answering `IsOpen`, `NextOpen`, `Add` (advance by business duration), and `Between` (business time elapsed) — DST-correct. Holiday data is consumer-supplied (fixed dates + computed rules); no embedded country tables. The substrate for SLA clocks and leave-day math.
+
+Deps: none (stdlib only).
+
 ## web/
 
 ---
@@ -158,6 +168,22 @@ consumer-side.
 
 Deps: none (stdlib only).
 
+---
+
+**data/comments**
+
+Generic threaded discussions `Store[T]`: subject-addressed threads (`Subject{Kind, ID}`, no FK into consumer tables), append/edit/soft-delete with edit history, visibility tiers (public/internal) enforced at the store, participants, cursor pagination. The body is a consumer struct marshaled at the storage seam and never interpreted — mixed timelines (comments + system events) ride an envelope `T`. Exports the `Threader[T]` seam so extensions decorate rather than grow the core, each seeing into the opaque body only through a consumer-supplied extractor: `comments/mentions` (`func(T) []string` lens, edit re-diffing, per-mention seen state, unseen inbox/count), `comments/reactions` (per-user emoji toggle + counts keyed by comment ID), `comments/attachments` (`func(T) []Ref` lens tracking objectstore keys in sidecar rows — per-thread file listing, delete/edit cascade with an opt-in blob-removal hook; upload itself stays consumer → `objectstore`). Reply-nesting only ever as an additive core option; thread-level read tracking is a product, never here. In-memory store built in; `comments/pgstore` driver.
+
+Deps: `data/postgres`, `web/pagination`.
+
+---
+
+**data/customfields**
+
+Tenant-defined typed custom fields on consumer entities, in the `reportspec` mold: a per-tenant field catalog (name, type, required, enum choices) values validate against fail-closed — unknown field, type mismatch, missing required = error, never a silent write. Typed value model (string/number/bool/date/enum/multi-enum) over a storage-agnostic Store, plus `(sql, args)` filter-fragment emission for querying by custom field with a placeholder-dialect option; user input only ever binds as args. Field deletion is soft (values orphan gracefully); rendering and form UI stay consumer-side (`view/form` composes).
+
+Deps: `core/validate`.
+
 ## async/
 
 ---
@@ -290,6 +316,14 @@ consumer-side.
 
 Deps: `web/httpclient`.
 
+---
+
+**auth/invite**
+
+Token invitations into a tenant: email-addressed, single-use, expiring invites carrying an opaque role payload the package never interprets. Tokens hashed at rest (`apikey`/`magiclink` discipline), constant-time accept, revoke and resend (resend rotates the token), pending-invite listing. Accept returns the verified `{tenant, email, role}` claim — membership creation, seat limits, and the send itself (`comms/email`) stay consumer-side. Domain auto-join and shareable multi-use links are out of scope.
+
+Deps: `data/postgres`.
+
 ## comms/
 
 ---
@@ -304,6 +338,14 @@ transactional format; goldmark confined there. Provider adapters
 (SES/Postmark/…) are consumer-side or isolated subpackages.
 
 Deps: none forge-internal (goldmark external, isolated).
+
+---
+
+**comms/inbound**
+
+Inbound email processing — the receive side `comms/email` deliberately omits: MIME parse over stdlib `net/mail`/`mime` into a typed `Message` (decoded headers, text/HTML bodies, attachments with magic-byte MIME check via `filetype`), reply/quote/signature stripping to the newly-written text, thread correlation via `In-Reply-To`/`References` plus plus-addressing and reply-token recipients, and a DKIM/SPF-results header reader (verdicts from the receiving MTA — no crypto here). Transport-agnostic: consumers feed it raw RFC 5322 bytes from an SES/Mailgun/Postmark webhook or an IMAP poller; what becomes a ticket is consumer-side.
+
+Deps: `core/filetype`.
 
 ---
 
@@ -434,6 +476,14 @@ Poll-based config reload with atomic snapshot swap, as a
 `supervisor.Service`.
 
 Deps: `ops/supervisor`.
+
+---
+
+**ops/sla**
+
+SLA policy engine over `bizcal`: named targets (first-response, resolution) attach deadlines to consumer subjects, computed in business time; pause/resume (waiting-on-customer) with correct deadline extension, warning thresholds, and breach/warning events delivered through `scheduler`-driven sweeps over a storage-agnostic Store. Fulfillment, escalation actions, and reporting stay consumer-side.
+
+Deps: `async/scheduler`; `core/bizcal` (planned).
 
 ## testkit/
 
