@@ -52,3 +52,14 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, "fanout.pgbus:app_events", bus.Name())
 	})
 }
+
+// The envelope-size check runs before any pool I/O, so no live Postgres is
+// needed to exercise it.
+func TestPublishPayloadTooLarge(t *testing.T) {
+	t.Parallel()
+
+	bus, err := pgbus.New(testPool(t))
+	require.NoError(t, err)
+	err = bus.Publish(context.Background(), "t", make([]byte, 8000))
+	assert.ErrorIs(t, err, pgbus.ErrPayloadTooLarge)
+}

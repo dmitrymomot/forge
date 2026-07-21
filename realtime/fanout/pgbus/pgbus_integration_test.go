@@ -143,16 +143,6 @@ func TestChannelIsolation_Integration(t *testing.T) {
 	assert.False(t, ok, "messages must not cross channels")
 }
 
-func TestPayloadTooLarge_Integration(t *testing.T) {
-	t.Parallel()
-	pool := openPool(t)
-	bus, err := pgbus.New(pool, pgbus.WithChannel(uniqueChannel("fanout_big")))
-	require.NoError(t, err)
-
-	err = bus.Publish(context.Background(), "t", make([]byte, 8000))
-	assert.ErrorIs(t, err, pgbus.ErrPayloadTooLarge)
-}
-
 func TestHubEndToEnd_Integration(t *testing.T) {
 	t.Parallel()
 	pool := openPool(t)
