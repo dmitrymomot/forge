@@ -41,19 +41,21 @@ func mkRecord(t *testing.T) session.Record {
 	t.Helper()
 	uid := id.NewUUID()
 	return session.Record{
-		ID:        uid,
-		UserID:    "user-" + uid.String(),
-		Scope:     "scope-" + uid.String(),
-		Data:      []byte(`{"theme":"dark"}`),
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		ID:         uid,
+		UserID:     "user-" + uid.String(),
+		Scope:      "scope-" + uid.String(),
+		IP:         "203.0.113.7",
+		UserAgent:  "browser-a",
+		Data:       []byte(`{"theme":"dark"}`),
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+		LastSeenAt: time.Now().UTC(),
 	}
 }
 
 func newToken() string { return random.URLSafe(32) }
 
 func TestPg_SaveLoadRoundTrip(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	ctx := context.Background()
 	rec := mkRecord(t)
@@ -75,20 +77,21 @@ func TestPg_SaveLoadRoundTrip(t *testing.T) {
 	assert.Equal(t, rec.Scope, got.Scope)
 	assert.Equal(t, rec.Data, got.Data)
 	assert.Equal(t, rec.Fingerprint, got.Fingerprint)
+	assert.Equal(t, rec.IP, got.IP)
+	assert.Equal(t, rec.UserAgent, got.UserAgent)
 	// timestamptz stores microseconds; compare within that precision.
 	assert.WithinDuration(t, rec.CreatedAt, got.CreatedAt, time.Millisecond)
 	assert.WithinDuration(t, rec.ExpiresAt, got.ExpiresAt, time.Millisecond)
+	assert.WithinDuration(t, rec.LastSeenAt, got.LastSeenAt, time.Millisecond)
 }
 
 func TestPg_LoadUnknown(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	_, err := s.Load(context.Background(), newToken())
 	assert.ErrorIs(t, err, session.ErrNotFound)
 }
 
 func TestPg_SaveUpsertsAndFingerprintNull(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	ctx := context.Background()
 	rec := mkRecord(t)
@@ -111,7 +114,6 @@ func TestPg_SaveUpsertsAndFingerprintNull(t *testing.T) {
 }
 
 func TestPg_Delete(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	ctx := context.Background()
 	rec := mkRecord(t)
@@ -126,7 +128,6 @@ func TestPg_Delete(t *testing.T) {
 }
 
 func TestPg_UserIndex(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	ctx := context.Background()
 
@@ -156,6 +157,13 @@ func TestPg_UserIndex(t *testing.T) {
 	assert.Equal(t, ids[2], list[0].ID, "newest first")
 	assert.Equal(t, ids[0], list[2].ID)
 
+	// Keep-list: "log out other devices" preserves exactly the kept id.
+	require.NoError(t, s.DeleteByUser(ctx, scope, user, ids[2]))
+	list, err = s.ListByUser(ctx, scope, user)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, ids[2], list[0].ID)
+
 	require.NoError(t, s.DeleteByUser(ctx, scope, user))
 	list, err = s.ListByUser(ctx, scope, user)
 	require.NoError(t, err)
@@ -166,8 +174,27 @@ func TestPg_UserIndex(t *testing.T) {
 	require.NoError(t, s.DeleteByUser(ctx, scope, user), "deleting a user with no sessions is a no-op")
 }
 
+func TestPg_DeleteOne(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	rec := mkRecord(t)
+	token := newToken()
+	_, err := s.Save(ctx, token, rec)
+	require.NoError(t, err)
+
+	// Wrong user binding revokes nothing (IDOR guard).
+	require.NoError(t, s.DeleteOne(ctx, rec.Scope, "someone-else", rec.ID))
+	_, err = s.Load(ctx, token)
+	require.NoError(t, err)
+
+	require.NoError(t, s.DeleteOne(ctx, rec.Scope, rec.UserID, rec.ID))
+	_, err = s.Load(ctx, token)
+	assert.ErrorIs(t, err, session.ErrNotFound)
+	require.NoError(t, s.DeleteOne(ctx, rec.Scope, rec.UserID, rec.ID), "revoking an absent session is a no-op")
+}
+
 func TestPg_DeleteExpired(t *testing.T) {
-	t.Parallel()
 	s := newStore(t)
 	ctx := context.Background()
 
@@ -193,7 +220,6 @@ func TestPg_DeleteExpired(t *testing.T) {
 
 // TestPg_ManagerEndToEnd runs the full Manager lifecycle against Postgres.
 func TestPg_ManagerEndToEnd(t *testing.T) {
-	t.Parallel()
 	type data struct {
 		Theme string `json:"theme,omitempty"`
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/auth/session"
+	"github.com/dmitrymomot/forge/core/id"
 	"github.com/dmitrymomot/forge/crypto/digest"
 	"github.com/dmitrymomot/forge/web/fingerprint"
 )
@@ -55,15 +56,17 @@ func tokenHash(token string) string {
 	return hex.EncodeToString(digest.SHA256([]byte(token)))
 }
 
-const cols = `id, user_id, scope, data, fingerprint, created_at, expires_at`
+const cols = `id, user_id, scope, ip, user_agent, data, fingerprint, created_at, expires_at, last_seen_at`
 
 const saveSQL = `
 INSERT INTO forge_sessions (token_hash, ` + cols + `)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (token_hash) DO UPDATE SET
 	id = EXCLUDED.id, user_id = EXCLUDED.user_id, scope = EXCLUDED.scope,
+	ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent,
 	data = EXCLUDED.data, fingerprint = EXCLUDED.fingerprint,
-	created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at`
+	created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at,
+	last_seen_at = EXCLUDED.last_seen_at`
 
 // Save upserts rec under token's digest; the token is returned unchanged.
 func (s *Store) Save(ctx context.Context, token string, rec session.Record) (string, error) {
@@ -76,8 +79,8 @@ func (s *Store) Save(ctx context.Context, token string, rec session.Record) (str
 		fp = b
 	}
 	_, err := s.pool.Exec(ctx, saveSQL,
-		tokenHash(token), rec.ID, rec.UserID, rec.Scope, rec.Data, fp,
-		rec.CreatedAt, rec.ExpiresAt)
+		tokenHash(token), rec.ID, rec.UserID, rec.Scope, rec.IP, rec.UserAgent, rec.Data, fp,
+		rec.CreatedAt, rec.ExpiresAt, rec.LastSeenAt)
 	if err != nil {
 		return "", err
 	}
@@ -117,10 +120,27 @@ func (s *Store) ListByUser(ctx context.Context, scope, userID string) ([]session
 	return out, rows.Err()
 }
 
-// DeleteByUser removes every record bound to userID within scope.
-func (s *Store) DeleteByUser(ctx context.Context, scope, userID string) error {
+// DeleteByUser removes every record bound to userID within scope, except the
+// ids in keep.
+func (s *Store) DeleteByUser(ctx context.Context, scope, userID string, keep ...id.UUID) error {
+	// pgx encodes []id.UUID via each element's driver.Valuer; an explicit
+	// string slice keeps the array encoding boring and predictable.
+	keepIDs := make([]string, len(keep))
+	for i, k := range keep {
+		keepIDs[i] = k.String()
+	}
 	_, err := s.pool.Exec(ctx,
-		`DELETE FROM forge_sessions WHERE scope = $1 AND user_id = $2`, scope, userID)
+		`DELETE FROM forge_sessions WHERE scope = $1 AND user_id = $2 AND NOT (id = ANY($3::uuid[]))`,
+		scope, userID, keepIDs)
+	return err
+}
+
+// DeleteOne removes the record for sessionID when it is bound to userID
+// within scope; anything else is a no-op.
+func (s *Store) DeleteOne(ctx context.Context, scope, userID string, sessionID id.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM forge_sessions WHERE scope = $1 AND user_id = $2 AND id = $3`,
+		scope, userID, sessionID)
 	return err
 }
 
@@ -141,7 +161,8 @@ type row interface{ Scan(dest ...any) error }
 func scanRecord(r row) (session.Record, error) {
 	var rec session.Record
 	var fp []byte
-	err := r.Scan(&rec.ID, &rec.UserID, &rec.Scope, &rec.Data, &fp, &rec.CreatedAt, &rec.ExpiresAt)
+	err := r.Scan(&rec.ID, &rec.UserID, &rec.Scope, &rec.IP, &rec.UserAgent, &rec.Data, &fp,
+		&rec.CreatedAt, &rec.ExpiresAt, &rec.LastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return session.Record{}, session.ErrNotFound
 	}

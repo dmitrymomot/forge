@@ -1,13 +1,16 @@
 -- +goose Up
 CREATE TABLE forge_sessions (
-    token_hash  text PRIMARY KEY,
-    id          uuid NOT NULL,
-    user_id     text NOT NULL DEFAULT '',
-    scope       text NOT NULL DEFAULT '',
-    data        bytea NOT NULL DEFAULT ''::bytea,
-    fingerprint bytea,
-    created_at  timestamptz NOT NULL,
-    expires_at  timestamptz NOT NULL
+    token_hash   text PRIMARY KEY,
+    id           uuid NOT NULL,
+    user_id      text NOT NULL DEFAULT '',
+    scope        text NOT NULL DEFAULT '',
+    ip           text NOT NULL DEFAULT '',
+    user_agent   text NOT NULL DEFAULT '',
+    data         bytea NOT NULL DEFAULT ''::bytea,
+    fingerprint  bytea,
+    created_at   timestamptz NOT NULL,
+    expires_at   timestamptz NOT NULL,
+    last_seen_at timestamptz NOT NULL
 );
 
 -- Multi-device listings and per-user deletion; anonymous sessions carry no

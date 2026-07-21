@@ -113,6 +113,15 @@ func TestTenancy_PlatformUserSwitchesTenants(t *testing.T) {
 	require.Len(t, listA, 1)
 	assert.Equal(t, sa.ID, listA[0].ID)
 
+	// Per-device revocation and logout-others are scope-bound too: issued
+	// from tenant B they must not touch tenant A's session.
+	require.NoError(t, mgr.RevokeUserSession(ctxB, "user-1", sa.ID))
+	_, err = mgr.Load(ctxA, sa.Token)
+	require.NoError(t, err, "cross-tenant revoke by id must be a no-op")
+	require.NoError(t, mgr.LogoutOthers(ctxB, sb))
+	_, err = mgr.Load(ctxA, sa.Token)
+	require.NoError(t, err, "cross-tenant logout-others must be a no-op")
+
 	// GDPR-deleting the user inside tenant A leaves tenant B intact.
 	require.NoError(t, mgr.DeleteUserSessions(ctxA, "user-1"))
 	_, err = mgr.Load(ctxA, sa.Token)

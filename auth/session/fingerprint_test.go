@@ -3,6 +3,7 @@ package session_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,72 @@ func TestFingerprint_RotateRecapturesBaseline(t *testing.T) {
 	require.NoError(t, err)
 	_, err = mgr.Load(oldCtx, s.Token)
 	assert.ErrorIs(t, err, session.ErrFingerprintMismatch)
+}
+
+// failDeleteStore fails Delete while delegating everything else.
+type failDeleteStore struct {
+	session.Store
+	err error
+}
+
+func (f *failDeleteStore) Delete(ctx context.Context, token string) error {
+	if f.err != nil {
+		return f.err
+	}
+	return f.Store.Delete(ctx, token)
+}
+
+func TestFingerprint_RotateSaveFailureRestoresBaseline(t *testing.T) {
+	t.Parallel()
+	store := session.NewMemoryStore()
+	fs := &failSaveStore{Store: store}
+	mgr, err := session.New[data](fs,
+		session.WithFingerprint(session.Strict), session.WithDigestSource(ctxDigest))
+	require.NoError(t, err)
+
+	ctxA := digestCtx(t, "h1", nil)
+	s := mgr.Start(ctxA)
+	require.NoError(t, mgr.Save(ctxA, s))
+
+	// A rotation from a new device fails at the store; the in-memory session
+	// must roll back to the baseline the store still holds.
+	fs.err = errors.New("boom")
+	require.Error(t, mgr.Rotate(digestCtx(t, "h2", nil), s))
+	fs.err = nil
+
+	require.NoError(t, mgr.Save(ctxA, s))
+	_, err = mgr.Load(ctxA, s.Token)
+	require.NoError(t, err, "the original device must still match after a failed rotation")
+}
+
+// failSaveStore fails Save while delegating everything else.
+type failSaveStore struct {
+	session.Store
+	err error
+}
+
+func (f *failSaveStore) Save(ctx context.Context, token string, rec session.Record) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.Store.Save(ctx, token, rec)
+}
+
+func TestFingerprint_StrictRevokeFailureKeepsMismatchSignal(t *testing.T) {
+	t.Parallel()
+	fs := &failDeleteStore{Store: session.NewMemoryStore()}
+	mgr, err := session.New[data](fs,
+		session.WithFingerprint(session.Strict), session.WithDigestSource(ctxDigest))
+	require.NoError(t, err)
+
+	ctx := digestCtx(t, "h1", nil)
+	s := mgr.Start(ctx)
+	require.NoError(t, mgr.Save(ctx, s))
+
+	fs.err = errors.New("boom")
+	_, err = mgr.Load(digestCtx(t, "h2", nil), s.Token)
+	assert.ErrorIs(t, err, session.ErrFingerprintMismatch, "a failed revoke must not swallow the hijack signal")
+	assert.ErrorIs(t, err, session.ErrStore, "and the revoke failure must surface too")
 }
 
 // TestFingerprint_DefaultSourceRidesMiddleware proves the default digest

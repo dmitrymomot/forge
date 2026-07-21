@@ -14,6 +14,9 @@ var (
 	// ErrNoUserIndex reports a user-level operation on a Store that does not
 	// implement UserIndex (KV and cookie backings cannot list by user).
 	ErrNoUserIndex = errors.New("session: store does not implement UserIndex")
+	// ErrNoTransport reports a request-level method on a Manager built
+	// without WithTransport.
+	ErrNoTransport = errors.New("session: no transport configured")
 	// ErrScope reports a configured scope hook that failed or returned empty.
 	ErrScope = errors.New("session: scope resolution failed")
 	// ErrStore wraps failures of the underlying Store.

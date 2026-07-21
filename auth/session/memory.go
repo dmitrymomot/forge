@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/dmitrymomot/forge/core/id"
 )
 
 // MemoryStore is the built-in Store + UserIndex for tests and development.
@@ -78,12 +80,24 @@ func (s *MemoryStore) ListByUser(_ context.Context, scope, userID string) ([]Rec
 	return out, nil
 }
 
-// DeleteByUser removes every record bound to userID within scope.
-func (s *MemoryStore) DeleteByUser(_ context.Context, scope, userID string) error {
+// DeleteByUser removes every record bound to userID within scope, except the
+// ids in keep.
+func (s *MemoryStore) DeleteByUser(_ context.Context, scope, userID string, keep ...id.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	maps.DeleteFunc(s.byToken, func(_ string, rec Record) bool {
-		return rec.Scope == scope && rec.UserID == userID
+		return rec.Scope == scope && rec.UserID == userID && !slices.Contains(keep, rec.ID)
+	})
+	return nil
+}
+
+// DeleteOne removes the record for sessionID when it is bound to userID
+// within scope; anything else is a no-op.
+func (s *MemoryStore) DeleteOne(_ context.Context, scope, userID string, sessionID id.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	maps.DeleteFunc(s.byToken, func(_ string, rec Record) bool {
+		return rec.Scope == scope && rec.UserID == userID && rec.ID == sessionID
 	})
 	return nil
 }

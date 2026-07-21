@@ -11,6 +11,7 @@ import (
 
 	"github.com/dmitrymomot/forge/auth/session"
 	"github.com/dmitrymomot/forge/core/clock"
+	"github.com/dmitrymomot/forge/core/id"
 )
 
 type data struct {
@@ -254,6 +255,90 @@ func TestUserSessions(t *testing.T) {
 	_, err = mgr.ListUserSessions(ctx, "")
 	assert.ErrorIs(t, err, session.ErrInvalidInput)
 	assert.ErrorIs(t, mgr.DeleteUserSessions(ctx, ""), session.ErrInvalidInput)
+}
+
+func TestLogoutOthers(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newManager(t)
+	ctx := t.Context()
+
+	var others [2]*session.Session[data]
+	for i := range others {
+		s := mgr.Start(ctx)
+		require.NoError(t, mgr.Authenticate(ctx, s, "user-1"))
+		others[i] = s
+	}
+	current := mgr.Start(ctx)
+	require.NoError(t, mgr.Authenticate(ctx, current, "user-1"))
+
+	require.NoError(t, mgr.LogoutOthers(ctx, current))
+
+	// The current device survives, every other one is gone.
+	_, err := mgr.Load(ctx, current.Token)
+	require.NoError(t, err)
+	for _, o := range others {
+		_, err := mgr.Load(ctx, o.Token)
+		assert.ErrorIs(t, err, session.ErrNotFound)
+	}
+	list, err := mgr.ListUserSessions(ctx, "user-1")
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, current.ID, list[0].ID)
+
+	// Anonymous or never-saved sessions cannot anchor a LogoutOthers.
+	anon := mgr.Start(ctx)
+	require.NoError(t, mgr.Save(ctx, anon))
+	assert.ErrorIs(t, mgr.LogoutOthers(ctx, anon), session.ErrInvalidInput)
+	fresh := mgr.Start(ctx)
+	fresh.UserID = "user-1"
+	assert.ErrorIs(t, mgr.LogoutOthers(ctx, fresh), session.ErrInvalidInput)
+}
+
+func TestRevokeUserSession(t *testing.T) {
+	t.Parallel()
+	mgr, _, _ := newManager(t)
+	ctx := t.Context()
+
+	victim := mgr.Start(ctx)
+	require.NoError(t, mgr.Authenticate(ctx, victim, "user-1"))
+	keeper := mgr.Start(ctx)
+	require.NoError(t, mgr.Authenticate(ctx, keeper, "user-1"))
+
+	require.NoError(t, mgr.RevokeUserSession(ctx, "user-1", victim.ID))
+	_, err := mgr.Load(ctx, victim.Token)
+	assert.ErrorIs(t, err, session.ErrNotFound)
+	_, err = mgr.Load(ctx, keeper.Token)
+	require.NoError(t, err)
+
+	// Another user naming the same id revokes nothing (IDOR guard).
+	other := mgr.Start(ctx)
+	require.NoError(t, mgr.Authenticate(ctx, other, "user-2"))
+	require.NoError(t, mgr.RevokeUserSession(ctx, "user-1", other.ID))
+	_, err = mgr.Load(ctx, other.Token)
+	require.NoError(t, err, "a session id under the wrong user must revoke nothing")
+
+	// Idempotent: revoking an already-gone session is a no-op.
+	require.NoError(t, mgr.RevokeUserSession(ctx, "user-1", victim.ID))
+
+	assert.ErrorIs(t, mgr.RevokeUserSession(ctx, "", keeper.ID), session.ErrInvalidInput)
+	assert.ErrorIs(t, mgr.RevokeUserSession(ctx, "user-1", id.UUID{}), session.ErrInvalidInput)
+}
+
+func TestLastSeenAt_RefreshedOnSave(t *testing.T) {
+	t.Parallel()
+	mgr, _, ck := newManager(t)
+	ctx := t.Context()
+	s := mgr.Start(ctx)
+	require.NoError(t, mgr.Save(ctx, s))
+	first := s.LastSeenAt
+
+	ck.Advance(time.Hour)
+	require.NoError(t, mgr.Save(ctx, s))
+	assert.Equal(t, first.Add(time.Hour), s.LastSeenAt)
+
+	got, err := mgr.Load(ctx, s.Token)
+	require.NoError(t, err)
+	assert.Equal(t, s.LastSeenAt, got.LastSeenAt)
 }
 
 func TestUserSessions_NoUserIndex(t *testing.T) {

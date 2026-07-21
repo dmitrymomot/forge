@@ -28,13 +28,15 @@ const (
 type DigestSource func(ctx context.Context) (fingerprint.Digest, bool)
 
 type config struct {
-	clock    clock.Clock
-	scope    func(ctx context.Context) (string, error)
-	logger   *slog.Logger
-	digest   DigestSource
-	ttl      time.Duration
-	lifetime time.Duration
-	fpMode   Mode
+	clock      clock.Clock
+	scope      func(ctx context.Context) (string, error)
+	logger     *slog.Logger
+	digest     DigestSource
+	transport  Transport
+	clientInfo ClientInfo
+	ttl        time.Duration
+	lifetime   time.Duration
+	fpMode     Mode
 }
 
 // Option configures a Manager.
@@ -69,6 +71,20 @@ func WithDigestSource(src DigestSource) Option { return func(c *config) { c.dige
 func WithScope(fn func(ctx context.Context) (string, error)) Option {
 	return func(c *config) { c.scope = fn }
 }
+
+// WithTransport installs the client-credential transport backing the
+// request-level methods (LoadRequest, SaveRequest, AuthenticateRequest,
+// RotateRequest, DestroyRequest). Ship implementations live in
+// session/transport (Cookie, Bearer, Basic, JWT); any Transport
+// implementation plugs in. Without it the request-level methods fail with
+// ErrNoTransport — the token-level API stays fully usable.
+func WithTransport(t Transport) Option { return func(c *config) { c.transport = t } }
+
+// WithClientInfo overrides how the request-level methods extract the client
+// IP and User-Agent stamped onto sessions for device listings. The default
+// resolves the IP via web/clientip and takes the User-Agent header verbatim
+// (truncated to 256 bytes).
+func WithClientInfo(fn ClientInfo) Option { return func(c *config) { c.clientInfo = fn } }
 
 // WithLogger sets the logger for Warn-mode drift reports. Default is a no-op
 // logger.
