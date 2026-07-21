@@ -278,6 +278,38 @@ func TestExecuteRunsFnWhenClaimAuditFails(t *testing.T) {
 	assert.Equal(t, "po_88", sawPayload.PayoutID)
 }
 
+// TestExecuteJoinsDistinctAuditFailures covers the ambiguity fix: when
+// BOTH the claim's audit write and the subsequent Complete audit write
+// fail, the joined error must carry two ErrAuditFailed wrappings that are
+// textually distinguishable — a caller reading the error string alone
+// must be able to tell the claim's trail entry and the completion's
+// trail entry apart, not see the same message twice with no way to know
+// which transition lost its record.
+func TestExecuteJoinsDistinctAuditFailures(t *testing.T) {
+	t.Parallel()
+	m := newManager(t, approval.Policy{Quorum: 1},
+		approval.WithAuditor(auditlog.New(failingSink{})))
+	ctx := context.Background()
+
+	r, err := approval.Submit(ctx, m, kindPayout,
+		payoutPayload{PayoutID: "po_88"}, approval.SubmitParams{Requester: "alice"})
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+
+	_, err = m.Approve(ctx, r.ID, actor("bob"))
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+
+	got, err := m.Execute(ctx, r.ID, "worker-1",
+		func(context.Context, approval.Request) error { return nil })
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+	assert.Equal(t, approval.Executed, got.Status, "both durable transitions still applied")
+
+	msg := err.Error()
+	assert.Contains(t, msg, "approval.claim",
+		"the claim's own audit failure must name its transition")
+	assert.Contains(t, msg, "approval.complete",
+		"the completion's audit failure must name its transition, distinctly from the claim's")
+}
+
 func TestExecuteYieldsToTheClaimHolder(t *testing.T) {
 	t.Parallel()
 	m, r := approved(t, approval.Policy{Quorum: 1})

@@ -46,7 +46,11 @@ func (m *Manager) audit(ctx context.Context, r Request, action, actor, outcome, 
 		Meta:     meta,
 	})
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+		// action is folded in so that two ErrAuditFailed wrappings joined
+		// together (e.g. Execute's claim write and its Complete/Fail write
+		// both failing) remain distinguishable in the error text — see
+		// TestExecuteJoinsDistinctAuditFailures.
+		return fmt.Errorf("%w for %s: %w", ErrAuditFailed, action, err)
 	}
 	return nil
 }
