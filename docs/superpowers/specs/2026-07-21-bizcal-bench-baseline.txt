@@ -1,0 +1,43 @@
+core/bizcal benchmark baseline — before the yearPlan index optimization
+go test ./core/bizcal/ -bench=. -benchmem -run=^$ -count=3
+Apple M3 Max, go1.26.5, darwin/arm64
+
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/core/bizcal
+cpu: Apple M3 Max
+BenchmarkNew-14                      	 3877026	       294.9 ns/op	     928 B/op	       8 allocs/op
+BenchmarkNew-14                      	 4142371	       307.0 ns/op	     928 B/op	       8 allocs/op
+BenchmarkNew-14                      	 3936220	       297.8 ns/op	     928 B/op	       8 allocs/op
+BenchmarkIsOpen-14                   	44746342	        27.01 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIsOpen-14                   	44209615	        27.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIsOpen-14                   	43773120	        27.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	16151164	        75.05 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	16201965	        74.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	16338339	        73.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	19772342	        60.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	19921186	        60.51 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	19771813	        60.52 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2118618	       567.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2122854	       572.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2059856	       570.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	22162846	        54.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	22119169	        54.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	22062980	        54.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	  771926	      1521 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	  788223	      1513 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	  784426	      1541 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  118620	     10618 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  122020	      9744 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  100484	     11452 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	  819303	      1431 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	  865243	      1384 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	  869515	      1383 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+Notes: at this point yearPlan.days was map[Date]dayPlan; every resolved-year
+lookup (IsOpen, NextOpen, Add, Between, ScheduledBetween, WindowsBetween) paid
+a map hash+probe on a struct key per civil day touched. All ops already
+zero-alloc on a resolved year; BenchmarkNew's 8 allocs/928B are construction
+cost (merges, exceptions map, rules slice, Calendar struct), unaffected by
+the resolver-side optimization below.

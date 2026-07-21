@@ -13,14 +13,21 @@ type dayPlan struct {
 }
 
 // yearPlan memoizes every civil date's dayPlan for one year, computed lazily
-// on first touch of that year and cached on the Calendar.
+// on first touch of that year and cached on the Calendar. days is indexed by
+// day-of-year minus one (dayOfYear returns 1-366) rather than keyed by Date,
+// so a resolved lookup is a slice index instead of a map hash+probe.
 type yearPlan struct {
-	days map[Date]dayPlan
+	days []dayPlan
 }
 
 // dayPlan resolves d's plan, building and caching d's year on first touch.
 func (c *Calendar) dayPlan(d Date) dayPlan {
-	return c.yearPlanFor(d.Year).days[d]
+	yp := c.yearPlanFor(d.Year)
+	idx := dayOfYear(d) - 1
+	if idx < 0 || idx >= len(yp.days) {
+		return dayPlan{}
+	}
+	return yp.days[idx]
 }
 
 // yearPlanFor returns the memoized plan for year, building it under the write
@@ -50,12 +57,36 @@ func (c *Calendar) buildYear(year int) *yearPlan {
 	ruleDates := c.ruleDates(year)
 	buckets := c.shiftBuckets(year)
 
-	days := make(map[Date]dayPlan, 366)
-	end := Date{Year: year + 1, Month: time.January, Day: 1}
-	for d := (Date{Year: year, Month: time.January, Day: 1}); d.Before(end); d = d.AddDays(1) {
-		days[d] = c.resolvePlan(d, ruleDates, buckets)
+	n := 365
+	if isLeapYear(year) {
+		n = 366
+	}
+	days := make([]dayPlan, n)
+	d := Date{Year: year, Month: time.January, Day: 1}
+	for i := range days {
+		days[i] = c.resolvePlan(d, ruleDates, buckets)
+		d = d.AddDays(1)
 	}
 	return &yearPlan{days: days}
+}
+
+// cumulativeDaysBeforeMonth[m] is the count of days in a non-leap year
+// falling in months before m (1-indexed; index 0 is unused).
+var cumulativeDaysBeforeMonth = [...]int{0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334}
+
+// dayOfYear returns d's 1-based ordinal day within its year (Jan 1 is 1,
+// Dec 31 is 365 or 366) via pure arithmetic, with no time.Date call.
+func dayOfYear(d Date) int {
+	doy := cumulativeDaysBeforeMonth[d.Month] + d.Day
+	if d.Month > time.February && isLeapYear(d.Year) {
+		doy++
+	}
+	return doy
+}
+
+// isLeapYear reports whether year is a Gregorian leap year.
+func isLeapYear(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
 // ruleDates expands every registered rule for year, keeping only dates that
