@@ -29,9 +29,11 @@ CREATE INDEX forge_approval_requests_expiry_idx
     ON forge_approval_requests (status, expires_at)
     WHERE expires_at IS NOT NULL;
 
--- Covers a List filtered by Requester alone (or Requester plus Tenant),
--- which forge_approval_requests_list_idx cannot serve since it leads with
--- kind and status.
+-- Covers a List filtered by Requester within a Tenant, which
+-- forge_approval_requests_list_idx cannot serve since it leads with kind and
+-- status. A single-tenant deployment (tenant uniformly '') gets no benefit:
+-- the optional-filter idiom leaves the leading column unqualified, so
+-- Postgres cannot use requester as a search key.
 CREATE INDEX forge_approval_requests_requester_idx
     ON forge_approval_requests (tenant, requester, id DESC);
 

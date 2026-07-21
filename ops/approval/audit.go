@@ -75,7 +75,7 @@ func (m *Manager) auditDenied(ctx context.Context, reqID id.UUID, action, actor,
 		Meta:     map[string]string{"cause": cause.Error()},
 	})
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+		return fmt.Errorf("%w for %s: %w", ErrAuditFailed, action, err)
 	}
 	return nil
 }
