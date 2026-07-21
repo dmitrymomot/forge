@@ -139,6 +139,14 @@ func BenchmarkRescaleUp(b *testing.B) {
 	}
 }
 
+func BenchmarkRescaleDown(b *testing.B) {
+	d := decimal.MustParse("1234.56789012")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = d.Rescale(2, decimal.HalfEven)
+	}
+}
+
 func BenchmarkRescaleBig(b *testing.B) {
 	d := decimal.MustParse(bigLit)
 	b.ReportAllocs()
