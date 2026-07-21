@@ -30,6 +30,13 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # nilaway's whole-repo analysis started getting OOM-killed ("signal:
+    # killed") on the 16 GB runner as the repo grew. A soft memory limit
+    # plus a more aggressive GC keeps its RSS under the kernel OOM
+    # threshold — slower, but it completes.
+    env:
+      GOMEMLIMIT: 12GiB
+      GOGC: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

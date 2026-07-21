@@ -148,7 +148,7 @@ Named retention policies run as batched delete/anonymize sweeps via
 audit events. Handles the two-sided GDPR constraint — minimum retention
 and erasure deadlines — as declared policy, not cron scripts.
 
-Deps: `async/scheduler`, `async/queue`, `ops/auditlog` (planned).
+Deps: `async/scheduler`, `async/queue`, `ops/auditlog`.
 
 ---
 
@@ -303,8 +303,8 @@ events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/access`; `auth/session`, `ops/auditlog`, `ops/approval` (all
-planned).
+Deps: `auth/access`; `auth/session`, `ops/approval` (both planned);
+`ops/auditlog`.
 
 ---
 
@@ -458,19 +458,6 @@ Deps: `ops/supervisor` (MCP go-sdk external, isolated).
 
 ---
 
-**ops/auditlog**
-
-Append-only structured audit events (actor/action/resource/outcome) over a
-`Sink` seam; slog + JSONL sinks built in; `auditlog/pgsink` adds the
-insert plus tenant-isolated, keyset-paginated queries — the audit trail
-every B2B SaaS shows in its UI. Optional per-stream hash chaining
-(prev-hash + a verify pass) makes the trail tamper-evident for
-compliance-grade audits.
-
-Deps: `ops/logger`, `data/postgres`.
-
----
-
 **ops/approval**
 
 Maker-checker dual control: typed approval requests (action + payload) a
@@ -479,7 +466,7 @@ emit `auditlog` events and approver eligibility rides the `auth/access`
 decision seam. The two-person rule for payouts, limit overrides, and
 config changes.
 
-Deps: `auth/access`; `ops/auditlog` (planned).
+Deps: `auth/access`; `ops/auditlog`.
 
 ---
 
