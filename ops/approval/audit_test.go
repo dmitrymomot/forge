@@ -104,6 +104,62 @@ func TestAuditRecordsDeniedAttempts(t *testing.T) {
 	assert.Equal(t, "approval:"+r.ID.String(), denied.Resource)
 }
 
+// TestAuditRecordsStructuralRefusals covers the refusals that need no
+// decider: a requester deciding their own request and an approver voting
+// twice must land in the trail as OutcomeDenied, exactly like a decider
+// denial — they are attempts to subvert dual control, not benign errors.
+func TestAuditRecordsStructuralRefusals(t *testing.T) {
+	t.Parallel()
+	sink := auditlog.NewMemorySink()
+	m, r := submitted(t, approval.Policy{Quorum: 2}, approval.WithAuditor(auditlog.New(sink)))
+	ctx := context.Background()
+
+	_, err := m.Approve(ctx, r.ID, actor("alice")) // alice is the requester
+	require.ErrorIs(t, err, approval.ErrSelfApproval)
+
+	_, err = m.Approve(ctx, r.ID, actor("bob"))
+	require.NoError(t, err)
+	_, err = m.Reject(ctx, r.ID, actor("bob")) // bob already voted
+	require.ErrorIs(t, err, approval.ErrAlreadyVoted)
+
+	events := sink.Events()
+	require.Len(t, events, 4, "submit + denied self-approval + bob's vote + denied re-vote")
+
+	self := events[1]
+	assert.Equal(t, "approval.approve", self.Action)
+	assert.Equal(t, auditlog.OutcomeDenied, self.Outcome)
+	assert.Equal(t, "alice", self.Actor)
+	assert.Equal(t, "approval:"+r.ID.String(), self.Resource)
+	assert.Contains(t, self.Meta["cause"], "cannot decide own request")
+
+	dup := events[3]
+	assert.Equal(t, "approval.reject", dup.Action)
+	assert.Equal(t, auditlog.OutcomeDenied, dup.Outcome)
+	assert.Equal(t, "bob", dup.Actor)
+	assert.Contains(t, dup.Meta["cause"], "already voted")
+}
+
+// TestSelfApprovalAndFailingSinkJoinsBothErrors pins the same non-masking
+// rule the decider-denial path has: when the structural refusal cannot be
+// audited, the caller still sees ErrSelfApproval, joined with ErrAuditFailed.
+func TestSelfApprovalAndFailingSinkJoinsBothErrors(t *testing.T) {
+	t.Parallel()
+	m := newManager(t, approval.Policy{Quorum: 1},
+		approval.WithAuditor(auditlog.New(failingSink{})))
+	ctx := context.Background()
+
+	r, err := approval.Submit(ctx, m, kindPayout,
+		payoutPayload{PayoutID: "po_88", Amount: 250000},
+		approval.SubmitParams{Requester: "alice", Reason: "invoice #4471"})
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+	require.False(t, r.ID.IsZero())
+
+	_, err = m.Approve(ctx, r.ID, actor("alice"))
+	assert.ErrorIs(t, err, approval.ErrSelfApproval,
+		"the structural refusal must survive the audit sink failing")
+	assert.ErrorIs(t, err, approval.ErrAuditFailed)
+}
+
 // TestAuditFailureReturnsDurableRequest deviates from the task brief's
 // literal test body: the brief built the fixture via submitted(), which
 // asserts require.NoError on Submit — but Submit itself audits, so a sink

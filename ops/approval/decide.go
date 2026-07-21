@@ -41,10 +41,12 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 			return statusErr(r.Status)
 		}
 		if r.Requester == a.Subject.ID {
+			denied = true
 			return ErrSelfApproval
 		}
 		for i := range r.Decisions {
 			if r.Decisions[i].Approver == a.Subject.ID {
+				denied = true
 				return ErrAlreadyVoted
 			}
 		}
@@ -78,10 +80,12 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 	})
 	if err != nil {
 		if denied {
-			// An ineligible actor trying to push a request through is the
-			// most security-relevant event this package sees. Record it, and
-			// join the audit error with the caller's own: errors.Is must still
-			// hold for both the original sentinel and ErrAuditFailed.
+			// A refused attempt to influence a decision — an ineligible actor,
+			// the requester voting on their own request, or an approver voting
+			// twice — is the most security-relevant event this package sees.
+			// Record it, and join the audit error with the caller's own:
+			// errors.Is must still hold for both the original sentinel and
+			// ErrAuditFailed.
 			if aerr := m.auditDenied(ctx, reqID, action, a.Subject.ID, tenant, err); aerr != nil {
 				return Request{}, errors.Join(err, aerr)
 			}
