@@ -74,6 +74,18 @@ func TestScope(t *testing.T) {
 		assert.ErrorIs(t, err, boom)
 	})
 
+	t.Run("closed hub wins over scope errors", func(t *testing.T) {
+		t.Parallel()
+		hub, err := fanout.New(fanout.WithScope(tenantScope))
+		require.NoError(t, err)
+		hub.Close()
+
+		// No scope in ctx: the hook would fail, but ErrClosed must win.
+		err = hub.Publish(context.Background(), "orders", []byte("x"))
+		assert.ErrorIs(t, err, fanout.ErrClosed)
+		assert.NotErrorIs(t, err, fanout.ErrScopeMissing)
+	})
+
 	t.Run("reserved bytes in scope rejected", func(t *testing.T) {
 		t.Parallel()
 		hub, err := fanout.New(fanout.WithScope(func(context.Context) (string, error) { return "bad\x1ftenant", nil }))

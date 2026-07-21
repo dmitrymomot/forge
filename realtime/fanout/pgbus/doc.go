@@ -18,4 +18,8 @@
 // connected, but messages published while the listener reconnects are lost —
 // exactly the fanout contract. The Run loop reconnects with exponential
 // backoff and never returns until its context is cancelled.
+//
+// While Run is live it holds one connection from the pool exclusively for
+// LISTEN; size pgxpool.Pool.MaxConns to account for it when the pool is
+// shared with application traffic.
 package pgbus

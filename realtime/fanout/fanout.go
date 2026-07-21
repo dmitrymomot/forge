@@ -86,15 +86,17 @@ func New(opts ...Option) (*Hub, error) {
 // the message routes through the bus and local delivery happens on the bus
 // receive path; the returned error is then the bus publish error.
 func (h *Hub) Publish(ctx context.Context, topic string, payload []byte) error {
+	// Closed wins over every other error so a shut-down hub reports ErrClosed
+	// even when the scope hook would also fail.
+	if h.closed.Load() {
+		return ErrClosed
+	}
 	if err := validateTopic(topic); err != nil {
 		return err
 	}
 	key, err := h.key(ctx, topic)
 	if err != nil {
 		return err
-	}
-	if h.closed.Load() {
-		return ErrClosed
 	}
 	if h.bus != nil {
 		return h.bus.Publish(ctx, key, payload)
