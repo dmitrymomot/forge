@@ -17,14 +17,6 @@ External module deps stay in the entry prose. Composition partners
 
 ## core/
 
----
-
-**core/bizcal**
-
-Business-calendar arithmetic, stdlib-only and data-free: consumer-declared working-hours schedules (per-weekday windows, timezone-aware) and holiday sets compose into a `Calendar` answering `IsOpen`, `NextOpen`, `Add` (advance by business duration), and `Between` (business time elapsed) — DST-correct. Holiday data is consumer-supplied (fixed dates + computed rules); no embedded country tables. The substrate for SLA clocks and leave-day math.
-
-Deps: none (stdlib only).
-
 ## web/
 
 ---
@@ -459,7 +451,7 @@ Deps: `ops/supervisor`.
 
 SLA policy engine over `bizcal`: named targets (first-response, resolution) attach deadlines to consumer subjects, computed in business time; pause/resume (waiting-on-customer) with correct deadline extension, warning thresholds, and breach/warning events delivered through `scheduler`-driven sweeps over a storage-agnostic Store. Fulfillment, escalation actions, and reporting stay consumer-side.
 
-Deps: `async/scheduler`; `core/bizcal` (planned).
+Deps: `async/scheduler`; `core/bizcal`.
 
 ## testkit/
 
