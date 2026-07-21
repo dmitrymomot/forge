@@ -128,7 +128,7 @@ LIMIT $6`
 
 // List returns requests matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order). A zero f.Limit defaults to
-// defaultLimit, matching the memory store.
+// approval.DefaultListLimit, matching the memory store.
 func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request, error) {
 	statuses := make([]int16, 0, len(f.Statuses))
 	for _, st := range f.Statuses {
@@ -136,7 +136,7 @@ func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request
 	}
 	limit := f.Limit
 	if limit <= 0 {
-		limit = defaultLimit
+		limit = approval.DefaultListLimit
 	}
 	rows, err := s.pool.Query(ctx, listSQL,
 		f.Tenant, f.Kind, f.Requester, statuses, nullTime(f.ExpiresBefore), limit)
@@ -155,11 +155,6 @@ func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request
 	}
 	return out, rows.Err()
 }
-
-// defaultLimit caps an unbounded List so a large table cannot be pulled
-// into memory by a zero-valued Filter. The memory store defaults to the
-// same value, so swapping stores cannot silently truncate results.
-const defaultLimit = 100
 
 // row is satisfied by both pgx.Row and pgx.Rows.
 type row interface{ Scan(dest ...any) error }

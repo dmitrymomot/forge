@@ -184,6 +184,12 @@ type Actor struct {
 	Subject access.Subject
 }
 
+// DefaultListLimit is the cap List applies when Filter.Limit is zero, so an
+// unbounded filter cannot pull an unbounded result set into memory. Every
+// Store implementation must apply exactly this default — see
+// approvaltest.Run's ListDefaultLimitIsFixed case.
+const DefaultListLimit = 100
+
 // Filter selects requests for List.
 type Filter struct {
 	// ExpiresBefore bounds ExpiresAt, selecting requests that have expired
@@ -198,8 +204,8 @@ type Filter struct {
 	// derived on read), so listing it matches nothing — query
 	// []Status{Pending, Approved} with ExpiresBefore instead.
 	Statuses []Status
-	// Limit caps the number of records returned. Zero defaults to 100; every
-	// Store implementation must apply the same default so swapping stores
-	// cannot silently truncate results.
+	// Limit caps the number of records returned. Zero defaults to
+	// DefaultListLimit; every Store implementation must apply the same
+	// default so swapping stores cannot silently truncate results.
 	Limit int
 }
