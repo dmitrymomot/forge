@@ -615,15 +615,6 @@ Deps: none (stdlib only).
 
 ---
 
-**ops/tracing**
-
-`Tracer` seam, W3C traceparent middleware, trace_id log extractor;
-`tracing/otel` driver isolated. Pairs with httpclient propagation.
-
-Deps: none forge-internal (otel external, isolated).
-
----
-
 **ops/secretsource**
 
 Hot-reloadable secrets behind a `Provider` seam, exposing `redact.Secret`
