@@ -195,19 +195,6 @@ consumer-side.
 
 Deps: none (stdlib only).
 
-## finance/
-
----
-
-**finance/fxrate**
-
-Exchange rates behind a `RateSource` seam with stored snapshots; `Convert`
-records the rate applied, so audits answer "what rate at transaction
-time". Math is multiply-and-round via `core/decimal`; providers are thin
-JSON adapters over httpclient — no provider SDKs, no live streaming.
-
-Deps: `core/decimal`, `web/httpclient`.
-
 ## async/
 
 ---
