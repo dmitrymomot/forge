@@ -109,10 +109,12 @@ func (m *Manager) Fail(ctx context.Context, reqID id.UUID, executor, reason stri
 //
 // Release does not touch ExpiresAt. A request released past its kind's TTL
 // goes back to Approved in the stored row, but the next read still derives
-// Expired from the unchanged ExpiresAt (see Manager.applyExpiry) and every
-// further transition refuses with ErrExpired — the rescue hatch quietly
-// no-ops for exactly the long-wedged requests it exists for. There is no
-// workaround: submit a new request instead.
+// Expired from the unchanged ExpiresAt (see Manager.applyExpiry): Claim,
+// vote, and Cancel all refuse it with ErrExpired, while Complete, Fail, and
+// Release itself refuse it with ErrNotExecuting because it is no longer
+// Executing — either way the rescue hatch quietly no-ops for exactly the
+// long-wedged requests it exists for. There is no workaround: submit a new
+// request instead.
 func (m *Manager) Release(ctx context.Context, reqID id.UUID, a Actor) (Request, error) {
 	if a.Subject.ID == "" {
 		return Request{}, ErrActorRequired
