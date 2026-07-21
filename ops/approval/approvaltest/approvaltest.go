@@ -123,6 +123,13 @@ func Run(t *testing.T, factory func(t *testing.T) approval.Store) {
 		require.Len(t, got.Decisions, 1)
 		assert.Equal(t, "bob", got.Decisions[0].Approver,
 			"a caller must not be able to rewrite a persisted vote")
+
+		got.Decisions[0].Approver = "mallory" // mutate the Get-returned slice too
+		got2, err := s.Get(ctx, r.ID)
+		require.NoError(t, err)
+		require.Len(t, got2.Decisions, 1)
+		assert.Equal(t, "bob", got2.Decisions[0].Approver,
+			"mutating a Get-returned slice must not corrupt the stored copy — read-side isolation")
 	})
 
 	t.Run("DecisionsRoundTrip", func(t *testing.T) {
