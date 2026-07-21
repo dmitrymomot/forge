@@ -2,6 +2,8 @@ package approval
 
 import (
 	"context"
+	"errors"
+	"slices"
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/core/id"
@@ -91,4 +93,90 @@ func (m *Manager) applyExpiry(r *Request) {
 		return
 	}
 	r.Status = Expired
+}
+
+// List returns requests matching f, newest first, with expiry applied to
+// each record.
+//
+// Filter.Statuses matches the STORED status, so a record that has expired
+// out of the requested set is dropped after the fact: List returns UP TO
+// Limit records, and a Statuses filter may yield fewer than the store
+// matched. Query with no Statuses to see expired records with their derived
+// status.
+func (m *Manager) List(ctx context.Context, f Filter) ([]Request, error) {
+	tenant, err := m.scoped(ctx, f.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	f.Tenant = tenant
+
+	out, err := m.store.List(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	kept := out[:0]
+	for i := range out {
+		m.applyExpiry(&out[i])
+		if len(f.Statuses) > 0 && !slices.Contains(f.Statuses, out[i].Status) {
+			continue
+		}
+		kept = append(kept, out[i])
+	}
+	return kept, nil
+}
+
+// mutate is the one concurrency primitive every transition rides: read the
+// current record, derive its effective status, let fn validate and apply
+// the transition, then compare-and-swap it back.
+//
+// fn is re-run from a FRESH read on every conflict retry — never from the
+// previous attempt's copy. That re-validation is load-bearing: without it a
+// vote that lost a race could be applied a second time on top of the
+// winner's write, pushing a request past quorum with one approver counted
+// twice.
+//
+//nolint:unused // consumed by Approve/Reject/Cancel/Claim/Complete/Fail/Release, added in Tasks 6-8 of this package's build.
+func (m *Manager) mutate(ctx context.Context, reqID id.UUID, fn func(r *Request) error) (Request, error) {
+	tenant, err := m.scoped(ctx, "")
+	if err != nil {
+		return Request{}, err
+	}
+	for attempt := 0; ; attempt++ {
+		r, err := m.store.Get(ctx, reqID)
+		if err != nil {
+			return Request{}, err
+		}
+		// Report a foreign-tenant request as missing rather than forbidden,
+		// so cross-tenant existence cannot be probed.
+		if tenant != "" && r.Tenant != tenant {
+			return Request{}, ErrNotFound
+		}
+		expect := r.Version
+		m.applyExpiry(&r)
+
+		if err := fn(&r); err != nil {
+			return Request{}, err
+		}
+
+		err = m.store.Update(ctx, r, expect)
+		switch {
+		case err == nil:
+			r.Version = expect + 1
+			return r, nil
+		case !errors.Is(err, ErrConflict):
+			return Request{}, err
+		case attempt >= m.cfg.maxRetries:
+			return Request{}, ErrConflict
+		}
+	}
+}
+
+// statusErr maps a non-Pending status to the sentinel that explains it.
+//
+//nolint:unused // consumed by Tasks 6-8's transitions.
+func statusErr(s Status) error {
+	if s == Expired {
+		return ErrExpired
+	}
+	return ErrNotPending
 }
