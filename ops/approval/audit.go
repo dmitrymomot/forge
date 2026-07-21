@@ -1,0 +1,69 @@
+package approval
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+
+	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/ops/auditlog"
+)
+
+// audit records a completed transition.
+//
+// It runs AFTER the store write, never before: auditing first would record
+// transitions that a lost CAS race then discarded. The cost of that
+// ordering is that a failed trail write cannot undo a durable transition,
+// so the caller gets the updated Request AND an ErrAuditFailed-wrapped
+// error. Match it with errors.Is and alert — in a dual-control package a
+// silent gap in the trail is the failure mode that matters.
+func (m *Manager) audit(ctx context.Context, r Request, action, actor, outcome, reason string) error {
+	if m.cfg.auditor == nil {
+		return nil
+	}
+	meta := map[string]string{
+		"kind":   r.Kind,
+		"status": r.Status.String(),
+	}
+	if reason != "" {
+		meta["reason"] = reason
+	}
+	if action == actionApprove || action == actionReject {
+		if pol, ok := m.policyFor(r.Kind); ok {
+			meta["quorum"] = strconv.Itoa(pol.Quorum)
+			meta["approvals"] = strconv.Itoa(r.Approvals())
+		}
+	}
+	_, err := m.cfg.auditor.Record(ctx, auditlog.Event{
+		Actor:    actor,
+		Action:   action,
+		Resource: "approval:" + r.ID.String(),
+		Outcome:  auditlog.Outcome(outcome),
+		Tenant:   r.Tenant,
+		Meta:     meta,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+	}
+	return nil
+}
+
+// auditDenied records a refused attempt. An ineligible actor trying to push
+// a request through is the most security-relevant event this package sees,
+// so it is never invisible — even though no state changed.
+func (m *Manager) auditDenied(ctx context.Context, reqID id.UUID, action, actor string, cause error) error {
+	if m.cfg.auditor == nil {
+		return nil
+	}
+	_, err := m.cfg.auditor.Record(ctx, auditlog.Event{
+		Actor:    actor,
+		Action:   action,
+		Resource: "approval:" + reqID.String(),
+		Outcome:  auditlog.OutcomeDenied,
+		Meta:     map[string]string{"cause": cause.Error()},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+	}
+	return nil
+}

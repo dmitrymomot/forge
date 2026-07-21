@@ -7,6 +7,7 @@ import (
 
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/core/id"
+	"github.com/dmitrymomot/forge/ops/auditlog"
 )
 
 // Manager records approval requests, collects decisions on them, and hands
@@ -53,12 +54,6 @@ func (m *Manager) scoped(_ context.Context, requested string) (string, error) {
 	return requested, nil
 }
 
-// audit records a state change. The auditlog seam lands in Task 10; until
-// then it is a no-op.
-func (m *Manager) audit(_ context.Context, _ Request, _, _, _, _ string) error {
-	return nil
-}
-
 // Audit action names and outcomes.
 const (
 	actionSubmit   = "approval.submit"
@@ -69,8 +64,8 @@ const (
 	actionComplete = "approval.complete"
 	actionFail     = "approval.fail"
 	actionRelease  = "approval.release"
-	outcomeSuccess = "success"
-	outcomeFailure = "failure"
+	outcomeSuccess = string(auditlog.OutcomeSuccess)
+	outcomeFailure = string(auditlog.OutcomeFailure)
 )
 
 // Eligibility verbs, appended to a kind name to form the access.Action.
@@ -78,11 +73,6 @@ const (
 	verbDecide = "decide"
 	verbCancel = "cancel"
 )
-
-// auditDenied records a refused attempt. Landed in Task 10.
-func (m *Manager) auditDenied(_ context.Context, _ id.UUID, _, _ string, _ error) error {
-	return nil
-}
 
 // Get loads one request, with expiry applied: a Pending or Approved
 // request past its ExpiresAt reports Status Expired even though the stored

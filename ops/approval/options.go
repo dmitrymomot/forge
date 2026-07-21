@@ -3,11 +3,13 @@ package approval
 import (
 	"github.com/dmitrymomot/forge/auth/access"
 	"github.com/dmitrymomot/forge/core/clock"
+	"github.com/dmitrymomot/forge/ops/auditlog"
 )
 
 type config struct {
 	clk        clock.Clock
 	decider    access.Decider
+	auditor    *auditlog.Recorder
 	kinds      map[string]Policy
 	maxRetries int
 }
@@ -69,4 +71,15 @@ func WithMaxRetries(n int) Option {
 // one vote per approver) hold either way.
 func WithDecider(d access.Decider) Option {
 	return func(c *config) { c.decider = d }
+}
+
+// WithAuditor records every state change to the audit trail: submissions,
+// decisions, cancellations, claims, and outcomes — plus every attempt a
+// decider refused, as OutcomeDenied.
+//
+// The trail is written after the state change is durable. If the sink
+// fails, the transition still happened and the operation returns
+// ErrAuditFailed alongside the updated request.
+func WithAuditor(rec *auditlog.Recorder) Option {
+	return func(c *config) { c.auditor = rec }
 }
