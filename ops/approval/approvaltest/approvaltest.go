@@ -10,6 +10,9 @@ package approvaltest
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,6 +224,57 @@ func Run(t *testing.T, factory func(t *testing.T) approval.Store) {
 		require.NoError(t, err)
 		assert.NotNil(t, got, "nil vs empty must not differ across implementations")
 		assert.Empty(t, got)
+	})
+
+	// ConcurrentUpdateHasExactlyOneWinner exercises the package's one
+	// concurrency primitive under real contention: N goroutines all race
+	// Store.Update on the same record from the same expected version. A
+	// non-atomic implementation (e.g. read-then-write without a single
+	// atomic compare-and-swap) could let more than one of them believe it
+	// won, which is exactly the double-counted-vote defect the CAS exists
+	// to prevent — see Store's doc comment. This is the suite's only
+	// direct test of that atomicity; every other case only ever drives
+	// Update sequentially.
+	t.Run("ConcurrentUpdateHasExactlyOneWinner", func(t *testing.T) {
+		s, n, ctx := factory(t), newNS(), context.Background()
+		base := n.request("alice", approval.Pending)
+		require.NoError(t, s.Create(ctx, base))
+
+		const workers = 8
+		var wg sync.WaitGroup
+		results := make([]error, workers)
+		for i := range workers {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				r := base
+				r.Meta = map[string]string{"worker": strconv.Itoa(i)}
+				results[i] = s.Update(ctx, r, 1)
+			}(i)
+		}
+		wg.Wait()
+
+		var winners, conflicts int
+		winner := -1
+		for i, err := range results {
+			switch {
+			case err == nil:
+				winners++
+				winner = i
+			case errors.Is(err, approval.ErrConflict):
+				conflicts++
+			default:
+				require.NoError(t, err, "an Update racing on a stale version must fail with ErrConflict, nothing else")
+			}
+		}
+		require.Equal(t, 1, winners, "exactly one concurrent Update on the same expected version must succeed")
+		require.Equal(t, workers-1, conflicts, "every loser must report ErrConflict")
+
+		got, err := s.Get(ctx, base.ID)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), got.Version, "the stored Version must be expect+1, not double-incremented")
+		assert.Equal(t, strconv.Itoa(winner), got.Meta["worker"],
+			"the stored record must be exactly the winner's write, not a loser's or a merge of both")
 	})
 
 	t.Run("ListDefaultLimitIsFixed", func(t *testing.T) {
