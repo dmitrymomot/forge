@@ -71,7 +71,17 @@ func New(loc *time.Location, opts ...Option) (*Calendar, error) {
 		}
 	}
 
-	hasBase := cfg.usedWeekday || cfg.usedWorkdays || cfg.usedAlwaysOpen
+	// A WithWeekday base only opens the calendar if at least one window was
+	// actually supplied; WithWeekday(wd) with no windows contributes no open
+	// time, so it does not count as a base for the never-open check.
+	weekdayHasWindows := false
+	for _, ws := range cfg.weekly {
+		if len(ws) > 0 {
+			weekdayHasWindows = true
+			break
+		}
+	}
+	hasBase := cfg.usedWorkdays || cfg.usedAlwaysOpen || (cfg.usedWeekday && weekdayHasWindows)
 	if !hasBase && len(cfg.shifts) == 0 {
 		errs = append(errs, ErrNeverOpen)
 	}

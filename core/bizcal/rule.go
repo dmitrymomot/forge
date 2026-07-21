@@ -121,7 +121,8 @@ func (f RuleFunc) Dates(year int) []Date {
 // shifted back to the preceding Friday, and any date falling on a Sunday is
 // shifted forward to the following Monday. Dates on other weekdays pass
 // through unchanged. This is the common observed-holiday convention for
-// weekend dates.
+// weekend dates. Cross-year shifts are honored: a Dec 31 or Jan 1 observance
+// that lands in the adjacent year is resolved into that year's plan.
 func Observed(r Rule) Rule {
 	return observedRule{inner: r}
 }

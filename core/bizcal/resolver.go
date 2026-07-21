@@ -89,17 +89,24 @@ func isLeapYear(year int) bool {
 	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
-// ruleDates expands every registered rule for year, keeping only dates that
-// actually fall in year (rules that return out-of-year dates are ignored).
+// ruleDates expands every registered rule for years year-1, year, and year+1,
+// keeping only the produced dates that actually fall in year. Evaluating the
+// adjacent years catches holidays whose observed date shifts across a year
+// boundary (e.g. an Observed rule moving Jan 1 back to the prior Dec 31, or a
+// Dec 31 forward to the next Jan 1) while still discarding any date a rule
+// emits outside the queried year. The map dedupes dates produced more than
+// once across the three evaluations.
 func (c *Calendar) ruleDates(year int) map[Date]bool {
 	if len(c.rules) == 0 {
 		return nil
 	}
 	out := make(map[Date]bool)
 	for _, r := range c.rules {
-		for _, rd := range r.Dates(year) {
-			if rd.Year == year {
-				out[rd] = true
+		for y := year - 1; y <= year+1; y++ {
+			for _, rd := range r.Dates(y) {
+				if rd.Year == year {
+					out[rd] = true
+				}
 			}
 		}
 	}
