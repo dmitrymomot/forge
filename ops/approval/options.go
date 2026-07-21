@@ -82,8 +82,9 @@ func WithDecider(d access.Decider) Option {
 }
 
 // WithAuditor records every state change to the audit trail: submissions,
-// decisions, cancellations, claims, and outcomes — plus every attempt a
-// decider refused, as OutcomeDenied.
+// decisions, cancellations, claims, and outcomes — plus every refused
+// attempt to influence a decision, as OutcomeDenied: decider denials,
+// self-approvals, and duplicate votes.
 //
 // The trail is written after the state change is durable. If the sink
 // fails, the transition still happened and the operation returns

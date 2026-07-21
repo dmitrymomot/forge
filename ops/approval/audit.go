@@ -55,8 +55,9 @@ func (m *Manager) audit(ctx context.Context, r Request, action, actor, outcome, 
 	return nil
 }
 
-// auditDenied records a refused attempt. An ineligible actor trying to push
-// a request through is the most security-relevant event this package sees,
+// auditDenied records a refused attempt — a decider denial, a self-approval,
+// or a duplicate vote. An actor trying to push a request through without the
+// standing to do so is the most security-relevant event this package sees,
 // so it is never invisible — even though no state changed.
 //
 // tenant is the request's own tenant (empty when unscoped), not the

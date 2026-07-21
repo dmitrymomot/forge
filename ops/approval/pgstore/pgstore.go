@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,13 +57,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 
 // Create inserts r. A colliding id yields approval.ErrDuplicate.
 func (s *Store) Create(ctx context.Context, r approval.Request) error {
-	decisions, meta, err := encodeState(r)
+	payload, decisions, meta, err := encodeState(r)
 	if err != nil {
 		return err
 	}
 	_, err = s.pool.Exec(ctx, createSQL,
 		r.ID, r.Kind, r.Tenant, r.Requester, r.Reason, int16(r.Status), r.Version,
-		[]byte(r.Payload), decisions, meta, r.ClaimedBy,
+		payload, decisions, meta, r.ClaimedBy,
 		r.CreatedAt, nullTime(r.ExpiresAt), nullTime(r.ClaimedAt), nullTime(r.DecidedAt))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
@@ -89,13 +91,13 @@ WHERE id = $1 AND version = $15`
 // a follow-up existence check tells those apart, because the Manager
 // retries one and gives up on the other.
 func (s *Store) Update(ctx context.Context, r approval.Request, expect int64) error {
-	decisions, meta, err := encodeState(r)
+	payload, decisions, meta, err := encodeState(r)
 	if err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx, updateSQL,
 		r.ID, r.Kind, r.Tenant, r.Requester, r.Reason, int16(r.Status),
-		[]byte(r.Payload), decisions, meta, r.ClaimedBy,
+		payload, decisions, meta, r.ClaimedBy,
 		r.CreatedAt, nullTime(r.ExpiresAt), nullTime(r.ClaimedAt), nullTime(r.DecidedAt),
 		expect)
 	if err != nil {
@@ -116,30 +118,56 @@ func (s *Store) Update(ctx context.Context, r approval.Request, expect int64) er
 	return approval.ErrConflict
 }
 
-const listSQL = `
-SELECT ` + cols + ` FROM forge_approval_requests
-WHERE ($1 = '' OR tenant = $1)
-  AND ($2 = '' OR kind = $2)
-  AND ($3 = '' OR requester = $3)
-  AND (cardinality($4::smallint[]) = 0 OR status = ANY($4))
-  AND ($5::timestamptz IS NULL OR (expires_at IS NOT NULL AND expires_at < $5))
-ORDER BY id DESC
-LIMIT $6`
-
 // List returns requests matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order). A zero f.Limit defaults to
 // approval.DefaultListLimit, matching the memory store.
 func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request, error) {
-	statuses := make([]int16, 0, len(f.Statuses))
-	for _, st := range f.Statuses {
-		statuses = append(statuses, int16(st))
+	// The WHERE clause carries only the filters actually set, rather than
+	// the static `($n = '' OR col = $n)` idiom: once a prepared statement
+	// switches to a generic plan (pgx prepares every query, and Postgres
+	// goes generic after five executions) those ORs cannot be pruned and
+	// the planner stops using the indexes. The distinct filter combinations
+	// bound the statement cache at 32 entries.
+	var (
+		conds []string
+		args  []any
+	)
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if f.Tenant != "" {
+		conds = append(conds, "tenant = "+arg(f.Tenant))
+	}
+	if f.Kind != "" {
+		conds = append(conds, "kind = "+arg(f.Kind))
+	}
+	if f.Requester != "" {
+		conds = append(conds, "requester = "+arg(f.Requester))
+	}
+	if len(f.Statuses) > 0 {
+		statuses := make([]int16, 0, len(f.Statuses))
+		for _, st := range f.Statuses {
+			statuses = append(statuses, int16(st))
+		}
+		conds = append(conds, "status = ANY("+arg(statuses)+"::smallint[])")
+	}
+	if !f.ExpiresBefore.IsZero() {
+		// A NULL expires_at never satisfies the comparison, which is exactly
+		// the contract: rows with no expiry never match an expiry bound.
+		conds = append(conds, "expires_at < "+arg(f.ExpiresBefore))
 	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = approval.DefaultListLimit
 	}
-	rows, err := s.pool.Query(ctx, listSQL,
-		f.Tenant, f.Kind, f.Requester, statuses, nullTime(f.ExpiresBefore), limit)
+	sql := `SELECT ` + cols + ` FROM forge_approval_requests`
+	if len(conds) > 0 {
+		sql += " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql += " ORDER BY id DESC LIMIT " + arg(limit)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -196,22 +224,29 @@ func scanRequest(rw row) (approval.Request, error) {
 	return r, nil
 }
 
-// encodeState marshals the two JSON columns, normalizing nil to an empty
-// array and an empty object so a reader never has to special-case null.
-func encodeState(r approval.Request) (decisions []byte, meta map[string]string, err error) {
+// encodeState prepares the three JSON columns, normalizing nil Decisions to
+// an empty array and nil Meta to an empty object so a reader never has to
+// special-case null. A nil Payload becomes JSON null: the column is NOT
+// NULL, and the memory store accepts a nil payload, so rejecting it here
+// would make the two stores diverge on the same input.
+func encodeState(r approval.Request) (payload, decisions []byte, meta map[string]string, err error) {
+	payload = []byte(r.Payload)
+	if len(payload) == 0 {
+		payload = []byte("null")
+	}
 	d := r.Decisions
 	if d == nil {
 		d = []approval.Decision{}
 	}
 	decisions, err = json.Marshal(d)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	meta = r.Meta
 	if meta == nil {
 		meta = map[string]string{}
 	}
-	return decisions, meta, nil
+	return payload, decisions, meta, nil
 }
 
 // nullTime maps a zero time to SQL NULL.

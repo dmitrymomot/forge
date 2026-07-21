@@ -16,8 +16,9 @@ import (
 // vote or counting one approver twice.
 //
 // Implementations may normalize nil and empty Decisions/Meta in either
-// direction; callers must not depend on which form is returned. List must
-// return a non-nil empty slice rather than nil when nothing matches.
+// direction, and a nil Payload to JSON null; callers must not depend on
+// which form is returned. List must return a non-nil empty slice rather
+// than nil when nothing matches.
 //
 // approvaltest.Run is the executable contract; every implementation must
 // pass it.

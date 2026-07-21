@@ -48,8 +48,9 @@ var (
 	// ErrExpired rejects every transition on a request past its TTL.
 	ErrExpired = errors.New("approval: request expired")
 
-	// ErrNotApproved rejects a claim on a request that has not reached
-	// quorum.
+	// ErrNotApproved rejects a claim on a request that is not in the
+	// Approved status: it has not reached quorum yet, or it has already
+	// moved past claiming (rejected, cancelled, executed, or failed).
 	ErrNotApproved = errors.New("approval: request not approved")
 
 	// ErrAlreadyClaimed rejects a claim held by another executor whose

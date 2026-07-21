@@ -59,7 +59,8 @@
 // that errors refuses the vote.
 //
 // WithAuditor writes every transition to an ops/auditlog Recorder,
-// including attempts the decider denied. WithScope confines every operation
+// including refused decision attempts — decider denials, self-approvals,
+// and duplicate votes. WithScope confines every operation
 // to a context-derived tenant, failing closed when none is available;
 // single-tenant applications pay no ceremony.
 //

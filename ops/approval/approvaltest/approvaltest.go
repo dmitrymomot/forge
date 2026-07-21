@@ -76,6 +76,24 @@ func Run(t *testing.T, factory func(t *testing.T) approval.Store) {
 		assert.ErrorIs(t, s.Create(ctx, r), approval.ErrDuplicate)
 	})
 
+	// The Manager always marshals a payload before Create, but the Store
+	// contract does not require one: a driver must accept a nil Payload
+	// rather than surface a backend constraint error, normalizing it to at
+	// most JSON null.
+	t.Run("CreateAcceptsNilPayload", func(t *testing.T) {
+		s, n, ctx := factory(t), newNS(), context.Background()
+		r := n.request("alice", approval.Pending)
+		r.Payload = nil
+		require.NoError(t, s.Create(ctx, r))
+
+		got, err := s.Get(ctx, r.ID)
+		require.NoError(t, err)
+		if len(got.Payload) > 0 {
+			assert.Equal(t, "null", string(got.Payload),
+				"a nil payload may round-trip only as nil, empty, or JSON null")
+		}
+	})
+
 	t.Run("GetReportsNotFound", func(t *testing.T) {
 		s := factory(t)
 		_, err := s.Get(context.Background(), id.NewUUID())
