@@ -1,10 +1,10 @@
 package approval
 
 import (
+	"bytes"
 	"context"
 	"maps"
 	"slices"
-	"sort"
 	"sync"
 
 	"github.com/dmitrymomot/forge/core/id"
@@ -79,8 +79,8 @@ func (s *memoryStore) List(_ context.Context, f Filter) ([]Request, error) {
 	s.mu.RUnlock()
 
 	// UUIDv7 ids are time-ordered, so descending id order is newest-first.
-	sort.Slice(out, func(i, j int) bool {
-		return string(out[i].ID[:]) > string(out[j].ID[:])
+	slices.SortFunc(out, func(a, b Request) int {
+		return bytes.Compare(b.ID[:], a.ID[:])
 	})
 	limit := f.Limit
 	if limit <= 0 {
