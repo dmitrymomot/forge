@@ -34,7 +34,9 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 	}
 
 	var denied bool
+	var tenant string
 	r, err := m.mutate(ctx, reqID, func(r *Request) error {
+		tenant = r.Tenant
 		if r.Status != Pending {
 			return statusErr(r.Status)
 		}
@@ -80,7 +82,7 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 			// most security-relevant event this package sees. Record it, and
 			// join the audit error with the caller's own: errors.Is must still
 			// hold for both the original sentinel and ErrAuditFailed.
-			if aerr := m.auditDenied(ctx, reqID, action, a.Subject.ID, err); aerr != nil {
+			if aerr := m.auditDenied(ctx, reqID, action, a.Subject.ID, tenant, err); aerr != nil {
 				return Request{}, errors.Join(err, aerr)
 			}
 		}
@@ -103,7 +105,9 @@ func (m *Manager) Cancel(ctx context.Context, reqID id.UUID, a Actor) (Request, 
 	}
 
 	var denied bool
+	var tenant string
 	r, err := m.mutate(ctx, reqID, func(r *Request) error {
+		tenant = r.Tenant
 		if r.Status != Pending && r.Status != Approved {
 			if r.Status == Expired {
 				return ErrExpired
@@ -124,7 +128,7 @@ func (m *Manager) Cancel(ctx context.Context, reqID id.UUID, a Actor) (Request, 
 		if denied {
 			// Join, don't drop: the actor's denial and the audit failure are
 			// distinct facts and both must survive errors.Is.
-			if aerr := m.auditDenied(ctx, reqID, actionCancel, a.Subject.ID, err); aerr != nil {
+			if aerr := m.auditDenied(ctx, reqID, actionCancel, a.Subject.ID, tenant, err); aerr != nil {
 				return Request{}, errors.Join(err, aerr)
 			}
 		}

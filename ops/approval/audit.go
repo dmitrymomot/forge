@@ -51,7 +51,11 @@ func (m *Manager) audit(ctx context.Context, r Request, action, actor, outcome, 
 // auditDenied records a refused attempt. An ineligible actor trying to push
 // a request through is the most security-relevant event this package sees,
 // so it is never invisible — even though no state changed.
-func (m *Manager) auditDenied(ctx context.Context, reqID id.UUID, action, actor string, cause error) error {
+//
+// tenant is the request's own tenant (empty when unscoped), not the
+// caller's — that's what lets a denied event be attributed to the right
+// tenant in the trail.
+func (m *Manager) auditDenied(ctx context.Context, reqID id.UUID, action, actor, tenant string, cause error) error {
 	if m.cfg.auditor == nil {
 		return nil
 	}
@@ -60,6 +64,7 @@ func (m *Manager) auditDenied(ctx context.Context, reqID id.UUID, action, actor 
 		Action:   action,
 		Resource: "approval:" + reqID.String(),
 		Outcome:  auditlog.OutcomeDenied,
+		Tenant:   tenant,
 		Meta:     map[string]string{"cause": cause.Error()},
 	})
 	if err != nil {

@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/dmitrymomot/forge/core/clock"
@@ -48,10 +49,28 @@ func (m *Manager) policyFor(kind string) (Policy, bool) {
 	return p, ok
 }
 
-// scoped resolves the tenant an operation is confined to. Tenancy lands in
-// Task 11; until then it passes the requested tenant through.
-func (m *Manager) scoped(_ context.Context, requested string) (string, error) {
-	return requested, nil
+// scoped resolves the tenant an operation is confined to.
+//
+// With no WithScope hook it passes the requested tenant through, so
+// single-tenant applications pay nothing. With one, it fails closed: a hook
+// error or an empty tenant aborts with ErrScope rather than silently
+// operating across every tenant, and an explicitly requested tenant must
+// agree with the scoped one.
+func (m *Manager) scoped(ctx context.Context, requested string) (string, error) {
+	if m.cfg.scope == nil {
+		return requested, nil
+	}
+	tenant, err := m.cfg.scope(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrScope, err)
+	}
+	if tenant == "" {
+		return "", ErrScope
+	}
+	if requested != "" && requested != tenant {
+		return "", fmt.Errorf("%w: requested tenant %q is outside scope %q", ErrScope, requested, tenant)
+	}
+	return tenant, nil
 }
 
 // Audit action names and outcomes.
@@ -77,10 +96,20 @@ const (
 // Get loads one request, with expiry applied: a Pending or Approved
 // request past its ExpiresAt reports Status Expired even though the stored
 // row still carries its last written status.
+//
+// Under WithScope, another tenant's request reports ErrNotFound rather than
+// a forbidden error, so cross-tenant existence cannot be probed.
 func (m *Manager) Get(ctx context.Context, reqID id.UUID) (Request, error) {
+	tenant, err := m.scoped(ctx, "")
+	if err != nil {
+		return Request{}, err
+	}
 	r, err := m.store.Get(ctx, reqID)
 	if err != nil {
 		return Request{}, err
+	}
+	if tenant != "" && r.Tenant != tenant {
+		return Request{}, ErrNotFound
 	}
 	m.applyExpiry(&r)
 	return r, nil

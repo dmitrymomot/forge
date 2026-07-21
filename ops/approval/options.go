@@ -1,6 +1,8 @@
 package approval
 
 import (
+	"context"
+
 	"github.com/dmitrymomot/forge/auth/access"
 	"github.com/dmitrymomot/forge/core/clock"
 	"github.com/dmitrymomot/forge/ops/auditlog"
@@ -10,6 +12,7 @@ type config struct {
 	clk        clock.Clock
 	decider    access.Decider
 	auditor    *auditlog.Recorder
+	scope      func(context.Context) (string, error)
 	kinds      map[string]Policy
 	maxRetries int
 }
@@ -82,4 +85,16 @@ func WithDecider(d access.Decider) Option {
 // ErrAuditFailed alongside the updated request.
 func WithAuditor(rec *auditlog.Recorder) Option {
 	return func(c *config) { c.auditor = rec }
+}
+
+// WithScope derives the tenant from context for every operation: Submit
+// stamps it, List is confined to it, and Get and every transition report
+// ErrNotFound for other tenants' requests — not a forbidden error, so
+// cross-tenant existence cannot be probed.
+//
+// Fail-closed: a hook error or an empty tenant fails the operation with
+// ErrScope. A nil fn leaves the manager unscoped, which is the correct
+// single-tenant default.
+func WithScope(fn func(context.Context) (string, error)) Option {
+	return func(c *config) { c.scope = fn }
 }
