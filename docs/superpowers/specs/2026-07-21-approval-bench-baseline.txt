@@ -1,0 +1,52 @@
+# ops/approval benchmark baseline — bench suite as originally landed (Task 13)
+# Commit: 28c535a (test(approval): add benchmarks for Submit/Approve/Get/List/PayloadOf)
+# Apple M3 Max, darwin/arm64, go1.26.5, macOS 15.7.7
+# Captured: 2026-07-21 via `go test -run=^$ -bench=. -benchmem -benchtime=1s ./ops/approval/`
+# In-memory store only (approval.NewMemoryStore); pgstore has its own suite.
+# Single-sample (-count=1), indicative only, no external services required.
+
+pkg: github.com/dmitrymomot/forge/ops/approval
+BenchmarkSubmit-14                	 2073648	       598.6 ns/op	     643 B/op	       5 allocs/op
+BenchmarkApproveQuorum2-14        	 2244069	       556.0 ns/op	     480 B/op	       5 allocs/op
+BenchmarkApproveQuorum5-14        	 2365843	       660.2 ns/op	     480 B/op	       5 allocs/op
+BenchmarkApproveContended-14      	  760786	      3820 ns/op	    6872 B/op	       5 allocs/op
+BenchmarkGet-14                   	 9205342	       122.3 ns/op	      32 B/op	       1 allocs/op
+BenchmarkList100-14               	   22922	     43681 ns/op	   30824 B/op	     104 allocs/op
+BenchmarkPayloadOf-14             	 1926427	       589.8 ns/op	     248 B/op	       6 allocs/op
+BenchmarkApproveWithDecider-14    	 1562392	       826.0 ns/op	     944 B/op	      12 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/ops/approval	20.982s
+
+# ===========================================================================
+# KNOWN DEFECT in this baseline's BenchmarkApproveContended (review finding,
+# fixed in the commit that adds -after.txt; see that file for the redesign)
+# ===========================================================================
+#
+# This benchmark's name and its own doc comment claim it measures sustained
+# CAS-retry contention: many goroutines racing to approve one Pending
+# request under Quorum: 100. It does not sustain that. Approve -> vote ->
+# mutate always does a store.Get (a full Request clone) BEFORE checking
+# r.Status != Pending. Once ~100 distinct approvers push the single request
+# to Approved, every later call in the run pays only a cheap Get+clone+
+# immediate-reject - real CAS retries happen only during the initial ~100-
+# vote window, regardless of how many total iterations the run has.
+#
+# Reproduced directly against this commit's code (not just quoted from the
+# review): a 100x spread in iteration count produces a statistically flat
+# B/op, which is only possible if the contended ramp-up is a negligible
+# fraction of both runs -
+#
+# BenchmarkApproveContended-14  (-benchtime=2000x)    6981 B/op   5 allocs/op
+# BenchmarkApproveContended-14  (-benchtime=200000x)  6872 B/op   5 allocs/op
+#
+# If contention were actually sustained across the run, B/op should fall
+# substantially as N grows (the ~100-vote ramp-up cost gets amortized over
+# far more iterations at 200000x than at 2000x). It does not move outside
+# noise. The dominant per-call cost at BOTH scales is cloning a Request
+# whose Decisions slice is frozen at ~100 entries by the cheap-reject tail,
+# not genuine contended CAS work.
+#
+# See docs/superpowers/specs/2026-07-21-approval-bench-after.txt for the
+# redesign (a rotating pool of many low-quorum Pending requests, sized off
+# b.N, so the whole run stays inside the contended CAS path) and the data
+# proving it.
