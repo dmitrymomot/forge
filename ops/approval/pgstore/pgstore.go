@@ -121,14 +121,13 @@ func (s *Store) Update(ctx context.Context, r approval.Request, expect int64) er
 // List returns requests matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order). A zero f.Limit defaults to
 // approval.DefaultListLimit, matching the memory store.
-//
-// The WHERE clause carries only the filters actually set, rather than the
-// static `($n = ” OR col = $n)` idiom: once a prepared statement switches
-// to a generic plan (pgx prepares every query, and Postgres goes generic
-// after five executions) those ORs cannot be pruned and the planner stops
-// using the indexes. The distinct filter combinations bound the statement
-// cache at 32 entries.
 func (s *Store) List(ctx context.Context, f approval.Filter) ([]approval.Request, error) {
+	// The WHERE clause carries only the filters actually set, rather than
+	// the static `($n = '' OR col = $n)` idiom: once a prepared statement
+	// switches to a generic plan (pgx prepares every query, and Postgres
+	// goes generic after five executions) those ORs cannot be pruned and
+	// the planner stops using the indexes. The distinct filter combinations
+	// bound the statement cache at 32 entries.
 	var (
 		conds []string
 		args  []any
