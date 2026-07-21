@@ -62,8 +62,24 @@ func (m *Manager) audit(_ context.Context, _ Request, _, _, _, _ string) error {
 // Audit action names and outcomes.
 const (
 	actionSubmit   = "approval.submit"
+	actionApprove  = "approval.approve"
+	actionReject   = "approval.reject"
 	outcomeSuccess = "success"
 )
+
+// Eligibility verbs, appended to a kind name to form the access.Action.
+const verbDecide = "decide"
+
+// eligible checks the actor against the decider seam. Landed in Task 9;
+// until then every actor is eligible.
+func (m *Manager) eligible(_ context.Context, _ Request, _ Actor, _ string) error {
+	return nil
+}
+
+// auditDenied records a refused attempt. Landed in Task 10.
+func (m *Manager) auditDenied(_ context.Context, _ id.UUID, _, _ string, _ error) error {
+	return nil
+}
 
 // Get loads one request, with expiry applied: a Pending or Approved
 // request past its ExpiresAt reports Status Expired even though the stored
@@ -134,8 +150,6 @@ func (m *Manager) List(ctx context.Context, f Filter) ([]Request, error) {
 // vote that lost a race could be applied a second time on top of the
 // winner's write, pushing a request past quorum with one approver counted
 // twice.
-//
-//nolint:unused // consumed by Approve/Reject/Cancel/Claim/Complete/Fail/Release, added in Tasks 6-8 of this package's build.
 func (m *Manager) mutate(ctx context.Context, reqID id.UUID, fn func(r *Request) error) (Request, error) {
 	tenant, err := m.scoped(ctx, "")
 	if err != nil {
@@ -172,8 +186,6 @@ func (m *Manager) mutate(ctx context.Context, reqID id.UUID, fn func(r *Request)
 }
 
 // statusErr maps a non-Pending status to the sentinel that explains it.
-//
-//nolint:unused // consumed by Tasks 6-8's transitions.
 func statusErr(s Status) error {
 	if s == Expired {
 		return ErrExpired
