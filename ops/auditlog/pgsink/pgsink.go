@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -135,27 +137,56 @@ func (s *Sink) List(ctx context.Context, f Filter) ([]auditlog.Event, string, er
 	case limit > 500:
 		limit = 500
 	}
-	var cursor any
+	// The WHERE clause carries only the filters actually set, rather than
+	// the static `($n = '' OR col = $n)` / `($n IS NULL OR ...)` idiom:
+	// once a prepared statement switches to a generic plan (pgx prepares
+	// every query, and Postgres goes generic after five executions) those
+	// ORs cannot be pruned and the planner stops using
+	// forge_audit_events_list_idx. The filter combinations bound the
+	// statement cache at 2^8 shapes.
+	var (
+		conds []string
+		args  []any
+	)
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if tenant != "" {
+		conds = append(conds, "tenant = "+arg(tenant))
+	}
+	if f.Actor != "" {
+		conds = append(conds, "actor = "+arg(f.Actor))
+	}
+	if f.Action != "" {
+		conds = append(conds, "action = "+arg(f.Action))
+	}
+	if f.Resource != "" {
+		conds = append(conds, "resource = "+arg(f.Resource))
+	}
+	if f.Outcome != "" {
+		conds = append(conds, "outcome = "+arg(string(f.Outcome)))
+	}
+	if !f.From.IsZero() {
+		conds = append(conds, "occurred_at >= "+arg(f.From))
+	}
+	if !f.To.IsZero() {
+		conds = append(conds, "occurred_at <= "+arg(f.To))
+	}
 	if f.Cursor != "" {
 		u, err := id.ParseUUID(f.Cursor)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: %w", ErrInvalidCursor, err)
 		}
-		cursor = u
+		conds = append(conds, "id < "+arg(u))
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+cols+` FROM forge_audit_events
-		WHERE ($1 = '' OR tenant = $1)
-		  AND ($2 = '' OR actor = $2)
-		  AND ($3 = '' OR action = $3)
-		  AND ($4 = '' OR resource = $4)
-		  AND ($5 = '' OR outcome = $5)
-		  AND ($6::timestamptz IS NULL OR occurred_at >= $6)
-		  AND ($7::timestamptz IS NULL OR occurred_at <= $7)
-		  AND ($8::uuid IS NULL OR id < $8)
-		ORDER BY id DESC
-		LIMIT $9`,
-		tenant, f.Actor, f.Action, f.Resource, string(f.Outcome),
-		nullTime(f.From), nullTime(f.To), cursor, limit+1)
+	sql := `SELECT ` + cols + ` FROM forge_audit_events`
+	if len(conds) > 0 {
+		sql += " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql += " ORDER BY id DESC LIMIT " + arg(limit+1)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -198,10 +229,7 @@ func (s *Sink) Verify(ctx context.Context, stream string) (int, string, error) {
 		count int
 	)
 	for {
-		rows, err := s.pool.Query(ctx, `SELECT `+cols+` FROM forge_audit_events
-			WHERE tenant = $1 AND ($2::uuid IS NULL OR id > $2)
-			ORDER BY id ASC
-			LIMIT $3`, tenant, after, verifyBatch)
+		rows, err := s.verifyPage(ctx, tenant, after)
 		if err != nil {
 			return count, prev, err
 		}
@@ -221,6 +249,24 @@ func (s *Sink) Verify(ctx context.Context, stream string) (int, string, error) {
 			return count, prev, nil
 		}
 	}
+}
+
+// verifyPage fetches one ascending batch of the tenant's chain. Two static
+// shapes instead of `($2 IS NULL OR id > $2)`: under a generic plan (which
+// pgx-prepared statements reach after five executions) the keyset bound
+// stops being an index condition, so every batch would rescan the tenant's
+// rows from the chain's genesis and filter — O(N²/batch) over the stream.
+func (s *Sink) verifyPage(ctx context.Context, tenant string, after any) (pgx.Rows, error) {
+	if after == nil {
+		return s.pool.Query(ctx, `SELECT `+cols+` FROM forge_audit_events
+			WHERE tenant = $1
+			ORDER BY id ASC
+			LIMIT $2`, tenant, verifyBatch)
+	}
+	return s.pool.Query(ctx, `SELECT `+cols+` FROM forge_audit_events
+		WHERE tenant = $1 AND id > $2
+		ORDER BY id ASC
+		LIMIT $3`, tenant, after, verifyBatch)
 }
 
 // scoped resolves the effective tenant: the WithScope hook when
@@ -260,12 +306,4 @@ func scanEvents(rows pgx.Rows, capacity int) ([]auditlog.Event, error) {
 		events = append(events, e)
 	}
 	return events, rows.Err()
-}
-
-// nullTime maps the zero time to SQL NULL.
-func nullTime(t time.Time) any {
-	if t.IsZero() {
-		return nil
-	}
-	return t
 }
