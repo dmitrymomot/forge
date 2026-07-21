@@ -86,14 +86,13 @@ func (s *Store) GetByHash(ctx context.Context, hash string) (apikey.Key, error) 
 
 // List returns records matching f, newest first (UUIDv7 ids are
 // time-ordered, so id DESC is creation order).
-//
-// The WHERE clause carries only the filters actually set, rather than the
-// static `($n = ” OR col = $n)` idiom: once a prepared statement switches
-// to a generic plan (pgx prepares every query, and Postgres goes generic
-// after five executions) those ORs cannot be pruned and the planner stops
-// using forge_api_keys_list_idx. The filter combinations bound the
-// statement cache at 4 shapes.
 func (s *Store) List(ctx context.Context, f apikey.Filter) ([]apikey.Key, error) {
+	// The WHERE clause carries only the filters actually set, rather than
+	// the static `($n = '' OR col = $n)` idiom: once a prepared statement
+	// switches to a generic plan (pgx prepares every query, and Postgres
+	// goes generic after five executions) those ORs cannot be pruned and
+	// the planner stops using forge_api_keys_list_idx. The filter
+	// combinations bound the statement cache at 4 shapes.
 	var (
 		conds []string
 		args  []any

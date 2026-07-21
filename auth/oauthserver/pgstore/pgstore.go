@@ -85,9 +85,7 @@ func (s *Store) Update(ctx context.Context, c oauthserver.Client) error {
 	return nil
 }
 
-// Two static shapes instead of `($1 = ” OR tenant_id = $1)`: under a
-// generic plan (which pgx-prepared statements reach after five executions)
-// Postgres cannot prune that OR and stops using oauth_clients_tenant_idx.
+// List statement shapes — see List for why there are two.
 const (
 	listSQL = `
 SELECT ` + columns + ` FROM oauth_clients
@@ -101,6 +99,10 @@ ORDER BY created_at, id`
 
 // List returns the tenant's clients; tenantID "" returns all.
 func (s *Store) List(ctx context.Context, tenantID string) ([]oauthserver.Client, error) {
+	// Two static shapes instead of `($1 = '' OR tenant_id = $1)`: under a
+	// generic plan (which pgx-prepared statements reach after five
+	// executions) Postgres cannot prune that OR and stops using
+	// oauth_clients_tenant_idx.
 	sql, args := listSQL, []any(nil)
 	if tenantID != "" {
 		sql, args = listTenantSQL, []any{tenantID}

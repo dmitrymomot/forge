@@ -79,12 +79,11 @@ func (s *Store) Get(ctx context.Context, code string) (smartlink.Link, error) {
 // List returns Links matching f, newest first (created_at descending, code
 // ascending on ties). An empty Filter.Tenant matches every tenant; a zero
 // Filter.Limit applies no cap.
-//
-// The tenant predicate is added only when set, rather than the static
-// `($1 = ” OR tenant = $1)` idiom: under a generic plan (which
-// pgx-prepared statements reach after five executions) Postgres cannot
-// prune that OR and stops using forge_smart_links_tenant_created_idx.
 func (s *Store) List(ctx context.Context, f smartlink.Filter) ([]smartlink.Link, error) {
+	// The tenant predicate is added only when set, rather than the static
+	// `($1 = '' OR tenant = $1)` idiom: under a generic plan (which
+	// pgx-prepared statements reach after five executions) Postgres cannot
+	// prune that OR and stops using forge_smart_links_tenant_created_idx.
 	sql := `SELECT ` + cols + ` FROM forge_smart_links`
 	var args []any
 	if f.Tenant != "" {
@@ -115,10 +114,10 @@ func (s *Store) List(ctx context.Context, f smartlink.Filter) ([]smartlink.Link,
 }
 
 // The point statements come in unscoped/tenant-scoped pairs instead of the
-// `($n = ” OR tenant = $n)` idiom. Perf is not the driver here — code is
-// the primary key, so these are index point lookups under any plan — but
-// the pair keeps the package free of the OR idiom so it cannot be copied
-// back into a query where it does defeat an index (see List).
+// optional-tenant OR idiom List used to share. Perf is not the driver here
+// — code is the primary key, so these are index point lookups under any
+// plan — but the pair keeps the package free of the OR idiom so it cannot
+// be copied back into a query where it does defeat an index (see List).
 const (
 	deactivateSQL       = `UPDATE forge_smart_links SET deactivated_at = $2 WHERE code = $1`
 	deactivateTenantSQL = deactivateSQL + ` AND tenant = $3`

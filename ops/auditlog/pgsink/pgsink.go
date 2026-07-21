@@ -142,8 +142,12 @@ func (s *Sink) List(ctx context.Context, f Filter) ([]auditlog.Event, string, er
 	// once a prepared statement switches to a generic plan (pgx prepares
 	// every query, and Postgres goes generic after five executions) those
 	// ORs cannot be pruned and the planner stops using
-	// forge_audit_events_list_idx. The filter combinations bound the
-	// statement cache at 2^8 shapes.
+	// forge_audit_events_list_idx. The filter combinations bound this
+	// query's contribution to pgx's per-connection statement cache at 2^8 =
+	// 256 entries in the worst case — half the default 512-entry LRU cap,
+	// and only if a connection actually sees all 256 shapes; a typical
+	// paged-UI workload uses a handful. An evicted entry re-prepares on
+	// next use (one extra round-trip), it does not error.
 	var (
 		conds []string
 		args  []any
