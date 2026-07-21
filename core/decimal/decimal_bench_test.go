@@ -139,6 +139,14 @@ func BenchmarkRescaleUp(b *testing.B) {
 	}
 }
 
+func BenchmarkRescaleDown(b *testing.B) {
+	d := decimal.MustParse("1234.56789012")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = d.Rescale(2, decimal.HalfEven)
+	}
+}
+
 func BenchmarkRescaleBig(b *testing.B) {
 	d := decimal.MustParse(bigLit)
 	b.ReportAllocs()
@@ -220,5 +228,14 @@ func BenchmarkScan(b *testing.B) {
 	for b.Loop() {
 		var d decimal.Decimal
 		_ = d.Scan("1234.56")
+	}
+}
+
+func BenchmarkCmpMixedScale(b *testing.B) {
+	x := decimal.MustParse("1234.56") // scale 2
+	y := decimal.MustParse("1000")    // scale 0
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = x.Cmp(y)
 	}
 }

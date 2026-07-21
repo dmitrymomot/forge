@@ -8,6 +8,16 @@
 > idempotency) as composable packages — business logic stays in consumer
 > repos.
 
+## Focus priorities
+
+Every design decision, review, and trade-off is weighed in this order:
+
+1. **Performance** — speed, allocations, memory footprint, CPU usage. Forge code sits on every consumer's hot path; regressions here are the most expensive to claw back (see [Performance rules](#performance-rules--hot-path-hygiene)).
+2. **Developer experience** — less boilerplate for the consumer: sane defaults, `New(...Option)` with env-loadable config, zero ceremony for the common case, APIs that are hard to misuse.
+3. **Everything else** — feature breadth, internal elegance, driver coverage, etc. Never trade points 1–2 for these.
+
+When priorities collide, the higher one wins — e.g. a slightly less "clean" internal implementation is acceptable if it removes consumer boilerplate or measurably cuts allocations.
+
 ## Design DNA every package follows
 
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no
@@ -28,7 +38,10 @@
 - **Composition seams:** `http.Handler`, `supervisor.Service`,
   `middleware.Middleware`, `ctxkey.Key[T]`, `logger.ContextExtractor`, and
   pluggable `Store`/`Broker`/`Sender` interfaces.
-- Single-responsibility packages (~250–850 LOC); black-box tests only.
+- Single-responsibility packages (~250–850 LOC); black-box tests only —
+  white-box (`package foo`) test files are the narrow exception for pinning
+  unexported primitives' behavior directly (differential/oracle tests of
+  internal fast paths, decoder primitives).
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
   store, queue's in-memory broker) — there is no central fakes package.
 - **Two test tiers.** The default `go test ./...` is unit-only: fast, no
