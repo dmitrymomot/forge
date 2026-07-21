@@ -230,3 +230,12 @@ func BenchmarkScan(b *testing.B) {
 		_ = d.Scan("1234.56")
 	}
 }
+
+func BenchmarkCmpMixedScale(b *testing.B) {
+	x := decimal.MustParse("1234.56") // scale 2
+	y := decimal.MustParse("1000")    // scale 0
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = x.Cmp(y)
+	}
+}
