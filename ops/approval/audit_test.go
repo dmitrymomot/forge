@@ -23,10 +23,10 @@ func (failingSink) Write(context.Context, auditlog.Event) error {
 func TestAuditRecordsEveryTransition(t *testing.T) {
 	t.Parallel()
 	sink := auditlog.NewMemorySink()
-	m, r := submitted(t, approval.Policy{Quorum: 1},
-		approval.WithAuditor(auditlog.New(sink)))
+	auditor := auditlog.New(sink)
 	ctx := context.Background()
 
+	m, r := submitted(t, approval.Policy{Quorum: 1}, approval.WithAuditor(auditor))
 	_, err := m.Approve(ctx, r.ID, actor("bob"))
 	require.NoError(t, err)
 	_, err = m.Claim(ctx, r.ID, "worker-1")
@@ -46,11 +46,43 @@ func TestAuditRecordsEveryTransition(t *testing.T) {
 	assert.Equal(t, "approval.approve", events[1].Action)
 	assert.Equal(t, "bob", events[1].Actor)
 	assert.Equal(t, "approved", events[1].Meta["status"])
+	assert.Equal(t, "approve", events[1].Meta["vote"])
 
 	assert.Equal(t, "approval.claim", events[2].Action)
 	assert.Equal(t, "worker-1", events[2].Actor)
 
 	assert.Equal(t, "approval.complete", events[3].Action)
+
+	// A second flow, on its own request, covers Fail.
+	m2, r2 := submitted(t, approval.Policy{Quorum: 1}, approval.WithAuditor(auditor))
+	_, err = m2.Approve(ctx, r2.ID, actor("bob"))
+	require.NoError(t, err)
+	_, err = m2.Claim(ctx, r2.ID, "worker-2")
+	require.NoError(t, err)
+	_, err = m2.Fail(ctx, r2.ID, "worker-2", "gateway down")
+	require.NoError(t, err)
+
+	events = sink.Events()
+	require.Len(t, events, 8)
+	assert.Equal(t, "approval.fail", events[7].Action)
+	assert.Equal(t, "worker-2", events[7].Actor)
+	assert.Equal(t, auditlog.OutcomeFailure, events[7].Outcome)
+	assert.Equal(t, "gateway down", events[7].Meta["reason"])
+
+	// A third flow, on its own request, covers Release.
+	m3, r3 := submitted(t, approval.Policy{Quorum: 1}, approval.WithAuditor(auditor))
+	_, err = m3.Approve(ctx, r3.ID, actor("bob"))
+	require.NoError(t, err)
+	_, err = m3.Claim(ctx, r3.ID, "worker-3")
+	require.NoError(t, err)
+	_, err = m3.Release(ctx, r3.ID, actor("ops-oncall"))
+	require.NoError(t, err)
+
+	events = sink.Events()
+	require.Len(t, events, 12)
+	assert.Equal(t, "approval.release", events[11].Action)
+	assert.Equal(t, "ops-oncall", events[11].Actor)
+	assert.Equal(t, auditlog.OutcomeSuccess, events[11].Outcome)
 }
 
 func TestAuditRecordsDeniedAttempts(t *testing.T) {

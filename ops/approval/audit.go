@@ -33,6 +33,9 @@ func (m *Manager) audit(ctx context.Context, r Request, action, actor, outcome, 
 			meta["quorum"] = strconv.Itoa(pol.Quorum)
 			meta["approvals"] = strconv.Itoa(r.Approvals())
 		}
+		if n := len(r.Decisions); n > 0 {
+			meta["vote"] = r.Decisions[n-1].Vote.String()
+		}
 	}
 	_, err := m.cfg.auditor.Record(ctx, auditlog.Event{
 		Actor:    actor,
