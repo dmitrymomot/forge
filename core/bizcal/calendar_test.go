@@ -69,6 +69,57 @@ func TestNew_EmptyCalendar_ErrNeverOpen(t *testing.T) {
 	}
 }
 
+func TestNew_WeekdayNoWindows_ErrNeverOpen(t *testing.T) {
+	// A weekday base with no windows and nothing else opens no time: the
+	// calendar is structurally never open and must be rejected at New.
+	_, err := bizcal.New(time.UTC, bizcal.WithWeekday(time.Monday))
+	if !errors.Is(err, bizcal.ErrNeverOpen) {
+		t.Fatalf("New() = %v, want ErrNeverOpen", err)
+	}
+}
+
+func TestNew_WeekdayNoWindows_WithShifts_Valid(t *testing.T) {
+	// A windows-empty weekday base combined with shifts is still open: the
+	// shifts supply the open time, so construction must succeed.
+	start := time.Date(2026, time.July, 20, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, time.July, 20, 17, 0, 0, 0, time.UTC)
+	cal, err := bizcal.New(time.UTC,
+		bizcal.WithWeekday(time.Monday),
+		bizcal.WithShifts(bizcal.Shift(start, end)),
+	)
+	if err != nil {
+		t.Fatalf("New() = %v, want nil", err)
+	}
+	if !cal.IsWorkingDay(bizcal.MustDate(2026, time.July, 20)) {
+		t.Fatal("IsWorkingDay(shift day) = false, want true")
+	}
+}
+
+func TestNew_WithWeekday_SameWeekdayAppends(t *testing.T) {
+	// Repeated WithWeekday for the same weekday appends windows rather than
+	// replacing; overlapping windows merge. A Monday configured with a
+	// morning window in one call and an overlapping-into-afternoon window in
+	// another must be open across the union.
+	cal, err := bizcal.New(time.UTC,
+		bizcal.WithWeekday(time.Monday, bizcal.MustWindows("09:00-13:00")...),
+		bizcal.WithWeekday(time.Monday, bizcal.MustWindows("12:00-18:00")...),
+	)
+	if err != nil {
+		t.Fatalf("New() = %v, want nil", err)
+	}
+	monday := bizcal.MustDate(2026, time.July, 20) // a Monday
+	if got, want := cal.DayDuration(monday), 9*time.Hour; got != want {
+		t.Fatalf("DayDuration(Monday) = %s, want %s (merged 09-18)", got, want)
+	}
+	// A point inside each original window is open; the merge spans both.
+	for _, hm := range []struct{ h, m int }{{10, 0}, {12, 30}, {17, 0}} {
+		at := time.Date(2026, time.July, 20, hm.h, hm.m, 0, 0, time.UTC)
+		if !cal.IsOpen(at) {
+			t.Fatalf("IsOpen(%02d:%02d) = false, want true", hm.h, hm.m)
+		}
+	}
+}
+
 func TestNew_NilLocation_ErrNilLocation(t *testing.T) {
 	_, err := bizcal.New(nil, bizcal.WithAlwaysOpen())
 	if !errors.Is(err, bizcal.ErrNilLocation) {

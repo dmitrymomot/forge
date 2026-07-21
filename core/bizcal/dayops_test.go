@@ -203,20 +203,62 @@ func TestAddWorkingDays_HorizonExceeded(t *testing.T) {
 }
 
 func TestRule_OutOfYearDatesIgnored(t *testing.T) {
-	// A rule that only ever returns next-year dates must not affect the
-	// queried year: 2026-01-01 (a Thursday) stays a working day.
-	outOfYear := bizcal.RuleFunc(func(year int) []bizcal.Date {
-		return []bizcal.Date{bizcal.MustDate(year+1, time.January, 1)}
+	// A rule that always returns the same far-year date regardless of the
+	// queried year must only close that date in its own year. buildYear now
+	// evaluates each rule for years y-1, y, and y+1, so 2030-06-18 (a Tuesday)
+	// is produced when building 2029, 2030, and 2031; only 2030's plan may
+	// keep it. This pins the defensive out-of-year filter: 2029-06-18 (Monday)
+	// and 2031-06-18 (Wednesday), both workdays, stay working days.
+	fixedFar := bizcal.RuleFunc(func(int) []bizcal.Date {
+		return []bizcal.Date{bizcal.MustDate(2030, time.June, 18)}
 	})
 	cal, err := bizcal.New(time.UTC,
 		bizcal.WithWorkdays(8*time.Hour, time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday),
-		bizcal.WithRule(outOfYear),
+		bizcal.WithRule(fixedFar),
 	)
 	if err != nil {
 		t.Fatalf("New() = %v", err)
 	}
-	if !cal.IsWorkingDay(bizcal.MustDate(2026, time.January, 1)) {
-		t.Fatal("IsWorkingDay(2026-01-01) = false, want true (out-of-year rule date must be ignored)")
+	if cal.IsWorkingDay(bizcal.MustDate(2030, time.June, 18)) {
+		t.Fatal("IsWorkingDay(2030-06-18) = true, want false (rule closes its own year)")
+	}
+	if !cal.IsWorkingDay(bizcal.MustDate(2029, time.June, 18)) {
+		t.Fatal("IsWorkingDay(2029-06-18) = false, want true (out-of-year rule date must be ignored)")
+	}
+	if !cal.IsWorkingDay(bizcal.MustDate(2031, time.June, 18)) {
+		t.Fatal("IsWorkingDay(2031-06-18) = false, want true (out-of-year rule date must be ignored)")
+	}
+}
+
+func TestRule_ObservedShiftBackwardAcrossYearBoundary(t *testing.T) {
+	// Observed(Fixed{Jan 1}): in 2022 Jan 1 is a Saturday, so the observance
+	// shifts back to Friday 2021-12-31, which lands in the prior year's plan.
+	// buildYear(2021) must honor it even though the rule was defined for 2022.
+	cal, err := bizcal.New(time.UTC,
+		bizcal.WithWorkdays(8*time.Hour, time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday),
+		bizcal.WithRule(bizcal.Observed(bizcal.Fixed{Month: time.January, Day: 1})),
+	)
+	if err != nil {
+		t.Fatalf("New() = %v", err)
+	}
+	if cal.IsWorkingDay(bizcal.MustDate(2021, time.December, 31)) {
+		t.Fatal("IsWorkingDay(2021-12-31) = true, want false (observed New Year shifted back)")
+	}
+}
+
+func TestRule_ObservedShiftForwardAcrossYearBoundary(t *testing.T) {
+	// Observed(Fixed{Dec 31}): in 2023 Dec 31 is a Sunday, so the observance
+	// shifts forward to Monday 2024-01-01, landing in the next year's plan.
+	// buildYear(2024) must honor it even though the rule was defined for 2023.
+	cal, err := bizcal.New(time.UTC,
+		bizcal.WithWorkdays(8*time.Hour, time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday),
+		bizcal.WithRule(bizcal.Observed(bizcal.Fixed{Month: time.December, Day: 31})),
+	)
+	if err != nil {
+		t.Fatalf("New() = %v", err)
+	}
+	if cal.IsWorkingDay(bizcal.MustDate(2024, time.January, 1)) {
+		t.Fatal("IsWorkingDay(2024-01-01) = true, want false (observed Dec 31 shifted forward)")
 	}
 }
 
