@@ -87,3 +87,45 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 	}
 	return r, m.audit(ctx, r, action, a.Subject.ID, outcomeSuccess, a.Reason)
 }
+
+// Cancel withdraws a request before it executes. It is legal from Pending
+// and Approved but not from Executing — an in-flight action is not
+// cancellable; the executor reports the outcome with Complete or Fail.
+//
+// The requester may always cancel their own request. Any other actor is
+// gated on "<kind>:cancel" when a decider is configured: withdrawing
+// someone else's request is a different privilege from judging it, and a
+// policy that grants one need not grant the other.
+func (m *Manager) Cancel(ctx context.Context, reqID id.UUID, a Actor) (Request, error) {
+	if a.Subject.ID == "" {
+		return Request{}, ErrActorRequired
+	}
+
+	var denied bool
+	r, err := m.mutate(ctx, reqID, func(r *Request) error {
+		if r.Status != Pending && r.Status != Approved {
+			if r.Status == Expired {
+				return ErrExpired
+			}
+			return ErrNotCancellable
+		}
+		if r.Requester != a.Subject.ID {
+			if err := m.eligible(ctx, *r, a, verbCancel); err != nil {
+				denied = true
+				return err
+			}
+		}
+		r.Status = Cancelled
+		r.DecidedAt = m.now()
+		return nil
+	})
+	if err != nil {
+		if denied {
+			if aerr := m.auditDenied(ctx, reqID, actionCancel, a.Subject.ID, err); aerr != nil {
+				return Request{}, aerr
+			}
+		}
+		return Request{}, err
+	}
+	return r, m.audit(ctx, r, actionCancel, a.Subject.ID, outcomeSuccess, a.Reason)
+}

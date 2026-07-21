@@ -65,7 +65,8 @@ var (
 	ErrNotClaimHolder = errors.New("approval: executor does not hold the claim")
 
 	// ErrNotCancellable rejects Cancel on a request that is executing or
-	// already terminal.
+	// has already reached a terminal status other than Expired — an expired
+	// request is rejected with ErrExpired instead.
 	ErrNotCancellable = errors.New("approval: request not cancellable")
 
 	// ErrNotEligible rejects a decision from an actor the decider denied,

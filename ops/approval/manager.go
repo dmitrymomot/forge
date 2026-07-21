@@ -64,11 +64,15 @@ const (
 	actionSubmit   = "approval.submit"
 	actionApprove  = "approval.approve"
 	actionReject   = "approval.reject"
+	actionCancel   = "approval.cancel"
 	outcomeSuccess = "success"
 )
 
 // Eligibility verbs, appended to a kind name to form the access.Action.
-const verbDecide = "decide"
+const (
+	verbDecide = "decide"
+	verbCancel = "cancel"
+)
 
 // eligible checks the actor against the decider seam. Landed in Task 9;
 // until then every actor is eligible.
