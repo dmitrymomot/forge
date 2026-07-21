@@ -47,10 +47,11 @@
 // # Stores
 //
 // The built-in MemoryStore is for tests and development. Production
-// backings: pgstore (Postgres, the only driver with UserIndex — device
-// listings, per-device revocation, "log out everywhere", GDPR deletion),
-// cookiestore (stateless encrypted cookie, no server state, no revocation),
-// and NewKVStore over any durable cache.Store (cache/redis).
+// backings: pgstore (Postgres) and mongostore (MongoDB) — the UserIndex
+// drivers behind device listings, per-device revocation, "log out
+// everywhere", and GDPR deletion — plus cookiestore (stateless encrypted
+// cookie, no server state, no revocation) and NewKVStore over any durable
+// cache.Store (cache/redis).
 //
 // # Device management (UserIndex stores only)
 //

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dmitrymomot/forge/web/clientip"
 )
@@ -96,7 +97,13 @@ func (m *Manager[T]) saveRequest(w http.ResponseWriter, r *http.Request, s *Sess
 	}
 	ip, ua := m.cfg.clientInfo(r)
 	if len(ua) > maxUserAgentLen {
-		ua = ua[:maxUserAgentLen]
+		// Cut on a rune boundary: a byte-count slice through a multi-byte
+		// UTF-8 sequence would store an invalid string.
+		cut := maxUserAgentLen
+		for cut > 0 && !utf8.RuneStart(ua[cut]) {
+			cut--
+		}
+		ua = ua[:cut]
 	}
 	s.IP, s.UserAgent = ip, ua
 	if err := op(m, r.Context(), s); err != nil {

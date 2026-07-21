@@ -3,7 +3,9 @@ package session_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,6 +130,17 @@ func TestRequestFlow_ClientInfoHookAndUACap(t *testing.T) {
 	require.NoError(t, mgr.SaveRequest(w, r, s))
 	assert.Equal(t, "10.0.0.1", s.IP)
 	assert.Len(t, s.UserAgent, 256, "hostile User-Agent must be truncated")
+
+	// A multi-byte rune straddling the cap must not be split mid-sequence:
+	// after the ASCII prefix every 2-byte rune starts on an odd index, so
+	// byte 256 falls mid-rune and the cut must retreat to 255.
+	multi := "a" + strings.Repeat("é", 200)
+	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2.Header.Set("X-Custom-UA", multi)
+	s2 := mgr.Start(r2.Context())
+	require.NoError(t, mgr.SaveRequest(httptest.NewRecorder(), r2, s2))
+	assert.True(t, utf8.ValidString(s2.UserAgent), "truncation must land on a rune boundary")
+	assert.Equal(t, 255, len(s2.UserAgent))
 }
 
 func TestRequestFlow_RotateRequest(t *testing.T) {
