@@ -26,9 +26,13 @@ func WithRejectHandler(h func(w http.ResponseWriter, r *http.Request, err error)
 }
 
 // WithLogger sets the logger for rejection and scorer-failure records.
-// Defaults to logger.NewNope.
+// Defaults to logger.NewNope; nil is ignored.
 func WithLogger(l *slog.Logger) MiddlewareOption {
-	return func(c *middlewareConfig) { c.log = l }
+	return func(c *middlewareConfig) {
+		if l != nil {
+			c.log = l
+		}
+	}
 }
 
 // Middleware gates requests through e. buildInput assembles the scorer input
