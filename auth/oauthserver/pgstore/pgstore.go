@@ -85,14 +85,27 @@ func (s *Store) Update(ctx context.Context, c oauthserver.Client) error {
 	return nil
 }
 
-const listSQL = `
+// Two static shapes instead of `($1 = ” OR tenant_id = $1)`: under a
+// generic plan (which pgx-prepared statements reach after five executions)
+// Postgres cannot prune that OR and stops using oauth_clients_tenant_idx.
+const (
+	listSQL = `
 SELECT ` + columns + ` FROM oauth_clients
-WHERE ($1 = '' OR tenant_id = $1)
 ORDER BY created_at, id`
+
+	listTenantSQL = `
+SELECT ` + columns + ` FROM oauth_clients
+WHERE tenant_id = $1
+ORDER BY created_at, id`
+)
 
 // List returns the tenant's clients; tenantID "" returns all.
 func (s *Store) List(ctx context.Context, tenantID string) ([]oauthserver.Client, error) {
-	rows, err := s.pool.Query(ctx, listSQL, tenantID)
+	sql, args := listSQL, []any(nil)
+	if tenantID != "" {
+		sql, args = listTenantSQL, []any{tenantID}
+	}
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
