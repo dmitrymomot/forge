@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -16,11 +17,13 @@ import (
 type Calendar struct {
 	loc            *time.Location
 	exceptions     map[Date]Exception
+	years          map[int]*yearPlan
 	weekly         [7][]Window
 	rules          []Rule
 	shifts         []Interval
 	workdayCap     [7]time.Duration
 	horizon        time.Duration
+	mu             sync.RWMutex
 	workdaySet     [7]bool
 	usedWeekday    bool
 	usedWorkdays   bool
@@ -88,6 +91,7 @@ func New(loc *time.Location, opts ...Option) (*Calendar, error) {
 		exceptions:     make(map[Date]Exception, len(cfg.exceptions)),
 		shifts:         mergeIntervals(cfg.shifts),
 		horizon:        cfg.horizon,
+		years:          make(map[int]*yearPlan),
 	}
 	for i := range cfg.weekly {
 		cal.weekly[i] = mergeWindows(cfg.weekly[i])
@@ -106,6 +110,82 @@ func (c *Calendar) Location() *time.Location {
 // DateOf converts t to c's zone and returns its civil date there.
 func (c *Calendar) DateOf(t time.Time) Date {
 	return DateOf(t.In(c.loc))
+}
+
+// IsWorkingDay reports whether d has any open time: a non-zero scheduled
+// capacity or at least one open interval. A workdays-model day-off (or a
+// zero-capacity ShortDay) leaves both empty and is therefore not a working
+// day; a shift rostered onto a holiday makes that date working.
+func (c *Calendar) IsWorkingDay(d Date) bool {
+	p := c.dayPlan(d)
+	return p.capacity > 0 || len(p.intervals) > 0
+}
+
+// WorkingDays counts the working days in the half-open range [from, to). It
+// returns 0 when from is not before to (empty or inverted range).
+func (c *Calendar) WorkingDays(from, to Date) int {
+	if !from.Before(to) {
+		return 0
+	}
+	count := 0
+	for d := from; d.Before(to); d = d.AddDays(1) {
+		if c.IsWorkingDay(d) {
+			count++
+		}
+	}
+	return count
+}
+
+// AddWorkingDays returns the n-th working day strictly after d (n > 0) or
+// strictly before d (n < 0), skipping non-working days. n == 0 returns d
+// unchanged, even when d itself is not a working day. The scan is bounded by
+// the configured horizon (interpreted as a day count of horizon/24h from d);
+// exhausting it returns ErrHorizonExceeded.
+func (c *Calendar) AddWorkingDays(d Date, n int) (Date, error) {
+	if n == 0 {
+		return d, nil
+	}
+	maxDays := int(c.horizon / (24 * time.Hour))
+	step := 1
+	if n < 0 {
+		step = -1
+		n = -n
+	}
+	cur := d
+	for moved := 0; ; {
+		cur = cur.AddDays(step)
+		moved++
+		if moved > maxDays {
+			return Date{}, ErrHorizonExceeded
+		}
+		if c.IsWorkingDay(cur) {
+			if n--; n == 0 {
+				return cur, nil
+			}
+		}
+	}
+}
+
+// DayDuration returns d's scheduled capacity: the duration that counts as the
+// day's expected hours. For the windows model this is the sum of real
+// interval durations (so a DST day may differ from a nominal one); for the
+// workdays model it is the fixed per-day capacity; shift time rostered onto d
+// adds on top.
+func (c *Calendar) DayDuration(d Date) time.Duration {
+	return c.dayPlan(d).capacity
+}
+
+// ScheduledBetween sums DayDuration over the half-open range [from, to). It
+// returns 0 when from is not before to (empty or inverted range).
+func (c *Calendar) ScheduledBetween(from, to Date) time.Duration {
+	if !from.Before(to) {
+		return 0
+	}
+	var total time.Duration
+	for d := from; d.Before(to); d = d.AddDays(1) {
+		total += c.dayPlan(d).capacity
+	}
+	return total
 }
 
 // mergeWindows returns a sorted, non-aliasing copy of ws with overlapping or
