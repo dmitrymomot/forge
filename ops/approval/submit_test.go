@@ -2,6 +2,7 @@ package approval_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -82,6 +83,32 @@ func TestSubmitClonesMeta(t *testing.T) {
 
 	meta["request_id"] = "tampered"
 	assert.Equal(t, "req_1", r.Meta["request_id"], "meta is cloned at submit")
+}
+
+// unmarshalablePayload cannot be encoded by encoding/json — a chan field
+// always fails Marshal.
+type unmarshalablePayload struct {
+	Ch chan int
+}
+
+func TestSubmitMarshalFailureLeavesNothingPersisted(t *testing.T) {
+	t.Parallel()
+	kind := approval.NewKind[unmarshalablePayload]("test.submit-marshal-failure")
+	m := approval.New(approval.NewMemoryStore(),
+		approval.WithKind(kind, approval.Policy{Quorum: 1}),
+		approval.WithClock(clock.NewMock(fixedNow)))
+	ctx := context.Background()
+
+	_, err := approval.Submit(ctx, m, kind, unmarshalablePayload{Ch: make(chan int)},
+		approval.SubmitParams{Requester: "alice"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marshal payload")
+	var jsonErr *json.UnsupportedTypeError
+	assert.ErrorAs(t, err, &jsonErr, "the underlying json error must surface, not be swallowed")
+
+	got, lerr := m.List(ctx, approval.Filter{Kind: kind.Name()})
+	require.NoError(t, lerr)
+	assert.Empty(t, got, "a marshal failure must abort before Store.Create — nothing may be persisted")
 }
 
 func TestPayloadOf(t *testing.T) {
