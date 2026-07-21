@@ -308,17 +308,6 @@ Deps: `auth/guard`.
 
 ---
 
-**auth/abac**
-
-Attribute/relationship predicates as registered Go functions — "agent sees
-own subtree but not subagents' player details" — evaluated in the
-`access` decision seam alongside rbac/acl. The relationship data (trees,
-assignments) stays consumer code feeding the predicate; no policy DSL.
-
-Deps: `auth/access`.
-
----
-
 **auth/webauthn**
 
 Passkey registration and assertion over isolated `go-webauthn` (CBOR/COSE
