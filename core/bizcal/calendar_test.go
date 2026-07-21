@@ -95,6 +95,32 @@ func TestNew_WeekdayNoWindows_WithShifts_Valid(t *testing.T) {
 	}
 }
 
+func TestNew_WorkdaysNoWeekdays_ErrNeverOpen(t *testing.T) {
+	// A workdays base with no weekdays supplied opens no time: the calendar
+	// is structurally never open and must be rejected at New.
+	_, err := bizcal.New(time.UTC, bizcal.WithWorkdays(8*time.Hour))
+	if !errors.Is(err, bizcal.ErrNeverOpen) {
+		t.Fatalf("New() = %v, want ErrNeverOpen", err)
+	}
+}
+
+func TestNew_WorkdaysNoWeekdays_WithShifts_Valid(t *testing.T) {
+	// A weekdays-empty workdays base combined with shifts is still open: the
+	// shifts supply the open time, so construction must succeed.
+	start := time.Date(2026, time.July, 20, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, time.July, 20, 17, 0, 0, 0, time.UTC)
+	cal, err := bizcal.New(time.UTC,
+		bizcal.WithWorkdays(8*time.Hour),
+		bizcal.WithShifts(bizcal.Shift(start, end)),
+	)
+	if err != nil {
+		t.Fatalf("New() = %v, want nil", err)
+	}
+	if !cal.IsWorkingDay(bizcal.MustDate(2026, time.July, 20)) {
+		t.Fatal("IsWorkingDay(shift day) = false, want true")
+	}
+}
+
 func TestNew_WithWeekday_SameWeekdayAppends(t *testing.T) {
 	// Repeated WithWeekday for the same weekday appends windows rather than
 	// replacing; overlapping windows merge. A Monday configured with a

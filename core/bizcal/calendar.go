@@ -81,7 +81,17 @@ func New(loc *time.Location, opts ...Option) (*Calendar, error) {
 			break
 		}
 	}
-	hasBase := cfg.usedWorkdays || cfg.usedAlwaysOpen || (cfg.usedWeekday && weekdayHasWindows)
+	// A WithWorkdays base only opens the calendar if at least one weekday was
+	// actually supplied; WithWorkdays(perDay) with no weekdays contributes no
+	// open time, so it does not count as a base for the never-open check.
+	workdaysHasDays := false
+	for _, on := range cfg.workdaySet {
+		if on {
+			workdaysHasDays = true
+			break
+		}
+	}
+	hasBase := (cfg.usedWorkdays && workdaysHasDays) || cfg.usedAlwaysOpen || (cfg.usedWeekday && weekdayHasWindows)
 	if !hasBase && len(cfg.shifts) == 0 {
 		errs = append(errs, ErrNeverOpen)
 	}
