@@ -55,6 +55,10 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 			return err
 		}
 
+		pol, ok := m.policyFor(r.Kind)
+		if !ok {
+			return ErrUnknownKind
+		}
 		now := m.now()
 		r.Decisions = append(r.Decisions, Decision{
 			At:       now,
@@ -62,10 +66,6 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 			Reason:   a.Reason,
 			Vote:     v,
 		})
-		pol, ok := m.policyFor(r.Kind)
-		if !ok {
-			return ErrUnknownKind
-		}
 		switch {
 		case v == VoteReject:
 			r.Status = Rejected
