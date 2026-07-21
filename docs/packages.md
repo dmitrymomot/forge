@@ -245,20 +245,6 @@ Deps: `resilience/cache`; `realtime/fanout`.
 
 ---
 
-**auth/session**
-
-Server-side session lifecycle (Start/Load/Save/Destroy/Rotate) over a
-pluggable Store; rotate-on-privilege-change; multi-device management via
-an optional `UserIndex` store extension (ListByUser/DeleteByUser — "log
-out other devices", GDPR deletion); `WithFingerprint(Warn|Strict)` hijack
-detection. In-memory store built in; drivers: `session/pgstore`
-(user-indexed), `session/cookiestore` (stateless-encrypted, no UserIndex —
-documented); generic KV backing rides `cache.Store`.
-
-Deps: `resilience/cache`, `data/postgres`; `web/fingerprint`.
-
----
-
 **auth/impersonation**
 
 Support-agent "log in as": time-boxed impersonation sessions with a
@@ -267,7 +253,7 @@ events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/access`; `auth/session`, `ops/approval` (both planned);
+Deps: `auth/access`, `auth/session`; `ops/approval` (planned);
 `ops/auditlog`.
 
 ---
