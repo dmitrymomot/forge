@@ -65,7 +65,12 @@ const (
 	actionApprove  = "approval.approve"
 	actionReject   = "approval.reject"
 	actionCancel   = "approval.cancel"
+	actionClaim    = "approval.claim"
+	actionComplete = "approval.complete"
+	actionFail     = "approval.fail"
+	actionRelease  = "approval.release"
 	outcomeSuccess = "success"
+	outcomeFailure = "failure"
 )
 
 // Eligibility verbs, appended to a kind name to form the access.Action.

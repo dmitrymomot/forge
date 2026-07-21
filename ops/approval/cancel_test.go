@@ -53,3 +53,29 @@ func TestCancelRequiresActorID(t *testing.T) {
 	_, err := m.Cancel(context.Background(), r.ID, approval.Actor{})
 	assert.ErrorIs(t, err, approval.ErrActorRequired)
 }
+
+func TestCancelRejectedWhileExecuting(t *testing.T) {
+	t.Parallel()
+	m, r := approved(t, approval.Policy{Quorum: 1})
+	ctx := context.Background()
+
+	_, err := m.Claim(ctx, r.ID, "worker-1")
+	require.NoError(t, err)
+
+	_, err = m.Cancel(ctx, r.ID, actor("alice"))
+	assert.ErrorIs(t, err, approval.ErrNotCancellable, "an in-flight action is not cancellable")
+}
+
+func TestCancelRejectedOnExecutedRequest(t *testing.T) {
+	t.Parallel()
+	m, r := approved(t, approval.Policy{Quorum: 1})
+	ctx := context.Background()
+
+	_, err := m.Claim(ctx, r.ID, "worker-1")
+	require.NoError(t, err)
+	_, err = m.Complete(ctx, r.ID, "worker-1")
+	require.NoError(t, err)
+
+	_, err = m.Cancel(ctx, r.ID, actor("alice"))
+	assert.ErrorIs(t, err, approval.ErrNotCancellable)
+}
