@@ -192,19 +192,7 @@ handling, Last-Event-ID resume via the replay ring. The low-level writer
 stays exported as the brick under `web/htmx`'s SendComponent bridge and
 `llm.SSE`. Requires httpserver WriteTimeout=0 (documented).
 
-Deps: `realtime/fanout` (planned).
-
----
-
-**realtime/fanout**
-
-In-process pub/sub hub (bounded buffers, explicit slow-consumer policy)
-with the `Bus` seam for multi-instance backplanes and an optional bounded
-`WithReplay(n)` ring. Drivers: `fanout/pgbus` (LISTEN/NOTIFY — multi-
-instance push with zero new infrastructure), `fanout/redisbus` (takes the
-caller's `data/redis` client).
-
-Deps: drivers ride `data/postgres`, `data/redis`.
+Deps: `realtime/fanout`.
 
 ---
 
@@ -225,7 +213,7 @@ Deps: `ops/supervisor` (coder/websocket external).
 Who-is-here tracking with TTL heartbeats over `fanout` + `cache` — online
 indicators, concurrent-viewer counts.
 
-Deps: `resilience/cache`; `realtime/fanout` (planned).
+Deps: `resilience/cache`; `realtime/fanout`.
 
 ## auth/
 
