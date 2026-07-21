@@ -51,7 +51,10 @@ consumer ──Submit[T]──► Manager ──CAS──► Store ──► mem
 | `doc.go` | Package doc + runnable example |
 | `approval.go` | `Request`, `Decision`, `Status`, `Vote`, `Kind[T]`, `SubmitParams`, `Actor`, `Filter` |
 | `policy.go` | `Policy`, kind registry entry, validation |
-| `manager.go` | `New`, transitions, CAS retry loop, lazy expiry, scope resolution |
+| `manager.go` | `New`, `Get`, `List`, CAS retry loop, lazy expiry, scope resolution |
+| `submit.go` | `Submit[T]`, `PayloadOf[T]` |
+| `decide.go` | `Approve`, `Reject`, `Cancel` |
+| `execute.go` | `Claim`, `Complete`, `Fail`, `Release`, `Execute` |
 | `eligibility.go` | access.Decider invocation and fail-closed mapping |
 | `audit.go` | auditlog event emission |
 | `store.go` | `Store` interface |
@@ -59,6 +62,7 @@ consumer ──Submit[T]──► Manager ──CAS──► Store ──► mem
 | `options.go` | `type Option func(*config)`, `WithKind`, `WithDecider`, `WithAuditor`, `WithScope`, `WithClock`, `WithMaxRetries` |
 | `errors.go` | `errors.Is`-matchable single-line sentinels |
 | `bench_test.go` | Required benchmarks (see Performance) |
+| `approvaltest/` | Exported Store conformance suite, shared by memory and pgstore |
 | `pgstore/` | Postgres driver + goose migrations + integration tests |
 
 Target ~700–850 LOC for the core package, inside the single-responsibility band.
@@ -133,6 +137,9 @@ type Request struct {
     Tenant    string
     Requester string
     ClaimedBy string
+    // Reason is the maker's justification, captured at submit and shown to
+    // checkers deciding on the request.
+    Reason string
 
     ID      id.UUID
     Version int64
@@ -373,6 +380,7 @@ CREATE TABLE forge_approval_requests (
     status      smallint NOT NULL,
     version     bigint NOT NULL DEFAULT 1,
     payload     json NOT NULL,
+    reason      text NOT NULL DEFAULT '',
     decisions   json NOT NULL DEFAULT '[]'::json,
     meta        jsonb NOT NULL DEFAULT '{}'::jsonb,
     claimed_by  text NOT NULL DEFAULT '',
