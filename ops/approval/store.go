@@ -30,7 +30,8 @@ type Store interface {
 	Get(ctx context.Context, reqID id.UUID) (Request, error)
 
 	// List returns requests matching f, newest first (UUIDv7 id order;
-	// ties within one millisecond are unordered).
+	// ties within one millisecond are unordered). A zero f.Limit defaults
+	// to 100; every implementation must apply the same fixed default.
 	List(ctx context.Context, f Filter) ([]Request, error)
 
 	// Update persists r only when the stored Version equals expect,

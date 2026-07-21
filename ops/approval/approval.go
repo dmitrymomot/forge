@@ -198,7 +198,8 @@ type Filter struct {
 	// derived on read), so listing it matches nothing — query
 	// []Status{Pending, Approved} with ExpiresBefore instead.
 	Statuses []Status
-	// Limit caps the number of records returned. Zero means the store's
-	// default.
+	// Limit caps the number of records returned. Zero defaults to 100; every
+	// Store implementation must apply the same default so swapping stores
+	// cannot silently truncate results.
 	Limit int
 }

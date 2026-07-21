@@ -82,11 +82,20 @@ func (s *memoryStore) List(_ context.Context, f Filter) ([]Request, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return string(out[i].ID[:]) > string(out[j].ID[:])
 	})
-	if f.Limit > 0 && len(out) > f.Limit {
-		out = out[:f.Limit]
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }
+
+// defaultLimit caps an unbounded List so a zero Filter.Limit cannot pull an
+// unbounded result set into memory. Every Store implementation defaults to
+// the same value — see approvaltest.Run's ListDefaultLimitIsFixed case.
+const defaultLimit = 100
 
 func matches(r Request, f Filter) bool {
 	if f.Kind != "" && r.Kind != f.Kind {

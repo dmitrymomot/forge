@@ -215,4 +215,16 @@ func Run(t *testing.T, factory func(t *testing.T) approval.Store) {
 		assert.NotNil(t, got, "nil vs empty must not differ across implementations")
 		assert.Empty(t, got)
 	})
+
+	t.Run("ListDefaultLimitIsFixed", func(t *testing.T) {
+		s, n, ctx := factory(t), newNS(), context.Background()
+		for range 105 {
+			require.NoError(t, s.Create(ctx, n.request("alice", approval.Pending)))
+		}
+
+		got, err := s.List(ctx, approval.Filter{Tenant: n.tenant})
+		require.NoError(t, err)
+		assert.Len(t, got, 100,
+			"a zero Filter.Limit must default to exactly 100 across every Store implementation")
+	})
 }
