@@ -121,21 +121,21 @@ func TestMaxRetriesZeroIsSingleAttempt(t *testing.T) {
 	assert.Equal(t, 1, cs.calls, "WithMaxRetries(0) means a single attempt, no retry")
 }
 
-// TestMaxRetriesNegativeClampsToZero proves a negative WithMaxRetries
-// clamps to zero rather than, say, disabling the retry bound.
-func TestMaxRetriesNegativeClampsToZero(t *testing.T) {
-	t.Parallel()
-	p := approval.Policy{Quorum: 1}
-	real := approval.NewMemoryStore()
-	ctx := context.Background()
-	cs := &conflictStore{Store: real, left: 1}
-	m := approval.New(cs, approval.WithKind(kindPayout, p), approval.WithClock(clock.NewMock(fixedNow)),
-		approval.WithMaxRetries(-5))
-
-	r, err := approval.Submit(ctx, m, kindPayout, payoutPayload{}, approval.SubmitParams{Requester: "alice"})
-	require.NoError(t, err)
-
-	_, err = m.Approve(ctx, r.ID, actor("bob"))
-	assert.ErrorIs(t, err, approval.ErrConflict)
-	assert.Equal(t, 1, cs.calls, "a negative WithMaxRetries clamps to zero — still a single attempt")
-}
+// There is intentionally no TestMaxRetriesNegativeClampsToZero here.
+//
+// mutate's exhaustion check is `case attempt >= m.cfg.maxRetries` with
+// attempt starting at 0, so for ANY maxRetries <= 0 — clamped to 0 by
+// options.go, or left raw at -5 without that clamp — the very first
+// conflict already satisfies `0 >= maxRetries` and mutate stops after
+// exactly one Update call. That holds for every possible number of
+// injected conflicts, so no black-box assertion on call count, error, or
+// outcome can ever distinguish "clamped to zero" from "left negative":
+// grep confirms cfg.maxRetries is read nowhere else in the package. A
+// test asserting this indistinguishable behavior would pass identically
+// whether options.go's `if n < 0 { n = 0 }` clamp exists or not — proven
+// by temporarily deleting that clamp and re-running the old version of
+// this test, which still passed unchanged. The clamp itself stays (it is
+// still the documented contract on WithMaxRetries and would matter the
+// moment maxRetries is ever read from a second call site), but a test
+// that cannot fail when the thing it guards is removed is worse than no
+// test: it was deleted rather than kept as false assurance.
