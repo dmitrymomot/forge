@@ -40,12 +40,28 @@ func New(store Store, opts ...Option) *Manager {
 
 // policyFor returns the policy registered for kind. The registry is
 // immutable after New, so this read needs no lock.
-//
-//nolint:unused // consumed by Submit, added in Task 4 of this package's build.
 func (m *Manager) policyFor(kind string) (Policy, bool) {
 	p, ok := m.cfg.kinds[kind]
 	return p, ok
 }
+
+// scoped resolves the tenant an operation is confined to. Tenancy lands in
+// Task 11; until then it passes the requested tenant through.
+func (m *Manager) scoped(_ context.Context, requested string) (string, error) {
+	return requested, nil
+}
+
+// audit records a state change. The auditlog seam lands in Task 10; until
+// then it is a no-op.
+func (m *Manager) audit(_ context.Context, _ Request, _, _, _, _ string) error {
+	return nil
+}
+
+// Audit action names and outcomes.
+const (
+	actionSubmit   = "approval.submit"
+	outcomeSuccess = "success"
+)
 
 // Get loads one request, with expiry applied: a Pending or Approved
 // request past its ExpiresAt reports Status Expired even though the stored
