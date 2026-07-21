@@ -24,28 +24,28 @@ func TestNewPanics(t *testing.T) {
 		approval.New(nil, approval.WithKind(kindPayout, approval.Policy{Quorum: 2}))
 	})
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, `approval: kind "payout.release": quorum must be >= 1, got 0`, func() {
 		approval.New(approval.NewMemoryStore(),
 			approval.WithKind(kindPayout, approval.Policy{Quorum: 0}))
 	}, "quorum below 1 is a wiring bug")
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "approval: duplicate kind payout.release", func() {
 		approval.New(approval.NewMemoryStore(),
 			approval.WithKind(kindPayout, approval.Policy{Quorum: 2}),
 			approval.WithKind(kindPayout, approval.Policy{Quorum: 3}))
 	}, "duplicate kind registration is a wiring bug")
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, `approval: kind "payout.release": negative TTL -1h0m0s`, func() {
 		approval.New(approval.NewMemoryStore(),
 			approval.WithKind(kindPayout, approval.Policy{Quorum: 2, TTL: -time.Hour}))
 	}, "negative TTL is a wiring bug")
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, `approval: kind "payout.release": negative ClaimTTL -1h0m0s`, func() {
 		approval.New(approval.NewMemoryStore(),
 			approval.WithKind(kindPayout, approval.Policy{Quorum: 2, ClaimTTL: -time.Hour}))
 	}, "negative ClaimTTL is a wiring bug")
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "approval: no kinds registered; every submission would fail with ErrUnknownKind", func() {
 		approval.New(approval.NewMemoryStore())
 	}, "a manager with no registered kinds can never accept a submission")
 }
