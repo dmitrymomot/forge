@@ -102,6 +102,50 @@ func TestAuditFailureReturnsDurableRequest(t *testing.T) {
 	assert.Equal(t, approval.Approved, stored.Status, "and it really is persisted")
 }
 
+// TestDeniedVoteAndFailingSinkJoinsBothErrors covers the vote path (backing
+// Approve/Reject): when the decider denies AND the audit sink is down, the
+// caller must still see the original ErrNotEligible alongside ErrAuditFailed
+// — not have it masked entirely.
+func TestDeniedVoteAndFailingSinkJoinsBothErrors(t *testing.T) {
+	t.Parallel()
+	d := &recordingDecider{effect: access.Deny}
+	m := newManager(t, approval.Policy{Quorum: 1},
+		approval.WithDecider(d), approval.WithAuditor(auditlog.New(failingSink{})))
+	ctx := context.Background()
+
+	r, err := approval.Submit(ctx, m, kindPayout,
+		payoutPayload{PayoutID: "po_88", Amount: 250000},
+		approval.SubmitParams{Requester: "alice", Reason: "invoice #4471"})
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+	require.False(t, r.ID.IsZero())
+
+	_, err = m.Approve(ctx, r.ID, actor("mallory"))
+	assert.ErrorIs(t, err, approval.ErrNotEligible,
+		"the business-rule denial must survive the audit sink also failing")
+	assert.ErrorIs(t, err, approval.ErrAuditFailed)
+}
+
+// TestCancelDeniedAndFailingSinkJoinsBothErrors covers the same defect on
+// the Cancel path.
+func TestCancelDeniedAndFailingSinkJoinsBothErrors(t *testing.T) {
+	t.Parallel()
+	d := &recordingDecider{effect: access.Deny}
+	m := newManager(t, approval.Policy{Quorum: 2},
+		approval.WithDecider(d), approval.WithAuditor(auditlog.New(failingSink{})))
+	ctx := context.Background()
+
+	r, err := approval.Submit(ctx, m, kindPayout,
+		payoutPayload{PayoutID: "po_88", Amount: 250000},
+		approval.SubmitParams{Requester: "alice", Reason: "invoice #4471"})
+	require.ErrorIs(t, err, approval.ErrAuditFailed)
+	require.False(t, r.ID.IsZero())
+
+	_, err = m.Cancel(ctx, r.ID, actor("ops-oncall"))
+	assert.ErrorIs(t, err, approval.ErrNotEligible,
+		"the business-rule denial must survive the audit sink also failing")
+	assert.ErrorIs(t, err, approval.ErrAuditFailed)
+}
+
 func TestNoAuditorIsSilent(t *testing.T) {
 	t.Parallel()
 	m, r := submitted(t, approval.Policy{Quorum: 1})

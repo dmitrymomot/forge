@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"errors"
 
 	"github.com/dmitrymomot/forge/core/id"
 )
@@ -76,11 +77,11 @@ func (m *Manager) vote(ctx context.Context, reqID id.UUID, a Actor, v Vote) (Req
 	if err != nil {
 		if denied {
 			// An ineligible actor trying to push a request through is the
-			// most security-relevant event this package sees. Record it,
-			// and let the audit error win only if the caller has no error
-			// of their own to act on.
+			// most security-relevant event this package sees. Record it, and
+			// join the audit error with the caller's own: errors.Is must still
+			// hold for both the original sentinel and ErrAuditFailed.
 			if aerr := m.auditDenied(ctx, reqID, action, a.Subject.ID, err); aerr != nil {
-				return Request{}, aerr
+				return Request{}, errors.Join(err, aerr)
 			}
 		}
 		return Request{}, err
@@ -121,8 +122,10 @@ func (m *Manager) Cancel(ctx context.Context, reqID id.UUID, a Actor) (Request, 
 	})
 	if err != nil {
 		if denied {
+			// Join, don't drop: the actor's denial and the audit failure are
+			// distinct facts and both must survive errors.Is.
 			if aerr := m.auditDenied(ctx, reqID, actionCancel, a.Subject.ID, err); aerr != nil {
-				return Request{}, aerr
+				return Request{}, errors.Join(err, aerr)
 			}
 		}
 		return Request{}, err
