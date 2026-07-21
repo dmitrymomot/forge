@@ -145,7 +145,7 @@ func TestFailRecordsReason(t *testing.T) {
 	got, err := m.Fail(ctx, r.ID, "worker-1", "gateway rejected: insufficient funds")
 	require.NoError(t, err)
 	assert.Equal(t, approval.Failed, got.Status)
-	assert.Equal(t, "gateway rejected: insufficient funds", got.Meta["failure"])
+	assert.Equal(t, "gateway rejected: insufficient funds", got.Meta["approval.failure"])
 }
 
 func TestApprovedRequestExpiresBeforeClaim(t *testing.T) {

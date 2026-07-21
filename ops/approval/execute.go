@@ -75,9 +75,10 @@ func (m *Manager) Complete(ctx context.Context, reqID id.UUID, executor string) 
 }
 
 // Fail records that the claimed action failed, storing reason under the
-// "failure" meta key. Only the claim holder may call it. The request is
-// terminal afterwards: re-running it means submitting a new request, which
-// means asking for approval again.
+// "approval.failure" meta key — namespaced so it cannot silently overwrite
+// a submitter-supplied "failure" key in the request's own Meta. Only the
+// claim holder may call it. The request is terminal afterwards: re-running
+// it means submitting a new request, which means asking for approval again.
 func (m *Manager) Fail(ctx context.Context, reqID id.UUID, executor, reason string) (Request, error) {
 	r, err := m.mutate(ctx, reqID, func(r *Request) error {
 		if err := checkHolder(*r, executor); err != nil {
@@ -88,7 +89,7 @@ func (m *Manager) Fail(ctx context.Context, reqID id.UUID, executor, reason stri
 		if r.Meta == nil {
 			r.Meta = make(map[string]string, 1)
 		}
-		r.Meta["failure"] = reason
+		r.Meta["approval.failure"] = reason
 		return nil
 	})
 	if err != nil {
