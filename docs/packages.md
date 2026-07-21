@@ -208,26 +208,6 @@ JSON adapters over httpclient — no provider SDKs, no live streaming.
 
 Deps: `core/decimal`, `web/httpclient`.
 
----
-
-**finance/formula**
-
-Formulas as structured, versioned data — never text: a spec of named
-derived metrics, each a list of (metric, decimal coefficient) terms over
-inputs or prior stages plus an optional clamp, evaluated in
-`core/decimal` with deterministic rounding. Evaluation returns an
-explanation record — every stage, every term's contribution, spec
-version, inputs — the statement line item and the dispute answer (the
-`fxrate` record-the-evaluation philosophy). Specs are immutable once
-referenced; recomputes byte-match. Derives the base (NGR, billable
-usage, commission bases) that `tariff` rates and `ledger` posts. Hard
-anti-scope: no string parsing, no conditionals, no user-typed
-expressions — anything beyond staged linear terms + clamp is a
-registered Go function; for fixed deal shapes the documented default is
-named Go functions with per-deal parameters as data.
-
-Deps: `core/decimal`.
-
 ## async/
 
 ---
