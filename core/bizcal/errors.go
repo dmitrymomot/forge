@@ -1,4 +1,3 @@
-// Package bizcal provides stdlib-only business-calendar arithmetic.
 package bizcal
 
 import "errors"
