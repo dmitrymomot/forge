@@ -8,6 +8,16 @@
 > idempotency) as composable packages — business logic stays in consumer
 > repos.
 
+## Focus priorities
+
+Every design decision, review, and trade-off is weighed in this order:
+
+1. **Performance** — speed, allocations, memory footprint, CPU usage. Forge code sits on every consumer's hot path; regressions here are the most expensive to claw back (see [Performance rules](#performance-rules--hot-path-hygiene)).
+2. **Developer experience** — less boilerplate for the consumer: sane defaults, `New(...Option)` with env-loadable config, zero ceremony for the common case, APIs that are hard to misuse.
+3. **Everything else** — feature breadth, internal elegance, driver coverage, etc. Never trade points 1–2 for these.
+
+When priorities collide, the higher one wins — e.g. a slightly less "clean" internal implementation is acceptable if it removes consumer boilerplate or measurably cuts allocations.
+
 ## Design DNA every package follows
 
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no
