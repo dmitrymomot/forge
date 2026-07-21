@@ -79,12 +79,6 @@ const (
 	verbCancel = "cancel"
 )
 
-// eligible checks the actor against the decider seam. Landed in Task 9;
-// until then every actor is eligible.
-func (m *Manager) eligible(_ context.Context, _ Request, _ Actor, _ string) error {
-	return nil
-}
-
 // auditDenied records a refused attempt. Landed in Task 10.
 func (m *Manager) auditDenied(_ context.Context, _ id.UUID, _, _ string, _ error) error {
 	return nil

@@ -1,11 +1,13 @@
 package approval
 
 import (
+	"github.com/dmitrymomot/forge/auth/access"
 	"github.com/dmitrymomot/forge/core/clock"
 )
 
 type config struct {
 	clk        clock.Clock
+	decider    access.Decider
 	kinds      map[string]Policy
 	maxRetries int
 }
@@ -53,4 +55,18 @@ func WithMaxRetries(n int) Option {
 		}
 		c.maxRetries = n
 	}
+}
+
+// WithDecider gates who may decide on a request. The manager asks it
+// "<kind>:decide" before recording any vote and "<kind>:cancel" before a
+// non-requester cancellation, passing the request's kind, requester, and
+// raw payload as resource attributes so relational rules ("must be the
+// requester's manager") and value-aware rules ("over 10 days needs the
+// department head") both work.
+//
+// Without it, any principal other than the requester may decide — the
+// correct single-team default. The structural invariants (no self-approval,
+// one vote per approver) hold either way.
+func WithDecider(d access.Decider) Option {
+	return func(c *config) { c.decider = d }
 }
