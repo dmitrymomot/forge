@@ -341,17 +341,6 @@ Deps: `auth/guard`.
 
 ---
 
-**auth/acl**
-
-Per-subject / per-resource grant and deny overrides (deny wins) layered
-onto rbac decisions — "this manager sees exactly these assigned agents".
-The runtime-data authorization layer: storage-agnostic Store with drivers;
-composes into the `access` decision seam.
-
-Deps: `auth/access`.
-
----
-
 **auth/abac**
 
 Attribute/relationship predicates as registered Go functions — "agent sees
