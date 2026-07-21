@@ -55,13 +55,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 
 // Create inserts r. A colliding id yields approval.ErrDuplicate.
 func (s *Store) Create(ctx context.Context, r approval.Request) error {
-	decisions, meta, err := encodeState(r)
+	payload, decisions, meta, err := encodeState(r)
 	if err != nil {
 		return err
 	}
 	_, err = s.pool.Exec(ctx, createSQL,
 		r.ID, r.Kind, r.Tenant, r.Requester, r.Reason, int16(r.Status), r.Version,
-		[]byte(r.Payload), decisions, meta, r.ClaimedBy,
+		payload, decisions, meta, r.ClaimedBy,
 		r.CreatedAt, nullTime(r.ExpiresAt), nullTime(r.ClaimedAt), nullTime(r.DecidedAt))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
@@ -89,13 +89,13 @@ WHERE id = $1 AND version = $15`
 // a follow-up existence check tells those apart, because the Manager
 // retries one and gives up on the other.
 func (s *Store) Update(ctx context.Context, r approval.Request, expect int64) error {
-	decisions, meta, err := encodeState(r)
+	payload, decisions, meta, err := encodeState(r)
 	if err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx, updateSQL,
 		r.ID, r.Kind, r.Tenant, r.Requester, r.Reason, int16(r.Status),
-		[]byte(r.Payload), decisions, meta, r.ClaimedBy,
+		payload, decisions, meta, r.ClaimedBy,
 		r.CreatedAt, nullTime(r.ExpiresAt), nullTime(r.ClaimedAt), nullTime(r.DecidedAt),
 		expect)
 	if err != nil {
@@ -196,22 +196,29 @@ func scanRequest(rw row) (approval.Request, error) {
 	return r, nil
 }
 
-// encodeState marshals the two JSON columns, normalizing nil to an empty
-// array and an empty object so a reader never has to special-case null.
-func encodeState(r approval.Request) (decisions []byte, meta map[string]string, err error) {
+// encodeState prepares the three JSON columns, normalizing nil Decisions to
+// an empty array and nil Meta to an empty object so a reader never has to
+// special-case null. A nil Payload becomes JSON null: the column is NOT
+// NULL, and the memory store accepts a nil payload, so rejecting it here
+// would make the two stores diverge on the same input.
+func encodeState(r approval.Request) (payload, decisions []byte, meta map[string]string, err error) {
+	payload = []byte(r.Payload)
+	if len(payload) == 0 {
+		payload = []byte("null")
+	}
 	d := r.Decisions
 	if d == nil {
 		d = []approval.Decision{}
 	}
 	decisions, err = json.Marshal(d)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	meta = r.Meta
 	if meta == nil {
 		meta = map[string]string{}
 	}
-	return decisions, meta, nil
+	return payload, decisions, meta, nil
 }
 
 // nullTime maps a zero time to SQL NULL.
