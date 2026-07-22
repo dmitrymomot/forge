@@ -3,6 +3,7 @@ package email_test
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -230,6 +231,51 @@ func TestEncodeDeterministicHeaderOrder(t *testing.T) {
 	idxC := strings.Index(first.String(), "X-C: 3")
 	require.True(t, idxA >= 0 && idxB >= 0 && idxC >= 0)
 	assert.True(t, idxA < idxB && idxB < idxC, "custom headers must encode in sorted order")
+}
+
+func TestEncodeFoldsLongHeaders(t *testing.T) {
+	t.Parallel()
+
+	msg := validMessage()
+	for i := range 40 {
+		msg.To = append(msg.To, fmt.Sprintf("Recipient Number %02d <user%02d@example.com>", i, i))
+	}
+	subject := strings.TrimSpace(strings.Repeat("purchase order confirmation for the July invoice batch ", 6))
+	msg.Subject = subject
+	var buf bytes.Buffer
+	require.NoError(t, msg.Encode(&buf))
+
+	for line := range strings.SplitSeq(buf.String(), "\r\n") {
+		assert.LessOrEqual(t, len(line), 200, "header lines must fold, got %q", line)
+	}
+
+	parsed, err := mail.ReadMessage(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	to, err := parsed.Header.AddressList("To")
+	require.NoError(t, err)
+	assert.Len(t, to, 41, "folding must not lose recipients")
+	assert.Equal(t, subject, parsed.Header.Get("Subject"), "unfolding must restore the exact subject")
+}
+
+func TestEncodeNonASCIIHeaderValue(t *testing.T) {
+	t.Parallel()
+
+	msg := validMessage()
+	msg.Headers = map[string]string{"X-Note": "café en été"}
+	var buf bytes.Buffer
+	require.NoError(t, msg.Encode(&buf))
+
+	headerSection, _, ok := strings.Cut(buf.String(), "\r\n\r\n")
+	require.True(t, ok)
+	for i := 0; i < len(headerSection); i++ {
+		require.Less(t, headerSection[i], byte(0x80), "headers must be 7-bit ASCII")
+	}
+
+	parsed, err := mail.ReadMessage(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	decoded, err := new(mime.WordDecoder).DecodeHeader(parsed.Header.Get("X-Note"))
+	require.NoError(t, err)
+	assert.Equal(t, "café en été", decoded)
 }
 
 func TestEncodeDateIsNow(t *testing.T) {

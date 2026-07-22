@@ -53,7 +53,13 @@ func (m *Message) encode(w io.Writer, env envelope, now time.Time) error {
 		writeHeader(bw, "Subject", mime.QEncoding.Encode("utf-8", m.Subject))
 	}
 	for _, k := range slices.Sorted(maps.Keys(m.Headers)) {
-		writeHeader(bw, k, m.Headers[k])
+		v := m.Headers[k]
+		if !isASCII(v) {
+			// Headers are 7-bit; a non-ASCII custom value rides an
+			// encoded-word like the subject does.
+			v = mime.QEncoding.Encode("utf-8", v)
+		}
+		writeHeader(bw, k, v)
 	}
 	writeHeader(bw, "MIME-Version", "1.0")
 
@@ -80,11 +86,37 @@ func (m *Message) hasCustomHeader(canonical string) bool {
 	return false
 }
 
+// foldAt is the column past which writeHeader folds at the next space —
+// RFC 5322 recommends 78-octet lines and hard-caps them at 998; long
+// recipient lists and subjects would otherwise exceed both.
+const foldAt = 76
+
+// writeHeader emits one header line, folding before a space once the line
+// passes foldAt. The CRLF lands ahead of the existing space, so the space
+// itself becomes the continuation-line whitespace and unfolding restores the
+// exact original value.
 func writeHeader(bw *bufio.Writer, name, value string) {
-	bw.WriteString(name)   //nolint:errcheck // surfaced by Flush
-	bw.WriteString(": ")   //nolint:errcheck // surfaced by Flush
-	bw.WriteString(value)  //nolint:errcheck // surfaced by Flush
+	bw.WriteString(name) //nolint:errcheck // surfaced by Flush
+	bw.WriteString(": ") //nolint:errcheck // surfaced by Flush
+	col := len(name) + 2
+	for i := range len(value) {
+		if value[i] == ' ' && col >= foldAt {
+			bw.WriteString("\r\n") //nolint:errcheck // surfaced by Flush
+			col = 0
+		}
+		bw.WriteByte(value[i]) //nolint:errcheck // surfaced by Flush
+		col++
+	}
 	bw.WriteString("\r\n") //nolint:errcheck // surfaced by Flush
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func joinAddrs(addrs []*mail.Address) string {

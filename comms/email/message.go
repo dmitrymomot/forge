@@ -29,7 +29,8 @@ type Message struct {
 // empty value is inferred from the filename extension, falling back to
 // application/octet-stream. Inline attachments are embedded for HTML display
 // (images referenced as <img src="cid:FILENAME">) instead of being listed
-// for download; the Content-ID is the filename.
+// for download; the Content-ID is the filename, so inline filenames are
+// restricted to [A-Za-z0-9._-].
 type Attachment struct {
 	Filename    string
 	ContentType string
@@ -106,11 +107,15 @@ func (m *Message) validate() (envelope, error) {
 		return envelope{}, fmt.Errorf("%w: newline in subject", ErrInvalidMessage)
 	}
 	for k, v := range m.Headers {
-		if strings.ContainsAny(k, "\r\n") || strings.ContainsAny(v, "\r\n") {
-			return envelope{}, fmt.Errorf("%w: newline in header %q", ErrInvalidMessage, k)
+		// Only RFC 5322 field-name bytes are allowed: a name like "Bcc:" or
+		// "Bcc " canonicalizes to itself, dodges the reserved list, and is
+		// re-parsed by receivers as the reserved header — so any invalid byte
+		// is rejected before the reserved lookup, never passed through.
+		if !validHeaderName(k) {
+			return envelope{}, fmt.Errorf("%w: invalid header name %q", ErrInvalidMessage, k)
 		}
-		if k == "" {
-			return envelope{}, fmt.Errorf("%w: empty header name", ErrInvalidMessage)
+		if !validHeaderValue(v) {
+			return envelope{}, fmt.Errorf("%w: control character in header %q", ErrInvalidMessage, k)
 		}
 		if _, reserved := reservedHeaders[textproto.CanonicalMIMEHeaderKey(k)]; reserved {
 			return envelope{}, fmt.Errorf("%w: header %q is set by the encoder", ErrInvalidMessage, k)
@@ -120,11 +125,53 @@ func (m *Message) validate() (envelope, error) {
 		if a.Filename == "" {
 			return envelope{}, fmt.Errorf("%w: attachment without filename", ErrInvalidMessage)
 		}
-		if strings.ContainsAny(a.Filename, "\r\n\"") {
+		// Backslash would escape the closing quote of filename="...", quotes
+		// and CR/LF break the header outright; 255 bytes is the filesystem
+		// ceiling and keeps the header line foldable.
+		if len(a.Filename) > 255 || strings.ContainsAny(a.Filename, "\r\n\"\\") {
 			return envelope{}, fmt.Errorf("%w: invalid attachment filename %q", ErrInvalidMessage, a.Filename)
+		}
+		if !validHeaderValue(a.ContentType) || strings.ContainsFunc(a.ContentType, func(r rune) bool { return r >= 0x7f }) {
+			return envelope{}, fmt.Errorf("%w: invalid content type for attachment %q", ErrInvalidMessage, a.Filename)
+		}
+		if a.Inline && !validContentID(a.Filename) {
+			return envelope{}, fmt.Errorf("%w: inline filename %q must match [A-Za-z0-9._-] (it becomes the Content-ID)", ErrInvalidMessage, a.Filename)
 		}
 	}
 	return env, nil
+}
+
+// validHeaderName reports whether s is a non-empty RFC 5322 field name:
+// printable ASCII, no colon.
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if c := s[i]; c <= ' ' || c >= 0x7f || c == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// validHeaderValue rejects every control character except horizontal tab
+// (legal header whitespace) — CR/LF injection is the headline case.
+func validHeaderValue(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 && r != '\t' })
+}
+
+// validContentID keeps inline filenames usable as a Content-ID and a cid:
+// URL: letters, digits, dot, underscore, hyphen.
+func validContentID(s string) bool {
+	for i := range len(s) {
+		switch c := s[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseAddr parses one RFC 5322 address, naming the field in the error.

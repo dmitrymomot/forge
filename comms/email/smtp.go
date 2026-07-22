@@ -45,6 +45,12 @@ func New(cfg Config, opts ...Option) (*SMTP, error) {
 	}
 	auth := c.auth
 	if auth == nil && cfg.Username != "" {
+		// net/smtp refuses PLAIN over a plaintext connection to any host but
+		// loopback, so this combination can never send — fail at construction
+		// with a usable error instead of on the first Send.
+		if cfg.TLS == TLSNone && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return nil, fmt.Errorf("%w: PLAIN auth requires TLS for non-localhost servers; set TLS or supply WithAuth", ErrInvalidConfig)
+		}
 		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, host)
 	}
 	tc := c.tlsConfig.Clone() // nil-receiver Clone returns nil

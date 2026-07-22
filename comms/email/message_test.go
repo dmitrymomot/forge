@@ -41,6 +41,24 @@ func TestMessageValidation(t *testing.T) {
 		"attachment bad filename": func(m *email.Message) {
 			m.Attachments = []email.Attachment{{Filename: "a\"b.txt", Content: []byte("x")}}
 		},
+		// "Bcc:" and "Bcc " canonicalize to themselves, so they'd dodge the
+		// reserved list and be re-parsed by receivers as a real Bcc header.
+		"reserved header via colon": func(m *email.Message) { m.Headers = map[string]string{"Bcc:": "spy@example.com"} },
+		"reserved header via space": func(m *email.Message) { m.Headers = map[string]string{"Bcc ": "spy@example.com"} },
+		"non-ascii header name":     func(m *email.Message) { m.Headers = map[string]string{"X-Café": "x"} },
+		"control in header value":   func(m *email.Message) { m.Headers = map[string]string{"X-Tag": "a\x00b"} },
+		"attachment backslash filename": func(m *email.Message) {
+			m.Attachments = []email.Attachment{{Filename: `report\`, Content: []byte("x")}}
+		},
+		"attachment overlong filename": func(m *email.Message) {
+			m.Attachments = []email.Attachment{{Filename: strings.Repeat("a", 256) + ".txt", Content: []byte("x")}}
+		},
+		"attachment content type injection": func(m *email.Message) {
+			m.Attachments = []email.Attachment{{Filename: "a.txt", ContentType: "text/plain\r\nX-Spy: 1", Content: []byte("x")}}
+		},
+		"inline attachment cid-unsafe filename": func(m *email.Message) {
+			m.Attachments = []email.Attachment{{Filename: "my logo.png", Inline: true, Content: []byte("x")}}
+		},
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {

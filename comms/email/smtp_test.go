@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/mail"
+	"net/smtp"
 	"net/textproto"
 	"strings"
 	"sync"
@@ -51,6 +52,7 @@ type smtpServerConfig struct {
 	startTLS       bool // advertise and accept STARTTLS
 	implicitTLS    bool // TLS handshake immediately on accept
 	stall          bool // accept and never speak — for timeout tests
+	dropAfterData  bool // 250-accept the DATA body, then sever the connection
 	rejectMailCode int  // non-zero: reply this code to MAIL FROM
 	rejectRcptCode int  // non-zero: reply this code to every RCPT TO
 	rejectAuthCode int  // non-zero: reply this code to AUTH
@@ -198,6 +200,9 @@ func (s *smtpServer) session(conn net.Conn, secured bool) {
 			s.data = body
 			s.mu.Unlock()
 			reply("250 accepted")
+			if s.cfg.dropAfterData {
+				return // the deferred Close severs the connection before QUIT
+			}
 		case upper == "QUIT":
 			reply("221 bye")
 			return
@@ -340,6 +345,40 @@ func TestSMTPStatusClassification(t *testing.T) {
 		err = sender.Send(context.Background(), validMessage())
 		require.ErrorIs(t, err, email.ErrPermanent)
 	})
+}
+
+func TestSMTPAcceptedThenConnectionDrop(t *testing.T) {
+	t.Parallel()
+	// The server 250-accepts the message body and then severs the connection,
+	// so QUIT fails. Send must still return nil: the mail is in flight, and
+	// an error here would make an at-least-once queue send it twice.
+	server, pool := startSMTPServer(t, smtpServerConfig{startTLS: true, dropAfterData: true})
+	cfg, tlsOpt := clientConfig(server.addr(), pool, email.TLSStartTLS)
+	sender, err := email.New(cfg, tlsOpt)
+	require.NoError(t, err)
+
+	require.NoError(t, sender.Send(context.Background(), validMessage()))
+	_, _, _, _, data, _ := server.snapshot()
+	assert.NotEmpty(t, data, "message was accepted before the drop")
+}
+
+func TestNewPlaintextAuthNonLocalhost(t *testing.T) {
+	t.Parallel()
+	cfg := email.DefaultConfig()
+	cfg.Addr = "smtp.example.com:587"
+	cfg.TLS = email.TLSNone
+	cfg.Username = "postmaster"
+	cfg.Password = "secret"
+	_, err := email.New(cfg)
+	require.ErrorIs(t, err, email.ErrInvalidConfig, "PLAIN over plaintext to a remote host can never send")
+
+	cfg.Addr = "localhost:2525"
+	_, err = email.New(cfg)
+	require.NoError(t, err, "loopback dev catchers stay allowed")
+
+	cfg.Addr = "smtp.example.com:587"
+	_, err = email.New(cfg, email.WithAuth(smtp.CRAMMD5Auth("postmaster", "secret")))
+	require.NoError(t, err, "WithAuth overrides the PLAIN-over-plaintext guard")
 }
 
 func TestSMTPDefaultFrom(t *testing.T) {
