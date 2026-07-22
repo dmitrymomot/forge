@@ -23,10 +23,12 @@
 // HTML in the markdown is dropped, never passed through.
 //
 // Render treats the source as static content ("{{" stays literal).
-// RenderData runs text/template over the whole source first — frontmatter
-// included, so subjects and preheaders can carry {{.Field}} — with
-// missingkey=error so a typo'd field fails the render. Templated values are
-// interpreted as markdown/YAML: pass trusted, application-owned data only.
+// RenderData templates the frontmatter subject/preheader values and the body
+// with data ({{.Field}}), with missingkey=error so a typo'd field fails the
+// render. The document structure is parsed before data enters it, so a data
+// value cannot re-terminate the frontmatter or inject keys, and a newline
+// landing in the subject or preheader fails the render. Body values are
+// still interpreted as markdown.
 //
 // # Non-goals
 //
@@ -34,9 +36,10 @@
 //     when the default card doesn't fit.
 //   - No GFM extensions (tables, strikethrough): transactional email bodies
 //     are prose, headings, lists, and buttons.
-//   - No sanitization of templated values: RenderData data is trusted
-//     application data by contract; user-generated strings belong in static
-//     Render documents.
+//   - No markdown-escaping of templated body values: a hostile string can
+//     still inject a link or emphasis (never raw HTML — that is dropped), so
+//     RenderData data is application-owned by contract; user-generated
+//     strings that must render verbatim belong in static Render documents.
 //
 // # Usage
 //

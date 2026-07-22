@@ -205,6 +205,34 @@ func TestRenderDataErrors(t *testing.T) {
 	})
 }
 
+func TestRenderDataStructureInjection(t *testing.T) {
+	t.Parallel()
+	r := newRenderer(t)
+
+	t.Run("frontmatter cannot be re-terminated from a value", func(t *testing.T) {
+		t.Parallel()
+		// Pre-fix, templating ran over the raw source and a value containing
+		// "\n---\n" cut the frontmatter early, reinterpreting the document.
+		doc := []byte("---\nsubject: Hi {{.Name}}\n---\nbody\n")
+		_, err := r.RenderData(doc, map[string]string{"Name": "Ann\n---\npreheader: pwned"})
+		require.ErrorIs(t, err, markdown.ErrInvalidDocument, "newline in rendered subject must fail closed")
+	})
+	t.Run("preheader newline injection fails closed", func(t *testing.T) {
+		t.Parallel()
+		doc := []byte("---\nsubject: s\npreheader: '{{.P}}'\n---\nbody\n")
+		_, err := r.RenderData(doc, map[string]string{"P": "a\nsubject: evil"})
+		require.ErrorIs(t, err, markdown.ErrInvalidDocument)
+	})
+	t.Run("frontmatter markers in body values are inert", func(t *testing.T) {
+		t.Parallel()
+		doc := []byte("---\nsubject: Stable\n---\nHi {{.Name}}!\n")
+		msg, err := r.RenderData(doc, map[string]string{"Name": "Ann\n\n---\n\nsubject: evil"})
+		require.NoError(t, err)
+		assert.Equal(t, "Stable", msg.Subject, "body data must not reach the frontmatter")
+		assert.Contains(t, msg.Text, "subject: evil", "marker renders as plain body content")
+	})
+}
+
 func TestRenderStaticLeavesBracesLiteral(t *testing.T) {
 	t.Parallel()
 	r := newRenderer(t)

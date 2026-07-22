@@ -69,28 +69,52 @@ type frontmatter struct {
 	Preheader string `yaml:"preheader"`
 }
 
-// RenderData runs text/template over the whole source — frontmatter
-// included, so subjects and preheaders carry {{.Field}} too — and renders
-// the result like Render. Missing keys are errors (missingkey=error), so a
-// typo'd field fails the render instead of sending "<no value>".
+// RenderData renders a templated document: the frontmatter subject and
+// preheader values and the markdown body are each executed as text/template
+// with data, then rendered like Render. Missing keys are errors
+// (missingkey=error), so a typo'd field fails the render instead of sending
+// "<no value>".
 //
-// Substituted values land in the source before markdown parsing, so they are
-// interpreted as markdown and YAML: pass trusted, application-owned data.
-// A user-controlled string that must render verbatim belongs in a static
-// Render document, not in template data.
+// The document structure is fixed before data enters it: the frontmatter is
+// split and YAML-decoded from the raw source, and only the decoded values
+// are templated — a data value containing "---" or "key: x" cannot
+// re-terminate the frontmatter or inject keys, and a newline landing in the
+// rendered subject or preheader fails the render. Body values are still
+// interpreted as markdown (a hostile string can inject a link), so data
+// should be application-owned; user-controlled strings that must render
+// verbatim belong in a static Render document.
 func (r *Renderer) RenderData(src []byte, data any) (email.Message, error) {
 	if r == nil || r.md == nil {
 		return email.Message{}, fmt.Errorf("%w: renderer not constructed with New", ErrInvalidDocument)
 	}
-	tmpl, err := texttemplate.New("email").Option("missingkey=error").Parse(string(src))
+	fm, body, err := parseDocument(src)
 	if err != nil {
-		return email.Message{}, fmt.Errorf("%w: template: %v", ErrInvalidDocument, err)
+		return email.Message{}, err
+	}
+	if fm.Subject, err = execTemplate("subject", fm.Subject, data); err != nil {
+		return email.Message{}, err
+	}
+	if fm.Preheader, err = execTemplate("preheader", fm.Preheader, data); err != nil {
+		return email.Message{}, err
+	}
+	renderedBody, err := execTemplate("body", string(body), data)
+	if err != nil {
+		return email.Message{}, err
+	}
+	return r.render(fm, []byte(renderedBody))
+}
+
+// execTemplate runs one document fragment as a text/template.
+func execTemplate(name, src string, data any) (string, error) {
+	tmpl, err := texttemplate.New(name).Option("missingkey=error").Parse(src)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s template: %v", ErrInvalidDocument, name, err)
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return email.Message{}, fmt.Errorf("email/markdown: execute template: %w", err)
+		return "", fmt.Errorf("email/markdown: execute %s template: %w", name, err)
 	}
-	return r.Render(buf.Bytes())
+	return buf.String(), nil
 }
 
 // Render converts one static markdown document into a Message with Subject,
@@ -102,16 +126,32 @@ func (r *Renderer) Render(src []byte) (email.Message, error) {
 	if r == nil || r.md == nil {
 		return email.Message{}, fmt.Errorf("%w: renderer not constructed with New", ErrInvalidDocument)
 	}
-	meta, body, err := splitFrontmatter(src)
+	fm, body, err := parseDocument(src)
 	if err != nil {
 		return email.Message{}, err
+	}
+	return r.render(fm, body)
+}
+
+// parseDocument splits and strictly decodes the frontmatter. Subject checks
+// live in render — for RenderData the values are templated in between.
+func parseDocument(src []byte) (frontmatter, []byte, error) {
+	meta, body, err := splitFrontmatter(src)
+	if err != nil {
+		return frontmatter{}, nil, err
 	}
 	var fm frontmatter
 	dec := yaml.NewDecoder(bytes.NewReader(meta))
 	dec.KnownFields(true)
 	if err := dec.Decode(&fm); err != nil {
-		return email.Message{}, fmt.Errorf("%w: frontmatter: %v", ErrInvalidDocument, err)
+		return frontmatter{}, nil, fmt.Errorf("%w: frontmatter: %v", ErrInvalidDocument, err)
 	}
+	return fm, body, nil
+}
+
+// render is the shared back half: subject contract checks, markdown to HTML
+// inside the layout, and the plain-text alternative.
+func (r *Renderer) render(fm frontmatter, body []byte) (email.Message, error) {
 	fm.Subject = strings.TrimSpace(fm.Subject)
 	fm.Preheader = strings.TrimSpace(fm.Preheader)
 	if fm.Subject == "" {
