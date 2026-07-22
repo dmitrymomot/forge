@@ -115,6 +115,21 @@ func TestTempl(t *testing.T) {
 	assert.Equal(t, html, strings.Join(lines, "\n"))
 }
 
+func TestTemplEmptyRender(t *testing.T) {
+	t.Parallel()
+
+	// A component that writes nothing (an empty-state branch) must still
+	// dispatch an empty event — "clear this row" — not vanish for lack of a
+	// data line, matching Text(name, "").
+	e, err := sse.Templ(t.Context(), "orders.42", componentFunc(func(context.Context, io.Writer) error {
+		return nil
+	}))
+	require.NoError(t, err)
+	got, err := frame(t, e)
+	require.NoError(t, err)
+	assert.Equal(t, "event: orders.42\ndata: \n\n", got)
+}
+
 func TestTemplErrors(t *testing.T) {
 	t.Parallel()
 

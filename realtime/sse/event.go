@@ -74,7 +74,13 @@ func Templ(ctx context.Context, name string, c Component) (Event, error) {
 	if err := c.Render(ctx, &buf); err != nil {
 		return Event{}, fmt.Errorf("sse: render component: %w", err)
 	}
-	return Event{Name: name, Data: buf.Bytes()}, nil
+	data := buf.Bytes()
+	if data == nil {
+		// A component that rendered nothing still dispatches an empty event
+		// (matching Text(name, "")); nil Data would drop the frame entirely.
+		data = []byte{}
+	}
+	return Event{Name: name, Data: data}, nil
 }
 
 // Comment builds a comment-only frame (": text"). Clients ignore comments;
