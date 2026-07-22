@@ -1,8 +1,11 @@
 package sse
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +53,28 @@ func JSON(name string, v any) (Event, error) {
 		return Event{}, fmt.Errorf("sse: marshal event data: %w", err)
 	}
 	return Event{Name: name, Data: data}, nil
+}
+
+// Component is the structural seam for templ components — anything with
+// templ's Render method satisfies it implicitly, so sse never imports templ
+// and html/template users can adapt with a small func type.
+type Component interface {
+	Render(ctx context.Context, w io.Writer) error
+}
+
+// Templ builds a named event carrying the rendered HTML of c. Multi-line
+// output is framed as multiple "data:" lines and reassembles byte-identical
+// client-side (CR/CRLF normalize to LF), so htmx's sse extension swaps it in
+// unchanged. An empty name means the client's default "message" event.
+func Templ(ctx context.Context, name string, c Component) (Event, error) {
+	if c == nil {
+		return Event{}, fmt.Errorf("sse: nil component")
+	}
+	var buf bytes.Buffer
+	if err := c.Render(ctx, &buf); err != nil {
+		return Event{}, fmt.Errorf("sse: render component: %w", err)
+	}
+	return Event{Name: name, Data: buf.Bytes()}, nil
 }
 
 // Comment builds a comment-only frame (": text"). Clients ignore comments;

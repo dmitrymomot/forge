@@ -48,6 +48,17 @@
 //	ev, _ := sse.JSON("update", payload)
 //	_ = w.Send(ev)
 //
+// HTML-over-SSE (htmx sse-swap) rides the Component seam — templ components
+// satisfy it implicitly, sse imports nothing:
+//
+//	ev, err := sse.Templ(ctx, "orders.42", views.OrderRow(order))
+//	if err != nil { ... }
+//	_ = w.Send(ev)
+//
+// Multi-line HTML frames as multiple "data:" lines and reassembles
+// byte-identical in the browser (CR/CRLF normalize to LF), so the swapped
+// markup is exactly what the component rendered.
+//
 // # Deployment
 //
 // An SSE response never finishes, so the server's write timeout must not

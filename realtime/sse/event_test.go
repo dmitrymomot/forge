@@ -1,7 +1,11 @@
 package sse_test
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +83,48 @@ func TestEventValidation(t *testing.T) {
 			assert.Empty(t, got, "nothing must be written on validation failure")
 		})
 	}
+}
+
+// componentFunc adapts a render func to sse.Component, the same way an
+// html/template consumer would.
+type componentFunc func(ctx context.Context, w io.Writer) error
+
+func (f componentFunc) Render(ctx context.Context, w io.Writer) error { return f(ctx, w) }
+
+func TestTempl(t *testing.T) {
+	t.Parallel()
+
+	html := "<tr>\n  <td>paid</td>\n</tr>"
+	e, err := sse.Templ(t.Context(), "orders.42", componentFunc(func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, html)
+		return err
+	}))
+	require.NoError(t, err)
+	got, err := frame(t, e)
+	require.NoError(t, err)
+	assert.Equal(t, "event: orders.42\ndata: <tr>\ndata:   <td>paid</td>\ndata: </tr>\n\n", got)
+
+	// What a spec-compliant EventSource reassembles (data lines joined with
+	// \n) must be the exact HTML htmx swaps in.
+	var lines []string
+	for line := range strings.Lines(got) {
+		if rest, ok := strings.CutPrefix(line, "data: "); ok {
+			lines = append(lines, strings.TrimSuffix(rest, "\n"))
+		}
+	}
+	assert.Equal(t, html, strings.Join(lines, "\n"))
+}
+
+func TestTemplErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := sse.Templ(t.Context(), "x", nil)
+	require.Error(t, err)
+
+	_, err = sse.Templ(t.Context(), "x", componentFunc(func(context.Context, io.Writer) error {
+		return errors.New("render failed")
+	}))
+	require.Error(t, err)
 }
 
 func TestJSON(t *testing.T) {
