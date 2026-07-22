@@ -2,9 +2,16 @@ package smartlink
 
 import "errors"
 
-// Compile-time validation errors. Match with errors.Is; Compile wraps each with
-// the offending rule, target, or matcher context. Decide never returns an error.
+// Engine errors. Match with errors.Is; Compile wraps each with the offending
+// rule, target, or matcher context. Decide fails only with [ErrMissingFact] —
+// every other failure mode is a Compile error.
 var (
+	// ErrMissingFact is returned by Decide when the outcome would depend on a
+	// visit fact the visit doesn't carry — a Geo/Device/Locale rule with the
+	// matching Visit field empty (geoip miss, unparsed user agent), or a
+	// Percent gate / weighted split with an empty StickyKey. Fail-closed: the
+	// click is refused instead of silently routed to the default target.
+	ErrMissingFact = errors.New("smartlink: missing visit fact")
 	// ErrNoDefault is returned when a Spec has no default target.
 	ErrNoDefault = errors.New("smartlink: no default target")
 	// ErrInvalidRule is returned for a rule with an empty or duplicate name, or no targets.

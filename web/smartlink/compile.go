@@ -29,6 +29,7 @@ type compiledRule struct {
 // split is a target list with cumulative weights for deterministic
 // sticky-key bucketing.
 type split struct {
+	missErr error // precomputed ErrMissingFact for an empty StickyKey; nil for a single target
 	targets []compiledTarget
 	cum     []int // cumulative weights, len == len(targets); nil for a single target
 	seed    uint64
@@ -136,6 +137,7 @@ func compileSplit(targets []Target, salt, ruleName string) (split, error) {
 		}
 	}
 	if len(targets) > 1 {
+		s.missErr = fmt.Errorf("%w: %s: weighted split needs Visit.StickyKey", ErrMissingFact, where)
 		s.seed = hashString(fnvOffset, "s\x00"+salt+"\x00"+ruleName)
 		s.cum = make([]int, len(targets))
 		var total int64

@@ -1,6 +1,7 @@
 package smartlink_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dmitrymomot/forge/web/smartlink"
@@ -14,8 +15,12 @@ func TestCompiledIsDecider(t *testing.T) {
 
 	link := mustCompile(t, smartlink.Spec{Default: defTargets()})
 	var d smartlink.Decider = link
-	if got := d.Decide(smartlink.Visit{}).URL; got != "https://example.com/" {
-		t.Fatalf("Decide via interface = %q, want default target", got)
+	dec, err := d.Decide(smartlink.Visit{})
+	if err != nil {
+		t.Fatalf("Decide via interface error = %v", err)
+	}
+	if dec.URL != "https://example.com/" {
+		t.Fatalf("Decide via interface = %q, want default target", dec.URL)
 	}
 }
 
@@ -23,10 +28,13 @@ func TestCompiledIsDecider(t *testing.T) {
 // delegating to the wrapped Decider, so composition order is observable.
 func tagDecorator(tag string) smartlink.Decorator {
 	return func(next smartlink.Decider) smartlink.Decider {
-		return smartlink.DecideFunc(func(v smartlink.Visit) smartlink.Decision {
-			d := next.Decide(v)
+		return smartlink.DecideFunc(func(v smartlink.Visit) (smartlink.Decision, error) {
+			d, err := next.Decide(v)
+			if err != nil {
+				return smartlink.Decision{}, err
+			}
 			d.Rule += tag
-			return d
+			return d, nil
 		})
 	}
 }
@@ -35,14 +43,16 @@ func tagDecorator(tag string) smartlink.Decorator {
 // d, and A's tag is applied last, ending up outermost in the result.
 func TestChainOrder(t *testing.T) {
 	t.Parallel()
-	base := smartlink.DecideFunc(func(smartlink.Visit) smartlink.Decision {
-		return smartlink.Decision{Rule: "base"}
+	base := smartlink.DecideFunc(func(smartlink.Visit) (smartlink.Decision, error) {
+		return smartlink.Decision{Rule: "base"}, nil
 	})
 	chained := smartlink.Chain(tagDecorator("A"), tagDecorator("B"), tagDecorator("C"))(base)
-	got := chained.Decide(smartlink.Visit{}).Rule
-	want := "baseCBA"
-	if got != want {
-		t.Fatalf("Chain(A, B, C)(base).Decide().Rule = %q, want %q", got, want)
+	got, err := chained.Decide(smartlink.Visit{})
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if want := "baseCBA"; got.Rule != want {
+		t.Fatalf("Chain(A, B, C)(base).Decide().Rule = %q, want %q", got.Rule, want)
 	}
 }
 
@@ -50,12 +60,29 @@ func TestChainOrder(t *testing.T) {
 // Decider's decisions unchanged.
 func TestChainEmpty(t *testing.T) {
 	t.Parallel()
-	base := smartlink.DecideFunc(func(smartlink.Visit) smartlink.Decision {
-		return smartlink.Decision{Rule: "base", URL: "https://example.com/"}
+	base := smartlink.DecideFunc(func(smartlink.Visit) (smartlink.Decision, error) {
+		return smartlink.Decision{Rule: "base", URL: "https://example.com/"}, nil
 	})
-	got := smartlink.Chain()(base).Decide(smartlink.Visit{})
+	got, err := smartlink.Chain()(base).Decide(smartlink.Visit{})
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
 	want := smartlink.Decision{Rule: "base", URL: "https://example.com/"}
 	if got != want {
 		t.Fatalf("Chain()(base).Decide() = %+v, want %+v", got, want)
+	}
+}
+
+// TestChainPropagatesError asserts a wrapped Decider's refusal surfaces
+// through the decorator chain instead of being swallowed into a decision.
+func TestChainPropagatesError(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{
+		Rules:   []smartlink.Rule{rule("geo", "https://hit.com", smartlink.Geo{Countries: []string{"DE"}})},
+		Default: defTargets(),
+	})
+	chained := smartlink.Chain(tagDecorator("A"))(link)
+	if _, err := chained.Decide(smartlink.Visit{}); !errors.Is(err, smartlink.ErrMissingFact) {
+		t.Fatalf("Decide() error = %v, want ErrMissingFact through the chain", err)
 	}
 }

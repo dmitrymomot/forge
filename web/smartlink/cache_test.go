@@ -150,7 +150,7 @@ func TestCacheInvalidateDuringLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if got := compiled.Decide(smartlink.Visit{}).URL; got != newURL {
+	if got := mustDecide(t, compiled, smartlink.Visit{}).URL; got != newURL {
 		t.Fatalf("post-invalidate Decide().URL = %q, want %q", got, newURL)
 	}
 
@@ -161,7 +161,7 @@ func TestCacheInvalidateDuringLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final Get() error = %v", err)
 	}
-	if got := final.Decide(smartlink.Visit{}).URL; got != newURL {
+	if got := mustDecide(t, final, smartlink.Visit{}).URL; got != newURL {
 		t.Fatalf("final Decide().URL = %q, want %q (stale store overwrote fresh entry)", got, newURL)
 	}
 	if n := calls.Load(); n != 2 {
@@ -290,9 +290,12 @@ func TestCacheResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolver() error = %v", err)
 	}
-	got := d.Decide(smartlink.Visit{}).Rule
-	if got != "R" {
-		t.Fatalf("Decide().Rule = %q, want %q", got, "R")
+	dec, err := d.Decide(smartlink.Visit{})
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if dec.Rule != "R" {
+		t.Fatalf("Decide().Rule = %q, want %q", dec.Rule, "R")
 	}
 }
 

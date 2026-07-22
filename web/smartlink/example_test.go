@@ -30,12 +30,15 @@ func Example() {
 		panic(err)
 	}
 
-	d := link.Decide(smartlink.Visit{
+	d, err := link.Decide(smartlink.Visit{
 		Country:   "de",
 		Device:    "mobile",
 		StickyKey: "visitor-42",
 		Params:    map[string]string{"click_id": "abc123"},
 	})
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println(d.Rule)
 	fmt.Println(d.URL)
 	// Output:

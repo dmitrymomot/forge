@@ -21,9 +21,19 @@ type Decision struct {
 
 // Decide evaluates the visit against the link's rules in order — first rule
 // whose matchers all match wins, falling back to the default target — picks a
-// split target by sticky-key bucket, and renders the final URL. It never
-// fails: every failure mode is a Compile error.
-func (l *Compiled) Decide(v Visit) Decision {
+// split target by sticky-key bucket, and renders the final URL.
+//
+// Decide fails closed on missing facts: when the outcome would depend on a
+// visit field the visit doesn't carry — a Geo rule with no Country (geoip
+// miss), a Device or Locale rule with the fact empty, a Percent gate or
+// weighted split with no StickyKey — it returns [ErrMissingFact] instead of
+// silently falling through to the default target. The gate is exact, not
+// eager: a missing fact never errors when the decision is provably
+// independent of it — the rule consulting it is already definitively false
+// on another matcher, or an earlier rule matched outright. A spec whose
+// consulted facts are all present — in particular the degenerate
+// single-default-target link — never fails.
+func (l *Compiled) Decide(v Visit) (Decision, error) {
 	var now time.Time
 	if l.needsNow {
 		now = v.At
@@ -33,40 +43,66 @@ func (l *Compiled) Decide(v Visit) Decision {
 	}
 	for i := range l.rules {
 		r := &l.rules[i]
-		if matchAll(r.when, &v, now) {
-			t := r.targets.pick(v.StickyKey)
-			return Decision{Rule: r.name, Target: t.raw, URL: l.finalURL(t, &v)}
+		ok, err := matchAll(r.when, &v, now)
+		if err != nil {
+			return Decision{}, err
 		}
+		if !ok {
+			continue
+		}
+		t, err := r.targets.pick(v.StickyKey)
+		if err != nil {
+			return Decision{}, err
+		}
+		return Decision{Rule: r.name, Target: t.raw, URL: l.finalURL(t, &v)}, nil
 	}
-	t := l.def.pick(v.StickyKey)
-	return Decision{Target: t.raw, URL: l.finalURL(t, &v)}
+	t, err := l.def.pick(v.StickyKey)
+	if err != nil {
+		return Decision{}, err
+	}
+	return Decision{Target: t.raw, URL: l.finalURL(t, &v)}, nil
 }
 
 // matchAll reports whether every matcher in the conjunction matches; an empty
-// conjunction always matches.
-func matchAll(when []matcher, v *Visit, now time.Time) bool {
+// conjunction always matches. Evaluation is three-valued: a matcher whose
+// visit fact is missing is unknowable, so the whole conjunction is scanned —
+// any definitively-false matcher settles the rule as non-matching regardless
+// of order, and only when the rule would otherwise match does the first
+// missing fact's precomputed error surface.
+func matchAll(when []matcher, v *Visit, now time.Time) (bool, error) {
+	var miss error
 	for i := range when {
-		if !when[i].match(v, now) {
-			return false
+		switch when[i].eval(v, now) {
+		case evalFalse:
+			return false, nil
+		case evalMissing:
+			if miss == nil {
+				miss = when[i].missErr
+			}
+		case evalTrue:
 		}
 	}
-	return true
+	return miss == nil, miss
 }
 
 // pick buckets the sticky key into the split's cumulative weights. A single
-// target returns directly; an empty key deterministically takes the first
-// target.
-func (s *split) pick(stickyKey string) *compiledTarget {
-	if s.cum == nil || stickyKey == "" {
-		return &s.targets[0]
+// target returns directly; a weighted split with an empty key fails closed
+// with the split's precomputed [ErrMissingFact] — a visit with no bucketing
+// identity must not silently collapse onto the first target.
+func (s *split) pick(stickyKey string) (*compiledTarget, error) {
+	if s.cum == nil {
+		return &s.targets[0], nil
+	}
+	if stickyKey == "" {
+		return nil, s.missErr
 	}
 	n := int(hashString(s.seed, stickyKey) % uint64(s.cum[len(s.cum)-1]))
 	for i, c := range s.cum {
 		if n < c {
-			return &s.targets[i]
+			return &s.targets[i], nil
 		}
 	}
-	return &s.targets[len(s.targets)-1] // unreachable: n < cum[last]
+	return &s.targets[len(s.targets)-1], nil // unreachable: n < cum[last]
 }
 
 // finalURL renders the target's macros and merges visit params per the link

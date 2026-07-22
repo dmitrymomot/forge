@@ -36,7 +36,9 @@ func BenchmarkDecideLiteral(b *testing.B) {
 	visit := smartlink.Visit{Country: "de", Device: "mobile", StickyKey: "visitor-42"}
 	b.ReportAllocs()
 	for b.Loop() {
-		link.Decide(visit)
+		if _, err := link.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -57,7 +59,9 @@ func BenchmarkDecideSplit(b *testing.B) {
 	visit := smartlink.Visit{StickyKey: "visitor-42"}
 	b.ReportAllocs()
 	for b.Loop() {
-		link.Decide(visit)
+		if _, err := link.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -73,7 +77,9 @@ func BenchmarkDecideMacro(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		link.Decide(visit)
+		if _, err := link.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -87,7 +93,9 @@ func BenchmarkDecideMerge(b *testing.B) {
 	visit := smartlink.Visit{Params: map[string]string{"sub1": "x", "sub2": "y"}}
 	b.ReportAllocs()
 	for b.Loop() {
-		link.Decide(visit)
+		if _, err := link.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -99,14 +107,16 @@ func BenchmarkDecideBare(b *testing.B) {
 	visit := smartlink.Visit{StickyKey: "visitor-42"}
 	b.ReportAllocs()
 	for b.Loop() {
-		link.Decide(visit)
+		if _, err := link.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
 // noopDecorator wraps d without altering the decision — isolates Chain/call
 // overhead from any decorator's own work.
 func noopDecorator(d smartlink.Decider) smartlink.Decider {
-	return smartlink.DecideFunc(func(v smartlink.Visit) smartlink.Decision {
+	return smartlink.DecideFunc(func(v smartlink.Visit) (smartlink.Decision, error) {
 		return d.Decide(v)
 	})
 }
@@ -120,7 +130,9 @@ func BenchmarkChain3(b *testing.B) {
 	visit := smartlink.Visit{StickyKey: "visitor-42"}
 	b.ReportAllocs()
 	for b.Loop() {
-		chained.Decide(visit)
+		if _, err := chained.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -215,7 +227,9 @@ func BenchmarkResolveDecideTarget(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Compile() error = %v", err)
 		}
-		compiled.Decide(visit)
+		if _, err := compiled.Decide(visit); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
