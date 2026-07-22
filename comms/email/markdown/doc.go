@@ -22,14 +22,21 @@
 // Frontmatter decoding is strict — an unknown key fails the render — and raw
 // HTML in the markdown is dropped, never passed through.
 //
+// Render treats the source as static content ("{{" stays literal).
+// RenderData runs text/template over the whole source first — frontmatter
+// included, so subjects and preheaders can carry {{.Field}} — with
+// missingkey=error so a typo'd field fails the render. Templated values are
+// interpreted as markdown/YAML: pass trusted, application-owned data only.
+//
 // # Non-goals
 //
-//   - No variable interpolation: the source is static content; run
-//     text/template over it first if a document needs data.
 //   - No CSS inliner or theming system: WithLayout replaces the whole shell
 //     when the default card doesn't fit.
 //   - No GFM extensions (tables, strikethrough): transactional email bodies
 //     are prose, headings, lists, and buttons.
+//   - No sanitization of templated values: RenderData data is trusted
+//     application data by contract; user-generated strings belong in static
+//     Render documents.
 //
 // # Usage
 //
@@ -37,9 +44,9 @@
 //	if err != nil {
 //		// bad custom layout
 //	}
-//	msg, err := r.Render(welcomeMD)
+//	msg, err := r.RenderData(welcomeMD, map[string]string{"Name": "Ann"})
 //	if err != nil {
-//		// malformed frontmatter or markdown
+//		// malformed frontmatter, markdown, or template data
 //	}
 //	msg.To = []string{"ann@example.com"}
 //	err = sender.Send(ctx, msg) // any email.Sender

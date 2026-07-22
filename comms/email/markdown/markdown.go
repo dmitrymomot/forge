@@ -5,6 +5,7 @@ import (
 	"fmt"
 	htmltemplate "html/template"
 	"strings"
+	texttemplate "text/template"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/parser"
@@ -68,11 +69,35 @@ type frontmatter struct {
 	Preheader string `yaml:"preheader"`
 }
 
-// Render converts one markdown document into a Message with Subject, HTML
-// (markdown wrapped in the layout), and Text (the plain-text alternative)
-// filled — From and recipients stay with the caller. Raw HTML in the
-// markdown is dropped, never passed through. The source is static content:
-// to template variables into it, run text/template over the source first.
+// RenderData runs text/template over the whole source — frontmatter
+// included, so subjects and preheaders carry {{.Field}} too — and renders
+// the result like Render. Missing keys are errors (missingkey=error), so a
+// typo'd field fails the render instead of sending "<no value>".
+//
+// Substituted values land in the source before markdown parsing, so they are
+// interpreted as markdown and YAML: pass trusted, application-owned data.
+// A user-controlled string that must render verbatim belongs in a static
+// Render document, not in template data.
+func (r *Renderer) RenderData(src []byte, data any) (email.Message, error) {
+	if r == nil || r.md == nil {
+		return email.Message{}, fmt.Errorf("%w: renderer not constructed with New", ErrInvalidDocument)
+	}
+	tmpl, err := texttemplate.New("email").Option("missingkey=error").Parse(string(src))
+	if err != nil {
+		return email.Message{}, fmt.Errorf("%w: template: %v", ErrInvalidDocument, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return email.Message{}, fmt.Errorf("email/markdown: execute template: %w", err)
+	}
+	return r.Render(buf.Bytes())
+}
+
+// Render converts one static markdown document into a Message with Subject,
+// HTML (markdown wrapped in the layout), and Text (the plain-text
+// alternative) filled — From and recipients stay with the caller. Raw HTML
+// in the markdown is dropped, never passed through. The source is rendered
+// verbatim ("{{" stays literal); use RenderData to template values in.
 func (r *Renderer) Render(src []byte) (email.Message, error) {
 	if r == nil || r.md == nil {
 		return email.Message{}, fmt.Errorf("%w: renderer not constructed with New", ErrInvalidDocument)

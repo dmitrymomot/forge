@@ -163,6 +163,56 @@ func TestRenderDocumentErrors(t *testing.T) {
 	require.ErrorIs(t, err, markdown.ErrInvalidDocument)
 }
 
+func TestRenderData(t *testing.T) {
+	t.Parallel()
+	r := newRenderer(t)
+	doc := []byte(`---
+subject: Welcome, {{.Name}}!
+preheader: '{{.Days}} days of trial await.'
+---
+# Hi {{.Name}}
+
+[Button: Start now](https://app.acme.example/start?t={{.Token}})
+`)
+
+	msg, err := r.RenderData(doc, map[string]any{"Name": "Ann", "Days": 14, "Token": "abc123"})
+	require.NoError(t, err)
+	assert.Equal(t, "Welcome, Ann!", msg.Subject)
+	assert.Contains(t, msg.HTML, "14 days of trial await.")
+	assert.Contains(t, msg.HTML, `href="https://app.acme.example/start?t=abc123"`)
+	assert.Equal(t, "Hi Ann\n\nStart now: https://app.acme.example/start?t=abc123", msg.Text)
+}
+
+func TestRenderDataErrors(t *testing.T) {
+	t.Parallel()
+	r := newRenderer(t)
+
+	t.Run("missing key fails closed", func(t *testing.T) {
+		t.Parallel()
+		_, err := r.RenderData([]byte("---\nsubject: Hi {{.Nmae}}\n---\nbody\n"), map[string]string{"Name": "Ann"})
+		require.Error(t, err, `typo'd key must not send "<no value>"`)
+	})
+	t.Run("unparseable template", func(t *testing.T) {
+		t.Parallel()
+		_, err := r.RenderData([]byte("---\nsubject: s\n---\n{{.Name\n"), map[string]string{"Name": "Ann"})
+		require.ErrorIs(t, err, markdown.ErrInvalidDocument)
+	})
+	t.Run("zero renderer", func(t *testing.T) {
+		t.Parallel()
+		var zero markdown.Renderer
+		_, err := zero.RenderData([]byte(welcomeDoc), nil)
+		require.ErrorIs(t, err, markdown.ErrInvalidDocument)
+	})
+}
+
+func TestRenderStaticLeavesBracesLiteral(t *testing.T) {
+	t.Parallel()
+	r := newRenderer(t)
+	msg, err := r.Render([]byte("---\nsubject: Docs\n---\nUse {{.Name}} in your template.\n"))
+	require.NoError(t, err)
+	assert.Contains(t, msg.Text, "Use {{.Name}} in your template.", "Render must never interpolate")
+}
+
 func TestRenderCRLFSource(t *testing.T) {
 	t.Parallel()
 	r := newRenderer(t)

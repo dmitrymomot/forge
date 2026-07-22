@@ -19,6 +19,20 @@ func BenchmarkRender(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderData(b *testing.B) {
+	r, err := markdown.New()
+	if err != nil {
+		b.Fatal(err)
+	}
+	src := []byte("---\nsubject: Welcome, {{.Name}}!\n---\n# Hi {{.Name}}\n\n[Button: Start](https://app.acme.example/start?t={{.Token}})\n")
+	data := map[string]string{"Name": "Ann", "Token": "abc123"}
+	for b.Loop() {
+		if _, err := r.RenderData(src, data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkRenderLongDocument(b *testing.B) {
 	r, err := markdown.New()
 	if err != nil {
