@@ -111,6 +111,7 @@ func (m *Manager) Save(ctx context.Context, s *Session) error {
 	}
 	s.token = tok
 	s.isNew = false
+	s.clearDirty()
 	return nil
 }
 

@@ -108,7 +108,12 @@ func (s *Session) isDirty() bool { return len(s.dirty) > 0 }
 
 // encode folds dirty namespaces back into the payload. Namespaces the process
 // never touched keep their original bytes, so a plugin's keys survive a save by
-// a handler that has never heard of that plugin.
+// a handler that has never heard of that plugin. It deliberately leaves the
+// dirty set untouched — clearing it is the caller's job, and only once the
+// store write it staged the payload for has actually succeeded. Clearing it
+// here, before the write is even attempted, would let a failed save silently
+// discard the pending namespace changes: a retry would find nothing dirty
+// left to re-encode.
 func (s *Session) encode() error {
 	if !s.isDirty() {
 		return nil
@@ -130,7 +135,6 @@ func (s *Session) encode() error {
 	}
 	if len(s.raw) == 0 {
 		s.rec.Payload = nil
-		clear(s.dirty)
 		return nil
 	}
 	b, err := json.Marshal(s.raw)
@@ -138,8 +142,11 @@ func (s *Session) encode() error {
 		return err
 	}
 	s.rec.Payload = b
-	clear(s.dirty)
 	return nil
 }
+
+// clearDirty marks every pending namespace write as persisted. Callers must
+// invoke it only after the store write that encode() staged has succeeded.
+func (s *Session) clearDirty() { clear(s.dirty) }
 
 func (s *Session) record() Record { return s.rec }

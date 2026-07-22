@@ -84,28 +84,45 @@ func TestAbsoluteLifetimeCapsSliding(t *testing.T) {
 	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	clk := clock.NewMock(start)
 	mgr := newTestManager(t, session.WithClock(clk),
-		session.WithIdle(time.Hour), session.WithMaxTTL(90*time.Minute))
+		session.WithIdle(time.Hour), session.WithMaxTTL(80*time.Minute))
 
 	sess := mgr.Start()
 	if err := mgr.Save(t.Context(), sess); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	capAt := start.Add(80 * time.Minute)
 
-	// 30 minutes in, sliding would reach start+90m; the cap is start+90m too.
+	// 30 minutes in, uncapped sliding would reach start+90m; the cap is
+	// start+80m — a genuinely different instant, so this actually proves
+	// capping rather than coinciding with the uncapped value.
 	clk.Advance(30 * time.Minute)
 	loaded, err := mgr.Load(t.Context(), sess.Token())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+	if !loaded.ExpiresAt().Equal(capAt) {
+		t.Fatalf("ExpiresAt = %v, want %v (capped by MaxTTL, not %v uncapped)", loaded.ExpiresAt(), capAt, start.Add(90*time.Minute))
+	}
 	if err := mgr.Save(t.Context(), loaded); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if want := start.Add(90 * time.Minute); !loaded.ExpiresAt().Equal(want) {
-		t.Fatalf("ExpiresAt = %v, want %v (capped by MaxTTL)", loaded.ExpiresAt(), want)
+
+	// More real activity, still inside the cap: the deadline must hold
+	// steady at capAt even though every request refreshes LastSeenAt.
+	clk.Advance(30 * time.Minute) // start+60m
+	loaded, err = mgr.Load(t.Context(), loaded.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.ExpiresAt().Equal(capAt) {
+		t.Fatalf("ExpiresAt = %v, want %v (continued activity must not push it past the cap)", loaded.ExpiresAt(), capAt)
+	}
+	if err := mgr.Save(t.Context(), loaded); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 
-	// Past the cap, no amount of activity revives it.
-	clk.Advance(61 * time.Minute)
+	// Cross the cap boundary: no amount of activity revives it.
+	clk.Advance(30 * time.Minute) // start+90m, past capAt
 	if _, err := mgr.Load(t.Context(), loaded.Token()); !errors.Is(err, session.ErrExpired) {
 		t.Fatalf("Load past the absolute lifetime = %v, want ErrExpired", err)
 	}

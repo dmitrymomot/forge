@@ -109,6 +109,40 @@ func TestAuthenticateRollsBackTokenOnFailedSave(t *testing.T) {
 	}
 }
 
+func TestFailedAuthenticateKeepsPendingPayloadForRetry(t *testing.T) {
+	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	nsCart.Set(sess, cartData{Items: []string{"guest-item"}})
+
+	store.failOn = store.calls + 1
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err == nil {
+		t.Fatal("Authenticate must surface the store failure")
+	}
+
+	// The rollback undid UserID/token, but the cart write was never
+	// persisted anywhere — it must still be pending, not silently dropped.
+	if err := mgr.Save(t.Context(), sess); err != nil {
+		t.Fatalf("retry Save: %v", err)
+	}
+
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cart, err := nsCart.Get(reloaded)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(cart.Items) != 1 || cart.Items[0] != "guest-item" {
+		t.Fatalf("pending namespace write lost after a failed Authenticate: %+v", cart)
+	}
+}
+
 func TestRememberSelectsTheRememberDeadlines(t *testing.T) {
 	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	clk := clock.NewMock(start)
@@ -170,6 +204,14 @@ func TestElevationSurvivesRotation(t *testing.T) {
 	if !sess.ElevatedWithin(time.Minute) {
 		t.Fatal("rotation must preserve ElevatedAt")
 	}
+
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reloaded.ElevatedWithin(time.Minute) {
+		t.Fatal("rotation must persist ElevatedAt, not just hold it in memory")
+	}
 }
 
 func TestElevateStampsFreshly(t *testing.T) {
@@ -192,6 +234,14 @@ func TestElevateStampsFreshly(t *testing.T) {
 	if !sess.ElevatedWithin(10 * time.Minute) {
 		t.Fatal("Elevate must refresh the stamp")
 	}
+
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reloaded.ElevatedWithin(10 * time.Minute) {
+		t.Fatal("Elevate must persist the refreshed stamp, not just hold it in memory")
+	}
 }
 
 func TestRebindReplacesPinnedMetadata(t *testing.T) {
@@ -202,5 +252,13 @@ func TestRebindReplacesPinnedMetadata(t *testing.T) {
 	}
 	if sess.IP() != "203.0.113.4" || sess.UserAgent() != "Chrome" || sess.Fingerprint() != "fp1" {
 		t.Fatalf("Rebind did not apply: ip=%q ua=%q fp=%q", sess.IP(), sess.UserAgent(), sess.Fingerprint())
+	}
+
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if reloaded.IP() != "203.0.113.4" || reloaded.UserAgent() != "Chrome" || reloaded.Fingerprint() != "fp1" {
+		t.Fatalf("Rebind did not persist: ip=%q ua=%q fp=%q", reloaded.IP(), reloaded.UserAgent(), reloaded.Fingerprint())
 	}
 }
