@@ -25,6 +25,7 @@ func TestConfigValidate(t *testing.T) {
 		{"negative maxttl", func(c *session.Config) { c.MaxTTL = -time.Second }, session.ErrBadMaxTTL},
 		{"maxttl below idle", func(c *session.Config) { c.Idle = 48 * time.Hour; c.MaxTTL = time.Hour }, session.ErrBadMaxTTL},
 		{"zero remember idle", func(c *session.Config) { c.RememberIdle = 0 }, session.ErrBadIdle},
+		{"remembermax below remember idle", func(c *session.Config) { c.RememberIdle = 60 * 24 * time.Hour; c.RememberMax = time.Hour }, session.ErrBadMaxTTL},
 		{"negative touch", func(c *session.Config) { c.Touch = -time.Second }, session.ErrBadTouch},
 		{"touch above idle", func(c *session.Config) { c.Touch = 48 * time.Hour }, session.ErrBadTouch},
 	}
