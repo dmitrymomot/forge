@@ -359,6 +359,27 @@ func TestHandlerStreamingUnsupported(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.code)
 }
 
+func TestHandlerWriterOptionsForwarded(t *testing.T) {
+	t.Parallel()
+
+	// An invalid writer option fails only inside the per-request NewWriter
+	// call, so the 500 proves the handler forwards WithWriterOptions to it.
+	h, err := sse.NewHandler(newHub(t), staticTopics("x"),
+		sse.WithWriterOptions(sse.WithSendTimeout(-time.Second)))
+	require.NoError(t, err)
+	srv := newServer(t, h)
+
+	resp, err := srv.Client().Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("nil response")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
 func TestNewHandlerValidation(t *testing.T) {
 	t.Parallel()
 

@@ -40,18 +40,24 @@ func NewWriter(w http.ResponseWriter, opts ...WriterOption) (*Writer, error) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no")
+	// On any failure below, nothing has been written yet: reset the stream
+	// headers so the caller can still respond with a clean error.
+	resetHeaders := func() {
+		h.Del("Content-Type")
+		h.Del("Cache-Control")
+		h.Del("X-Accel-Buffering")
+	}
 	rc := http.NewResponseController(w)
 	// A wrapping middleware that does not implement Unwrap surfaces
 	// ErrNotSupported here even though the underlying connection has a
 	// deadline; that is the caller's cue to run the server with
 	// WriteTimeout=0 instead (see the package comment).
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		resetHeaders()
 		return nil, fmt.Errorf("sse: clear write deadline: %w", err)
 	}
 	if err := rc.Flush(); err != nil {
-		h.Del("Content-Type")
-		h.Del("Cache-Control")
-		h.Del("X-Accel-Buffering")
+		resetHeaders()
 		if errors.Is(err, http.ErrNotSupported) {
 			return nil, ErrStreamingUnsupported
 		}

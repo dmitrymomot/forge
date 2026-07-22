@@ -69,6 +69,29 @@ func TestNewWriterStreamingUnsupported(t *testing.T) {
 	assert.Empty(t, w.header.Get("X-Accel-Buffering"))
 }
 
+// deadlineFail flushes fine but hard-fails deadline changes (not a mere
+// not-supported), forcing NewWriter's clear-deadline error path.
+type deadlineFail struct {
+	header http.Header
+}
+
+func (w *deadlineFail) Header() http.Header              { return w.header }
+func (w *deadlineFail) Write(p []byte) (int, error)      { return len(p), nil }
+func (w *deadlineFail) WriteHeader(int)                  {}
+func (w *deadlineFail) Flush()                           {}
+func (w *deadlineFail) SetWriteDeadline(time.Time) error { return errors.New("deadline broken") }
+
+func TestNewWriterDeadlineErrorResetsHeaders(t *testing.T) {
+	t.Parallel()
+
+	w := &deadlineFail{header: make(http.Header)}
+	_, err := sse.NewWriter(w)
+	require.Error(t, err)
+	assert.Empty(t, w.header.Get("Content-Type"), "stream headers must be reset on failure")
+	assert.Empty(t, w.header.Get("Cache-Control"))
+	assert.Empty(t, w.header.Get("X-Accel-Buffering"))
+}
+
 func TestSendFlushesEveryEvent(t *testing.T) {
 	t.Parallel()
 
