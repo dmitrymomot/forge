@@ -144,6 +144,12 @@ func parseDocument(src []byte) (frontmatter, []byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(meta))
 	dec.KnownFields(true)
 	if err := dec.Decode(&fm); err != nil {
+		// YAML reserves an opening brace (flow mapping), so the natural
+		// RenderData pattern `subject: {{.Field}}` fails decode unless
+		// quoted — point straight at the fix instead of a bare yaml error.
+		if bytes.Contains(meta, []byte("{{")) {
+			return frontmatter{}, nil, fmt.Errorf("%w: frontmatter: %v (a value starting with a placeholder must be quoted: subject: '%s')", ErrInvalidDocument, err, "{{.Field}}")
+		}
 		return frontmatter{}, nil, fmt.Errorf("%w: frontmatter: %v", ErrInvalidDocument, err)
 	}
 	return fm, body, nil

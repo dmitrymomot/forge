@@ -205,6 +205,26 @@ func TestRenderDataErrors(t *testing.T) {
 	})
 }
 
+func TestRenderDataPlaceholderOnlyFrontmatter(t *testing.T) {
+	t.Parallel()
+	r := newRenderer(t)
+
+	t.Run("quoted placeholder value renders", func(t *testing.T) {
+		t.Parallel()
+		msg, err := r.RenderData([]byte("---\nsubject: '{{.Subject}}'\n---\nbody\n"), map[string]string{"Subject": "Monthly digest"})
+		require.NoError(t, err)
+		assert.Equal(t, "Monthly digest", msg.Subject)
+	})
+	t.Run("unquoted placeholder value errors with quoting hint", func(t *testing.T) {
+		t.Parallel()
+		// YAML reserves the opening brace, so this can't decode; the error
+		// must tell the author to quote instead of leaving a bare yaml error.
+		_, err := r.RenderData([]byte("---\nsubject: {{.Subject}}\n---\nbody\n"), map[string]string{"Subject": "x"})
+		require.ErrorIs(t, err, markdown.ErrInvalidDocument)
+		assert.ErrorContains(t, err, "must be quoted")
+	})
+}
+
 func TestRenderDataStructureInjection(t *testing.T) {
 	t.Parallel()
 	r := newRenderer(t)

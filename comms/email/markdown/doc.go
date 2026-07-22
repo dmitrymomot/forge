@@ -28,7 +28,11 @@
 // render. The document structure is parsed before data enters it, so a data
 // value cannot re-terminate the frontmatter or inject keys, and a newline
 // landing in the subject or preheader fails the render. Body values are
-// still interpreted as markdown.
+// still interpreted as markdown. Because the frontmatter is YAML first, a
+// value that begins with a placeholder must be quoted:
+//
+//	subject: 'Welcome, {{.Name}}!'   // always safe
+//	subject: {{.Subject}}            // invalid YAML — quote it
 //
 // # Non-goals
 //
