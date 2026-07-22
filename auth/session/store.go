@@ -54,6 +54,10 @@ type UserIndex interface {
 
 // Expirer is the optional bulk reaping capability. Stores whose backend expires
 // records natively (a Mongo TTL index, a Redis key TTL) do not implement it.
+//
+// DeleteExpired removes every record whose ExpiresAt is at or before now — the
+// boundary is inclusive, so a record expiring exactly at now is reaped. A zero
+// ExpiresAt means the record never expires and must never be reaped.
 type Expirer interface {
 	DeleteExpired(ctx context.Context, now time.Time) (int, error)
 }
