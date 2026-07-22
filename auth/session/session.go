@@ -11,15 +11,16 @@ import (
 // request-scoped and NOT safe for concurrent use: a handler that fans out to
 // goroutines must serialize access itself.
 type Session struct {
-	raw     map[string]json.RawMessage // lazily parsed from rec.Payload
-	cache   map[string]any             // decoded namespace values
-	dirty   map[string]struct{}
-	now     func() time.Time
-	token   string
-	rec     Record
-	parsed  bool
-	isNew   bool
-	deleted bool
+	storedSeenAt time.Time                  // rec.LastSeenAt as it was persisted, before Load refreshes it
+	raw          map[string]json.RawMessage // lazily parsed from rec.Payload
+	cache        map[string]any             // decoded namespace values
+	dirty        map[string]struct{}
+	now          func() time.Time
+	token        string
+	rec          Record
+	parsed       bool
+	isNew        bool
+	deleted      bool
 }
 
 func newSession(rec Record, token string, isNew bool, now func() time.Time) *Session {
@@ -69,7 +70,8 @@ func (s *Session) IsNew() bool { return s.isNew }
 func (s *Session) Authenticated() bool { return s.rec.UserID != "" }
 
 // ElevatedWithin reports whether identity was re-proved within d of now.
-// The manager stamps now via elevatedNow so tests can drive a mock clock.
+// "Now" comes from the now func the Manager threaded into newSession, so
+// tests can drive it with a mock clock.
 func (s *Session) ElevatedWithin(d time.Duration) bool {
 	if s.rec.ElevatedAt.IsZero() || d <= 0 {
 		return false
