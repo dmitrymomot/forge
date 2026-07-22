@@ -16,6 +16,7 @@ type Session struct {
 	cache        map[string]any             // decoded namespace values
 	dirty        map[string]struct{}
 	now          func() time.Time
+	inf          *Info // context-visible view, set by withSession; nil outside the middleware
 	token        string
 	rec          Record
 	parsed       bool
@@ -150,3 +151,21 @@ func (s *Session) encode() error {
 func (s *Session) clearDirty() { clear(s.dirty) }
 
 func (s *Session) record() Record { return s.rec }
+
+// info returns the session's live Info view, or nil outside the middleware.
+//
+//nolint:unused // consumed by the request-handling middleware, a later task in this plan
+func (s *Session) info() *Info { return s.inf }
+
+// syncInfo mirrors the record onto the context-visible Info, if one exists. It
+// is a no-op when the session was never wired through withSession.
+func (s *Session) syncInfo() {
+	if s.inf == nil {
+		return
+	}
+	s.inf.ID = s.rec.ID
+	s.inf.UserID = s.rec.UserID
+	s.inf.CreatedAt = s.rec.CreatedAt
+	s.inf.ExpiresAt = s.rec.ExpiresAt
+	s.inf.ElevatedAt = s.rec.ElevatedAt
+}
