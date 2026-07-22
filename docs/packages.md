@@ -74,16 +74,6 @@ Deps: `core/structfields`, `core/validate`, `core/i18n`.
 
 ---
 
-**data/objectstore**
-
-Blob `Store` seam with a path-traversal-safe disk adapter;
-`objectstore/s3` driver on aws-sdk-go-v2. Magic-byte MIME validation via
-`filetype`, tenant key-prefix scoping, presigned URLs.
-
-Deps: `core/filetype`.
-
----
-
 **data/seed**
 
 Idempotent named-Seeder runner with an `app seed` cli.Command; mirrors
