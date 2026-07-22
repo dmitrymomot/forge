@@ -19,7 +19,10 @@
 //	if err != nil {
 //		// handle error
 //	}
-//	d := link.Decide(smartlink.Visit{Country: "de", StickyKey: "visitor-42"})
+//	d, err := link.Decide(smartlink.Visit{Country: "de", StickyKey: "visitor-42"})
+//	if err != nil {
+//		// smartlink.ErrMissingFact: the visit lacks a fact the rules consult
+//	}
 //	// d.Rule == "de-mobile", d.URL == "https://a.example.com/lp"
 //
 // # Engine
@@ -28,13 +31,28 @@
 // of typed matchers ([Geo], [Device], [Locale], [ParamEquals],
 // [TimeWindow], [Percent]) evaluated over a caller-built [Visit], first
 // match wins, with a mandatory default target — and returns an immutable
-// [Compiled]; [Compiled.Decide] is the infallible per-click hot path. Rule
+// [Compiled]; [Compiled.Decide] is the per-click hot path. Rule
 // values are consumer data hydrated into the typed vocabulary — there is no
 // DSL, and rule storage/admin, target health checks, and bot filtering stay
 // consumer-side. The engine never imports net/http: the caller builds the
 // Visit from its own request facts (web/clientip + web/geoip for country,
 // web/useragent for device) and emits the returned [Decision] as the click
 // event.
+//
+// Decide fails closed on missing facts. A visit field the decision would
+// hinge on but doesn't carry — Country empty on a geoip miss while a Geo
+// rule is live, Device/Locale empty under an unparsed user agent, StickyKey
+// empty against a [Percent] gate or weighted split — returns
+// [ErrMissingFact] instead of silently falling through to the default
+// target or collapsing a split onto its first entry. A
+// restricted-jurisdictions rule therefore cannot stop firing just because
+// the country became unknowable. The gate is exact: a missing fact whose
+// rule is already definitively false on another matcher, or that only rules
+// after the winning one consult, does not error, and a spec that consults
+// no facts (the degenerate single-default-target short link) never fails.
+// [ParamEquals] deliberately treats an absent param as a non-match, not a
+// missing fact — params are click data, and their absence is a fact of the
+// click.
 //
 // Weighted splits and [Percent] shares bucket deterministically by FNV-1a
 // hash of [Spec.Salt], the rule name, and Visit.StickyKey — never RNG — so a

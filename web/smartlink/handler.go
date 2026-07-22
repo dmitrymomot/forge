@@ -29,6 +29,15 @@ import (
 // rule evaluation or offer update, so nothing here is safe for a client or
 // intermediary to cache.
 //
+// A visit the Decider refuses is never redirected: [ErrMissingFact] — the
+// link's rules consult a fact the visit doesn't carry, e.g. a Geo rule on a
+// geoip miss or a weighted split with no sticky key — answers 403 (logged at
+// warn), and any other Decider error answers 500. Fail-closed by design:
+// neither the default target nor [WithFallbackURL] is a safe destination for
+// a click the rules couldn't evaluate. A consumer that wants a friendlier
+// outcome (a compliance interstitial, a consent page) wraps the Decider with
+// a [Decorator] that catches [ErrMissingFact] and returns its own Decision.
+//
 // The Handler redirects for every HTTP method, including HEAD, and
 // [WithOnHit] fires for all of them alike — it does not special-case
 // method. A consumer that needs method awareness (e.g. to skip counting
@@ -74,7 +83,22 @@ func (m *Manager) Handler() http.Handler {
 			return
 		}
 
-		dec := d.Decide(v)
+		dec, err := d.Decide(v)
+		if err != nil {
+			// Fail closed: a click the engine refuses to route — a Geo rule
+			// with no country fact, a split with no sticky key — must never
+			// fall back to a redirect (the fallback URL is a destination, not
+			// a safe harbor). 403 for the per-visit data gap, 500 for
+			// anything else (a decorator failure is a consumer bug/outage).
+			if errors.Is(err, ErrMissingFact) {
+				m.cfg.logger.WarnContext(ctx, "smartlink: visit refused", "code", code, "error", err)
+				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+				return
+			}
+			m.cfg.logger.ErrorContext(ctx, "smartlink: decide error", "code", code, "error", err)
+			internalServerError(w)
+			return
+		}
 		http.Redirect(w, r, dec.URL, m.cfg.redirectStatus)
 		if m.cfg.onHit != nil {
 			// Cancellation-detached: a client that disconnects right after

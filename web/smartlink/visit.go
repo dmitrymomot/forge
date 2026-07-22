@@ -22,9 +22,10 @@ type Visit struct {
 	// Locale is a BCP-47-style tag ("en" or "en-US"), any case.
 	Locale string
 	// StickyKey is the bucketing identity (click ID, visitor ID) that keeps
-	// Percent matchers and weighted splits deterministic per visitor. With an
-	// empty key, Percent never matches and splits pick their first target.
-	// Consumers typically set it to their fingerprint digest, so weighted-split
-	// stickiness and fraud identity agree by construction.
+	// Percent matchers and weighted splits deterministic per visitor. An empty
+	// key is a missing fact: a decision that would hinge on a Percent gate or
+	// weighted split fails closed with ErrMissingFact instead of guessing a
+	// bucket. Consumers typically set it to their fingerprint digest, so
+	// weighted-split stickiness and fraud identity agree by construction.
 	StickyKey string
 }

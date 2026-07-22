@@ -148,9 +148,9 @@ func TestHandlerVisitFuncEnriches(t *testing.T) {
 		}
 	})
 
-	t.Run("without VisitFunc falls to default", func(t *testing.T) {
+	t.Run("without VisitFunc fails closed", func(t *testing.T) {
 		t.Parallel()
-		m := newTestManager(t, smartlink.WithResolver(geoResolver()))
+		m := newTestManager(t, smartlink.WithResolver(geoResolver()), smartlink.WithFallbackURL("https://fallback.example.com/"))
 		l, err := m.Create(context.Background(), smartlink.CreateParams{Ref: "geo-1"})
 		if err != nil {
 			t.Fatalf("Create() error = %v, want nil", err)
@@ -162,8 +162,14 @@ func TestHandlerVisitFuncEnriches(t *testing.T) {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 
-		if got, want := rec.Header().Get("Location"), "https://default.example.com/"; got != want {
-			t.Fatalf("Location = %q, want %q (default target)", got, want)
+		// The geo rule consults a country fact no VisitFunc supplied: the
+		// click must be refused, never redirected to the default target or
+		// the fallback URL.
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d (missing fact must fail closed)", rec.Code, http.StatusForbidden)
+		}
+		if got := rec.Header().Get("Location"); got != "" {
+			t.Fatalf("Location = %q, want no redirect on a refused visit", got)
 		}
 	})
 }
@@ -357,13 +363,21 @@ func TestHandlerDecoratorsWrapBothKinds(t *testing.T) {
 	t.Parallel()
 	const guardURL = "https://guard.example.com/"
 	divert := func(next smartlink.Decider) smartlink.Decider {
-		return smartlink.DecideFunc(func(v smartlink.Visit) smartlink.Decision {
-			d := next.Decide(v)
+		return smartlink.DecideFunc(func(v smartlink.Visit) (smartlink.Decision, error) {
+			d, err := next.Decide(v)
+			if err != nil {
+				return smartlink.Decision{}, err
+			}
 			d.URL = guardURL
-			return d
+			return d, nil
 		})
 	}
-	m := newTestManager(t, smartlink.WithResolver(geoResolver()), smartlink.WithDecorators(divert))
+	// A default-only resolver: the visits here carry no facts, and this test
+	// is about decorator coverage, not rule evaluation.
+	resolver := func(context.Context, smartlink.Link) (smartlink.Decider, error) {
+		return smartlink.Compile(smartlink.Spec{Default: []smartlink.Target{{URL: "https://offer.example.com/"}}})
+	}
+	m := newTestManager(t, smartlink.WithResolver(resolver), smartlink.WithDecorators(divert))
 	ctx := context.Background()
 
 	target, err := m.Create(ctx, smartlink.CreateParams{Target: "https://dest.example.com/"})

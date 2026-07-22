@@ -1,6 +1,7 @@
 package smartlink_test
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -26,6 +27,147 @@ func rule(name, url string, when ...smartlink.Matcher) smartlink.Rule {
 	return smartlink.Rule{Name: name, When: when, Targets: []smartlink.Target{{URL: url}}}
 }
 
+func mustDecide(t *testing.T, l *smartlink.Compiled, v smartlink.Visit) smartlink.Decision {
+	t.Helper()
+	d, err := l.Decide(v)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	return d
+}
+
+// wantMissingFact asserts Decide fails closed with ErrMissingFact and returns
+// no decision.
+func wantMissingFact(t *testing.T, l *smartlink.Compiled, v smartlink.Visit) {
+	t.Helper()
+	d, err := l.Decide(v)
+	if !errors.Is(err, smartlink.ErrMissingFact) {
+		t.Fatalf("Decide() = (%+v, %v), want ErrMissingFact", d, err)
+	}
+	if d.URL != "" || d.Rule != "" {
+		t.Fatalf("Decide() returned a decision %+v alongside the error", d)
+	}
+}
+
+// TestDecideMissingFactFailsClosed asserts a visit lacking a fact the spec's
+// rules consult is refused instead of silently falling through to the default
+// target — the restricted-jurisdictions-on-geoip-miss failure class.
+func TestDecideMissingFactFailsClosed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		when smartlink.Matcher
+	}{
+		{"geo", smartlink.Geo{Countries: []string{"CU", "IR", "KP"}}},
+		{"device", smartlink.Device{Devices: []string{"mobile"}}},
+		{"locale", smartlink.Locale{Locales: []string{"en"}}},
+		{"percent", smartlink.Percent{Share: 30}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			link := mustCompile(t, smartlink.Spec{
+				Rules:   []smartlink.Rule{rule("gate", "https://compliance.example.com", tc.when)},
+				Default: defTargets(),
+			})
+			wantMissingFact(t, link, smartlink.Visit{})
+		})
+	}
+}
+
+// TestDecideMissingFactIrrelevantWhenEarlierRuleMatches asserts the gate is
+// lazy: a missing fact only errors when the decision depends on it, not
+// because a later rule happens to consult it.
+func TestDecideMissingFactIrrelevantWhenEarlierRuleMatches(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{
+		Rules: []smartlink.Rule{
+			rule("bot", "https://sinkhole.example.com", smartlink.ParamEquals{Key: "bot", Values: []string{"1"}}),
+			rule("geo", "https://geo.example.com", smartlink.Geo{Countries: []string{"DE"}}),
+		},
+		Default: defTargets(),
+	})
+	d := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"bot": "1"}})
+	if d.Rule != "bot" {
+		t.Fatalf("Rule = %q, want bot", d.Rule)
+	}
+	// Without the earlier match the missing country is load-bearing again.
+	wantMissingFact(t, link, smartlink.Visit{})
+}
+
+// TestDecideMissingFactIrrelevantWhenRuleDefinitelyFalse asserts a conjunction
+// with a definitively-false matcher skips the rule without erroring on a
+// missing sibling fact — the outcome is provably identical either way — and
+// that matcher order within the conjunction doesn't change that.
+func TestDecideMissingFactIrrelevantWhenRuleDefinitelyFalse(t *testing.T) {
+	t.Parallel()
+	geo := smartlink.Geo{Countries: []string{"DE"}}
+	device := smartlink.Device{Devices: []string{"mobile"}}
+	for name, when := range map[string][]smartlink.Matcher{
+		"geo-first":    {geo, device},
+		"device-first": {device, geo},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			link := mustCompile(t, smartlink.Spec{
+				Rules:   []smartlink.Rule{{Name: "de-mobile", When: when, Targets: []smartlink.Target{{URL: "https://hit.com"}}}},
+				Default: defTargets(),
+			})
+			// Device is definitively not mobile: the rule cannot match no matter
+			// the country, so the missing country must not error.
+			d := mustDecide(t, link, smartlink.Visit{Device: "desktop"})
+			if d.Rule != "" {
+				t.Fatalf("Rule = %q, want default", d.Rule)
+			}
+			// Device matches, country missing: the rule's outcome now hinges on
+			// the missing fact.
+			wantMissingFact(t, link, smartlink.Visit{Device: "mobile"})
+		})
+	}
+}
+
+// TestDecideEmptyStickySplitErrors asserts a weighted split refuses an empty
+// StickyKey instead of silently collapsing onto the first target.
+func TestDecideEmptyStickySplitErrors(t *testing.T) {
+	t.Parallel()
+	splitTargets := []smartlink.Target{
+		{URL: "https://a.com", Weight: 70},
+		{URL: "https://b.com", Weight: 30},
+	}
+
+	def := mustCompile(t, smartlink.Spec{Default: splitTargets})
+	wantMissingFact(t, def, smartlink.Visit{})
+	if d := mustDecide(t, def, smartlink.Visit{StickyKey: "visitor-1"}); d.URL == "" {
+		t.Fatalf("keyed visit got no decision")
+	}
+
+	ruled := mustCompile(t, smartlink.Spec{
+		Rules: []smartlink.Rule{{
+			Name:    "de",
+			When:    []smartlink.Matcher{smartlink.Geo{Countries: []string{"DE"}}},
+			Targets: splitTargets,
+		}},
+		Default: defTargets(),
+	})
+	wantMissingFact(t, ruled, smartlink.Visit{Country: "DE"})
+	// The split is only consulted when its rule matches: a US visit takes the
+	// single default target and needs no sticky key.
+	if d := mustDecide(t, ruled, smartlink.Visit{Country: "US"}); d.Rule != "" {
+		t.Fatalf("Rule = %q, want default", d.Rule)
+	}
+}
+
+// TestDecideNoFactsNeededNeverErrors asserts the degenerate short link — one
+// default target, no rules — still decides every visit, including the empty
+// one.
+func TestDecideNoFactsNeededNeverErrors(t *testing.T) {
+	t.Parallel()
+	link := mustCompile(t, smartlink.Spec{Default: defTargets()})
+	if d := mustDecide(t, link, smartlink.Visit{}); d.URL != "https://example.com/" {
+		t.Fatalf("URL = %q, want default", d.URL)
+	}
+}
+
 func TestDecideFirstMatchWins(t *testing.T) {
 	t.Parallel()
 	link := mustCompile(t, smartlink.Spec{
@@ -35,7 +177,7 @@ func TestDecideFirstMatchWins(t *testing.T) {
 		},
 		Default: defTargets(),
 	})
-	d := link.Decide(smartlink.Visit{Country: "DE"})
+	d := mustDecide(t, link, smartlink.Visit{Country: "DE"})
 	if d.Rule != "first" || d.URL != "https://first.com" {
 		t.Fatalf("got (%q, %q), want first rule", d.Rule, d.URL)
 	}
@@ -47,7 +189,7 @@ func TestDecideDefaultFallback(t *testing.T) {
 		Rules:   []smartlink.Rule{rule("de", "https://de.com", smartlink.Geo{Countries: []string{"DE"}})},
 		Default: defTargets(),
 	})
-	d := link.Decide(smartlink.Visit{Country: "US"})
+	d := mustDecide(t, link, smartlink.Visit{Country: "US"})
 	if d.Rule != "" || d.URL != "https://example.com/" {
 		t.Fatalf("got (%q, %q), want default", d.Rule, d.URL)
 	}
@@ -62,7 +204,7 @@ func TestDecideUnconditionalRule(t *testing.T) {
 		Rules:   []smartlink.Rule{rule("maintenance", "https://sorry.com")},
 		Default: defTargets(),
 	})
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "maintenance" {
+	if d := mustDecide(t, link, smartlink.Visit{}); d.Rule != "maintenance" {
 		t.Fatalf("Rule = %q, want maintenance", d.Rule)
 	}
 }
@@ -76,10 +218,10 @@ func TestDecideConjunction(t *testing.T) {
 		)},
 		Default: defTargets(),
 	})
-	if d := link.Decide(smartlink.Visit{Country: "DE", Device: "mobile"}); d.Rule != "de-mobile" {
+	if d := mustDecide(t, link, smartlink.Visit{Country: "DE", Device: "mobile"}); d.Rule != "de-mobile" {
 		t.Fatalf("both matchers true: Rule = %q, want de-mobile", d.Rule)
 	}
-	if d := link.Decide(smartlink.Visit{Country: "DE", Device: "desktop"}); d.Rule != "" {
+	if d := mustDecide(t, link, smartlink.Visit{Country: "DE", Device: "desktop"}); d.Rule != "" {
 		t.Fatalf("one matcher false: Rule = %q, want default", d.Rule)
 	}
 }
@@ -91,13 +233,12 @@ func TestGeoCaseInsensitive(t *testing.T) {
 		Default: defTargets(),
 	})
 	for _, country := range []string{"DE", "de", "De"} {
-		if d := link.Decide(smartlink.Visit{Country: country}); d.Rule != "geo" {
+		if d := mustDecide(t, link, smartlink.Visit{Country: country}); d.Rule != "geo" {
 			t.Fatalf("country %q: Rule = %q, want geo", country, d.Rule)
 		}
 	}
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "" {
-		t.Fatalf("empty country matched geo rule")
-	}
+	// An empty country is a missing fact, not a non-match.
+	wantMissingFact(t, link, smartlink.Visit{})
 }
 
 func TestLocaleMatching(t *testing.T) {
@@ -115,17 +256,18 @@ func TestLocaleMatching(t *testing.T) {
 		{"en-US", "en", false},
 		{"en-US", "en-GB", false},
 		{"en", "de", false},
-		{"en", "", false},
 	}
 	for _, tc := range cases {
 		link := mustCompile(t, smartlink.Spec{
 			Rules:   []smartlink.Rule{rule("loc", "https://hit.com", smartlink.Locale{Locales: []string{tc.rule}})},
 			Default: defTargets(),
 		})
-		got := link.Decide(smartlink.Visit{Locale: tc.visit}).Rule == "loc"
+		got := mustDecide(t, link, smartlink.Visit{Locale: tc.visit}).Rule == "loc"
 		if got != tc.want {
 			t.Errorf("rule %q vs visit %q: matched = %v, want %v", tc.rule, tc.visit, got, tc.want)
 		}
+		// An empty locale is a missing fact, not a non-match.
+		wantMissingFact(t, link, smartlink.Visit{})
 	}
 }
 
@@ -137,13 +279,13 @@ func TestParamEqualsExact(t *testing.T) {
 		)},
 		Default: defTargets(),
 	})
-	if d := link.Decide(smartlink.Visit{Params: map[string]string{"source": "ig"}}); d.Rule != "src" {
+	if d := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"source": "ig"}}); d.Rule != "src" {
 		t.Fatalf("listed value: Rule = %q, want src", d.Rule)
 	}
-	if d := link.Decide(smartlink.Visit{Params: map[string]string{"source": "FB"}}); d.Rule != "" {
+	if d := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"source": "FB"}}); d.Rule != "" {
 		t.Fatalf("param match must be case-sensitive")
 	}
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "" {
+	if d := mustDecide(t, link, smartlink.Visit{}); d.Rule != "" {
 		t.Fatalf("missing param matched")
 	}
 }
@@ -158,19 +300,19 @@ func TestTimeWindow(t *testing.T) {
 		Default: defTargets(),
 	}, smartlink.WithClock(mock))
 
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "window" {
+	if d := mustDecide(t, link, smartlink.Visit{}); d.Rule != "window" {
 		t.Fatalf("inside window: Rule = %q, want window", d.Rule)
 	}
 	mock.Set(until) // Until is exclusive
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "" {
+	if d := mustDecide(t, link, smartlink.Visit{}); d.Rule != "" {
 		t.Fatalf("at Until: Rule = %q, want default", d.Rule)
 	}
 	mock.Set(from.Add(-time.Second))
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "" {
+	if d := mustDecide(t, link, smartlink.Visit{}); d.Rule != "" {
 		t.Fatalf("before From: Rule = %q, want default", d.Rule)
 	}
 	// Visit.At overrides the clock (click-log replay).
-	if d := link.Decide(smartlink.Visit{At: from.Add(time.Minute)}); d.Rule != "window" {
+	if d := mustDecide(t, link, smartlink.Visit{At: from.Add(time.Minute)}); d.Rule != "window" {
 		t.Fatalf("Visit.At inside window: Rule = %q, want window", d.Rule)
 	}
 }
@@ -185,10 +327,10 @@ func TestTimeWindowOpenEnded(t *testing.T) {
 		},
 		Default: defTargets(),
 	})
-	if d := link.Decide(smartlink.Visit{At: at.Add(-time.Hour)}); d.Rule != "until-only" {
+	if d := mustDecide(t, link, smartlink.Visit{At: at.Add(-time.Hour)}); d.Rule != "until-only" {
 		t.Fatalf("before at: Rule = %q, want until-only", d.Rule)
 	}
-	if d := link.Decide(smartlink.Visit{At: at.Add(time.Hour)}); d.Rule != "from-only" {
+	if d := mustDecide(t, link, smartlink.Visit{At: at.Add(time.Hour)}); d.Rule != "from-only" {
 		t.Fatalf("after at: Rule = %q, want from-only", d.Rule)
 	}
 }
@@ -200,21 +342,19 @@ func TestPercentDeterministicAndDistributed(t *testing.T) {
 		Default: defTargets(),
 	})
 	// Deterministic: the same sticky key always lands on the same side.
-	first := link.Decide(smartlink.Visit{StickyKey: "visitor-1"}).Rule
+	first := mustDecide(t, link, smartlink.Visit{StickyKey: "visitor-1"}).Rule
 	for range 10 {
-		if got := link.Decide(smartlink.Visit{StickyKey: "visitor-1"}).Rule; got != first {
+		if got := mustDecide(t, link, smartlink.Visit{StickyKey: "visitor-1"}).Rule; got != first {
 			t.Fatalf("same sticky key flipped: %q then %q", first, got)
 		}
 	}
-	// Empty sticky key fails closed.
-	if d := link.Decide(smartlink.Visit{}); d.Rule != "" {
-		t.Fatalf("empty sticky key matched Percent")
-	}
+	// An empty sticky key is a missing fact: refuse rather than skip the rule.
+	wantMissingFact(t, link, smartlink.Visit{})
 	// Distribution over many keys approximates the share.
 	matched := 0
 	const n = 5000
 	for i := range n {
-		if link.Decide(smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)}).Rule == "pct" {
+		if mustDecide(t, link, smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)}).Rule == "pct" {
 			matched++
 		}
 	}
@@ -232,21 +372,20 @@ func TestWeightedSplit(t *testing.T) {
 		},
 	})
 	// Deterministic per key.
-	first := link.Decide(smartlink.Visit{StickyKey: "visitor-1"}).URL
+	first := mustDecide(t, link, smartlink.Visit{StickyKey: "visitor-1"}).URL
 	for range 10 {
-		if got := link.Decide(smartlink.Visit{StickyKey: "visitor-1"}).URL; got != first {
+		if got := mustDecide(t, link, smartlink.Visit{StickyKey: "visitor-1"}).URL; got != first {
 			t.Fatalf("same sticky key flipped targets: %q then %q", first, got)
 		}
 	}
-	// Empty sticky key deterministically takes the first target.
-	if d := link.Decide(smartlink.Visit{}); d.URL != "https://a.com" {
-		t.Fatalf("empty sticky key got %q, want first target", d.URL)
-	}
+	// An empty sticky key is a missing fact: refuse rather than collapse the
+	// split onto its first target.
+	wantMissingFact(t, link, smartlink.Visit{})
 	// Distribution approximates the weights.
 	a := 0
 	const n = 5000
 	for i := range n {
-		if link.Decide(smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)}).URL == "https://a.com" {
+		if mustDecide(t, link, smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)}).URL == "https://a.com" {
 			a++
 		}
 	}
@@ -260,7 +399,7 @@ func TestMacroRendering(t *testing.T) {
 	link := mustCompile(t, smartlink.Spec{
 		Default: []smartlink.Target{{URL: "https://a.com/{country}/land?d={device}&l={locale}&s={param.sub1}"}},
 	})
-	d := link.Decide(smartlink.Visit{
+	d := mustDecide(t, link, smartlink.Visit{
 		Country: "DE",
 		Device:  "mobile",
 		Locale:  "de-DE",
@@ -271,7 +410,7 @@ func TestMacroRendering(t *testing.T) {
 		t.Fatalf("URL = %q, want %q", d.URL, want)
 	}
 	// Empty visit values render as empty substitutions.
-	if got := link.Decide(smartlink.Visit{}).URL; got != "https://a.com//land?d=&l=&s=" {
+	if got := mustDecide(t, link, smartlink.Visit{}).URL; got != "https://a.com//land?d=&l=&s=" {
 		t.Fatalf("sparse visit URL = %q", got)
 	}
 }
@@ -281,7 +420,7 @@ func TestMacroPathEscaping(t *testing.T) {
 	link := mustCompile(t, smartlink.Spec{
 		Default: []smartlink.Target{{URL: "https://a.com/{param.slug}/x"}},
 	})
-	d := link.Decide(smartlink.Visit{Params: map[string]string{"slug": "a b/c?d"}})
+	d := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"slug": "a b/c?d"}})
 	if want := "https://a.com/a%20b%2Fc%3Fd/x"; d.URL != want {
 		t.Fatalf("URL = %q, want %q", d.URL, want)
 	}
@@ -293,13 +432,13 @@ func TestMacroAuthorityEscaping(t *testing.T) {
 		Default: []smartlink.Target{{URL: "https://cdn-{param.region}.example.com/lp"}},
 	})
 	// Legitimate per-region subdomains render untouched.
-	if got := link.Decide(smartlink.Visit{Params: map[string]string{"region": "eu-1"}}).URL; got != "https://cdn-eu-1.example.com/lp" {
+	if got := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"region": "eu-1"}}).URL; got != "https://cdn-eu-1.example.com/lp" {
 		t.Fatalf("URL = %q", got)
 	}
 	// Hostile values cannot introduce userinfo, a port, or end the authority:
 	// the rendered URL still parses with a host under example.com.
 	for _, hostile := range []string{"evil.com@real.com", "a:9999", "evil.com/x", "e?y", "e#z"} {
-		got := link.Decide(smartlink.Visit{Params: map[string]string{"region": hostile}}).URL
+		got := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"region": hostile}}).URL
 		u, err := url.Parse(got)
 		if err != nil {
 			t.Fatalf("region %q rendered unparseable URL %q: %v", hostile, got, err)
@@ -317,7 +456,7 @@ func TestMacroSchemeInjection(t *testing.T) {
 	link := mustCompile(t, smartlink.Spec{
 		Default: []smartlink.Target{{URL: "{param.p}/lp"}},
 	})
-	got := link.Decide(smartlink.Visit{Params: map[string]string{"p": "https://evil.com"}}).URL
+	got := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"p": "https://evil.com"}}).URL
 	u, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("rendered unparseable URL %q: %v", got, err)
@@ -333,23 +472,23 @@ func TestParamPolicies(t *testing.T) {
 	visit := smartlink.Visit{Params: map[string]string{"keep": "new", "extra": "1", "": "skipme"}}
 
 	drop := mustCompile(t, smartlink.Spec{Default: target})
-	if got := drop.Decide(visit).URL; got != "https://a.com/lp?keep=orig" {
+	if got := mustDecide(t, drop, visit).URL; got != "https://a.com/lp?keep=orig" {
 		t.Fatalf("ParamsDrop URL = %q", got)
 	}
 
 	// Original target pairs stay first, verbatim; merged params append sorted.
 	fill := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsFill})
-	if got := fill.Decide(visit).URL; got != "https://a.com/lp?keep=orig&extra=1" {
+	if got := mustDecide(t, fill, visit).URL; got != "https://a.com/lp?keep=orig&extra=1" {
 		t.Fatalf("ParamsFill URL = %q", got)
 	}
 
 	override := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsOverride})
-	if got := override.Decide(visit).URL; got != "https://a.com/lp?keep=new&extra=1" {
+	if got := mustDecide(t, override, visit).URL; got != "https://a.com/lp?keep=new&extra=1" {
 		t.Fatalf("ParamsOverride URL = %q", got)
 	}
 
 	// No visit params: merge policies leave the URL untouched.
-	if got := fill.Decide(smartlink.Visit{}).URL; got != "https://a.com/lp?keep=orig" {
+	if got := mustDecide(t, fill, smartlink.Visit{}).URL; got != "https://a.com/lp?keep=orig" {
 		t.Fatalf("ParamsFill without params URL = %q", got)
 	}
 }
@@ -371,7 +510,7 @@ func TestPercentAndSplitDecorrelated(t *testing.T) {
 	})
 	a, b := 0, 0
 	for i := range 5000 {
-		d := link.Decide(smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)})
+		d := mustDecide(t, link, smartlink.Visit{StickyKey: "k" + strconv.Itoa(i)})
 		switch d.URL {
 		case "https://a.com":
 			a++
@@ -401,7 +540,10 @@ func TestDecideConcurrent(t *testing.T) {
 	for g := range 8 {
 		wg.Go(func() {
 			for i := range 200 {
-				link.Decide(smartlink.Visit{Country: "DE", StickyKey: strconv.Itoa(g*1000 + i)})
+				if _, err := link.Decide(smartlink.Visit{Country: "DE", StickyKey: strconv.Itoa(g*1000 + i)}); err != nil {
+					t.Errorf("Decide() error = %v", err)
+					return
+				}
 			}
 		})
 	}
@@ -414,7 +556,7 @@ func TestDecisionReportsRawTarget(t *testing.T) {
 	link := mustCompile(t, smartlink.Spec{
 		Default: []smartlink.Target{{URL: tpl}},
 	})
-	d := link.Decide(smartlink.Visit{Country: "DE"})
+	d := mustDecide(t, link, smartlink.Visit{Country: "DE"})
 	if d.Target.URL != tpl {
 		t.Fatalf("Target.URL = %q, want raw template", d.Target.URL)
 	}
@@ -432,12 +574,12 @@ func TestParamMergePreservesRawPairs(t *testing.T) {
 
 	fill := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsFill})
 	visit := smartlink.Visit{Params: map[string]string{"sub": "123", "keep": "new"}}
-	if got, want := fill.Decide(visit).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=orig&sub=123"; got != want {
+	if got, want := mustDecide(t, fill, visit).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=orig&sub=123"; got != want {
 		t.Fatalf("ParamsFill URL = %q, want %q", got, want)
 	}
 
 	override := mustCompile(t, smartlink.Spec{Default: target, Params: smartlink.ParamsOverride})
-	if got, want := override.Decide(smartlink.Visit{Params: map[string]string{"keep": "new"}}).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=new"; got != want {
+	if got, want := mustDecide(t, override, smartlink.Visit{Params: map[string]string{"keep": "new"}}).URL, "https://a.com/lp?promo=50%off&a=1;b=2&keep=new"; got != want {
 		t.Fatalf("ParamsOverride URL = %q, want %q", got, want)
 	}
 }
@@ -451,7 +593,7 @@ func TestParamOverrideCollapsesDuplicates(t *testing.T) {
 		Default: []smartlink.Target{{URL: "https://a.com/lp?k=1&k=2&x=9"}},
 		Params:  smartlink.ParamsOverride,
 	})
-	if got, want := link.Decide(smartlink.Visit{Params: map[string]string{"k": "new"}}).URL, "https://a.com/lp?k=new&x=9"; got != want {
+	if got, want := mustDecide(t, link, smartlink.Visit{Params: map[string]string{"k": "new"}}).URL, "https://a.com/lp?k=new&x=9"; got != want {
 		t.Fatalf("ParamsOverride URL = %q, want %q", got, want)
 	}
 }
@@ -472,7 +614,7 @@ func TestPercentConjunctionComposes(t *testing.T) {
 	const n = 20000
 	hits := 0
 	for i := range n {
-		if link.Decide(smartlink.Visit{StickyKey: fmt.Sprintf("k%d", i)}).Rule == "gate" {
+		if mustDecide(t, link, smartlink.Visit{StickyKey: fmt.Sprintf("k%d", i)}).Rule == "gate" {
 			hits++
 		}
 	}
@@ -501,11 +643,11 @@ func TestSaltDecorrelatesBucketing(t *testing.T) {
 	differ := 0
 	for i := range n {
 		key := fmt.Sprintf("k%d", i)
-		ua := a.Decide(smartlink.Visit{StickyKey: key}).URL
-		if got := a2.Decide(smartlink.Visit{StickyKey: key}).URL; got != ua {
+		ua := mustDecide(t, a, smartlink.Visit{StickyKey: key}).URL
+		if got := mustDecide(t, a2, smartlink.Visit{StickyKey: key}).URL; got != ua {
 			t.Fatalf("same salt diverged for key %q: %q vs %q", key, ua, got)
 		}
-		if b.Decide(smartlink.Visit{StickyKey: key}).URL != ua {
+		if mustDecide(t, b, smartlink.Visit{StickyKey: key}).URL != ua {
 			differ++
 		}
 	}
