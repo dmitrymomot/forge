@@ -304,14 +304,6 @@ consumer-side.
 
 Deps: `web/httpclient`.
 
----
-
-**auth/invite**
-
-Token invitations into a tenant: email-addressed, single-use, expiring invites carrying an opaque role payload the package never interprets. Tokens hashed at rest (`apikey`/`magiclink` discipline), constant-time accept, revoke and resend (resend rotates the token), pending-invite listing. Accept returns the verified `{tenant, email, role}` claim — membership creation, seat limits, and the send itself (`comms/email`) stay consumer-side. Domain auto-join and shareable multi-use links are out of scope.
-
-Deps: `data/postgres`.
-
 ## comms/
 
 ---
