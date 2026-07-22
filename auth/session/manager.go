@@ -137,6 +137,8 @@ func (m *Manager) deadline(rec Record, now time.Time) time.Time {
 // against storedSeenAt, not rec.LastSeenAt: Load refreshes the in-memory
 // LastSeenAt to now, so comparing against that would make the elapsed
 // interval always zero and no request would ever touch.
+//
+//nolint:unused // consumed by the request-handling commit writer, a later task in this plan
 func (m *Manager) touchDue(s *Session, now time.Time) bool {
 	if m.cfg.Touch <= 0 || m.toucher == nil || s.isNew {
 		return false
@@ -151,4 +153,111 @@ func newToken() string {
 		panic("session: crypto/rand failed: " + err.Error())
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// AuthOption tunes Authenticate.
+type AuthOption func(*authOptions)
+
+type authOptions struct{ remember bool }
+
+// Remember selects the remember-me deadline pair and marks the record so a
+// transport can choose persistent client storage. Taking the bool directly
+// keeps call sites free of conditional option slices.
+func Remember(v bool) AuthOption { return func(o *authOptions) { o.remember = v } }
+
+// Authenticate binds userID to the session and rotates the token, which is
+// mandatory: reusing the pre-login credential is the session fixation bug. The
+// session ID, CreatedAt, and payload survive; a failed save rolls every field
+// back so the client is never left holding a credential no record answers to.
+func (m *Manager) Authenticate(ctx context.Context, s *Session, userID string, opts ...AuthOption) error {
+	if s == nil {
+		return ErrNoSession
+	}
+	if userID == "" {
+		return ErrAnonymous
+	}
+	var o authOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	oldToken, oldRec := s.token, s.rec
+	now := m.now()
+
+	s.rec.UserID = userID
+	s.rec.Remembered = o.remember
+	s.rec.ElevatedAt = now
+	s.token = newToken()
+
+	wasNew := s.isNew
+	if err := m.Save(ctx, s); err != nil {
+		s.token, s.rec = oldToken, oldRec
+		return err
+	}
+	if !wasNew {
+		if err := m.store.Delete(ctx, oldToken); err != nil {
+			m.log.WarnContext(ctx, "session: deleting pre-rotation record failed", slog.Any("error", err))
+		}
+	}
+	return nil
+}
+
+// Rotate issues a fresh token for the same session, preserving every field.
+func (m *Manager) Rotate(ctx context.Context, s *Session) error {
+	if s == nil {
+		return ErrNoSession
+	}
+	oldToken := s.token
+	s.token = newToken()
+	if err := m.Save(ctx, s); err != nil {
+		s.token = oldToken
+		return err
+	}
+	if oldToken != s.token {
+		if err := m.store.Delete(ctx, oldToken); err != nil {
+			m.log.WarnContext(ctx, "session: deleting pre-rotation record failed", slog.Any("error", err))
+		}
+	}
+	return nil
+}
+
+// Destroy removes the record. The caller's transport clears the credential.
+func (m *Manager) Destroy(ctx context.Context, s *Session) error {
+	if s == nil {
+		return ErrNoSession
+	}
+	if err := m.store.Delete(ctx, s.token); err != nil {
+		return err
+	}
+	s.deleted = true
+	return nil
+}
+
+// Elevate stamps a successful identity re-proof. Session records that it
+// happened; auth/access decides what it entitles the user to.
+func (m *Manager) Elevate(ctx context.Context, s *Session) error {
+	if s == nil {
+		return ErrNoSession
+	}
+	s.rec.ElevatedAt = m.now()
+	return m.Save(ctx, s)
+}
+
+// Bind carries the pinned device metadata Rebind writes.
+type Bind struct {
+	IP          string
+	UserAgent   string
+	Fingerprint string
+}
+
+// Rebind replaces the pinned metadata. This is the deliberate re-pin after a
+// successful re-authentication — the middleware never does it implicitly,
+// because a per-request refresh would let a stolen credential overwrite the
+// binding on its first use and match forever after.
+func (m *Manager) Rebind(ctx context.Context, s *Session, b Bind) error {
+	if s == nil {
+		return ErrNoSession
+	}
+	s.rec.IP, s.rec.UserAgent, s.rec.Fingerprint = b.IP, b.UserAgent, b.Fingerprint
+	return m.Save(ctx, s)
 }
