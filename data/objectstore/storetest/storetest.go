@@ -225,6 +225,20 @@ func Run(t *testing.T, factory func(t *testing.T) objectstore.Store) {
 		}
 	})
 
+	t.Run("InvalidPrefixRejected", func(t *testing.T) {
+		s := factory(t)
+		for _, prefix := range []string{"a//b", "../x", "a\\b", "/abs"} {
+			var got error
+			for _, err := range s.List(ctx, prefix) {
+				got = err
+				break
+			}
+			if !errors.Is(got, objectstore.ErrInvalidKey) {
+				t.Errorf("List(%q) yielded %v, want ErrInvalidKey", prefix, got)
+			}
+		}
+	})
+
 	t.Run("CanceledContext", func(t *testing.T) {
 		s := factory(t)
 		canceled, cancel := context.WithCancel(context.Background())

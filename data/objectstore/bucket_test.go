@@ -32,6 +32,10 @@ func TestNewValidation(t *testing.T) {
 	if _, err := objectstore.New(objectstore.NewMemory(), objectstore.WithAllowedTypes("")); err == nil {
 		t.Error("WithAllowedTypes(\"\") accepted")
 	}
+	// An empty expansion must not silently mean "allow everything".
+	if _, err := objectstore.New(objectstore.NewMemory(), objectstore.WithAllowedTypes()); err == nil {
+		t.Error("WithAllowedTypes() accepted")
+	}
 }
 
 func TestZeroValueBucketFails(t *testing.T) {

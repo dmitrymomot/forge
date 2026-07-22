@@ -44,8 +44,9 @@ func ValidateKey(key string) error {
 
 // ValidatePrefix enforces the key grammar minus the segment-shape rules a
 // partial key legitimately breaks: empty is allowed (list everything), and a
-// trailing "/" or in-progress last segment is fine. Traversal segments and
-// forbidden bytes are still rejected.
+// trailing "/" or in-progress last segment is fine. Traversal segments,
+// non-final empty segments (no key can ever match "a//b"), and forbidden
+// bytes are still rejected.
 func ValidatePrefix(prefix string) error {
 	if prefix == "" {
 		return nil
@@ -59,8 +60,11 @@ func ValidatePrefix(prefix string) error {
 	segStart := 0
 	for i := range len(prefix) + 1 {
 		if i == len(prefix) || prefix[i] == '/' {
-			if seg := prefix[segStart:i]; seg == "." || seg == ".." {
+			switch seg := prefix[segStart:i]; {
+			case seg == "." || seg == "..":
 				return fmt.Errorf("%w: %q segment in prefix %q", ErrInvalidKey, seg, prefix)
+			case seg == "" && i < len(prefix):
+				return fmt.Errorf("%w: empty path segment in prefix %q", ErrInvalidKey, prefix)
 			}
 			segStart = i + 1
 			continue

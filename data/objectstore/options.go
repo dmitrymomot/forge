@@ -44,9 +44,14 @@ func WithMaxSize(n int64) Option {
 // ErrUnsupportedType. Without this option any recognizable or unknown
 // content is accepted and stored with its detected type (unknown content is
 // stored as application/octet-stream). An empty MIME is a configuration
-// error.
+// error, and so is calling the option with no MIMEs at all (a slice that
+// expanded to nothing must not silently mean "allow everything").
 func WithAllowedTypes(mimes ...string) Option {
 	return func(c *config) {
+		if len(mimes) == 0 {
+			c.optErrs = append(c.optErrs, fmt.Errorf("objectstore: WithAllowedTypes with no MIMEs"))
+			return
+		}
 		if c.allowed == nil {
 			c.allowed = make(map[string]struct{}, len(mimes))
 		}

@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dmitrymomot/forge/core/filetype"
 )
@@ -31,11 +32,21 @@ const tmpDir = ".tmp"
 // partial object. Content types are not persisted; Get and Stat re-detect
 // them from the object's leading bytes. Deleting an object leaves its parent
 // directories behind.
+//
+// One filesystem constraint has no S3/Memory equivalent: a key cannot be
+// both an object and a directory prefix of another object. After
+// Put("a/b"), Put("a") fails (and vice versa) with a filesystem error,
+// whereas flat-keyspace backends store both. Keep object keys and
+// "folder" prefixes disjoint (e.g. always give objects a file-like last
+// segment) when a consumer must be portable across backends.
 type Disk struct {
 	root *os.Root
 }
 
 // NewDisk opens (creating if needed) dir and returns a Disk rooted there.
+// Temp files orphaned under ".tmp" by an earlier crash are swept
+// (best-effort) when they are older than an hour — old enough that no
+// concurrent Disk on the same directory can still be streaming into them.
 // Close releases the root when the store is no longer needed.
 func NewDisk(dir string) (*Disk, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -45,7 +56,26 @@ func NewDisk(dir string) (*Disk, error) {
 	if err != nil {
 		return nil, fmt.Errorf("objectstore: open root: %w", err)
 	}
-	return &Disk{root: root}, nil
+	d := &Disk{root: root}
+	d.sweepStaleTemp()
+	return d, nil
+}
+
+// sweepStaleTemp removes crash-orphaned temp files. Best-effort: any error
+// (including a missing .tmp dir) is ignored — orphans just wait for the
+// next open.
+func (d *Disk) sweepStaleTemp() {
+	entries, err := fs.ReadDir(d.root.FS(), tmpDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-time.Hour)
+	for _, entry := range entries {
+		fi, err := entry.Info()
+		if err == nil && fi.Mode().IsRegular() && fi.ModTime().Before(cutoff) {
+			_ = d.root.Remove(filepath.Join(tmpDir, entry.Name()))
+		}
+	}
 }
 
 // Close releases the underlying directory handle. The Disk is unusable
@@ -88,6 +118,7 @@ func (d *Disk) Put(ctx context.Context, key, _ string, r io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("objectstore: create temp file: %w", err)
 	}
+	r = &ctxReader{ctx: ctx, r: r} // let a mid-stream cancel abort the copy
 	if err := writeAndSync(f, r); err != nil {
 		_ = f.Close()
 		_ = d.root.Remove(tmp)
@@ -113,6 +144,19 @@ func (d *Disk) Put(ctx context.Context, key, _ string, r io.Reader) error {
 		return fmt.Errorf("objectstore: rename into place: %w", err)
 	}
 	return nil
+}
+
+// ctxReader fails the stream as soon as its context is done.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // writeAndSync copies r to f and flushes it to stable storage, so the

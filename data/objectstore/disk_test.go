@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dmitrymomot/forge/data/objectstore"
 )
@@ -204,6 +205,85 @@ func TestDiskListSkipsSymlinks(t *testing.T) {
 	keys := collectKeys(t, d.List(ctx, ""))
 	if len(keys) != 1 || keys[0] != "real" {
 		t.Fatalf("List = %v, want [real]", keys)
+	}
+}
+
+func TestDiskSweepsStaleTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tmpDir := filepath.Join(dir, ".tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(tmpDir, "put-stale")
+	fresh := filepath.Join(tmpDir, "put-fresh")
+	for _, p := range []string{stale, fresh} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	d, err := objectstore.NewDisk(dir)
+	if err != nil {
+		t.Fatalf("NewDisk: %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Error("stale temp file survived NewDisk")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Error("fresh temp file was swept")
+	}
+}
+
+func TestDiskPutCanceledMidStream(t *testing.T) {
+	t.Parallel()
+	d, _ := newDisk(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &cancelAfterFirstRead{cancel: cancel}
+	if err := d.Put(ctx, "aborted", "", r); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Put = %v, want context.Canceled", err)
+	}
+	if _, _, err := d.Get(context.Background(), "aborted"); !errors.Is(err, objectstore.ErrNotFound) {
+		t.Fatalf("Get after canceled Put = %v, want ErrNotFound", err)
+	}
+}
+
+// cancelAfterFirstRead emits one chunk, then cancels its context so the next
+// read observes ctx.Done mid-stream.
+type cancelAfterFirstRead struct {
+	cancel context.CancelFunc
+	sent   bool
+}
+
+func (c *cancelAfterFirstRead) Read(p []byte) (int, error) {
+	if c.sent {
+		return 0, io.EOF
+	}
+	c.sent = true
+	n := copy(p, bytes.Repeat([]byte{0x42}, 700))
+	c.cancel()
+	return n, nil
+}
+
+func TestDiskFileDirectoryKeyConflict(t *testing.T) {
+	t.Parallel()
+	// Pins the documented filesystem constraint: a key cannot be both an
+	// object and a directory prefix of another object on Disk (S3 and Memory
+	// accept both — keep keys and folder prefixes disjoint for portability).
+	ctx := context.Background()
+	d, _ := newDisk(t)
+	if err := d.Put(ctx, "a/b", "", bytes.NewReader(binBlob)); err != nil {
+		t.Fatalf("Put(a/b): %v", err)
+	}
+	if err := d.Put(ctx, "a", "", bytes.NewReader(binBlob)); err == nil {
+		t.Fatal("Put(a) over directory succeeded; the documented constraint no longer holds")
+	}
+	if _, _, err := d.Get(ctx, "a/b"); err != nil {
+		t.Fatalf("a/b damaged by conflicting Put: %v", err)
 	}
 }
 

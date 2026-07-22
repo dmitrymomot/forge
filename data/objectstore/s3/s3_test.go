@@ -104,6 +104,14 @@ func TestS3PresignedURLs(t *testing.T) {
 		t.Errorf("Size = %d", info.Size)
 	}
 
+	// Invalid keys are rejected before any signing happens.
+	if _, err := store.SignedGetURL(ctx, "../evil", time.Minute); !errors.Is(err, objectstore.ErrInvalidKey) {
+		t.Errorf("SignedGetURL(../evil) = %v, want ErrInvalidKey", err)
+	}
+	if _, err := store.SignedPutURL(ctx, "a\\b", time.Minute); !errors.Is(err, objectstore.ErrInvalidKey) {
+		t.Errorf("SignedPutURL(a\\b) = %v, want ErrInvalidKey", err)
+	}
+
 	// An expired URL is refused.
 	shortURL, err := store.SignedGetURL(ctx, "signed/pic.png", time.Second)
 	if err != nil {

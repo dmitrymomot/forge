@@ -163,6 +163,9 @@ func (s *Store) List(ctx context.Context, prefix string) iter.Seq2[objectstore.I
 // SignedGetURL returns a presigned URL granting a plain HTTP GET of key for
 // ttl.
 func (s *Store) SignedGetURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if err := objectstore.ValidateKey(key); err != nil {
+		return "", err
+	}
 	req, err := s.presign.PresignGetObject(ctx, &awss3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -177,6 +180,9 @@ func (s *Store) SignedGetURL(ctx context.Context, key string, ttl time.Duration)
 // ttl. Uploads through it bypass Bucket validation — see
 // objectstore.URLSigner.
 func (s *Store) SignedPutURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if err := objectstore.ValidateKey(key); err != nil {
+		return "", err
+	}
 	req, err := s.presign.PresignPutObject(ctx, &awss3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),

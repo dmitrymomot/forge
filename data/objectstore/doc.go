@@ -38,6 +38,9 @@
 //
 //	// Download: caller closes the reader.
 //	rc, info, err := bucket.Get(ctx, "avatars/u123.png")
+//	if err != nil {
+//		return err
+//	}
 //	defer rc.Close()
 //
 //	// Enumerate a folder-like prefix.
