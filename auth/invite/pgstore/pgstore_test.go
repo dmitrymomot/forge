@@ -243,6 +243,18 @@ func TestPg_List(t *testing.T) {
 	require.Len(t, pending, 1)
 	assert.Equal(t, a.ID, pending[0].ID)
 
+	// Unscoped pending-only listing (the forge_invites_pending_idx shape):
+	// contains-style asserts because the table is shared across tests/runs.
+	allPending, err := s.List(ctx, invite.Filter{Pending: true})
+	require.NoError(t, err)
+	ids := make(map[id.UUID]bool, len(allPending))
+	for _, inv := range allPending {
+		ids[inv.ID] = true
+	}
+	assert.True(t, ids[a.ID], "pending invite missing from unscoped listing")
+	assert.False(t, ids[b.ID], "accepted invite leaked into pending listing")
+	assert.False(t, ids[expired.ID], "expired invite leaked into pending listing")
+
 	// Empty result is non-nil, matching the memory store.
 	empty, err := s.List(ctx, invite.Filter{Tenant: "absent-" + base.ID.String()})
 	require.NoError(t, err)
