@@ -32,7 +32,7 @@ Session is a durable per-visitor bucket plus the token that points at it.
 | Fingerprint computation | `web/fingerprint` |
 | Client IP extraction | `web/clientip` |
 | Tenant resolution | `web/tenant` |
-| Step-up elevation | deferred; a policy + custom `access.Decider` later |
+| Gating on step-up elevation | `auth/access` — session records the state and supplies a `Decider` |
 | Multi-tenancy / scope isolation | dropped entirely |
 | Basic-auth transport | dropped — sends credentials every request, no session to speak of |
 
@@ -99,6 +99,8 @@ func (s *Session) IP() string           // pinned at creation
 func (s *Session) UserAgent() string    // pinned at creation
 func (s *Session) Fingerprint() string  // pinned at creation; fingerprint.Fingerprint.Hash
 func (s *Session) Remembered() bool
+func (s *Session) ElevatedAt() time.Time
+func (s *Session) ElevatedWithin(d time.Duration) bool
 func (s *Session) IsNew() bool
 ```
 
@@ -110,10 +112,11 @@ Accessors, not exported fields: a handler must not be able to write `sess.UserID
 
 ```go
 type Info struct {
-    ID        id.UUID
-    UserID    string
-    CreatedAt time.Time
-    ExpiresAt time.Time
+    ID         id.UUID
+    UserID     string
+    CreatedAt  time.Time
+    ExpiresAt  time.Time
+    ElevatedAt time.Time
 }
 
 func (i *Info) Authenticated() bool { return i.UserID != "" }
@@ -167,6 +170,7 @@ mgr.Authenticate(ctx, sess, userID, session.Remember(bool))  // binds user + man
 mgr.Rotate(ctx, sess)                                        // explicit rotation
 mgr.Destroy(ctx, sess)                                       // delete record + clear credential
 mgr.Rebind(ctx, sess, session.Bind{IP, UserAgent, Fingerprint})
+mgr.Elevate(ctx, sess)                                       // re-proof succeeded; stamps ElevatedAt
 ```
 
 `Authenticate` preserves `ID` and `CreatedAt` across rotation and rolls back the in-memory token on a failed save, so a store error cannot orphan the client's credential.
@@ -298,7 +302,7 @@ type Expirer interface   { DeleteExpired(ctx context.Context, now time.Time) (in
 
 Named `Expirer`, not `Reaper` — `session.Reaper` is already the `supervisor.Service` constructor in the same package.
 
-`Record` is the stored shape: the first-class columns (`ID`, `UserID`, `CreatedAt`, `ExpiresAt`, `LastSeenAt`, `IP`, `UserAgent`, `Fingerprint`, `Remembered`) plus the payload as an opaque `[]byte`. Stores never interpret the payload and never see a `Session`.
+`Record` is the stored shape: the first-class columns (`ID`, `UserID`, `CreatedAt`, `ExpiresAt`, `LastSeenAt`, `IP`, `UserAgent`, `Fingerprint`, `Remembered`, `ElevatedAt`) plus the payload as an opaque `[]byte`. Stores never interpret the payload and never see a `Session`.
 
 A missing capability yields `ErrUnsupported` at the call, or a **boot error** if a configured option requires it (e.g. `WithTouch` on a store with no `Toucher`).
 
@@ -354,6 +358,37 @@ func BusinessHours(loc *time.Location) session.Policy {
 }
 ```
 
+## Step-up elevation
+
+Session records *that* the user recently re-proved identity. It never decides what that entitles them to.
+
+`ElevatedAt` is a first-class column, not a namespace: the check is on the gate path of every protected request, so it must not cost a JSON decode, and it must be readable from `Info` by a decider that has no manager.
+
+```go
+mgr.Authenticate(ctx, sess, userID, ...)   // stamps ElevatedAt — the user just proved identity
+mgr.Elevate(ctx, sess)                     // password/TOTP re-confirmed
+// rotation preserves ElevatedAt; Destroy drops it with the record
+```
+
+Gating is an `access.Decider`, so elevation composes with roles in one chain instead of becoming a second gate beside guard's:
+
+```go
+decider := access.DenyOverrides(
+    rbac.Decider(roles, rbac.FromSubject()),
+    session.RequireElevation(10*time.Minute, "tenant:delete", "billing:manage"),
+)
+
+mux.Handle("DELETE /tenant", middleware.Wrap(h.DeleteTenant,
+    access.RequirePermission(decider, "tenant:delete"),
+))
+```
+
+**The action list is mandatory.** An unscoped elevation decider under `DenyOverrides` denies every action in the app; scoped, it abstains on everything outside its list. Both listed actions still have to satisfy `rbac` as well, since `DenyOverrides` requires agreement.
+
+The window is per-gate, not config: delete-account and change-email justify different freshness. `sess.ElevatedWithin(d)` gives handlers the same freedom, and `access.Can` in a template hides the control exactly when the route would refuse it.
+
+A denied elevation surfaces as **403 from `access`**, not a redirect to the re-proof page. Server-rendered apps redirect via `access.WithForbidden` + `access.DecisionFrom`, which today means matching on the decision's reason string — see Deferred.
+
 ## Integration with guard / access
 
 Session does not gate or authorize. It exports an adapter; `guard` and `access` are unmodified.
@@ -399,11 +434,11 @@ sup.Add(session.Reaper(sessions, 15*time.Minute))   // supervisor.Service; no-op
 - A shared `storetest` conformance suite every store driver runs, including the capability matrix.
 - DB drivers behind `//go:build integration` via `testkit`; default `go test ./...` stays Docker-free. Serial, not `t.Parallel()` — concurrent goose migrations on a shared container collide.
 - `bench_test.go` required per package, with a post-benchmark optimization pass and before/after numbers in the PR. Baseline set: no-op request (load + commit, nothing dirty), single-namespace get/set, multi-namespace round-trip with unknown keys passing through, transport extract, commit with rotation.
-- Named regression tests for: `Set-Cookie` on a 303 redirect, commit-before-`Hijack`, commit-before-`Flush`, rotation rollback on failed save, `ErrNoEmbed` fall-through, stale-`Info` after mid-request `Authenticate`, capability boot error.
+- Named regression tests for: `Set-Cookie` on a 303 redirect, commit-before-`Hijack`, commit-before-`Flush`, rotation rollback on failed save, `ErrNoEmbed` fall-through, stale-`Info` after mid-request `Authenticate`, capability boot error, `RequireElevation` abstaining on unlisted actions, and elevation surviving rotation.
 
 ## Deferred
 
-- **Step-up elevation** — session state, but gating belongs to `access`. Revisit as a policy plus a custom `Decider`.
+- **A typed reason on `access.Decision`** so an elevation denial can be matched with `errors.Is` instead of a substring check on `Decision.Reason` inside `WithForbidden`. A change to `auth/access`, not to session; kept out of this work to hold the PR scope.
 - **`id.UID` constraint-only interface** in `core/id` (`var _ UID = UUID{}` conformance checks, never a field type). Standalone change.
 - **Framework-wide id rule** to record in `docs/design.md`: `UUID` for internal identifiers (native column type in Postgres, ClickHouse, and Mongo; universal tooling), `Short` only where a collision is recoverable (32 random bits), `ULID` for interop only, `Prefix` for anything user-facing.
 - **An auth-wide typed subject** across `guard`/`access`/`rbac`/`acl`/`session`. Worth doing; doing it in session alone buys type safety in one package and pays conversion friction in five.
