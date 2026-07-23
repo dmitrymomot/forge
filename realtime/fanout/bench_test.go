@@ -44,6 +44,38 @@ func BenchmarkPublish(b *testing.B) {
 	}
 }
 
+// BenchmarkPublishMultiTopic drives concurrent publishes across several topics
+// — the workload seqMu serializes to keep cross-topic delivery ordered.
+func BenchmarkPublishMultiTopic(b *testing.B) {
+	ctx := context.Background()
+	payload := []byte(`{"text":"hi"}`)
+	topics := []string{"a", "b", "c", "d"}
+
+	hub, err := fanout.New(fanout.WithDefaultBuffer(1024))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer hub.Close()
+	for _, topic := range topics {
+		sub, err := hub.Subscribe(ctx, []string{topic})
+		if err != nil {
+			b.Fatal(err)
+		}
+		go drain(sub)
+	}
+
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			if err := hub.Publish(ctx, topics[i%len(topics)], payload); err != nil {
+				b.Fatal(err)
+			}
+			i++
+		}
+	})
+}
+
 func BenchmarkPublishNoSubscribers(b *testing.B) {
 	ctx := context.Background()
 	hub, err := fanout.New()

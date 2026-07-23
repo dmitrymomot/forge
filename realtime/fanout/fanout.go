@@ -41,6 +41,9 @@ type Hub struct {
 	nextID    atomic.Uint64
 	lastSweep atomic.Int64
 	mu        sync.RWMutex
+	// seqMu orders ID allocation and delivery across topics so a subscriber on
+	// several topics never observes IDs out of order. See dispatch.
+	seqMu sync.Mutex
 	// closed is written under mu but read lock-free on the publish hot path.
 	closed atomic.Bool
 	policy OverflowPolicy
@@ -225,6 +228,12 @@ func (h *Hub) dispatch(key string, payload []byte) {
 		return
 	}
 	var stale []*Subscription
+	// seqMu serializes ID allocation, ring insertion, and delivery across every
+	// topic. IDs are a single global sequence, but topics lock independently, so
+	// without this a subscriber on two topics could see a higher ID enqueued
+	// before a lower one and regress its Last-Event-ID cursor. Held only around
+	// non-blocking sends, so it never waits on a slow consumer.
+	h.seqMu.Lock()
 	ts.mu.Lock()
 	msg := Message{Topic: ts.topic, Payload: payload, ID: h.nextID.Add(1)}
 	if ts.ring != nil {
@@ -239,6 +248,7 @@ func (h *Hub) dispatch(key string, payload []byte) {
 	}
 	empty := len(ts.subs) == 0 && ts.ring == nil
 	ts.mu.Unlock()
+	h.seqMu.Unlock()
 	for _, sub := range stale {
 		h.removeSub(sub)
 	}

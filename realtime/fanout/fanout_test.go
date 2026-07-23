@@ -43,6 +43,46 @@ func expectClosed(t *testing.T, sub *fanout.Subscription) {
 	}
 }
 
+func TestMultiTopicDeliveryMonotonic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	hub, err := fanout.New()
+	require.NoError(t, err)
+	defer hub.Close()
+
+	const perTopic = 500
+	// Buffer larger than the total so nothing is dropped and every published ID
+	// is observed.
+	sub, err := hub.Subscribe(ctx, []string{"a", "b"}, fanout.WithBuffer(4*perTopic))
+	require.NoError(t, err)
+	defer sub.Close()
+
+	var wg sync.WaitGroup
+	for _, topic := range []string{"a", "b"} {
+		wg.Go(func() {
+			for range perTopic {
+				if err := hub.Publish(ctx, topic, []byte("x")); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	// A subscriber multiplexing both topics must observe the global ID sequence
+	// strictly increasing; the SSE Last-Event-ID cursor depends on it. IDs are
+	// allocated globally but topics lock independently, so without ordering a
+	// higher ID could be enqueued ahead of a lower one.
+	prev := uint64(0)
+	for range 2 * perTopic {
+		id := recv(t, sub).ID
+		require.Greater(t, id, prev, "IDs must arrive strictly increasing across topics")
+		prev = id
+	}
+}
+
 func TestPublishSubscribe(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
