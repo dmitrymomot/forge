@@ -26,13 +26,11 @@ func TestEncodePreservesUnknownRawKeys(t *testing.T) {
 	}
 }
 
-// namespaceDrift is a local stand-in for prefsData: the brief's
-// TestNamespaceDecodeFailureIsAnError registered the same namespace name
-// twice with different types to stage a schema-drift decode failure, but
-// NewNamespace panics on a duplicate name (see TestDuplicateNamespacePanics),
-// so that scenario can't be reproduced through the public API in one
-// process. Constructing the Namespace struct literal here bypasses the
-// registry and reproduces the drift directly.
+// namespaceDrift is a local stand-in for prefsData: staging a schema-drift
+// decode failure means writing one type under a name and reading a different
+// type from it, which a black-box test cannot express through NewNamespace's
+// single type parameter. Constructing the Namespace struct literal here
+// reproduces the drift directly.
 type namespaceDrift struct {
 	Theme string `json:"theme"`
 }

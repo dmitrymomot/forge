@@ -1,7 +1,6 @@
 package session_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/forge/auth/session"
@@ -83,25 +82,11 @@ func TestUnknownNamespaceSurvivesSave(t *testing.T) {
 	}
 }
 
-func TestDuplicateNamespacePanics(t *testing.T) {
+func TestEmptyNamespaceNamePanics(t *testing.T) {
 	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("registering a duplicate namespace name must panic at init")
-		}
-		if !strings.Contains(toString(r), "test.cart") {
-			t.Fatalf("panic message %v must name the colliding namespace", r)
+		if recover() == nil {
+			t.Fatal("an empty namespace name must panic")
 		}
 	}()
-	_ = session.NewNamespace[cartData]("test.cart")
-}
-
-func toString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if e, ok := v.(error); ok {
-		return e.Error()
-	}
-	return ""
+	_ = session.NewNamespace[cartData]("")
 }

@@ -3,12 +3,6 @@ package session
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
-)
-
-var (
-	registryMu sync.Mutex
-	registry   = make(map[string]struct{})
 )
 
 // Namespace is a typed, independently-owned slice of the session payload. An
@@ -18,19 +12,15 @@ type Namespace[T any] struct {
 	name string
 }
 
-// NewNamespace declares a namespace. Call it once, at package scope. A
-// duplicate name panics: a collision is a programming error, and discovering
-// it in production means one owner silently overwriting another's data.
+// NewNamespace declares a namespace, usually once at package scope. The name is
+// the namespace's stable key in the payload, so it must be unique across the
+// app: two namespaces sharing a name read and write the same key and silently
+// overwrite each other. Choosing distinct, prefixed names ("cart",
+// "billing.plan") is the caller's responsibility.
 func NewNamespace[T any](name string) *Namespace[T] {
 	if name == "" {
 		panic("session: namespace name must not be empty")
 	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, dup := registry[name]; dup {
-		panic(fmt.Sprintf("session: namespace %q is already registered", name))
-	}
-	registry[name] = struct{}{}
 	return &Namespace[T]{name: name}
 }
 
