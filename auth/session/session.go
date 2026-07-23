@@ -153,11 +153,6 @@ func (s *Session) clearDirty() { clear(s.dirty) }
 
 func (s *Session) record() Record { return s.rec }
 
-// info returns the session's live Info view, or nil outside the middleware.
-//
-//nolint:unused // consumed by the request-handling middleware, a later task in this plan
-func (s *Session) info() *Info { return s.inf }
-
 // syncInfo mirrors the record onto the context-visible Info, if one exists. It
 // is a no-op when the session was never wired through withSession.
 func (s *Session) syncInfo() {

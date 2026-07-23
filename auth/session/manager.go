@@ -178,8 +178,6 @@ func (m *Manager) deadline(rec Record, now time.Time) time.Time {
 // against storedSeenAt, not rec.LastSeenAt: Load refreshes the in-memory
 // LastSeenAt to now, so comparing against that would make the elapsed
 // interval always zero and no request would ever touch.
-//
-//nolint:unused // consumed by the request-handling commit writer, a later task in this plan
 func (m *Manager) touchDue(s *Session, now time.Time) bool {
 	if m.cfg.Touch <= 0 || m.toucher == nil || s.isNew {
 		return false

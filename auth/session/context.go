@@ -54,8 +54,6 @@ func (m *Manager) MustFor(r *http.Request) *Session {
 }
 
 // fromContext returns the session for adapters that only have a context.
-//
-//nolint:unused // consumed by the guard adapter and elevation decider, later tasks in this plan
 func fromContext(ctx context.Context) (*Session, bool) { return sessionKey.From(ctx) }
 
 func withSession(ctx context.Context, s *Session) context.Context {
