@@ -73,7 +73,7 @@ func TestFlushCommitsFirst(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/events", nil))
 
-	if rec.Header().Get("X-Test-Token") == "" {
+	if rec.Result().Header.Get("X-Test-Token") == "" {
 		t.Fatal("a Flush before the first Write must still commit — ResponseController bypasses WriteHeader")
 	}
 }

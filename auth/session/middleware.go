@@ -75,7 +75,7 @@ func Middleware(m *Manager, opts ...MiddlewareOption) middleware.Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			sess, matched, err := load(m, &o, r)
+			sess, matchedIdx, err := load(m, &o, r)
 			if err != nil {
 				o.logger.ErrorContext(r.Context(), "session: load failed", slog.Any("error", err))
 				problem.JSON(problem.WithStatus(http.StatusInternalServerError))(w, r, err)
@@ -98,11 +98,11 @@ func Middleware(m *Manager, opts ...MiddlewareOption) middleware.Middleware {
 			ctx := withSession(r.Context(), sess)
 			r = r.WithContext(ctx)
 
-			if err := runPolicies(m, &o, w, r, sess, matched); err != nil {
+			if err := runPolicies(m, &o, w, r, sess, matchedIdx); err != nil {
 				return // runPolicies already answered
 			}
 
-			cw := newCommitWriter(w, func() error { return commit(m, &o, w, r, sess, matched, presentedToken) })
+			cw := newCommitWriter(w, func() error { return commit(m, &o, w, r, sess, matchedIdx, presentedToken) })
 			next.ServeHTTP(cw, r)
 
 			if !cw.committed {
@@ -114,9 +114,10 @@ func Middleware(m *Manager, opts ...MiddlewareOption) middleware.Middleware {
 	}
 }
 
-// load resolves the session for r, returning the transport that matched.
-func load(m *Manager, o *mwOptions, r *http.Request) (*Session, Transport, error) {
-	for _, t := range o.transports {
+// load resolves the session for r, returning the index into o.transports of
+// the transport that matched, or -1 when none did.
+func load(m *Manager, o *mwOptions, r *http.Request) (*Session, int, error) {
+	for i, t := range o.transports {
 		token, ok := t.Extract(r)
 		if !ok {
 			continue
@@ -124,18 +125,18 @@ func load(m *Manager, o *mwOptions, r *http.Request) (*Session, Transport, error
 		sess, err := m.Load(r.Context(), token)
 		switch {
 		case err == nil:
-			return sess, t, nil
+			return sess, i, nil
 		case errors.Is(err, ErrNotFound), errors.Is(err, ErrExpired):
 			// A credential we cannot honor is anonymous, not an error.
-			return m.Start(), t, nil
+			return m.Start(), i, nil
 		default:
-			return nil, nil, err
+			return nil, -1, err
 		}
 	}
-	return m.Start(), nil, nil
+	return m.Start(), -1, nil
 }
 
-func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matched Transport) error {
+func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matchedIdx int) error {
 	for _, p := range o.policies {
 		err := p(r.Context(), r, s)
 		if err == nil {
@@ -147,7 +148,7 @@ func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Reques
 				o.logger.ErrorContext(r.Context(), "session: revoke could not delete the record",
 					slog.String("reason", reason), slog.Any("error", delErr))
 			}
-			clearCredential(o, w, r, matched)
+			clearCredential(o, w, r, matchedIdx)
 			o.logger.InfoContext(r.Context(), "session: revoked", slog.String("reason", reason))
 			o.responder(w, r, err)
 			return err
@@ -173,9 +174,9 @@ func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Reques
 // Rotate mid-request already saved the session and minted a fresh token by
 // the time commit runs, so the session is neither dirty nor new — without
 // this check the rotated credential would never reach the client.
-func commit(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matched Transport, presentedToken string) error {
+func commit(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matchedIdx int, presentedToken string) error {
 	if s.deleted {
-		clearCredential(o, w, r, matched)
+		clearCredential(o, w, r, matchedIdx)
 		return nil
 	}
 	// A dirty payload, or a new session that carries data worth persisting, needs a save.
@@ -183,11 +184,11 @@ func commit(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s 
 		if err := m.Save(r.Context(), s); err != nil {
 			return err
 		}
-		return embed(o, w, r, s, matched)
+		return embed(o, w, r, s, matchedIdx)
 	}
 	// Authenticate/Rotate already persisted a fresh credential the client does not yet hold: embed it.
 	if !s.isNew && s.token != presentedToken {
-		return embed(o, w, r, s, matched)
+		return embed(o, w, r, s, matchedIdx)
 	}
 	// Otherwise a metadata-only refresh, fail-open: a failed touch must not fail the request.
 	if m.touchDue(s, m.now()) {
@@ -200,9 +201,12 @@ func commit(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s 
 
 // embed writes the credential using the matched transport, falling through to
 // the first transport that supports embedding when the matched one cannot.
-func embed(o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matched Transport) error {
-	if matched != nil {
-		err := matched.Embed(w, r, s)
+// matchedIdx is the index into o.transports of the matched transport, or -1
+// when none matched; indices are compared instead of Transport values because
+// a transport's dynamic type is not guaranteed to be comparable.
+func embed(o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, matchedIdx int) error {
+	if matchedIdx >= 0 {
+		err := o.transports[matchedIdx].Embed(w, r, s)
 		if err == nil {
 			return nil
 		}
@@ -210,8 +214,8 @@ func embed(o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, mat
 			return err
 		}
 	}
-	for _, t := range o.transports {
-		if t == matched {
+	for i, t := range o.transports {
+		if i == matchedIdx {
 			continue
 		}
 		err := t.Embed(w, r, s)
@@ -223,9 +227,9 @@ func embed(o *mwOptions, w http.ResponseWriter, r *http.Request, s *Session, mat
 	return ErrNoEmbed
 }
 
-func clearCredential(o *mwOptions, w http.ResponseWriter, r *http.Request, matched Transport) {
-	if matched != nil {
-		matched.Clear(w, r)
+func clearCredential(o *mwOptions, w http.ResponseWriter, r *http.Request, matchedIdx int) {
+	if matchedIdx >= 0 {
+		o.transports[matchedIdx].Clear(w, r)
 		return
 	}
 	for _, t := range o.transports {

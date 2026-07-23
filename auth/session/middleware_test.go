@@ -239,3 +239,53 @@ func (readOnlyTransport) Embed(http.ResponseWriter, *http.Request, *session.Sess
 	return session.ErrNoEmbed
 }
 func (readOnlyTransport) Clear(http.ResponseWriter, *http.Request) {}
+
+// sliceKeyNoEmbedTransport is deliberately non-comparable — its slice field
+// means a Go == on two Transport interface values holding this type panics
+// with "comparing uncomparable type". It reads a token and cannot write one
+// back, so it forces the embed fallthrough while sitting as the matched
+// transport.
+type sliceKeyNoEmbedTransport struct{ keys []string }
+
+func (t sliceKeyNoEmbedTransport) Extract(r *http.Request) (string, bool) {
+	tok := r.Header.Get("X-Slice-Token")
+	return tok, tok != ""
+}
+func (sliceKeyNoEmbedTransport) Embed(http.ResponseWriter, *http.Request, *session.Session) error {
+	return session.ErrNoEmbed
+}
+func (sliceKeyNoEmbedTransport) Clear(http.ResponseWriter, *http.Request) {}
+
+func TestEmbedFallthroughDoesNotPanicOnANonComparableMatchedTransport(t *testing.T) {
+	mgr := newTestManager(t)
+	mw := session.Middleware(mgr, session.WithTransport(
+		sliceKeyNoEmbedTransport{keys: []string{"a"}}, // matches, non-comparable, cannot embed
+		headerTransport{}, // embeds
+	))
+
+	seed := mgr.Start()
+	if err := mgr.Save(t.Context(), seed); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := mgr.MustFor(r)
+		if err := mgr.Authenticate(r.Context(), sess, "u1"); err != nil {
+			t.Errorf("Authenticate: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("X-Slice-Token", seed.Token())
+	rec := httptest.NewRecorder()
+
+	// The old `t == matched` fallthrough compared Transport interface values
+	// directly; with a non-comparable dynamic type like sliceKeyNoEmbedTransport
+	// that panics at runtime. A byte-index comparison never does.
+	h.ServeHTTP(rec, r)
+
+	if got := rec.Result().Header.Get("X-Test-Token"); got == "" {
+		t.Fatal("a non-comparable matched transport returning ErrNoEmbed must still hand off to the next transport")
+	}
+}
