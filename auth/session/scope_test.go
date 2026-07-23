@@ -207,13 +207,13 @@ func TestScopeConfinesRevoke(t *testing.T) {
 
 	sameID := id.NewUUID()
 	now := time.Now().UTC()
-	if _, err := store.Save(t.Context(), "tok-t1", session.Record{
+	if _, err := store.Create(t.Context(), "tok-t1", session.Record{
 		ID: sameID, UserID: "u1", Tenant: "t1",
 		CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("seed t1: %v", err)
 	}
-	if _, err := store.Save(t.Context(), "tok-t2", session.Record{
+	if _, err := store.Create(t.Context(), "tok-t2", session.Record{
 		ID: sameID, UserID: "u1", Tenant: "t2",
 		CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {

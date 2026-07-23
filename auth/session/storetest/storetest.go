@@ -19,11 +19,16 @@ import (
 func Run(t *testing.T, newStore func(*testing.T) session.Store) {
 	t.Helper()
 	t.Run("LoadMissing", func(t *testing.T) { testLoadMissing(t, newStore(t)) })
-	t.Run("SaveLoadDelete", func(t *testing.T) { testSaveLoadDelete(t, newStore(t)) })
-	t.Run("SaveReturnsToken", func(t *testing.T) { testSaveReturnsToken(t, newStore(t)) })
-	t.Run("SaveOverwritesToken", func(t *testing.T) { testSaveOverwritesToken(t, newStore(t)) })
+	t.Run("CreateLoadDelete", func(t *testing.T) { testCreateLoadDelete(t, newStore(t)) })
+	t.Run("CreateReturnsToken", func(t *testing.T) { testCreateReturnsToken(t, newStore(t)) })
+	t.Run("CreateExistingFails", func(t *testing.T) { testCreateExistingFails(t, newStore(t)) })
+	t.Run("UpdateOverwrites", func(t *testing.T) { testUpdateOverwrites(t, newStore(t)) })
+	t.Run("UpdateMissingFails", func(t *testing.T) { testUpdateMissingFails(t, newStore(t)) })
+	t.Run("UpdateAfterDeleteFails", func(t *testing.T) { testUpdateAfterDeleteFails(t, newStore(t)) })
 	t.Run("DeleteMissingIsNotAnError", func(t *testing.T) { testDeleteMissing(t, newStore(t)) })
 	t.Run("Toucher", func(t *testing.T) { testToucher(t, newStore(t)) })
+	t.Run("ToucherMonotonic", func(t *testing.T) { testToucherMonotonic(t, newStore(t)) })
+	t.Run("ToucherMissing", func(t *testing.T) { testToucherMissing(t, newStore(t)) })
 	t.Run("UserIndex", func(t *testing.T) { testUserIndex(t, newStore(t)) })
 	t.Run("UserIndexListOrder", func(t *testing.T) { testUserIndexOrder(t, newStore(t)) })
 	t.Run("UserIndexScoped", func(t *testing.T) { testUserIndexScoped(t, newStore(t)) })
@@ -70,13 +75,13 @@ func testLoadMissing(t *testing.T, st session.Store) {
 	}
 }
 
-func testSaveLoadDelete(t *testing.T, st session.Store) {
+func testCreateLoadDelete(t *testing.T, st session.Store) {
 	ctx := context.Background()
 	want := rec("u1", time.Now().Add(time.Hour))
 
-	tok, err := st.Save(ctx, "tok-1", want)
+	tok, err := st.Create(ctx, "tok-1", want)
 	if err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
 	got, err := st.Load(ctx, tok)
@@ -125,35 +130,58 @@ func testSaveLoadDelete(t *testing.T, st session.Store) {
 	}
 }
 
-func testSaveReturnsToken(t *testing.T, st session.Store) {
-	tok, err := st.Save(context.Background(), "tok-2", rec("u1", time.Now().Add(time.Hour)))
+func testCreateReturnsToken(t *testing.T, st session.Store) {
+	tok, err := st.Create(context.Background(), "tok-2", rec("u1", time.Now().Add(time.Hour)))
 	if err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	if tok == "" {
-		t.Fatal("Save must return the token the client should present next")
+		t.Fatal("Create must return the token the client should present next")
 	}
 }
 
-// testSaveOverwritesToken saves twice to the same token with different record
-// contents and confirms the second write wins with no duplicate left behind.
-// A driver that plain-INSERTs without upsert semantics either errors on the
-// second Save (caught directly) or leaves two rows reachable through the same
-// digest (caught via ListByUser, where the store supports it).
-func testSaveOverwritesToken(t *testing.T, st session.Store) {
+// testCreateExistingFails pins the insert-only half of the contract: Create
+// against an already-stored token must fail with ErrExists and must not
+// disturb the existing record.
+func testCreateExistingFails(t *testing.T, st session.Store) {
+	ctx := context.Background()
+	const tok = "tok-create-dup"
+
+	first := rec("u1", time.Now().Add(time.Hour))
+	if _, err := st.Create(ctx, tok, first); err != nil {
+		t.Fatalf("Create (first): %v", err)
+	}
+
+	second := rec("u1", time.Now().Add(2*time.Hour))
+	if _, err := st.Create(ctx, tok, second); !errors.Is(err, session.ErrExists) {
+		t.Fatalf("Create (second, same token) = %v, want ErrExists", err)
+	}
+
+	got, err := st.Load(ctx, tok)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.ID != first.ID {
+		t.Fatalf("failed Create must not disturb the stored record: got ID %v, want %v", got.ID, first.ID)
+	}
+}
+
+// testUpdateOverwrites updates an existing record with different contents and
+// confirms the rewrite wins with no duplicate left behind.
+func testUpdateOverwrites(t *testing.T, st session.Store) {
 	ctx := context.Background()
 	const tok = "tok-overwrite"
 
 	first := rec("u1", time.Now().Add(time.Hour))
-	if _, err := st.Save(ctx, tok, first); err != nil {
-		t.Fatalf("Save (first): %v", err)
+	if _, err := st.Create(ctx, tok, first); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 
 	second := rec("u1", time.Now().Add(2*time.Hour))
 	second.Payload = []byte(`{"k":{"v":2}}`)
-	gotTok, err := st.Save(ctx, tok, second)
+	gotTok, err := st.Update(ctx, tok, second)
 	if err != nil {
-		t.Fatalf("Save (second, same token): %v", err)
+		t.Fatalf("Update: %v", err)
 	}
 
 	got, err := st.Load(ctx, gotTok)
@@ -161,13 +189,13 @@ func testSaveOverwritesToken(t *testing.T, st session.Store) {
 		t.Fatalf("Load: %v", err)
 	}
 	if got.ID != second.ID {
-		t.Fatalf("second Save did not win: got ID %v, want %v", got.ID, second.ID)
+		t.Fatalf("Update did not win: got ID %v, want %v", got.ID, second.ID)
 	}
 	if string(got.Payload) != string(second.Payload) {
-		t.Fatalf("second Save did not win: got payload %s, want %s", got.Payload, second.Payload)
+		t.Fatalf("Update did not win: got payload %s, want %s", got.Payload, second.Payload)
 	}
 	if !got.ExpiresAt.Equal(second.ExpiresAt) {
-		t.Fatalf("second Save did not win: got ExpiresAt %v, want %v", got.ExpiresAt, second.ExpiresAt)
+		t.Fatalf("Update did not win: got ExpiresAt %v, want %v", got.ExpiresAt, second.ExpiresAt)
 	}
 
 	ix, ok := st.(session.UserIndex)
@@ -179,10 +207,47 @@ func testSaveOverwritesToken(t *testing.T, st session.Store) {
 		t.Fatalf("ListByUser: %v", err)
 	}
 	if len(list) != 1 {
-		t.Fatalf("Save on an existing token must not duplicate: ListByUser returned %d records, want 1", len(list))
+		t.Fatalf("Update must not duplicate: ListByUser returned %d records, want 1", len(list))
 	}
 	if list[0].ID != second.ID {
 		t.Fatalf("ListByUser returned a stale record: got %v, want %v", list[0].ID, second.ID)
+	}
+}
+
+// testUpdateMissingFails pins the update-only half of the contract: Update
+// must never insert.
+func testUpdateMissingFails(t *testing.T, st session.Store) {
+	ctx := context.Background()
+	if _, err := st.Update(ctx, "tok-never-created", rec("u1", time.Now().Add(time.Hour))); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("Update(missing) = %v, want ErrNotFound", err)
+	}
+	if _, err := st.Load(ctx, "tok-never-created"); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("Update(missing) must not insert a record")
+	}
+}
+
+// testUpdateAfterDeleteFails is the revocation-is-terminal guarantee: a
+// snapshot that lost a race with Delete cannot resurrect the record by
+// committing after it. An upserting driver fails here.
+func testUpdateAfterDeleteFails(t *testing.T, st session.Store) {
+	ctx := context.Background()
+	const tok = "tok-revoked"
+
+	r := rec("u1", time.Now().Add(time.Hour))
+	if _, err := st.Create(ctx, tok, r); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := st.Delete(ctx, tok); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	stale := r
+	stale.ExpiresAt = time.Now().Add(2 * time.Hour)
+	if _, err := st.Update(ctx, tok, stale); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("Update(deleted) = %v, want ErrNotFound — a stale snapshot must not resurrect a revoked session", err)
+	}
+	if _, err := st.Load(ctx, tok); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("Update(deleted) must not recreate the record")
 	}
 }
 
@@ -199,9 +264,9 @@ func testToucher(t *testing.T, st session.Store) {
 	}
 	ctx := context.Background()
 	r := rec("u1", time.Now().Add(time.Hour))
-	tok, err := st.Save(ctx, "tok-3", r)
+	tok, err := st.Create(ctx, "tok-3", r)
 	if err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
 	newSeen := r.LastSeenAt.Add(10 * time.Minute)
@@ -225,6 +290,53 @@ func testToucher(t *testing.T, st session.Store) {
 	}
 }
 
+// testToucherMonotonic pins the Toucher doc's monotonicity requirement: a
+// racing request's older timestamps must never move LastSeenAt or ExpiresAt
+// backward.
+func testToucherMonotonic(t *testing.T, st session.Store) {
+	tc, ok := st.(session.Toucher)
+	if !ok {
+		t.Skip("store does not implement Toucher")
+	}
+	ctx := context.Background()
+	r := rec("u1", time.Now().Add(time.Hour))
+	tok, err := st.Create(ctx, "tok-monotonic", r)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	ahead := r.LastSeenAt.Add(10 * time.Minute)
+	aheadExp := r.ExpiresAt.Add(10 * time.Minute)
+	if err := tc.Touch(ctx, tok, ahead, aheadExp); err != nil {
+		t.Fatalf("Touch (forward): %v", err)
+	}
+	if err := tc.Touch(ctx, tok, r.LastSeenAt, r.ExpiresAt); err != nil {
+		t.Fatalf("Touch (stale): %v", err)
+	}
+
+	got, err := st.Load(ctx, tok)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.LastSeenAt.Equal(ahead) {
+		t.Fatalf("stale Touch moved LastSeenAt backward: got %v want %v", got.LastSeenAt, ahead)
+	}
+	if !got.ExpiresAt.Equal(aheadExp) {
+		t.Fatalf("stale Touch moved ExpiresAt backward: got %v want %v", got.ExpiresAt, aheadExp)
+	}
+}
+
+func testToucherMissing(t *testing.T, st session.Store) {
+	tc, ok := st.(session.Toucher)
+	if !ok {
+		t.Skip("store does not implement Toucher")
+	}
+	now := time.Now()
+	if err := tc.Touch(context.Background(), "tok-never-created", now, now.Add(time.Hour)); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("Touch(missing) = %v, want ErrNotFound", err)
+	}
+}
+
 func testUserIndex(t *testing.T, st session.Store) {
 	ix, ok := st.(session.UserIndex)
 	if !ok {
@@ -234,8 +346,8 @@ func testUserIndex(t *testing.T, st session.Store) {
 	a, b, c := rec("u1", time.Now().Add(time.Hour)), rec("u1", time.Now().Add(time.Hour)), rec("u1", time.Now().Add(time.Hour))
 	other := rec("u2", time.Now().Add(time.Hour))
 	for tok, r := range map[string]session.Record{"ta": a, "tb": b, "tc": c, "to": other} {
-		if _, err := st.Save(ctx, tok, r); err != nil {
-			t.Fatalf("Save %s: %v", tok, err)
+		if _, err := st.Create(ctx, tok, r); err != nil {
+			t.Fatalf("Create %s: %v", tok, err)
 		}
 	}
 
@@ -305,14 +417,14 @@ func testUserIndexOrder(t *testing.T, st session.Store) {
 	newest := recAt("u1", base, base.Add(time.Hour))
 
 	// Save deliberately out of chronological order: middle, newest, oldest.
-	if _, err := st.Save(ctx, "order-middle", middle); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "order-middle", middle); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.Save(ctx, "order-newest", newest); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "order-newest", newest); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.Save(ctx, "order-oldest", oldest); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "order-oldest", oldest); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 
 	list, err := ix.ListByUser(ctx, "", "u1")
@@ -347,8 +459,8 @@ func testUserIndexScoped(t *testing.T, st session.Store) {
 	t2.Tenant = "t2"
 
 	for tok, r := range map[string]session.Record{"scoped-t1-a": t1a, "scoped-t1-b": t1b, "scoped-t2": t2} {
-		if _, err := st.Save(ctx, tok, r); err != nil {
-			t.Fatalf("Save %s: %v", tok, err)
+		if _, err := st.Create(ctx, tok, r); err != nil {
+			t.Fatalf("Create %s: %v", tok, err)
 		}
 	}
 
@@ -407,17 +519,17 @@ func testExpirer(t *testing.T, st session.Store) {
 	onBoundary := rec("u1", now)      // expires exactly at now: inclusive boundary, must be reaped
 	forever := rec("u1", time.Time{}) // zero ExpiresAt: never expires, must never be reaped
 
-	if _, err := st.Save(ctx, "expired", past); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "expired", past); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.Save(ctx, "live", future); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "live", future); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.Save(ctx, "boundary", onBoundary); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "boundary", onBoundary); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.Save(ctx, "forever", forever); err != nil {
-		t.Fatalf("Save: %v", err)
+	if _, err := st.Create(ctx, "forever", forever); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 
 	n, err := ex.DeleteExpired(ctx, now)
@@ -457,7 +569,7 @@ func testConcurrentAccess(t *testing.T, st session.Store) {
 			for i := range iterations {
 				tok := fmt.Sprintf("concurrent-%d-%d", worker, i)
 				r := rec("u-concurrent", time.Now().Add(time.Hour))
-				savedTok, err := st.Save(ctx, tok, r)
+				savedTok, err := st.Create(ctx, tok, r)
 				if err != nil {
 					errs <- fmt.Errorf("save: %w", err)
 					continue

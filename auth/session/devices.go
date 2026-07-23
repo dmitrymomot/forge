@@ -2,11 +2,12 @@ package session
 
 import (
 	"context"
+	"slices"
 
 	"github.com/dmitrymomot/forge/core/id"
 )
 
-// ListByUser returns every live session for userID, newest first. IP, user agent, and last-seen are columns, so a device list decodes no payload. Returns ErrUnsupported when the store has no user index. With a configured scope hook, results are confined to the resolved tenant.
+// ListByUser returns every live session for userID, newest first. Expired records the reaper has not removed yet are filtered out here, so the promise holds regardless of the driver. IP, user agent, and last-seen are columns, so a device list decodes no payload. Returns ErrUnsupported when the store has no user index. With a configured scope hook, results are confined to the resolved tenant.
 func (m *Manager) ListByUser(ctx context.Context, userID string) ([]Record, error) {
 	if m.index == nil {
 		return nil, ErrUnsupported
@@ -18,7 +19,14 @@ func (m *Manager) ListByUser(ctx context.Context, userID string) ([]Record, erro
 	if err != nil {
 		return nil, err
 	}
-	return m.index.ListByUser(ctx, tenant, userID)
+	recs, err := m.index.ListByUser(ctx, tenant, userID)
+	if err != nil {
+		return nil, err
+	}
+	now := m.now()
+	return slices.DeleteFunc(recs, func(r Record) bool {
+		return !r.ExpiresAt.IsZero() && !r.ExpiresAt.After(now)
+	}), nil
 }
 
 // Revoke removes one of userID's sessions. It is user-bound: passing another user's session id is a no-op, not a cross-account logout. With a configured scope hook, it is also tenant-bound the same way.

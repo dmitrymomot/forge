@@ -148,6 +148,9 @@ func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Reques
 		if err == nil {
 			continue
 		}
+		// The responder gets a static sentinel, never the policy error: reasons
+		// like "fingerprint mismatch" are for logs, and web/problem puts a 4xx
+		// error's text into the response body.
 		reason, revoke := IsRevoke(err)
 		if revoke {
 			if delErr := m.Destroy(r.Context(), s); delErr != nil {
@@ -156,12 +159,12 @@ func runPolicies(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Reques
 			}
 			clearCredential(o, w, r, matchedIdx)
 			o.logger.InfoContext(r.Context(), "session: revoked", slog.String("reason", reason))
-			o.responder(w, r, err)
+			o.responder(w, r, ErrRevoked)
 			return err
 		}
 		if reason, deny := IsDeny(err); deny {
 			o.logger.InfoContext(r.Context(), "session: denied", slog.String("reason", reason))
-			o.responder(w, r, err)
+			o.responder(w, r, ErrDenied)
 			return err
 		}
 		// Anything else is infrastructure: fail closed.
@@ -196,9 +199,19 @@ func commit(m *Manager, o *mwOptions, w http.ResponseWriter, r *http.Request, s 
 	if !s.isNew && s.token != presentedToken {
 		return embed(o, w, r, s, matchedIdx)
 	}
-	// Otherwise a metadata-only refresh, fail-open: a failed touch must not fail the request.
+	// Otherwise a sliding-deadline refresh, fail-open: a failed refresh must not
+	// fail the request. Metadata-only when the store implements Toucher, a full
+	// save otherwise — read-only traffic must still persist sliding expiry.
 	if m.touchDue(s, m.now()) {
-		if err := m.toucher.Touch(r.Context(), s.token, s.rec.LastSeenAt, s.rec.ExpiresAt); err != nil {
+		var err error
+		if m.toucher != nil {
+			err = m.toucher.Touch(r.Context(), s.token, s.rec.LastSeenAt, s.rec.ExpiresAt)
+		} else if err = m.Save(r.Context(), s); err == nil && s.token != presentedToken {
+			// A stateless store re-encodes on save; the fresh credential must
+			// still reach the client.
+			err = embed(o, w, r, s, matchedIdx)
+		}
+		if err != nil {
 			o.logger.WarnContext(r.Context(), "session: touch failed", slog.Any("error", err))
 		}
 	}

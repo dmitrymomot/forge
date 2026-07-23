@@ -5,9 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dmitrymomot/forge/auth/session"
+	"github.com/dmitrymomot/forge/core/clock"
 )
 
 func TestAnonymousRequestCostsNoStorage(t *testing.T) {
@@ -93,6 +96,43 @@ func TestPolicyRevokeDeletesTheRecord(t *testing.T) {
 	}
 	if _, err := mgr.Load(t.Context(), seed.Token()); !errors.Is(err, session.ErrNotFound) {
 		t.Fatal("Revoke must delete the record")
+	}
+}
+
+// TestPolicyReasonStaysOutOfTheResponseBody pins the sanitization: the default
+// responder puts a 4xx error's text into the body, so the middleware must hand
+// it ErrDenied/ErrRevoked, never the policy error whose reason explains what
+// tripped detection.
+func TestPolicyReasonStaysOutOfTheResponseBody(t *testing.T) {
+	const secret = "fingerprint-mismatch-from-known-botnet"
+	for name, policy := range map[string]session.Policy{
+		"deny":   func(context.Context, *http.Request, *session.Session) error { return session.Deny(secret) },
+		"revoke": func(context.Context, *http.Request, *session.Session) error { return session.Revoke(secret) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			seed := mgr.Start()
+			if err := mgr.Save(t.Context(), seed); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			mw := session.Middleware(mgr,
+				session.WithTransport(headerTransport{}),
+				session.WithPolicy(policy),
+			)
+			h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+			r := httptest.NewRequest("GET", "/", nil)
+			r.Header.Set("X-Test-Token", seed.Token())
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), secret) {
+				t.Fatalf("the policy reason leaked into the response body: %s", rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -225,6 +265,72 @@ func TestClientInfoIsPinnedAtCreationOnly(t *testing.T) {
 	}
 	if after.IP() != "203.0.113.4" || after.UserAgent() != "Chrome" {
 		t.Fatalf("pinned metadata was overwritten on a later request: ip=%q ua=%q", after.IP(), after.UserAgent())
+	}
+}
+
+// TestReadOnlyRequestSlidesExpiryViaToucher pins that clean traffic persists
+// sliding expiry: after the touch interval, a request that dirties nothing
+// still moves the stored deadline forward.
+func TestReadOnlyRequestSlidesExpiryViaToucher(t *testing.T) {
+	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewMock(start)
+	store := session.NewMemoryStore()
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store),
+		session.WithClock(clk), session.WithIdle(time.Hour), session.WithMaxTTL(0), session.WithTouch(5*time.Minute))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	seed := mgr.Start()
+	if err := mgr.Save(t.Context(), seed); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	clk.Advance(10 * time.Minute)
+	mw := session.Middleware(mgr, session.WithTransport(headerTransport{}))
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("X-Test-Token", seed.Token())
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	rec, err := store.Load(t.Context(), seed.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := start.Add(10*time.Minute + time.Hour); !rec.ExpiresAt.Equal(want) {
+		t.Fatalf("stored ExpiresAt = %v, want %v — a clean request past the touch interval must persist the slide", rec.ExpiresAt, want)
+	}
+}
+
+// TestReadOnlyRequestSlidesExpiryWithoutToucher pins the fallback: with no
+// Toucher capability the refresh is a full save, not a silent skip that lets
+// an active session expire under read-only traffic.
+func TestReadOnlyRequestSlidesExpiryWithoutToucher(t *testing.T) {
+	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewMock(start)
+	inner := session.NewMemoryStore()
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(noTouchStore{inner}),
+		session.WithClock(clk), session.WithIdle(time.Hour), session.WithMaxTTL(0), session.WithTouch(0))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	seed := mgr.Start()
+	if err := mgr.Save(t.Context(), seed); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	clk.Advance(10 * time.Minute)
+	mw := session.Middleware(mgr, session.WithTransport(headerTransport{}))
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("X-Test-Token", seed.Token())
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	rec, err := inner.Load(t.Context(), seed.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := start.Add(10*time.Minute + time.Hour); !rec.ExpiresAt.Equal(want) {
+		t.Fatalf("stored ExpiresAt = %v, want %v — WithTouch(0) and no Toucher must fall back to a full save", rec.ExpiresAt, want)
 	}
 }
 

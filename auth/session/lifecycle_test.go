@@ -10,19 +10,27 @@ import (
 	"github.com/dmitrymomot/forge/core/clock"
 )
 
-// failingSaveStore fails the Nth save, to prove rollback.
+// failingSaveStore fails the Nth write (Create or Update), to prove rollback.
 type failingSaveStore struct {
 	*session.MemoryStore
 	failOn int
 	calls  int
 }
 
-func (f *failingSaveStore) Save(ctx context.Context, token string, rec session.Record) (string, error) {
+func (f *failingSaveStore) Create(ctx context.Context, token string, rec session.Record) (string, error) {
 	f.calls++
 	if f.calls == f.failOn {
 		return "", errors.New("store unavailable")
 	}
-	return f.MemoryStore.Save(ctx, token, rec)
+	return f.MemoryStore.Create(ctx, token, rec)
+}
+
+func (f *failingSaveStore) Update(ctx context.Context, token string, rec session.Record) (string, error) {
+	f.calls++
+	if f.calls == f.failOn {
+		return "", errors.New("store unavailable")
+	}
+	return f.MemoryStore.Update(ctx, token, rec)
 }
 
 func TestAuthenticateRotatesTokenAndPreservesIdentity(t *testing.T) {
@@ -109,6 +117,67 @@ func TestAuthenticateRollsBackTokenOnFailedSave(t *testing.T) {
 	}
 }
 
+func TestRotateRollsBackTheWholeRecordOnFailedSave(t *testing.T) {
+	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	if err := mgr.Save(t.Context(), sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	oldToken, oldExpires := sess.Token(), sess.ExpiresAt()
+
+	store.failOn = store.calls + 1
+	if err := mgr.Rotate(t.Context(), sess); err == nil {
+		t.Fatal("Rotate must surface the store failure")
+	}
+
+	if sess.Token() != oldToken {
+		t.Fatal("a failed rotation must roll the token back")
+	}
+	if !sess.ExpiresAt().Equal(oldExpires) {
+		t.Fatal("a failed rotation must not leave a deadline the store never committed")
+	}
+	if _, err := mgr.Load(t.Context(), oldToken); err != nil {
+		t.Fatalf("the original session must still load after a failed Rotate: %v", err)
+	}
+}
+
+func TestElevateRollsBackTheWholeRecordOnFailedSave(t *testing.T) {
+	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	oldToken, oldElevated, oldExpires := sess.Token(), sess.ElevatedAt(), sess.ExpiresAt()
+
+	store.failOn = store.calls + 1
+	if err := mgr.Elevate(t.Context(), sess); err == nil {
+		t.Fatal("Elevate must surface the store failure")
+	}
+
+	if sess.Token() != oldToken {
+		t.Fatal("a failed elevation must roll the token back")
+	}
+	if !sess.ElevatedAt().Equal(oldElevated) {
+		t.Fatal("a failed elevation must not leave a fresher stamp than the store holds")
+	}
+	if !sess.ExpiresAt().Equal(oldExpires) {
+		t.Fatal("a failed elevation must not leave a deadline the store never committed")
+	}
+	if _, err := mgr.Load(t.Context(), oldToken); err != nil {
+		t.Fatalf("the original session must still load after a failed Elevate: %v", err)
+	}
+}
+
 func TestFailedAuthenticateKeepsPendingPayloadForRetry(t *testing.T) {
 	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
 	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
@@ -140,6 +209,117 @@ func TestFailedAuthenticateKeepsPendingPayloadForRetry(t *testing.T) {
 	}
 	if len(cart.Items) != 1 || cart.Items[0] != "guest-item" {
 		t.Fatalf("pending namespace write lost after a failed Authenticate: %+v", cart)
+	}
+}
+
+func TestAuthenticateRejectsSwitchingUsers(t *testing.T) {
+	mgr := newTestManager(t)
+	sess := mgr.Start()
+	nsCart.Set(sess, cartData{Items: []string{"user-a-item"}})
+	if err := mgr.Authenticate(t.Context(), sess, "user-a"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	// Same user re-authenticating is fine (e.g. password re-entry).
+	if err := mgr.Authenticate(t.Context(), sess, "user-a"); err != nil {
+		t.Fatalf("same-user re-authentication: %v", err)
+	}
+	tokenAfterA := sess.Token()
+
+	// A different user must be rejected: the payload still carries user-a's data.
+	if err := mgr.Authenticate(t.Context(), sess, "user-b"); !errors.Is(err, session.ErrUserMismatch) {
+		t.Fatalf("Authenticate(user-b) on user-a's session = %v, want ErrUserMismatch", err)
+	}
+	if sess.UserID() != "user-a" {
+		t.Fatalf("rejected switch must leave the binding intact: UserID = %q", sess.UserID())
+	}
+	if sess.Token() != tokenAfterA {
+		t.Fatal("a rejected switch must not rotate the credential")
+	}
+}
+
+func TestElevateRotatesTheToken(t *testing.T) {
+	mgr := newTestManager(t)
+	sess := mgr.Start()
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	stolen := sess.Token()
+
+	if err := mgr.Elevate(t.Context(), sess); err != nil {
+		t.Fatalf("Elevate: %v", err)
+	}
+	if sess.Token() == stolen {
+		t.Fatal("Elevate must rotate the token — a credential copied before step-up must not inherit the elevation")
+	}
+	if _, err := mgr.Load(t.Context(), stolen); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("the pre-elevation token must stop working")
+	}
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reloaded.ElevatedWithin(time.Minute) {
+		t.Fatal("the rotated record must carry the fresh elevation stamp")
+	}
+}
+
+func TestElevateRejectsAnonymousSessions(t *testing.T) {
+	mgr := newTestManager(t)
+	sess := mgr.Start()
+	if err := mgr.Elevate(t.Context(), sess); !errors.Is(err, session.ErrAnonymous) {
+		t.Fatalf("Elevate on an anonymous session = %v, want ErrAnonymous — there is no identity to re-prove", err)
+	}
+}
+
+func TestDestroyDeauthenticatesTheInMemorySession(t *testing.T) {
+	mgr := newTestManager(t)
+	sess := mgr.Start()
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+
+	if err := mgr.Destroy(t.Context(), sess); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if sess.Authenticated() {
+		t.Fatal("code later in the request must not keep authorizing a destroyed session")
+	}
+	if err := mgr.Save(t.Context(), sess); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("Save after Destroy = %v, want ErrNotFound — a destroyed session must not be resurrectable", err)
+	}
+}
+
+// TestStaleSnapshotCannotResurrectADestroyedSession is the manager-level
+// revocation-is-terminal proof: request A holds a loaded snapshot, request B
+// destroys the session, then A commits. The upsert contract this replaces
+// would recreate the record with a fresh deadline.
+func TestStaleSnapshotCannotResurrectADestroyedSession(t *testing.T) {
+	mgr := newTestManager(t)
+	sess := mgr.Start()
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	token := sess.Token()
+
+	snapshotA, err := mgr.Load(t.Context(), token)
+	if err != nil {
+		t.Fatalf("Load (request A): %v", err)
+	}
+	snapshotB, err := mgr.Load(t.Context(), token)
+	if err != nil {
+		t.Fatalf("Load (request B): %v", err)
+	}
+
+	if err := mgr.Destroy(t.Context(), snapshotB); err != nil {
+		t.Fatalf("Destroy (request B): %v", err)
+	}
+
+	nsCart.Set(snapshotA, cartData{Items: []string{"stale"}})
+	if err := mgr.Save(t.Context(), snapshotA); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("stale Save after Destroy = %v, want ErrNotFound", err)
+	}
+	if _, err := mgr.Load(t.Context(), token); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("the destroyed record must stay destroyed")
 	}
 }
 

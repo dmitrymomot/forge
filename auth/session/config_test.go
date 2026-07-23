@@ -28,6 +28,14 @@ func TestConfigValidate(t *testing.T) {
 		{"remembermax below remember idle", func(c *session.Config) { c.RememberIdle = 60 * 24 * time.Hour; c.RememberMax = time.Hour }, session.ErrBadMaxTTL},
 		{"negative touch", func(c *session.Config) { c.Touch = -time.Second }, session.ErrBadTouch},
 		{"touch above idle", func(c *session.Config) { c.Touch = 48 * time.Hour }, session.ErrBadTouch},
+		// Touch == Idle would refresh exactly when the session expires, so
+		// sliding expiry never actually slides.
+		{"touch equal to idle", func(c *session.Config) { c.Touch = c.Idle }, session.ErrBadTouch},
+		{"touch at remember idle", func(c *session.Config) {
+			c.RememberIdle = 30 * time.Minute
+			c.RememberMax = 0
+			c.Touch = 30 * time.Minute
+		}, session.ErrBadTouch},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

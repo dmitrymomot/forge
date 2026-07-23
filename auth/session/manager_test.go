@@ -10,7 +10,7 @@ import (
 )
 
 // noTouchStore implements Store but not Toucher. It embeds the Store
-// interface, not the concrete *MemoryStore, so only Load/Save/Delete
+// interface, not the concrete *MemoryStore, so only Load/Create/Update/Delete
 // promote — embedding the concrete type would also promote MemoryStore's
 // Touch method and defeat the point of this type.
 type noTouchStore struct{ session.Store }
@@ -21,13 +21,48 @@ func TestNewRequiresStore(t *testing.T) {
 	}
 }
 
-func TestNewRejectsTouchWithoutToucher(t *testing.T) {
-	_, err := session.New(session.DefaultConfig(),
+func TestNewAcceptsTouchWithoutToucher(t *testing.T) {
+	if _, err := session.New(session.DefaultConfig(),
 		session.WithStore(noTouchStore{session.NewMemoryStore()}),
 		session.WithTouch(time.Minute),
-	)
-	if !errors.Is(err, session.ErrTouchUnsupported) {
-		t.Fatalf("New = %v, want ErrTouchUnsupported — a configured option whose capability is missing is a boot error", err)
+	); err != nil {
+		t.Fatalf("New = %v — without a Toucher the refresh falls back to a full save, not a boot error", err)
+	}
+}
+
+// TestLoadEnforcesTightenedAbsoluteLifetime pins that a config change applies
+// on the very next load: a record persisted under a generous MaxTTL, read by a
+// manager whose MaxTTL now puts CreatedAt+cap in the past, is expired — not
+// admitted one more time on the strength of its stored deadline.
+func TestLoadEnforcesTightenedAbsoluteLifetime(t *testing.T) {
+	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewMock(start)
+	store := session.NewMemoryStore()
+
+	generous, err := session.New(session.DefaultConfig(), session.WithStore(store),
+		session.WithClock(clk), session.WithIdle(4*time.Hour), session.WithMaxTTL(0))
+	if err != nil {
+		t.Fatalf("New (generous): %v", err)
+	}
+	sess := generous.Start()
+	if err := generous.Save(t.Context(), sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	tightened, err := session.New(session.DefaultConfig(), session.WithStore(store),
+		session.WithClock(clk), session.WithIdle(time.Hour), session.WithMaxTTL(time.Hour))
+	if err != nil {
+		t.Fatalf("New (tightened): %v", err)
+	}
+
+	// 90 minutes in: the stored deadline (start+4h) is alive, but the tightened
+	// cap (CreatedAt+1h) is already behind us.
+	clk.Advance(90 * time.Minute)
+	if _, err := tightened.Load(t.Context(), sess.Token()); !errors.Is(err, session.ErrExpired) {
+		t.Fatalf("Load under the tightened MaxTTL = %v, want ErrExpired", err)
+	}
+	if _, err := store.Load(t.Context(), sess.Token()); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("a record expired under the current policy must be deleted, not left for one more request")
 	}
 }
 

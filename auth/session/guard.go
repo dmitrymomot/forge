@@ -30,7 +30,7 @@ type VerifierOption func(*verifierOptions)
 
 // WithIdentity maps a session to a guard.Identity, letting roles or scopes ride
 // a session namespace instead of a per-request store read. The default emits
-// Subject and Method only — session core knows nothing about roles.
+// Subject, Tenant, and Method only — session core knows nothing about roles.
 func WithIdentity(fn func(*Session) guard.Identity) VerifierOption {
 	return func(o *verifierOptions) { o.identity = fn }
 }
@@ -55,6 +55,8 @@ func Verifier(m *Manager, opts ...VerifierOption) guard.Verifier {
 		if o.identity != nil {
 			return o.identity(s), nil
 		}
-		return guard.Identity{Subject: s.rec.UserID, Method: guard.MethodSession}, nil
+		// Tenant rides along so access.SubjectFromIdentity sees it: dropping it
+		// here would silently disable tenant checks in downstream deciders.
+		return guard.Identity{Subject: s.rec.UserID, Tenant: s.rec.Tenant, Method: guard.MethodSession}, nil
 	})
 }
