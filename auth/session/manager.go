@@ -196,7 +196,6 @@ func (m *Manager) Authenticate(ctx context.Context, s *Session, userID string, o
 		s.token, s.rec = oldToken, oldRec
 		return err
 	}
-	s.syncInfo()
 	if !wasNew {
 		if err := m.store.Delete(ctx, oldToken); err != nil {
 			m.log.WarnContext(ctx, "session: deleting pre-rotation record failed", slog.Any("error", err))
@@ -262,9 +261,5 @@ func (m *Manager) Rebind(ctx context.Context, s *Session, b Bind) error {
 		return ErrNoSession
 	}
 	s.rec.IP, s.rec.UserAgent, s.rec.Fingerprint = b.IP, b.UserAgent, b.Fingerprint
-	if err := m.Save(ctx, s); err != nil {
-		return err
-	}
-	s.syncInfo()
-	return nil
+	return m.Save(ctx, s)
 }
