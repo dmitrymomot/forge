@@ -54,6 +54,11 @@ type Toucher interface {
 // unscoped manager); a non-empty tenant confines the operation so one tenant's
 // device-management call can never read or delete another tenant's sessions for
 // the same user id.
+//
+// Driver note: "" is a single-tenant wildcard, not "tenant scoping disabled". A
+// scoped manager resolves a non-empty tenant on every call and fails closed on
+// an empty one, so a driver only ever receives "" from a single-tenant caller —
+// where matching any row is correct because every row's Tenant is also "".
 type UserIndex interface {
 	ListByUser(ctx context.Context, tenant, userID string) ([]Record, error)
 	// DeleteByUser removes every record for tenant+userID except those in keep.

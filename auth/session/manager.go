@@ -208,6 +208,11 @@ func Remember(v bool) AuthOption { return func(o *authOptions) { o.remember = v 
 // mandatory: reusing the pre-login credential is the session fixation bug. The
 // session ID, CreatedAt, and payload survive; a failed save rolls every field
 // back so the client is never left holding a credential no record answers to.
+//
+// The new token is saved before the pre-rotation record is deleted. If that
+// delete fails it is only logged: the old token then remains loadable until it
+// expires on its own, so a store that can fail deletes weakens the "old token
+// stops working" guarantee for the length of the idle window.
 func (m *Manager) Authenticate(ctx context.Context, s *Session, userID string, opts ...AuthOption) error {
 	if s == nil {
 		return ErrNoSession

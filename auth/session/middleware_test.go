@@ -228,6 +228,26 @@ func TestClientInfoIsPinnedAtCreationOnly(t *testing.T) {
 	}
 }
 
+func TestSilentHandlerCommitFailureBecomes500(t *testing.T) {
+	mgr := newTestManager(t)
+	mw := testMiddlewareWithCommitError(t, mgr, errors.New("store down"))
+
+	// A handler that dirties the session but never touches the ResponseWriter:
+	// no WriteHeader, Write, Flush, or Hijack. The commit runs only in the
+	// post-handler fallback, and its failure must still surface as a 500 rather
+	// than net/http finalizing an implicit 200.
+	h := mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		nsCart.Set(mgr.MustFor(r), cartData{Items: []string{"x"}})
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — a commit failure after a silent handler must not finalize as an implicit 200", rec.Code)
+	}
+}
+
 // readOnlyTransport reads a query token and cannot write one back.
 type readOnlyTransport struct{}
 

@@ -107,7 +107,13 @@ func Middleware(m *Manager, opts ...MiddlewareOption) middleware.Middleware {
 
 			if !cw.committed {
 				if err := cw.ensureCommitted(); err != nil {
+					// The handler wrote nothing, so no status has gone out yet.
+					// Mirror commitWriter.WriteHeader's failure branch: a failed
+					// commit must be a clean 500, not an implicit 200 that hides
+					// a store failure and a never-persisted credential.
 					o.logger.ErrorContext(ctx, "session: commit failed after handler", slog.Any("error", err))
+					clearHeaders(w.Header())
+					w.WriteHeader(http.StatusInternalServerError)
 				}
 			}
 		})
