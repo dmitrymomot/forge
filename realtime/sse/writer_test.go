@@ -48,7 +48,9 @@ func TestNewWriterHeaders(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	_, err := sse.NewWriter(rec)
+	// A recorder cannot set write deadlines, so opt out of the send-timeout
+	// bound explicitly; this test is about the stream headers.
+	_, err := sse.NewWriter(rec, sse.WithSendTimeout(0))
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -96,7 +98,7 @@ func TestSendFlushesEveryEvent(t *testing.T) {
 	t.Parallel()
 
 	cw := &countingFlusher{rec: httptest.NewRecorder()}
-	w, err := sse.NewWriter(cw)
+	w, err := sse.NewWriter(cw, sse.WithSendTimeout(0)) // recorder has no deadline control
 	require.NoError(t, err)
 	flushed := cw.flushes // header flush
 
@@ -110,7 +112,7 @@ func TestSendWriteError(t *testing.T) {
 	t.Parallel()
 
 	cw := &countingFlusher{rec: httptest.NewRecorder()}
-	w, err := sse.NewWriter(cw)
+	w, err := sse.NewWriter(cw, sse.WithSendTimeout(0)) // recorder has no deadline control
 	require.NoError(t, err)
 
 	cw.writeErr = errors.New("client gone")
@@ -161,11 +163,38 @@ func TestSendTimeoutValidation(t *testing.T) {
 	require.Error(t, err)
 }
 
+// deadlinelessFlusher flushes but cannot set write deadlines and does not
+// implement Unwrap — a middleware wrapper that forgot Unwrap.
+type deadlinelessFlusher struct {
+	header http.Header
+}
+
+func (w *deadlinelessFlusher) Header() http.Header         { return w.header }
+func (w *deadlinelessFlusher) Write(p []byte) (int, error) { return len(p), nil }
+func (w *deadlinelessFlusher) WriteHeader(int)             {}
+func (w *deadlinelessFlusher) Flush()                      {}
+
+func TestNewWriterSendTimeoutUnsupported(t *testing.T) {
+	t.Parallel()
+
+	// A positive send timeout that cannot be enforced fails closed before the
+	// response is committed, rather than silently dropping the protection.
+	w := &deadlinelessFlusher{header: make(http.Header)}
+	_, err := sse.NewWriter(w)
+	require.Error(t, err)
+	assert.Empty(t, w.header.Get("Content-Type"), "stream headers must be reset on failure")
+
+	// Opting out of the bound accepts unbounded writes and succeeds.
+	w2 := &deadlinelessFlusher{header: make(http.Header)}
+	_, err = sse.NewWriter(w2, sse.WithSendTimeout(0))
+	require.NoError(t, err)
+}
+
 func TestWriterConcurrentSend(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	w, err := sse.NewWriter(rec)
+	w, err := sse.NewWriter(rec, sse.WithSendTimeout(0)) // recorder has no deadline control
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup

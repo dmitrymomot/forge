@@ -64,12 +64,15 @@
 // An SSE response never finishes, so the server's write timeout must not
 // apply to it. NewWriter clears the write deadline through
 // http.ResponseController, which works on net/http servers as long as every
-// wrapping middleware implements Unwrap (all forge middleware does). If a
-// deadline-oblivious wrapper sits in the chain, run the server with
-// httpserver WriteTimeout=0 instead. In place of the cleared deadline, every
-// Send arms a per-write one (WithSendTimeout, default 30s), so a client that
-// stays connected but stops reading fails the stream instead of pinning the
-// connection forever. Heartbeats (WithKeepAlive, default 15s) keep proxies
+// wrapping middleware implements Unwrap (all forge middleware does). In place
+// of the cleared deadline, every Send arms a per-write one (WithSendTimeout,
+// default 30s), so a client that stays connected but stops reading fails the
+// stream instead of pinning the connection forever. If a deadline-oblivious
+// wrapper sits in the chain, NewWriter cannot arm that per-send deadline and
+// fails closed rather than silently drop the protection; make the wrapper
+// implement Unwrap, or pass WithSendTimeout(0) and run the server with
+// httpserver WriteTimeout=0 to accept unbounded writes. Heartbeats
+// (WithKeepAlive, default 15s) keep proxies
 // from cutting idle streams — and give a silent topic regular Sends, which is
 // what makes the send timeout catch stalled clients even with no traffic —
 // and the X-Accel-Buffering header disables nginx response buffering.

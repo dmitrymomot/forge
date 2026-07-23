@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/dmitrymomot/forge/ops/logger"
@@ -29,8 +28,11 @@ type WriterOption func(*writerConfig)
 // connected client that stopped reading would pin the goroutine and the
 // connection forever; with it the blocked Send fails and ends the stream.
 // Zero disables the bound; negative is an error. Defaults to 30s.
-// Best-effort: a middleware chain that cannot set deadlines falls back to
-// the server's own write timeout.
+//
+// When the bound is positive, NewWriter fails closed if the response writer
+// cannot set write deadlines (a flushable wrapper without Unwrap): the
+// protection cannot be enforced, so pass WithSendTimeout(0) to accept
+// unbounded writes explicitly.
 func WithSendTimeout(d time.Duration) WriterOption {
 	return func(c *writerConfig) {
 		if d < 0 {
@@ -53,16 +55,9 @@ type handlerConfig struct {
 
 func newHandlerConfig() *handlerConfig {
 	return &handlerConfig{
-		encode:    defaultEncode,
 		log:       logger.NewNope(),
 		keepAlive: defaultKeepAlive,
 	}
-}
-
-// defaultEncode maps a fanout message onto the wire: the message ID becomes
-// the resume cursor and the topic becomes the event name.
-func defaultEncode(m fanout.Message) (Event, error) {
-	return Event{ID: strconv.FormatUint(m.ID, 10), Name: m.Topic, Data: m.Payload}, nil
 }
 
 // HandlerOption configures NewHandler.
@@ -95,11 +90,15 @@ func WithRetry(d time.Duration) HandlerOption {
 	}
 }
 
-// WithEncoder replaces the default fanout.Message → Event mapping (message ID
-// as the "id:" resume cursor, topic as the event name, payload as data). An
-// encoder that clears Event.ID opts that message out of Last-Event-ID resume.
-// An encoder error skips the message — logged, never delivered — and the
-// stream continues.
+// WithEncoder replaces the default fanout.Message → Event mapping (an
+// epoch-namespaced message ID as the "id:" resume cursor, topic as the event
+// name, payload as data). An encoder that clears Event.ID opts that message out
+// of Last-Event-ID resume. An encoder error skips the message — logged, never
+// delivered — and the stream continues.
+//
+// A custom encoder owns the "id:" it emits, so the handler resumes on the raw
+// Last-Event-ID (a bare uint64) rather than the default epoch-namespaced form —
+// emit stable, cross-instance IDs if you want resume to survive restarts.
 func WithEncoder(fn func(fanout.Message) (Event, error)) HandlerOption {
 	return func(c *handlerConfig) {
 		if fn == nil {

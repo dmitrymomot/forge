@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 func frame(t *testing.T, e sse.Event) (string, error) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	w, err := sse.NewWriter(rec)
+	w, err := sse.NewWriter(rec, sse.WithSendTimeout(0)) // recorder has no deadline control
 	require.NoError(t, err)
 	before := rec.Body.Len()
 	if err := w.Send(e); err != nil {
@@ -63,6 +64,17 @@ func TestEventFraming(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestRetryNoOverflow(t *testing.T) {
+	t.Parallel()
+
+	// A duration within a millisecond of MaxInt64 is valid and positive; the
+	// round-up must not overflow into a negative retry field. Old formula
+	// (Retry+time.Millisecond-1)/time.Millisecond wraps here.
+	got, err := frame(t, sse.Retry(time.Duration(math.MaxInt64)))
+	require.NoError(t, err)
+	assert.Equal(t, "retry: 9223372036855\n\n", got)
 }
 
 func TestEventValidation(t *testing.T) {

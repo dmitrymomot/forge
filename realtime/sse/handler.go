@@ -1,10 +1,14 @@
 package sse
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dmitrymomot/forge/realtime/fanout"
@@ -20,6 +24,7 @@ type handler struct {
 	hub        *fanout.Hub
 	topics     TopicsFunc
 	encode     func(fanout.Message) (Event, error)
+	resume     func(raw string) (uint64, bool)
 	log        *slog.Logger
 	subOpts    []fanout.SubscribeOption
 	writerOpts []WriterOption
@@ -45,16 +50,59 @@ func NewHandler(hub *fanout.Hub, topics TopicsFunc, opts ...HandlerOption) (http
 	if len(c.errs) > 0 {
 		return nil, errors.Join(c.errs...)
 	}
-	return &handler{
+	h := &handler{
 		hub:        hub,
 		topics:     topics,
-		encode:     c.encode,
 		log:        c.log,
 		subOpts:    c.subOpts,
 		writerOpts: c.writerOpts,
 		keepAlive:  c.keepAlive,
 		retry:      c.retry,
-	}, nil
+	}
+	if c.encode != nil {
+		// A custom encoder owns the id: semantics (typically stable domain IDs),
+		// so resume trusts the raw cursor as before.
+		h.encode = c.encode
+		h.resume = rawCursor
+	} else {
+		// The default encoder maps the per-instance hub ID to the cursor. Those
+		// IDs reset on restart and differ per instance, so namespace them with a
+		// random epoch: a cursor minted by another instance or a previous boot
+		// carries a foreign epoch, is recognised as such, and degrades to a
+		// live-only stream instead of silently dropping the messages whose IDs
+		// numerically overlap it.
+		epoch := newEpoch()
+		h.encode = func(m fanout.Message) (Event, error) {
+			return Event{ID: epoch + "." + strconv.FormatUint(m.ID, 10), Name: m.Topic, Data: m.Payload}, nil
+		}
+		h.resume = func(raw string) (uint64, bool) {
+			ep, seq, ok := strings.Cut(raw, ".")
+			if !ok || ep != epoch {
+				return 0, false
+			}
+			id, err := strconv.ParseUint(seq, 10, 64)
+			return id, err == nil
+		}
+	}
+	return h, nil
+}
+
+// rawCursor parses a bare numeric Last-Event-ID, the resume cursor a custom
+// encoder is expected to emit when it wants Last-Event-ID resume.
+func rawCursor(raw string) (uint64, bool) {
+	id, err := strconv.ParseUint(raw, 10, 64)
+	return id, err == nil
+}
+
+// newEpoch returns a random per-instance token that namespaces this handler's
+// resume cursors so cursors from other instances or previous boots are
+// recognised as foreign.
+func newEpoch() string {
+	var b [8]byte
+	// crypto/rand.Read never returns an error on supported platforms; a zero
+	// token would only weaken foreign-cursor detection, never break safety.
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +166,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := wr.Send(ev); err != nil {
+				if errors.Is(err, ErrInvalidEvent) {
+					// Validation failed with nothing written (e.g. a topic
+					// carrying CR/LF becomes an invalid event name). Skip it and
+					// keep the stream alive; treating it as a transport failure
+					// would, with replay enabled, re-serve the same bad event on
+					// every reconnect and trap the client in a loop.
+					h.log.WarnContext(ctx, "sse: invalid event skipped",
+						slog.String("topic", msg.Topic), slog.Uint64("message_id", msg.ID), slog.Any("error", err))
+					continue
+				}
 				return
 			}
 		case <-heartbeat:
@@ -134,10 +192,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // failing the request.
 func (h *handler) subscribe(r *http.Request, topics []string) (*fanout.Subscription, error) {
 	if raw := r.Header.Get("Last-Event-ID"); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			opts := make([]fanout.SubscribeOption, len(h.subOpts), len(h.subOpts)+1)
-			copy(opts, h.subOpts)
-			opts = append(opts, fanout.WithResumeAfter(id))
+		if id, ok := h.resume(raw); ok {
+			opts := append(slices.Clone(h.subOpts), fanout.WithResumeAfter(id))
 			sub, err := h.hub.Subscribe(r.Context(), topics, opts...)
 			if err == nil || !errors.Is(err, fanout.ErrReplayDisabled) {
 				return sub, err
