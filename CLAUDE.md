@@ -4,6 +4,7 @@
 - Use `just` recipes.
 - Run `just fmt file_path.go` after file changes.
 - Run `just lint` after task finished.
+- NO global states/variables allowed! No exclusions!
 - `docs/packages.md` = package catalog & roadmap (list only). `docs/design.md` = ALL design rules — layout/naming, package idioms & anatomy, dependency policy, seams, performance rules, testing policy, anti-scope. Read design.md BEFORE creating or changing any package and follow it exactly.
 - Perf: readable first, optimize only proven-hot paths; any perf-motivated complexity requires a benchmark in the PR. Hot-path rules: docs/design.md §Performance.
 - Benchmarks are REQUIRED for every package: `bench_test.go` + post-benchmark optimization pass (measured wins only); before/after numbers in the PR.

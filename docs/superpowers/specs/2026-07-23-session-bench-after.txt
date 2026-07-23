@@ -1,0 +1,88 @@
+# auth/session benchmark after-numbers — Task 14, post optimization pass
+# Apple M3 Max, darwin/arm64, go1.26.5, macOS 24.6.0
+# Captured via: just bench ./auth/session/
+#   (justfile recipe: go clean -testcache && go test -bench=. -benchmem ./auth/session/)
+# In-memory store only (session.NewMemoryStore); no external services required.
+
+go clean -testcache && go test -bench=. -benchmem ./auth/session/
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/auth/session
+cpu: Apple M3 Max
+BenchmarkNoOpRequest-14                    	 2275531	       506.8 ns/op	    1312 B/op	      14 allocs/op
+BenchmarkNamespaceGet-14                   	213458450	         5.654 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNamespaceSetAndEncode-14          	  699704	      1667 ns/op	    2248 B/op	      22 allocs/op
+BenchmarkUnknownNamespacePassthrough-14    	  972085	      1214 ns/op	     841 B/op	      17 allocs/op
+BenchmarkCommitWithRotation-14             	 1000000	      1199 ns/op	    1104 B/op	      11 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/auth/session	7.285s
+
+# ===========================================================================
+# One optimization applied — Info embedded in Session (measured win, kept)
+# ===========================================================================
+#
+# withSession (auth/session/context.go) allocated a separate *Info per
+# request. Session added an embedded `infoStore Info` field and withSession
+# now points inf at &s.infoStore instead of allocating a fresh *Info. Since
+# the Session itself is already heap-allocated by newSession, this folds the
+# Info write into the existing allocation instead of adding a second one.
+#
+# BenchmarkNoOpRequest (every authenticated request runs withSession once):
+#   before:  521.6 ns/op   1328 B/op   15 allocs/op
+#   after:   506.8 ns/op   1312 B/op   14 allocs/op
+#   delta:    -15 ns/op     -16 B/op    -1 alloc/op   (measured win — kept)
+#
+# Why only -16 B/op for a 104-byte struct: Go's size-class allocator already
+# rounded the un-embedded Session (~312 B) up to the 320-B class and Info
+# (104 B) up to the 112-B class — 432 B combined. The embedded Session is
+# exactly 416 B, which is itself an exact size class. 432 - 416 = 16 B saved,
+# plus one fewer heap object for the GC to scan per request.
+#
+# Side effect on paths that never call withSession (Manager used directly,
+# without going through Middleware): BenchmarkNamespaceSetAndEncode and
+# BenchmarkCommitWithRotation both call mgr.Start() in their loop, which now
+# allocates the enlarged (416 B, size-class 416) Session instead of the
+# smaller (312 B, size-class 320) one — a size-class artifact, not extra
+# work, since infoStore is simply reserved and never written on this path:
+#   BenchmarkNamespaceSetAndEncode: 2152 -> ~2248 B/op (+~96 B), allocs unchanged (22)
+#   BenchmarkCommitWithRotation:    1008 -> 1104 B/op  (+96 B),  allocs unchanged (11)
+#   ns/op on both: flat to slightly improved, no regression there.
+# BenchmarkNamespaceGet and BenchmarkUnknownNamespacePassthrough reuse an
+# already-allocated Session across their loop body, so they are unaffected
+# (0 and 841 B/op respectively, matching baseline exactly).
+#
+# This is the trade the brief's candidate asks for: Middleware-driven request
+# handling (the documented hot path, "the hot path of every authenticated
+# request") gets fewer allocations and fewer bytes; direct Manager usage that
+# never touches Info pays a few dozen bytes of unused, reserved struct space
+# per session object. No ns/op regression was observed on any benchmark.
+#
+# ===========================================================================
+# One optimization attempted and reverted — parse() nil-raw guard (NO WIN)
+# ===========================================================================
+#
+# Candidate: guard Session.parse so a zero-length Payload leaves raw nil
+# instead of allocating an empty map, deferring the allocation to encode()
+# only once a dirty namespace actually needs to land in raw.
+#
+# Implemented, rebuilt, and re-ran the same five benchmarks three times each
+# (-count=3) against this change. Result: no benchmark in this suite exercises
+# Namespace.Get or Session.encode on a session whose Payload is empty --
+#   - BenchmarkNoOpRequest never calls parse() at all (no namespace touched).
+#   - BenchmarkNamespaceGet reads a reloaded session that already carries a
+#     non-empty payload (seedSessionWithCart wrote to it first).
+#   - BenchmarkNamespaceSetAndEncode and BenchmarkUnknownNamespacePassthrough
+#     both reach encode() with a non-empty dirty set, so raw gets allocated
+#     either way; the guard only moves *when* the allocation happens, not
+#     whether it happens, on these paths.
+#   - BenchmarkCommitWithRotation never calls parse() either (Authenticate
+#     never touches a namespace).
+#
+# Every ns/op and allocs/op number was identical (within run-to-run noise,
+# +/-1%) to the baseline with the guard in place. Per the "measured-wins-only"
+# rule, the change was reverted; auth/session/session.go's parse()/encode()
+# are unchanged from before this task. The guard would help a real workload
+# that calls Namespace.Get on a freshly-started, never-Set session (a common
+# "is this namespace present" check on an anonymous visitor), but that shape
+# is not covered by the five benchmarks this task is scoped to, so it is not
+# a measured win under this task's evidence bar and was left alone.
