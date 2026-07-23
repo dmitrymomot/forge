@@ -285,11 +285,14 @@ func (m *Manager) Rotate(ctx context.Context, s *Session) error {
 	if s == nil {
 		return ErrNoSession
 	}
-	oldToken := s.token
+	oldToken, oldRec := s.token, s.rec
 	s.token = newToken()
 	wasNew := s.isNew
 	if err := m.persist(ctx, s, true); err != nil {
-		s.token = oldToken
+		// persist stamps Tenant/LastSeenAt/ExpiresAt before the store write;
+		// restore the whole record so a failed rotation leaves no field the
+		// store never durably committed.
+		s.token, s.rec = oldToken, oldRec
 		return err
 	}
 	if !wasNew && oldToken != s.token {
@@ -329,12 +332,12 @@ func (m *Manager) Elevate(ctx context.Context, s *Session) error {
 	if s.rec.UserID == "" {
 		return ErrAnonymous
 	}
-	oldToken, oldElevated := s.token, s.rec.ElevatedAt
+	oldToken, oldRec := s.token, s.rec
 	s.rec.ElevatedAt = m.now()
 	s.token = newToken()
 	wasNew := s.isNew
 	if err := m.persist(ctx, s, true); err != nil {
-		s.token, s.rec.ElevatedAt = oldToken, oldElevated
+		s.token, s.rec = oldToken, oldRec
 		return err
 	}
 	if !wasNew {

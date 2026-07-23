@@ -117,6 +117,67 @@ func TestAuthenticateRollsBackTokenOnFailedSave(t *testing.T) {
 	}
 }
 
+func TestRotateRollsBackTheWholeRecordOnFailedSave(t *testing.T) {
+	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	if err := mgr.Save(t.Context(), sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	oldToken, oldExpires := sess.Token(), sess.ExpiresAt()
+
+	store.failOn = store.calls + 1
+	if err := mgr.Rotate(t.Context(), sess); err == nil {
+		t.Fatal("Rotate must surface the store failure")
+	}
+
+	if sess.Token() != oldToken {
+		t.Fatal("a failed rotation must roll the token back")
+	}
+	if !sess.ExpiresAt().Equal(oldExpires) {
+		t.Fatal("a failed rotation must not leave a deadline the store never committed")
+	}
+	if _, err := mgr.Load(t.Context(), oldToken); err != nil {
+		t.Fatalf("the original session must still load after a failed Rotate: %v", err)
+	}
+}
+
+func TestElevateRollsBackTheWholeRecordOnFailedSave(t *testing.T) {
+	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	if err := mgr.Authenticate(t.Context(), sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	oldToken, oldElevated, oldExpires := sess.Token(), sess.ElevatedAt(), sess.ExpiresAt()
+
+	store.failOn = store.calls + 1
+	if err := mgr.Elevate(t.Context(), sess); err == nil {
+		t.Fatal("Elevate must surface the store failure")
+	}
+
+	if sess.Token() != oldToken {
+		t.Fatal("a failed elevation must roll the token back")
+	}
+	if !sess.ElevatedAt().Equal(oldElevated) {
+		t.Fatal("a failed elevation must not leave a fresher stamp than the store holds")
+	}
+	if !sess.ExpiresAt().Equal(oldExpires) {
+		t.Fatal("a failed elevation must not leave a deadline the store never committed")
+	}
+	if _, err := mgr.Load(t.Context(), oldToken); err != nil {
+		t.Fatalf("the original session must still load after a failed Elevate: %v", err)
+	}
+}
+
 func TestFailedAuthenticateKeepsPendingPayloadForRetry(t *testing.T) {
 	store := &failingSaveStore{MemoryStore: session.NewMemoryStore()}
 	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store))
