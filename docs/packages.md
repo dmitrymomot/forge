@@ -298,19 +298,6 @@ Deps: `web/httpclient`.
 
 ---
 
-**comms/email**
-
-The complete email package: `Sender` seam + stdlib net/smtp implementation
-(STARTTLS, multipart, attachments) + named-template rendering (subject +
-HTML + text into a `Message`). `email/markdown` renders markdown + YAML
-frontmatter (subject/preheader, CTA-button extension) — the designer-free
-transactional format; goldmark confined there. Provider adapters
-(SES/Postmark/…) are consumer-side or isolated subpackages.
-
-Deps: none forge-internal (goldmark external, isolated).
-
----
-
 **comms/inbound**
 
 Inbound email processing — the receive side `comms/email` deliberately omits: MIME parse over stdlib `net/mail`/`mime` into a typed `Message` (decoded headers, text/HTML bodies, attachments with magic-byte MIME check via `filetype`), reply/quote/signature stripping to the newly-written text, thread correlation via `In-Reply-To`/`References` plus plus-addressing and reply-token recipients, and a DKIM/SPF-results header reader (verdicts from the receiving MTA — no crypto here). Transport-agnostic: consumers feed it raw RFC 5322 bytes from an SES/Mailgun/Postmark webhook or an IMAP poller; what becomes a ticket is consumer-side.

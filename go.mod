@@ -31,6 +31,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/opensearch v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.43.0
+	github.com/yuin/goldmark v1.8.4
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
