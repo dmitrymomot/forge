@@ -119,11 +119,17 @@ func TestHandlerStream(t *testing.T) {
 
 	got, err := readEvent(br)
 	require.NoError(t, err)
-	assert.Equal(t, event{id: "1", name: "notifications.42", data: "first"}, got)
+	assert.Equal(t, "notifications.42", got.name)
+	assert.Equal(t, "first", got.data)
+	epoch, seq, ok := strings.Cut(got.id, ".")
+	require.True(t, ok, "default cursor must be epoch-namespaced")
+	assert.NotEmpty(t, epoch)
+	assert.Equal(t, "1", seq)
 
 	got, err = readEvent(br)
 	require.NoError(t, err)
 	assert.Equal(t, "a\nb", got.data, "multi-line payloads must survive framing")
+	assert.Equal(t, epoch+".2", got.id, "same instance keeps its epoch and advances the cursor")
 }
 
 func TestHandlerMethodNotAllowed(t *testing.T) {
@@ -218,17 +224,26 @@ func TestHandlerResume(t *testing.T) {
 	require.NoError(t, err)
 	srv := newServer(t, h)
 
-	for _, payload := range []string{"one", "two", "three"} {
-		require.NoError(t, hub.Publish(t.Context(), "feed", []byte(payload)))
-	}
+	// Learn a real cursor from a live event, exactly as a browser does — the
+	// default cursor is epoch-namespaced, so a fabricated "1" would be foreign.
+	br := connect(t, srv, nil)
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("one")))
+	first, err := readEvent(br)
+	require.NoError(t, err)
+	require.Equal(t, "one", first.data)
+	epoch, _, _ := strings.Cut(first.id, ".")
 
-	br := connect(t, srv, http.Header{"Last-Event-Id": {"1"}})
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("two")))
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("three")))
+
+	// Reconnect resuming after the captured cursor: replay serves the rest.
+	br = connect(t, srv, http.Header{"Last-Event-Id": {first.id}})
 	got, err := readEvent(br)
 	require.NoError(t, err)
-	assert.Equal(t, event{id: "2", name: "feed", data: "two"}, got)
+	assert.Equal(t, event{id: epoch + ".2", name: "feed", data: "two"}, got)
 	got, err = readEvent(br)
 	require.NoError(t, err)
-	assert.Equal(t, event{id: "3", name: "feed", data: "three"}, got)
+	assert.Equal(t, event{id: epoch + ".3", name: "feed", data: "three"}, got)
 }
 
 func TestHandlerResumeWithoutReplay(t *testing.T) {
@@ -261,6 +276,48 @@ func TestHandlerInvalidLastEventID(t *testing.T) {
 	got, err := readEvent(br)
 	require.NoError(t, err)
 	assert.Equal(t, "live", got.data, "an unparseable cursor starts a fresh live stream, no replay")
+}
+
+func TestHandlerResumeForeignEpoch(t *testing.T) {
+	t.Parallel()
+
+	hub := newHub(t, fanout.WithReplay(16))
+	h, err := sse.NewHandler(hub, staticTopics("feed"))
+	require.NoError(t, err)
+	srv := newServer(t, h)
+
+	// Buffer history whose numeric cursors (1, 2) this instance would honor.
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("old1")))
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("old2")))
+
+	// A well-formed cursor from a different instance/boot: valid seq, foreign
+	// epoch. It must not be applied against this instance's IDs (which would
+	// replay old2); it degrades to a live-only stream instead.
+	br := connect(t, srv, http.Header{"Last-Event-Id": {"0000000000000000.1"}})
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("live")))
+	got, err := readEvent(br)
+	require.NoError(t, err)
+	assert.Equal(t, "live", got.data, "a foreign-epoch cursor must degrade to live-only, never replay another instance's IDs")
+}
+
+func TestHandlerInvalidEventSkipped(t *testing.T) {
+	t.Parallel()
+
+	hub := newHub(t)
+	// A topic carrying a line break is legal for the hub but makes the default
+	// encoder produce an invalid event name.
+	h, err := sse.NewHandler(hub, staticTopics("bad\ntopic", "good"))
+	require.NoError(t, err)
+	srv := newServer(t, h)
+
+	br := connect(t, srv, nil)
+	require.NoError(t, hub.Publish(t.Context(), "bad\ntopic", []byte("dropped")))
+	require.NoError(t, hub.Publish(t.Context(), "good", []byte("kept")))
+
+	got, err := readEvent(br)
+	require.NoError(t, err)
+	assert.Equal(t, "good", got.name)
+	assert.Equal(t, "kept", got.data, "an invalid event is skipped, not treated as a transport failure")
 }
 
 func TestHandlerKeepAlive(t *testing.T) {

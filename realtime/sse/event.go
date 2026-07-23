@@ -122,7 +122,12 @@ func (e Event) appendTo(b []byte) ([]byte, error) {
 	}
 	if e.Retry > 0 {
 		b = append(b, "retry: "...)
-		ms := int64((e.Retry + time.Millisecond - 1) / time.Millisecond)
+		// Divide before rounding up: Retry+time.Millisecond-1 would overflow
+		// int64 for durations within a millisecond of math.MaxInt64.
+		ms := int64(e.Retry / time.Millisecond)
+		if e.Retry%time.Millisecond != 0 {
+			ms++
+		}
 		b = strconv.AppendInt(b, ms, 10)
 		b = append(b, '\n')
 	}

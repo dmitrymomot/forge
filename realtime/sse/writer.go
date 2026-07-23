@@ -48,13 +48,22 @@ func NewWriter(w http.ResponseWriter, opts ...WriterOption) (*Writer, error) {
 		h.Del("X-Accel-Buffering")
 	}
 	rc := http.NewResponseController(w)
-	// A wrapping middleware that does not implement Unwrap surfaces
-	// ErrNotSupported here even though the underlying connection has a
-	// deadline; that is the caller's cue to run the server with
-	// WriteTimeout=0 instead (see the package comment).
-	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		resetHeaders()
-		return nil, fmt.Errorf("sse: clear write deadline: %w", err)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		if !errors.Is(err, http.ErrNotSupported) {
+			resetHeaders()
+			return nil, fmt.Errorf("sse: clear write deadline: %w", err)
+		}
+		// Deadline control is unavailable — a flushable middleware in the chain
+		// does not implement Unwrap. Per-send deadlines then cannot be armed, so
+		// a configured send timeout would be silently unenforced and a stalled
+		// client could pin the connection forever. Fail closed before committing
+		// unless the caller explicitly accepted unbounded writes with
+		// WithSendTimeout(0). A writer that also cannot flush is a more
+		// fundamental problem, reported as ErrStreamingUnsupported below.
+		if c.sendTimeout > 0 && canFlush(w) {
+			resetHeaders()
+			return nil, fmt.Errorf("sse: response writer lacks the deadline control the per-send timeout needs; make wrappers implement Unwrap, or pass WithSendTimeout(0): %w", err)
+		}
 	}
 	if err := rc.Flush(); err != nil {
 		resetHeaders()
@@ -90,4 +99,23 @@ func (w *Writer) Send(e Event) error {
 		return fmt.Errorf("sse: flush event: %w", err)
 	}
 	return nil
+}
+
+// canFlush reports whether w supports flushing, mirroring how
+// http.ResponseController resolves Flush along the Unwrap chain. It lets
+// NewWriter tell a flushable-but-deadline-less writer (fail closed on the send
+// timeout) apart from one that cannot stream at all (ErrStreamingUnsupported).
+func canFlush(w http.ResponseWriter) bool {
+	for {
+		switch t := w.(type) {
+		case interface{ FlushError() error }:
+			return true
+		case http.Flusher:
+			return true
+		case interface{ Unwrap() http.ResponseWriter }:
+			w = t.Unwrap()
+		default:
+			return false
+		}
+	}
 }

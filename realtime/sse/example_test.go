@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	"github.com/dmitrymomot/forge/realtime/fanout"
 	"github.com/dmitrymomot/forge/realtime/sse"
@@ -42,16 +43,23 @@ func Example() {
 	}
 
 	br := bufio.NewReader(resp.Body)
-	for range 3 { // id line, event line, data line
+	// The frame opens with an "id:" line — an opaque, per-instance resume cursor
+	// — which we skip here, followed by the event and data lines.
+	for {
 		line, err := br.ReadString('\n')
 		if err != nil {
 			panic(err)
 		}
+		if strings.HasPrefix(line, "id: ") {
+			continue
+		}
 		fmt.Print(line)
+		if strings.HasPrefix(line, "data: ") {
+			break
+		}
 	}
 
 	// Output:
-	// id: 1
 	// event: notifications.42
 	// data: {"unread":3}
 }
@@ -59,7 +67,10 @@ func Example() {
 func ExampleNewWriter() {
 	rec := httptest.NewRecorder() // any flushable http.ResponseWriter
 
-	w, err := sse.NewWriter(rec)
+	// A recorder cannot set write deadlines, so WithSendTimeout(0) opts out of
+	// the per-send bound; a real server connection supports it, so production
+	// code keeps the default.
+	w, err := sse.NewWriter(rec, sse.WithSendTimeout(0))
 	if err != nil {
 		panic(err) // ErrStreamingUnsupported: respond 500 instead
 	}
