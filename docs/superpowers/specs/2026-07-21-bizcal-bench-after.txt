@@ -1,0 +1,69 @@
+core/bizcal benchmark after — yearPlan indexed by day-of-year instead of map[Date]dayPlan
+go test ./core/bizcal/ -bench=. -benchmem -run=^$ -count=3
+Apple M3 Max, go1.26.5, darwin/arm64
+
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/core/bizcal
+cpu: Apple M3 Max
+BenchmarkNew-14                      	 3741564	       310.7 ns/op	     928 B/op	       8 allocs/op
+BenchmarkNew-14                      	 3921465	       305.9 ns/op	     928 B/op	       8 allocs/op
+BenchmarkNew-14                      	 3906798	       308.2 ns/op	     928 B/op	       8 allocs/op
+BenchmarkIsOpen-14                   	77121234	        15.49 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIsOpen-14                   	77540878	        15.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIsOpen-14                   	78191390	        15.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	19000305	        63.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	18755433	        63.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNextOpen-14                 	19006538	        63.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	29351006	        40.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	29290141	        40.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_Short-14                	27390146	        41.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2747268	       436.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2760651	       434.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdd_MultiWeek-14            	 2760951	       434.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	24781291	        48.65 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	24608779	        48.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Day-14              	24479450	        48.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	 1000000	      1187 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	 1000000	      1186 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBetween_Month-14            	 1000000	      1185 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  135572	      8597 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  140274	      8591 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScheduledBetween_Year-14    	  139992	      8565 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	 1000000	      1119 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	 1000000	      1117 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWindowsBetween_Month-14     	 1000000	      1116 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+Optimization applied: yearPlan.days changed from map[Date]dayPlan to a
+[]dayPlan slice indexed by day-of-year minus one; dayOfYear(d) computes the
+1-based ordinal via a cumulative-days-per-month table plus a leap-year check
+(pure arithmetic, no time.Date call). cpuprofile of BenchmarkScheduledBetween_Year
+before this change showed runtime.mapaccess1 on the map[Date]dayPlan key at
+44.79% of cumulative samples (Date's three-field struct key needs a
+memequal-based probe on every lookup); replacing it with a slice index
+removes that cost entirely.
+
+Approximate before -> after deltas (median of the three counted runs):
+  BenchmarkIsOpen               27.1 ns -> 15.4 ns   (-43%)
+  BenchmarkNextOpen             75.0 ns -> 63.4 ns   (-15%)
+  BenchmarkAdd_Short            60.5 ns -> 41.0 ns   (-32%)
+  BenchmarkAdd_MultiWeek       570.6 ns -> 435.0 ns   (-24%)
+  BenchmarkBetween_Day          54.3 ns -> 48.7 ns   (-10%)
+  BenchmarkBetween_Month       1521   ns -> 1186   ns (-22%)
+  BenchmarkScheduledBetween_Year 10618 ns -> 8591  ns (-19%)
+  BenchmarkWindowsBetween_Month 1431  ns -> 1117  ns  (-22%)
+  BenchmarkNew                 297.8 ns -> 308.2 ns  (unchanged within noise;
+    construction does not touch yearPlan, as expected)
+
+All benchmarks remain zero-alloc except BenchmarkNew (construction-only
+allocations: merged window/interval slices, exceptions map, rules slice
+copy, the Calendar struct itself), which this change does not touch.
+
+Optimization considered and NOT applied: consolidating each year's
+per-day interval slices into one shared backing array (the other
+plan-suggested win). This only affects buildYear's one-time allocation
+cost, which none of the required benchmarks measure directly (they all
+prime the year before entering the timed loop), so there was no benchmark
+evidence of a win to report; skipped per the measured-wins-only rule
+rather than added speculatively.
