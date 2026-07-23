@@ -8,7 +8,6 @@ import (
 
 	"github.com/dmitrymomot/forge/core/ctxkey"
 	"github.com/dmitrymomot/forge/core/id"
-	"github.com/dmitrymomot/forge/ops/logger"
 )
 
 // Info is the small, always-available view of the current session. It is
@@ -77,7 +76,9 @@ func TestWithSession(ctx context.Context, s *Session) context.Context { return w
 
 // LogExtractor adds a "session" group with the session id, and the user id when
 // one is bound. Wire it with logger.WithContextExtractors(session.LogExtractor).
-var LogExtractor logger.ContextExtractor = func(ctx context.Context) (slog.Attr, bool) {
+// It satisfies logger.ContextExtractor as a plain function, so it carries no
+// package-level state.
+func LogExtractor(ctx context.Context) (slog.Attr, bool) {
 	inf, ok := infoKey.From(ctx)
 	if !ok || inf.ID.IsZero() {
 		return slog.Attr{}, false
