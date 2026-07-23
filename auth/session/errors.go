@@ -17,6 +17,9 @@ var (
 	ErrNoStore = errors.New("session: no store configured")
 	// ErrAnonymous means the call requires an authenticated session.
 	ErrAnonymous = errors.New("session: session is anonymous")
+	// ErrScope means a configured scope hook errored or yielded an empty scope. A
+	// scoped operation fails closed rather than touching an unscoped bucket.
+	ErrScope = errors.New("session: scope resolution failed")
 
 	// ErrBadIdle means Idle or RememberIdle is not positive.
 	ErrBadIdle = errors.New("session: idle ttl must be positive")

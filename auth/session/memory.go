@@ -73,13 +73,14 @@ func (m *MemoryStore) Touch(_ context.Context, token string, lastSeenAt, expires
 	return nil
 }
 
-// ListByUser implements UserIndex, newest first.
-func (m *MemoryStore) ListByUser(_ context.Context, userID string) ([]Record, error) {
+// ListByUser implements UserIndex, newest first. tenant == "" matches any
+// tenant, mirroring apikey's Filter.Tenant convention.
+func (m *MemoryStore) ListByUser(_ context.Context, tenant, userID string) ([]Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var out []Record
 	for _, rec := range m.byDigest {
-		if rec.UserID == userID {
+		if rec.UserID == userID && (tenant == "" || rec.Tenant == tenant) {
 			out = append(out, cloneRecord(rec))
 		}
 	}
@@ -87,12 +88,13 @@ func (m *MemoryStore) ListByUser(_ context.Context, userID string) ([]Record, er
 	return out, nil
 }
 
-// DeleteByUser implements UserIndex, preserving the keep list.
-func (m *MemoryStore) DeleteByUser(_ context.Context, userID string, keep ...id.UUID) error {
+// DeleteByUser implements UserIndex, preserving the keep list. tenant == ""
+// matches any tenant.
+func (m *MemoryStore) DeleteByUser(_ context.Context, tenant, userID string, keep ...id.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for d, rec := range m.byDigest {
-		if rec.UserID == userID && !slices.Contains(keep, rec.ID) {
+		if rec.UserID == userID && (tenant == "" || rec.Tenant == tenant) && !slices.Contains(keep, rec.ID) {
 			delete(m.byDigest, d)
 		}
 	}
@@ -101,12 +103,13 @@ func (m *MemoryStore) DeleteByUser(_ context.Context, userID string, keep ...id.
 
 // DeleteOne implements UserIndex. It removes every record carrying sessionID —
 // rotation can leave more than one digest pointing at the same session — and
-// only when the record belongs to userID.
-func (m *MemoryStore) DeleteOne(_ context.Context, userID string, sessionID id.UUID) error {
+// only when the record belongs to tenant+userID. tenant == "" matches any
+// tenant.
+func (m *MemoryStore) DeleteOne(_ context.Context, tenant, userID string, sessionID id.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for d, rec := range m.byDigest {
-		if rec.UserID == userID && rec.ID == sessionID {
+		if rec.UserID == userID && rec.ID == sessionID && (tenant == "" || rec.Tenant == tenant) {
 			delete(m.byDigest, d)
 		}
 	}

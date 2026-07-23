@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -19,9 +20,10 @@ const tokenBytes = 32
 // no requests, no transports, no policies. Safe for concurrent use.
 type Manager struct {
 	store   Store
-	toucher Toucher   // nil when the store lacks the capability
-	index   UserIndex // nil when the store lacks the capability
-	expirer Expirer   // nil when the store lacks the capability
+	toucher Toucher                               // nil when the store lacks the capability
+	index   UserIndex                             // nil when the store lacks the capability
+	expirer Expirer                               // nil when the store lacks the capability
+	scope   func(context.Context) (string, error) // nil when unscoped (single-tenant)
 	clk     clock.Clock
 	log     *slog.Logger
 	cfg     Config
@@ -42,7 +44,7 @@ func New(cfg Config, opts ...Option) (*Manager, error) {
 		return nil, err
 	}
 
-	m := &Manager{store: c.store, clk: c.clock, log: c.logger, cfg: c.Config}
+	m := &Manager{store: c.store, clk: c.clock, log: c.logger, cfg: c.Config, scope: c.scope}
 	m.toucher, _ = c.store.(Toucher)
 	m.index, _ = c.store.(UserIndex)
 	m.expirer, _ = c.store.(Expirer)
@@ -54,6 +56,24 @@ func New(cfg Config, opts ...Option) (*Manager, error) {
 }
 
 func (m *Manager) now() time.Time { return m.clk.Now().UTC() }
+
+// resolveScope runs the configured scope hook, failing closed: a hook error or
+// an empty scope from a configured hook aborts the operation, so a scoped
+// session can never land in an unscoped (or another tenant's) bucket. With no
+// hook it returns "" — the single-tenant path, no allocation, no call.
+func (m *Manager) resolveScope(ctx context.Context) (string, error) {
+	if m.scope == nil {
+		return "", nil
+	}
+	s, err := m.scope(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrScope, err)
+	}
+	if s == "" {
+		return "", ErrScope
+	}
+	return s, nil
+}
 
 // Start returns a fresh anonymous session. It performs no I/O and mints no
 // row: storage is touched on the first save.
@@ -69,7 +89,9 @@ func (m *Manager) Start() *Session {
 }
 
 // Load fetches the session for token. An expired record yields ErrExpired and
-// is deleted; a missing one yields ErrNotFound.
+// is deleted; a missing one yields ErrNotFound. With a configured scope hook,
+// a record belonging to another tenant also yields ErrNotFound — the same
+// error as truly-not-found, so tenant existence cannot be probed.
 func (m *Manager) Load(ctx context.Context, token string) (*Session, error) {
 	rec, err := m.store.Load(ctx, token)
 	if err != nil {
@@ -83,6 +105,16 @@ func (m *Manager) Load(ctx context.Context, token string) (*Session, error) {
 		return nil, ErrExpired
 	}
 
+	if m.scope != nil {
+		tenant, err := m.resolveScope(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if rec.Tenant != tenant {
+			return nil, ErrNotFound
+		}
+	}
+
 	storedSeenAt := rec.LastSeenAt
 	rec.LastSeenAt = now
 	rec.ExpiresAt = m.deadline(rec, now)
@@ -93,11 +125,18 @@ func (m *Manager) Load(ctx context.Context, token string) (*Session, error) {
 
 // Save persists the session, encoding any dirty namespaces first. The token the
 // store returns becomes the session's token, which is what lets a stateless
-// store re-encode the record into a fresh credential.
+// store re-encode the record into a fresh credential. With a configured scope
+// hook, the tenant is resolved and stamped before anything else is touched, so
+// a hook error or empty scope aborts before any mutation or write.
 func (m *Manager) Save(ctx context.Context, s *Session) error {
 	if s == nil {
 		return ErrNoSession
 	}
+	tenant, err := m.resolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	s.rec.Tenant = tenant
 	if err := s.encode(); err != nil {
 		return err
 	}

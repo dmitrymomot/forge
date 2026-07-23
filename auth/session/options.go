@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -13,6 +14,7 @@ type config struct {
 	store  Store
 	clock  clock.Clock
 	logger *slog.Logger
+	scope  func(context.Context) (string, error)
 	Config
 }
 
@@ -39,6 +41,17 @@ func WithRememberMaxTTL(d time.Duration) Option { return func(c *config) { c.Rem
 // moved by less than this does not write to the store. Zero disables touching,
 // which makes every request a full save.
 func WithTouch(d time.Duration) Option { return func(c *config) { c.Touch = d } }
+
+// WithScope enables tenant scoping. Without it, session is single-tenant and
+// every record's Tenant is empty. With it, the hook resolves the tenant for the
+// current request from context; every save stamps it, every load and every
+// device-management call is confined to it, and a hook error or empty scope
+// fails the operation closed rather than crossing tenants. The signature matches
+// the WithScope option of every other forge package, so web/tenant's Scope hook
+// plugs in directly: session.New(cfg, session.WithStore(st), session.WithScope(tenant.Scope)).
+func WithScope(fn func(context.Context) (string, error)) Option {
+	return func(c *config) { c.scope = fn }
+}
 
 // WithClock injects a clock for deterministic tests.
 func WithClock(cl clock.Clock) Option { return func(c *config) { c.clock = cl } }

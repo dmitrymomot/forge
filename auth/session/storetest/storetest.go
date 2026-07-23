@@ -26,6 +26,7 @@ func Run(t *testing.T, newStore func(*testing.T) session.Store) {
 	t.Run("Toucher", func(t *testing.T) { testToucher(t, newStore(t)) })
 	t.Run("UserIndex", func(t *testing.T) { testUserIndex(t, newStore(t)) })
 	t.Run("UserIndexListOrder", func(t *testing.T) { testUserIndexOrder(t, newStore(t)) })
+	t.Run("UserIndexScoped", func(t *testing.T) { testUserIndexScoped(t, newStore(t)) })
 	t.Run("Expirer", func(t *testing.T) { testExpirer(t, newStore(t)) })
 	t.Run("ConcurrentAccess", func(t *testing.T) { testConcurrentAccess(t, newStore(t)) })
 }
@@ -42,6 +43,7 @@ func rec(userID string, expiresAt time.Time) session.Record {
 	return session.Record{
 		ID:          id.NewUUID(),
 		UserID:      userID,
+		Tenant:      "storetest-tenant",
 		CreatedAt:   now,
 		LastSeenAt:  now,
 		ExpiresAt:   expiresAt,
@@ -83,6 +85,9 @@ func testSaveLoadDelete(t *testing.T, st session.Store) {
 	}
 	if got.ID != want.ID || got.UserID != want.UserID {
 		t.Fatalf("Load returned %+v, want id=%v user=%q", got, want.ID, want.UserID)
+	}
+	if got.Tenant != want.Tenant {
+		t.Fatalf("Tenant round trip: got %q want %q", got.Tenant, want.Tenant)
 	}
 	if string(got.Payload) != string(want.Payload) {
 		t.Fatalf("payload round trip: got %s want %s", got.Payload, want.Payload)
@@ -169,7 +174,7 @@ func testSaveOverwritesToken(t *testing.T, st session.Store) {
 	if !ok {
 		return
 	}
-	list, err := ix.ListByUser(ctx, "u1")
+	list, err := ix.ListByUser(ctx, "", "u1")
 	if err != nil {
 		t.Fatalf("ListByUser: %v", err)
 	}
@@ -234,7 +239,7 @@ func testUserIndex(t *testing.T, st session.Store) {
 		}
 	}
 
-	list, err := ix.ListByUser(ctx, "u1")
+	list, err := ix.ListByUser(ctx, "", "u1")
 	if err != nil {
 		t.Fatalf("ListByUser: %v", err)
 	}
@@ -242,22 +247,22 @@ func testUserIndex(t *testing.T, st session.Store) {
 		t.Fatalf("ListByUser returned %d records, want 3", len(list))
 	}
 
-	if err := ix.DeleteOne(ctx, "u2", a.ID); err != nil {
+	if err := ix.DeleteOne(ctx, "", "u2", a.ID); err != nil {
 		t.Fatalf("DeleteOne cross-user: %v", err)
 	}
-	if list, _ := ix.ListByUser(ctx, "u1"); len(list) != 3 {
+	if list, _ := ix.ListByUser(ctx, "", "u1"); len(list) != 3 {
 		t.Fatal("DeleteOne must refuse a session that belongs to another user")
 	}
 
 	// Positive case: delete one of u1's own sessions as u1 and confirm the
 	// specific record is actually gone, not just that DeleteOne returned nil.
-	if err := ix.DeleteOne(ctx, "u1", a.ID); err != nil {
+	if err := ix.DeleteOne(ctx, "", "u1", a.ID); err != nil {
 		t.Fatalf("DeleteOne own session: %v", err)
 	}
 	if _, err := st.Load(ctx, "ta"); !errors.Is(err, session.ErrNotFound) {
 		t.Fatalf("DeleteOne did not remove the record: Load = %v, want ErrNotFound", err)
 	}
-	list, err = ix.ListByUser(ctx, "u1")
+	list, err = ix.ListByUser(ctx, "", "u1")
 	if err != nil {
 		t.Fatalf("ListByUser after DeleteOne: %v", err)
 	}
@@ -270,17 +275,17 @@ func testUserIndex(t *testing.T, st session.Store) {
 		}
 	}
 
-	if err := ix.DeleteByUser(ctx, "u1", b.ID); err != nil {
+	if err := ix.DeleteByUser(ctx, "", "u1", b.ID); err != nil {
 		t.Fatalf("DeleteByUser: %v", err)
 	}
-	list, err = ix.ListByUser(ctx, "u1")
+	list, err = ix.ListByUser(ctx, "", "u1")
 	if err != nil {
 		t.Fatalf("ListByUser after keep-list delete: %v", err)
 	}
 	if len(list) != 1 || list[0].ID != b.ID {
 		t.Fatalf("keep-list not honored: %+v", list)
 	}
-	if others, _ := ix.ListByUser(ctx, "u2"); len(others) != 1 {
+	if others, _ := ix.ListByUser(ctx, "", "u2"); len(others) != 1 {
 		t.Fatal("DeleteByUser must not touch another user's sessions")
 	}
 }
@@ -310,7 +315,7 @@ func testUserIndexOrder(t *testing.T, st session.Store) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	list, err := ix.ListByUser(ctx, "u1")
+	list, err := ix.ListByUser(ctx, "", "u1")
 	if err != nil {
 		t.Fatalf("ListByUser: %v", err)
 	}
@@ -320,6 +325,69 @@ func testUserIndexOrder(t *testing.T, st session.Store) {
 	if list[0].ID != newest.ID || list[1].ID != middle.ID || list[2].ID != oldest.ID {
 		t.Fatalf("ListByUser must return newest-first: got CreatedAt order %v, %v, %v",
 			list[0].CreatedAt, list[1].CreatedAt, list[2].CreatedAt)
+	}
+}
+
+// testUserIndexScoped pins the tenant-filter contract every UserIndex driver
+// must honor: "" matches any tenant (mirroring apikey's Filter.Tenant), a
+// non-empty tenant confines both the read and the deletes, and a same-user
+// record owned by another tenant is never reachable through a scoped call.
+func testUserIndexScoped(t *testing.T, st session.Store) {
+	ix, ok := st.(session.UserIndex)
+	if !ok {
+		t.Skip("store does not implement UserIndex")
+	}
+	ctx := context.Background()
+	const user = "scoped-u"
+	t1a := rec(user, time.Now().Add(time.Hour))
+	t1a.Tenant = "t1"
+	t1b := rec(user, time.Now().Add(time.Hour))
+	t1b.Tenant = "t1"
+	t2 := rec(user, time.Now().Add(time.Hour))
+	t2.Tenant = "t2"
+
+	for tok, r := range map[string]session.Record{"scoped-t1-a": t1a, "scoped-t1-b": t1b, "scoped-t2": t2} {
+		if _, err := st.Save(ctx, tok, r); err != nil {
+			t.Fatalf("Save %s: %v", tok, err)
+		}
+	}
+
+	if list, err := ix.ListByUser(ctx, "t1", user); err != nil {
+		t.Fatalf("ListByUser(t1): %v", err)
+	} else if len(list) != 2 {
+		t.Fatalf("ListByUser(t1) returned %d records, want 2", len(list))
+	}
+
+	if list, err := ix.ListByUser(ctx, "t2", user); err != nil {
+		t.Fatalf("ListByUser(t2): %v", err)
+	} else if len(list) != 1 {
+		t.Fatalf("ListByUser(t2) returned %d records, want 1", len(list))
+	}
+
+	if list, err := ix.ListByUser(ctx, "", user); err != nil {
+		t.Fatalf("ListByUser(\"\"): %v", err)
+	} else if len(list) != 3 {
+		t.Fatalf("ListByUser(\"\") must see every tenant, got %d, want 3", len(list))
+	}
+
+	if err := ix.DeleteOne(ctx, "t1", user, t2.ID); err != nil {
+		t.Fatalf("DeleteOne(t1, t2's session id): %v", err)
+	}
+	if _, err := st.Load(ctx, "scoped-t2"); err != nil {
+		t.Fatalf("DeleteOne(t1) must be a no-op against a t2 session, even for the same user: %v", err)
+	}
+
+	if err := ix.DeleteByUser(ctx, "t1", user); err != nil {
+		t.Fatalf("DeleteByUser(t1): %v", err)
+	}
+	if _, err := st.Load(ctx, "scoped-t1-a"); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("DeleteByUser(t1) must remove t1's sessions")
+	}
+	if _, err := st.Load(ctx, "scoped-t1-b"); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("DeleteByUser(t1) must remove t1's sessions")
+	}
+	if _, err := st.Load(ctx, "scoped-t2"); err != nil {
+		t.Fatalf("DeleteByUser(t1) must not remove the t2 session: %v", err)
 	}
 }
 
