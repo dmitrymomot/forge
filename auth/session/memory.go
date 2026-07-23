@@ -41,12 +41,29 @@ func (m *MemoryStore) Load(_ context.Context, token string) (Record, error) {
 	return cloneRecord(rec), nil
 }
 
-// Save implements Store. The token is echoed back: this is a server-side store,
-// so the client's credential does not change unless the manager rotates it.
-func (m *MemoryStore) Save(_ context.Context, token string, rec Record) (string, error) {
+// Create implements Store. The token is echoed back: this is a server-side
+// store, so the client's credential does not change unless the manager rotates it.
+func (m *MemoryStore) Create(_ context.Context, token string, rec Record) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.byDigest[Digest(token)] = cloneRecord(rec)
+	d := Digest(token)
+	if _, ok := m.byDigest[d]; ok {
+		return "", ErrExists
+	}
+	m.byDigest[d] = cloneRecord(rec)
+	return token, nil
+}
+
+// Update implements Store. It never inserts: an absent record means the
+// session was deleted or revoked, and a stale snapshot must not resurrect it.
+func (m *MemoryStore) Update(_ context.Context, token string, rec Record) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d := Digest(token)
+	if _, ok := m.byDigest[d]; !ok {
+		return "", ErrNotFound
+	}
+	m.byDigest[d] = cloneRecord(rec)
 	return token, nil
 }
 
@@ -58,7 +75,8 @@ func (m *MemoryStore) Delete(_ context.Context, token string) error {
 	return nil
 }
 
-// Touch implements Toucher: metadata only, payload untouched.
+// Touch implements Toucher: metadata only, payload untouched, monotonic — a
+// racing request's older timestamps never move the deadline backward.
 func (m *MemoryStore) Touch(_ context.Context, token string, lastSeenAt, expiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -67,8 +85,12 @@ func (m *MemoryStore) Touch(_ context.Context, token string, lastSeenAt, expires
 	if !ok {
 		return ErrNotFound
 	}
-	rec.LastSeenAt = lastSeenAt
-	rec.ExpiresAt = expiresAt
+	if lastSeenAt.After(rec.LastSeenAt) {
+		rec.LastSeenAt = lastSeenAt
+	}
+	if expiresAt.After(rec.ExpiresAt) {
+		rec.ExpiresAt = expiresAt
+	}
 	m.byDigest[d] = rec
 	return nil
 }

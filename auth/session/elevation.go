@@ -18,13 +18,20 @@ import (
 func RequireElevation(window time.Duration, actions ...access.Action) access.Decider {
 	guarded := slices.Clone(actions)
 	return access.Named("session.elevation", access.DeciderFunc(
-		func(ctx context.Context, _ access.Subject, a access.Action, _ access.Resource) (access.Decision, error) {
+		func(ctx context.Context, sub access.Subject, a access.Action, _ access.Resource) (access.Decision, error) {
 			if !slices.Contains(guarded, a) {
 				return access.Abstain.Because("action does not require elevation"), nil
 			}
 			inf, ok := FromContext(ctx)
 			if !ok || !inf.Authenticated() {
 				return access.Deny.Because("no authenticated session"), nil
+			}
+			// The session's elevation vouches only for the session's own user. In
+			// a mixed-auth chain (API key + session cookie in one request) the
+			// subject under decision may come from the other mechanism — a
+			// bystander session must not satisfy its step-up requirement.
+			if sub.ID != inf.UserID {
+				return access.Deny.Because("elevation belongs to a different principal"), nil
 			}
 			if inf.ElevatedAt.IsZero() {
 				return access.Deny.Because("identity has not been re-proved"), nil

@@ -35,7 +35,10 @@ func (c Config) Validate() error {
 	if c.RememberMax < 0 || (c.RememberMax > 0 && c.RememberMax < c.RememberIdle) {
 		return ErrBadMaxTTL
 	}
-	if c.Touch < 0 || c.Touch > c.Idle {
+	// A nonzero Touch must sit strictly below both idle windows: at Touch ==
+	// Idle the refresh lands exactly when the session expires, so sliding
+	// expiry never actually slides.
+	if c.Touch < 0 || (c.Touch > 0 && (c.Touch >= c.Idle || c.Touch >= c.RememberIdle)) {
 		return ErrBadTouch
 	}
 	return nil

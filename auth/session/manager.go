@@ -48,10 +48,6 @@ func New(cfg Config, opts ...Option) (*Manager, error) {
 	m.toucher, _ = c.store.(Toucher)
 	m.index, _ = c.store.(UserIndex)
 	m.expirer, _ = c.store.(Expirer)
-
-	if m.cfg.Touch > 0 && m.toucher == nil {
-		return nil, ErrTouchUnsupported
-	}
 	return m, nil
 }
 
@@ -118,20 +114,44 @@ func (m *Manager) Load(ctx context.Context, token string) (*Session, error) {
 	storedSeenAt := rec.LastSeenAt
 	rec.LastSeenAt = now
 	rec.ExpiresAt = m.deadline(rec, now)
+	// The recomputed deadline reflects the CURRENT config. If an operator
+	// tightened MaxTTL/RememberMax since this record was written, the absolute
+	// cap can already be in the past even though the persisted ExpiresAt was
+	// not — enforce the new policy now instead of admitting one more request.
+	if !rec.ExpiresAt.After(now) {
+		if err := m.store.Delete(ctx, token); err != nil {
+			m.log.WarnContext(ctx, "session: deleting expired record failed", slog.Any("error", err))
+		}
+		return nil, ErrExpired
+	}
 	sess := newSession(rec, token, false, m.now)
 	sess.storedSeenAt = storedSeenAt
 	return sess, nil
 }
 
-// Save persists the session, encoding any dirty namespaces first. The token the
-// store returns becomes the session's token, which is what lets a stateless
-// store re-encode the record into a fresh credential. With a configured scope
-// hook, the tenant is resolved and stamped before anything else is touched, so
-// a hook error or empty scope aborts before any mutation or write.
+// Save persists the session, encoding any dirty namespaces first: Create for a
+// never-persisted session, Update otherwise. Update returns ErrNotFound when
+// the record was deleted or revoked mid-request — deliberately, so a stale
+// snapshot cannot resurrect it. A destroyed session fails the same way without
+// touching the store. With a configured scope hook, the tenant is resolved and
+// stamped before anything else is touched, so a hook error or empty scope
+// aborts before any mutation or write.
 func (m *Manager) Save(ctx context.Context, s *Session) error {
 	if s == nil {
 		return ErrNoSession
 	}
+	if s.deleted {
+		return ErrNotFound
+	}
+	return m.persist(ctx, s, s.isNew)
+}
+
+// persist stamps scope and timestamps, encodes dirty namespaces, and writes the
+// record — Create when the store has never seen this token (a new session or a
+// freshly-rotated credential), Update otherwise. The token the store returns
+// becomes the session's token, which is what lets a stateless store re-encode
+// the record into a fresh credential.
+func (m *Manager) persist(ctx context.Context, s *Session, create bool) error {
 	tenant, err := m.resolveScope(ctx)
 	if err != nil {
 		return err
@@ -144,7 +164,12 @@ func (m *Manager) Save(ctx context.Context, s *Session) error {
 	s.rec.LastSeenAt = now
 	s.rec.ExpiresAt = m.deadline(s.rec, now)
 
-	tok, err := m.store.Save(ctx, s.token, s.rec)
+	var tok string
+	if create {
+		tok, err = m.store.Create(ctx, s.token, s.rec)
+	} else {
+		tok, err = m.store.Update(ctx, s.token, s.rec)
+	}
 	if err != nil {
 		return err
 	}
@@ -173,13 +198,13 @@ func (m *Manager) deadline(rec Record, now time.Time) time.Time {
 	return exp
 }
 
-// touchDue reports whether enough time has passed since the LastSeenAt that
-// was actually persisted to justify a metadata-only write. It compares
+// touchDue reports whether the sliding deadline should be re-persisted for a
+// clean request. A zero Touch means every request refreshes. It compares
 // against storedSeenAt, not rec.LastSeenAt: Load refreshes the in-memory
 // LastSeenAt to now, so comparing against that would make the elapsed
 // interval always zero and no request would ever touch.
 func (m *Manager) touchDue(s *Session, now time.Time) bool {
-	if m.cfg.Touch <= 0 || m.toucher == nil || s.isNew {
+	if s.isNew || s.deleted {
 		return false
 	}
 	return now.Sub(s.storedSeenAt) >= m.cfg.Touch
@@ -209,6 +234,12 @@ func Remember(v bool) AuthOption { return func(o *authOptions) { o.remember = v 
 // session ID, CreatedAt, and payload survive; a failed save rolls every field
 // back so the client is never left holding a credential no record answers to.
 //
+// Only anonymous → authenticated and same-user re-authentication are allowed.
+// A session already bound to a different user gets ErrUserMismatch: the
+// payload carries whatever the first user's handlers cached (roles, tenant
+// membership, a cart), and silently rebinding it would hand all of that to the
+// second user. Destroy the old session and Start a fresh one instead.
+//
 // The new token is saved before the pre-rotation record is deleted. If that
 // delete fails it is only logged: the old token then remains loadable until it
 // expires on its own, so a store that can fail deletes weakens the "old token
@@ -219,6 +250,9 @@ func (m *Manager) Authenticate(ctx context.Context, s *Session, userID string, o
 	}
 	if userID == "" {
 		return ErrAnonymous
+	}
+	if s.rec.UserID != "" && s.rec.UserID != userID {
+		return ErrUserMismatch
 	}
 	var o authOptions
 	for _, opt := range opts {
@@ -234,7 +268,7 @@ func (m *Manager) Authenticate(ctx context.Context, s *Session, userID string, o
 	s.token = newToken()
 
 	wasNew := s.isNew
-	if err := m.Save(ctx, s); err != nil {
+	if err := m.persist(ctx, s, true); err != nil {
 		s.token, s.rec = oldToken, oldRec
 		return err
 	}
@@ -253,11 +287,12 @@ func (m *Manager) Rotate(ctx context.Context, s *Session) error {
 	}
 	oldToken := s.token
 	s.token = newToken()
-	if err := m.Save(ctx, s); err != nil {
+	wasNew := s.isNew
+	if err := m.persist(ctx, s, true); err != nil {
 		s.token = oldToken
 		return err
 	}
-	if oldToken != s.token {
+	if !wasNew && oldToken != s.token {
 		if err := m.store.Delete(ctx, oldToken); err != nil {
 			m.log.WarnContext(ctx, "session: deleting pre-rotation record failed", slog.Any("error", err))
 		}
@@ -265,7 +300,9 @@ func (m *Manager) Rotate(ctx context.Context, s *Session) error {
 	return nil
 }
 
-// Destroy removes the record. The caller's transport clears the credential.
+// Destroy removes the record and strips the in-memory identity, so code later
+// in the same request cannot keep authorizing a session that no longer exists.
+// The caller's transport clears the credential.
 func (m *Manager) Destroy(ctx context.Context, s *Session) error {
 	if s == nil {
 		return ErrNoSession
@@ -274,17 +311,38 @@ func (m *Manager) Destroy(ctx context.Context, s *Session) error {
 		return err
 	}
 	s.deleted = true
+	s.rec.UserID = ""
+	s.rec.ElevatedAt = time.Time{}
+	s.syncInfo()
 	return nil
 }
 
-// Elevate stamps a successful identity re-proof. Session records that it
-// happened; auth/access decides what it entitles the user to.
+// Elevate stamps a successful identity re-proof and rotates the token. Session
+// records that it happened; auth/access decides what it entitles the user to.
+// The rotation is what keeps a credential copied before the re-proof from
+// inheriting the elevation: the pre-elevation token stops working, so only the
+// client that actually completed step-up holds the elevated credential.
 func (m *Manager) Elevate(ctx context.Context, s *Session) error {
 	if s == nil {
 		return ErrNoSession
 	}
+	if s.rec.UserID == "" {
+		return ErrAnonymous
+	}
+	oldToken, oldElevated := s.token, s.rec.ElevatedAt
 	s.rec.ElevatedAt = m.now()
-	return m.Save(ctx, s)
+	s.token = newToken()
+	wasNew := s.isNew
+	if err := m.persist(ctx, s, true); err != nil {
+		s.token, s.rec.ElevatedAt = oldToken, oldElevated
+		return err
+	}
+	if !wasNew {
+		if err := m.store.Delete(ctx, oldToken); err != nil {
+			m.log.WarnContext(ctx, "session: deleting pre-rotation record failed", slog.Any("error", err))
+		}
+	}
+	return nil
 }
 
 // Bind carries the pinned device metadata Rebind writes.

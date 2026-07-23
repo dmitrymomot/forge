@@ -4,8 +4,10 @@ import (
 	"log/slog"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/dmitrymomot/forge/auth/session"
+	"github.com/dmitrymomot/forge/core/clock"
 )
 
 func TestFromContextAbsent(t *testing.T) {
@@ -84,7 +86,8 @@ func TestInfoStaysStaleAfterFailedAuthenticate(t *testing.T) {
 }
 
 func TestInfoTracksMidRequestElevate(t *testing.T) {
-	mgr := newTestManager(t)
+	clk := clock.NewMock(time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
+	mgr := newTestManager(t, session.WithClock(clk))
 	sess := mgr.Start()
 	ctx := session.TestWithSession(t.Context(), sess)
 	info, ok := session.FromContext(ctx)
@@ -94,6 +97,13 @@ func TestInfoTracksMidRequestElevate(t *testing.T) {
 	if !info.ElevatedAt.IsZero() {
 		t.Fatal("a fresh session's Info must not report an elevation stamp")
 	}
+
+	// Elevate requires an identity to re-prove; authenticate, then age the
+	// stamp so the elevation actually changes it.
+	if err := mgr.Authenticate(ctx, sess, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	clk.Advance(20 * time.Minute)
 
 	if err := mgr.Elevate(ctx, sess); err != nil {
 		t.Fatalf("Elevate: %v", err)

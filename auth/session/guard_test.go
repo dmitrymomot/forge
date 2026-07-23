@@ -65,6 +65,42 @@ func TestGuard401sAnAnonymousSession(t *testing.T) {
 	}
 }
 
+// TestDefaultIdentityCarriesTenant pins that a scoped session's tenant reaches
+// guard.Identity without WithIdentity: access.SubjectFromIdentity copies
+// Identity.Tenant, so dropping it here would silently blank tenant checks in
+// every downstream decider.
+func TestDefaultIdentityCarriesTenant(t *testing.T) {
+	mgr := newTestManager(t, session.WithScope(scopeFromCtx))
+	authed := mgr.Start()
+	if err := mgr.Authenticate(withTenant(t.Context(), "t1"), authed, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+
+	chain := middleware.Chain(
+		session.Middleware(mgr, session.WithTransport(headerTransport{})),
+		guard.New(session.Verifier(mgr), guard.WithExtractors(session.Extractor())),
+	)
+
+	var got guard.Identity
+	h := chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = guard.MustFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r = r.WithContext(withTenant(r.Context(), "t1"))
+	r.Header.Set("X-Test-Token", authed.Token())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got.Tenant != "t1" {
+		t.Fatalf("Identity.Tenant = %q, want t1", got.Tenant)
+	}
+}
+
 func TestWithIdentityCarriesRoles(t *testing.T) {
 	mgr := newTestManager(t)
 	authed := mgr.Start()

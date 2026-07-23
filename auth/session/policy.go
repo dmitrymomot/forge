@@ -21,7 +21,9 @@ type DenyError struct{ reason string }
 // Error implements error.
 func (e *DenyError) Error() string { return "session: denied: " + e.reason }
 
-// Reason returns the human-readable cause, surfaced to logs and the responder.
+// Reason returns the human-readable cause. It goes to logs only: the
+// middleware hands the responder ErrDenied, so a reason like "fingerprint
+// mismatch" never tells a rejected client what tripped the policy.
 func (e *DenyError) Reason() string { return e.reason }
 
 // RevokeError rejects the request and destroys the session.
@@ -30,7 +32,8 @@ type RevokeError struct{ reason string }
 // Error implements error.
 func (e *RevokeError) Error() string { return "session: revoked: " + e.reason }
 
-// Reason returns the human-readable cause, surfaced to logs and the responder.
+// Reason returns the human-readable cause. It goes to logs only: the
+// middleware hands the responder ErrRevoked.
 func (e *RevokeError) Reason() string { return e.reason }
 
 // Deny builds the "reject, keep the record" outcome.

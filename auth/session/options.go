@@ -37,9 +37,10 @@ func WithRememberIdle(d time.Duration) Option { return func(c *config) { c.Remem
 // WithRememberMaxTTL sets the absolute lifetime for remembered sessions. Zero means no cap.
 func WithRememberMaxTTL(d time.Duration) Option { return func(c *config) { c.RememberMax = d } }
 
-// WithTouch sets the metadata-only refresh interval: a request whose deadline
-// moved by less than this does not write to the store. Zero disables touching,
-// which makes every request a full save.
+// WithTouch sets the sliding-deadline refresh interval: a clean request whose
+// last persisted activity is younger than this writes nothing. When the
+// refresh is due it is metadata-only where the store implements Toucher and a
+// full save otherwise. Zero refreshes on every request.
 func WithTouch(d time.Duration) Option { return func(c *config) { c.Touch = d } }
 
 // WithScope enables tenant scoping. Without it, session is single-tenant and

@@ -17,8 +17,11 @@ type bareStore struct{ inner *session.MemoryStore }
 func (b bareStore) Load(ctx context.Context, tok string) (session.Record, error) {
 	return b.inner.Load(ctx, tok)
 }
-func (b bareStore) Save(ctx context.Context, tok string, r session.Record) (string, error) {
-	return b.inner.Save(ctx, tok, r)
+func (b bareStore) Create(ctx context.Context, tok string, r session.Record) (string, error) {
+	return b.inner.Create(ctx, tok, r)
+}
+func (b bareStore) Update(ctx context.Context, tok string, r session.Record) (string, error) {
+	return b.inner.Update(ctx, tok, r)
 }
 func (b bareStore) Delete(ctx context.Context, tok string) error { return b.inner.Delete(ctx, tok) }
 
@@ -118,6 +121,40 @@ func TestRevokeIsUserBound(t *testing.T) {
 	}
 }
 
+// TestListByUserFiltersExpiredRecords pins the "every live session" promise:
+// an expired record no reaper has removed yet must not show up in a device
+// list, whatever the driver returns.
+func TestListByUserFiltersExpiredRecords(t *testing.T) {
+	start := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewMock(start)
+	store := session.NewMemoryStore()
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store), session.WithClock(clk))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := t.Context()
+
+	live := mgr.Start()
+	if err := mgr.Authenticate(ctx, live, "u1"); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if _, err := store.Create(ctx, "expired-device-tok", session.Record{
+		ID: id.NewUUID(), UserID: "u1",
+		CreatedAt: start.Add(-2 * time.Hour), LastSeenAt: start.Add(-2 * time.Hour),
+		ExpiresAt: start.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("seed expired record: %v", err)
+	}
+
+	list, err := mgr.ListByUser(ctx, "u1")
+	if err != nil {
+		t.Fatalf("ListByUser: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != live.ID() {
+		t.Fatalf("ListByUser must return only live sessions: got %d records", len(list))
+	}
+}
+
 func TestReaperServiceName(t *testing.T) {
 	mgr := newTestManager(t)
 	svc := session.Reaper(mgr, time.Minute)
@@ -154,14 +191,14 @@ func TestReaperDeletesExpiredRecordsOnTick(t *testing.T) {
 	ctx := t.Context()
 
 	const expiredTok, liveTok = "reaper-expired-tok", "reaper-live-tok"
-	if _, err := store.Save(ctx, expiredTok, session.Record{
+	if _, err := store.Create(ctx, expiredTok, session.Record{
 		ID:        id.NewUUID(),
 		CreatedAt: time.Now().Add(-time.Hour),
 		ExpiresAt: time.Now().Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("seed expired record: %v", err)
 	}
-	if _, err := store.Save(ctx, liveTok, session.Record{
+	if _, err := store.Create(ctx, liveTok, session.Record{
 		ID:        id.NewUUID(),
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(time.Hour),
@@ -215,12 +252,12 @@ func TestDeleteExpiredUsesManagerClockAndBoundary(t *testing.T) {
 	ctx := t.Context()
 
 	const beforeTok, afterTok = "boundary-before-tok", "boundary-after-tok"
-	if _, err := store.Save(ctx, beforeTok, session.Record{
+	if _, err := store.Create(ctx, beforeTok, session.Record{
 		ID: id.NewUUID(), CreatedAt: start, ExpiresAt: start.Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := store.Save(ctx, afterTok, session.Record{
+	if _, err := store.Create(ctx, afterTok, session.Record{
 		ID: id.NewUUID(), CreatedAt: start, ExpiresAt: start.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
