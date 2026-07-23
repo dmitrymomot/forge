@@ -88,8 +88,10 @@ func (w *Writer) Send(e Event) error {
 	}
 	w.buf = buf
 	if w.sendTimeout > 0 {
-		// Best-effort: a chain that cannot set deadlines falls back to the
-		// server's own write timeout.
+		// NewWriter fails closed unless deadline control is available, so a
+		// positive sendTimeout guarantees this is supported; ignore the error
+		// because a genuine failure here (e.g. the connection already closed)
+		// surfaces on the Write/Flush below anyway.
 		_ = w.rc.SetWriteDeadline(time.Now().Add(w.sendTimeout))
 	}
 	if _, err := w.w.Write(buf); err != nil {

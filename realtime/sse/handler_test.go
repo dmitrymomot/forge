@@ -300,6 +300,30 @@ func TestHandlerResumeForeignEpoch(t *testing.T) {
 	assert.Equal(t, "live", got.data, "a foreign-epoch cursor must degrade to live-only, never replay another instance's IDs")
 }
 
+func TestHandlerResumeMalformedSequence(t *testing.T) {
+	t.Parallel()
+
+	hub := newHub(t, fanout.WithReplay(16))
+	h, err := sse.NewHandler(hub, staticTopics("feed"))
+	require.NoError(t, err)
+	srv := newServer(t, h)
+
+	// Learn this instance's epoch from a live event.
+	br := connect(t, srv, nil)
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("first")))
+	first, err := readEvent(br)
+	require.NoError(t, err)
+	epoch, _, _ := strings.Cut(first.id, ".")
+
+	// A cursor with the correct epoch but a non-numeric sequence must not be
+	// applied against the ring; it degrades to a live-only stream.
+	br = connect(t, srv, http.Header{"Last-Event-Id": {epoch + ".notanum"}})
+	require.NoError(t, hub.Publish(t.Context(), "feed", []byte("live")))
+	got, err := readEvent(br)
+	require.NoError(t, err)
+	assert.Equal(t, "live", got.data, "a correct epoch with a malformed sequence degrades to live-only")
+}
+
 func TestHandlerInvalidEventSkipped(t *testing.T) {
 	t.Parallel()
 
