@@ -247,15 +247,9 @@ Deps: `resilience/cache`; `realtime/fanout`.
 
 **auth/session**
 
-Server-side session lifecycle (Start/Load/Save/Destroy/Rotate) over a
-pluggable Store; rotate-on-privilege-change; multi-device management via
-an optional `UserIndex` store extension (ListByUser/DeleteByUser — "log
-out other devices", GDPR deletion); `WithFingerprint(Warn|Strict)` hijack
-detection. In-memory store built in; drivers: `session/pgstore`
-(user-indexed), `session/cookiestore` (stateless-encrypted, no UserIndex —
-documented); generic KV backing rides `cache.Store`.
+`Manager` owns lifecycle and storage (Start/Load/Save/Destroy/Rotate/Authenticate/Elevate/Rebind) behind a pluggable `Store` and knows nothing about HTTP; `Middleware` owns the request layer — extract credential, load, run policies, expose on context, commit exactly once at the first response byte, so a redirecting login handler still gets its cookie set. `Namespace[T]` gives each app or plugin an independently-owned typed slice of the payload, with unknown-namespace passthrough so one process never clobbers another's keys. Device metadata (IP/user agent/fingerprint) is pinned once at creation, never refreshed per request — `Rebind` is the deliberate re-pin after re-authentication. Sliding-plus-absolute expiry with a separate remember-me deadline pair; step-up re-auth via `RequireElevation`, an `auth/access.Decider`; a `guard` adapter (`Extractor`/`Verifier`) keeps authentication gating in `auth/guard` rather than duplicating it. Multi-device management (ListByUser/Revoke/LogoutOthers/DeleteByUser — "log out other devices", GDPR deletion) rides the optional `UserIndex` store capability. An optional `WithScope` hook adds tenant confinement — every save stamps the resolved tenant, every load and device-management call is confined to it, a hook error or empty scope fails closed — with zero ceremony for single-tenant apps that never configure it. In-memory store built in with a `storetest` conformance suite every driver must pass; drivers forthcoming: `session/pgstore` (user-indexed), `session/mongostore`, `session/cookiestore` (stateless-encrypted, no `UserIndex`), and a generic `session/kvstore` riding `cache.Store`.
 
-Deps: `resilience/cache`, `data/postgres`; `web/fingerprint`.
+Deps: `auth/access`, `auth/guard`, `ops/supervisor`; `web/middleware`, `web/problem`.
 
 ---
 

@@ -1,0 +1,40 @@
+# auth/session benchmark baseline — Task 14, before the optimization pass
+# Apple M3 Max, darwin/arm64, go1.26.5, macOS 24.6.0
+# Captured via: just bench ./auth/session/
+#   (justfile recipe: go clean -testcache && go test -bench=. -benchmem ./auth/session/)
+# In-memory store only (session.NewMemoryStore); no external services required.
+
+go clean -testcache && go test -bench=. -benchmem ./auth/session/
+goos: darwin
+goarch: arm64
+pkg: github.com/dmitrymomot/forge/auth/session
+cpu: Apple M3 Max
+BenchmarkNoOpRequest-14                    	 2302704	       521.6 ns/op	    1328 B/op	      15 allocs/op
+BenchmarkNamespaceGet-14                   	212727940	         5.756 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNamespaceSetAndEncode-14          	  693426	      1739 ns/op	    2152 B/op	      22 allocs/op
+BenchmarkUnknownNamespacePassthrough-14    	  958599	      1228 ns/op	     841 B/op	      17 allocs/op
+BenchmarkCommitWithRotation-14             	 1000000	      1163 ns/op	    1008 B/op	      11 allocs/op
+PASS
+ok  	github.com/dmitrymomot/forge/auth/session	7.636s
+
+# Notes on the candidate optimizations the brief flags:
+#
+# 1. BenchmarkNoOpRequest (15 allocs/op, 1328 B/op) — the hot path of every
+#    authenticated request. It does zero JSON work already: the request never
+#    touches a Namespace, so Session.parse/Get/Set never run. The 15 allocs
+#    trace to: one store.Load (MemoryStore.cloneRecord — Payload is nil here
+#    so this is cheap), one *Session (newSession), one Info (withSession),
+#    two ctxkey.With calls each wrapping the context, one *commitWriter, plus
+#    the http.Request clone http.HandlerFunc/mux machinery and the header-map
+#    allocations httptest.NewRecorder triggers per call. This roughly matches
+#    "context values plus the record clone" — no JSON decode/encode appears
+#    anywhere in this path.
+#
+# 2. withSession allocates an Info per request (auth/session/context.go). This
+#    is a real, visible allocation on the BenchmarkNoOpRequest path.
+#
+# 3. Session.parse (auth/session/session.go) always allocates `raw` via
+#    make(map[string]json.RawMessage) even when Payload is empty. This shows
+#    up on BenchmarkNamespaceSetAndEncode and BenchmarkUnknownNamespacePassthrough,
+#    both of which call encode -> parse. BenchmarkNoOpRequest never calls parse
+#    at all (no namespace touched), so this fix does not affect it.

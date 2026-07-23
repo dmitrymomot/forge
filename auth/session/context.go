@@ -59,13 +59,16 @@ func (m *Manager) MustFor(r *http.Request) *Session {
 func fromContext(ctx context.Context) (*Session, bool) { return sessionKey.From(ctx) }
 
 func withSession(ctx context.Context, s *Session) context.Context {
-	s.inf = &Info{
+	// s.infoStore is embedded in the already-heap-allocated Session, so pointing
+	// inf at it (instead of allocating a separate *Info) costs nothing extra.
+	s.infoStore = Info{
 		ID:         s.rec.ID,
 		UserID:     s.rec.UserID,
 		CreatedAt:  s.rec.CreatedAt,
 		ExpiresAt:  s.rec.ExpiresAt,
 		ElevatedAt: s.rec.ElevatedAt,
 	}
+	s.inf = &s.infoStore
 	return infoKey.With(sessionKey.With(ctx, s), s.inf)
 }
 

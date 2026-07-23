@@ -17,6 +17,7 @@ type Session struct {
 	dirty        map[string]struct{}
 	now          func() time.Time
 	inf          *Info // context-visible view, set by withSession; nil outside the middleware
+	infoStore    Info  // backing storage for inf; embedding it here saves a per-request allocation
 	token        string
 	rec          Record
 	parsed       bool
