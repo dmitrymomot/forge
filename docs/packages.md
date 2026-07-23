@@ -198,20 +198,6 @@ Deps: `async/queue`; drivers: `data/sqlite`, `data/nats` (planned),
 
 ---
 
-**realtime/sse**
-
-The complete Server-Sent Events package, stdlib-only: typed event
-constructors (string/JSON/comment/retry), correct framing + headers,
-per-event flush, keep-alive, ctx cancellation — plus the mountable
-endpoint over `fanout`: per-request subscribe, heartbeat, disconnect
-handling, Last-Event-ID resume via the replay ring. The low-level writer
-stays exported as the brick under `web/htmx`'s SendComponent bridge and
-`llm.SSE`. Requires httpserver WriteTimeout=0 (documented).
-
-Deps: `realtime/fanout`.
-
----
-
 **realtime/websocket**
 
 The complete WebSocket package: accept/read/write/ping-pong/close over
@@ -352,7 +338,7 @@ truncation; exported usage type (prices are consumer-supplied — never
 library data). Drivers `llm/openai`, `llm/anthropic` are stdlib JSON+SSE
 adapters over httpclient — never the official SDKs.
 
-Deps: `web/httpclient`; `realtime/sse` (planned).
+Deps: `web/httpclient`; `realtime/sse`.
 
 ---
 
