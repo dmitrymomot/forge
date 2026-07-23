@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,6 +114,54 @@ func TestScopeFailClosedOnEmptyScope(t *testing.T) {
 	// treated as "unscoped".
 	if err := mgr.Save(t.Context(), sess); !errors.Is(err, session.ErrScope) {
 		t.Fatalf("Save with an empty-resolving scope hook = %v, want ErrScope", err)
+	}
+}
+
+// TestFailedScopeSaveKeepsPendingPayloadForRetry mirrors
+// TestFailedAuthenticateKeepsPendingPayloadForRetry: it pins that a Save which
+// fails during scope resolution — before encode() or the store write ever run —
+// leaves a dirty namespace write pending rather than silently dropping it, so a
+// retry under a working scope still flushes it.
+func TestFailedScopeSaveKeepsPendingPayloadForRetry(t *testing.T) {
+	store := session.NewMemoryStore()
+	var failing atomic.Bool
+	failing.Store(true)
+	hook := func(context.Context) (string, error) {
+		if failing.Load() {
+			return "", errors.New("scope: boom")
+		}
+		return "t1", nil
+	}
+	mgr, err := session.New(session.DefaultConfig(), session.WithStore(store), session.WithScope(hook))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sess := mgr.Start()
+	nsCart.Set(sess, cartData{Items: []string{"guest-item"}})
+
+	if err := mgr.Save(t.Context(), sess); !errors.Is(err, session.ErrScope) {
+		t.Fatalf("Save with a failing scope hook = %v, want ErrScope", err)
+	}
+	if _, err := store.Load(t.Context(), sess.Token()); !errors.Is(err, session.ErrNotFound) {
+		t.Fatal("a failed scope resolution must write no row")
+	}
+
+	failing.Store(false)
+	if err := mgr.Save(t.Context(), sess); err != nil {
+		t.Fatalf("retry Save: %v", err)
+	}
+
+	reloaded, err := mgr.Load(t.Context(), sess.Token())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cart, err := nsCart.Get(reloaded)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(cart.Items) != 1 || cart.Items[0] != "guest-item" {
+		t.Fatalf("pending namespace write lost after a scope-failed Save: %+v", cart)
 	}
 }
 
