@@ -19,7 +19,7 @@
 //		workflow.Step[Onboard]{Name: "send_welcome", Run: sendWelcome},
 //	)
 //
-//	eng := workflow.NewEngine(broker, store)   // store: NewMemoryStore() or async/workflow/postgres
+//	eng := workflow.NewEngine(broker, store)   // store: NewMemoryStore() or a durable Store
 //	workflow.Register(eng, onboard)
 //	svc, _ := workflow.NewService(eng)         // run under ops/supervisor
 //	runID, _ := workflow.Start(ctx, eng, onboard, Onboard{UserID: "u1"})

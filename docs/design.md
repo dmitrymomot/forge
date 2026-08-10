@@ -99,21 +99,20 @@ Forge optimizes for a small, auditable dependency surface — not stdlib purism:
 - **Build or vendor** anything small that shapes forge's own API (`id`,
   `validate`, `request`, the job engine).
 - **Always isolate** a real dependency in a driver subpackage
-  (`logger/sentry`, `cache/redis`, `queue/nats`) so it stays a swappable
-  leaf.
+  (`logger/sentry`, `metrics/prometheus`, `tracing/otel`) so it stays a
+  swappable leaf.
 
-Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch
-clients, sentry, `gopkg.in/yaml.v3` (`ops/config`'s YAML loader). Sanctioned
-for the roadmap: aws-sdk-go-v2 (`objectstore/s3`), `coder/websocket`
-(`websocket`), `go-webauthn` (`webauthn`), `x/crypto`
+Isolated deps today: `pgx`, goose (`migration`), the mongo/redis/opensearch/
+clickhouse clients (connection factories in `data/*`), sentry,
+`gopkg.in/yaml.v3` (`ops/config`'s YAML loader). Sanctioned for the roadmap:
+`coder/websocket` (`websocket`), `go-webauthn` (`webauthn`), `x/crypto`
 (password/kdf/autocert), goldmark (`email/markdown`), the official MCP
 go-sdk (`mcpserver`), `x/image` (`imageproc`), prometheus client
 (`metrics/prometheus`), OTel SDK (`tracing/otel`), goquery (`htmltest`,
-test-only), `nats.go` (`queue/nats`), a Kafka client (`queue/kafka`),
-a cgo-free SQLite driver (`queue/sqlite`). **Postgres is the primary
-database**; the async engine is storage-agnostic with first-class drivers
-(postgres, sqlite, redis, mongo, nats, kafka); everything else outside `data/*`
-and the driver leaves stays stdlib.
+test-only). **Storage stays behind seams**: every Store/Broker/Bus/Sink
+seam ships an in-memory implementation plus a conformance suite; persistent
+drivers live in consumer repos. `data/*` provides connection factories and
+health checks only; everything else outside `data/*` stays stdlib.
 
 ## Repository layout rules
 
@@ -124,8 +123,9 @@ and the driver leaves stays stdlib.
 - **Group by purpose, not by layer, tier, or build phase.** Folder names are
   domain nouns (`crypto`, `web`, `data`, `async`).
 - **Two levels max** (`domain/package`); a third level only for driver
-  isolators (`resilience/cache/redis`, `async/queue/postgres`) and
-  colocated codegen (`web/useragent/gen`).
+  isolators (`ops/metrics/prometheus`, `ops/logger/sentry`), conformance
+  suites (`async/queue/brokertest`), and colocated codegen
+  (`web/useragent/gen`).
 - **Leaf directory = package name**, unique across all domains (no forced
   import aliasing). No packages at the repository root.
 - **Names are full words or industry-standard acronyms** (`sse`, `csrf`,
@@ -152,11 +152,11 @@ and the driver leaves stays stdlib.
 ## Framework-wide seams
 
 - **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete
-  + atomic SetNX claim) is THE key-value seam. Backends: memory (shipped),
-  `cache/redis` (shipped). The memory store is LRU-evicting and unsuitable
-  for sessions/idempotency, so those consumers need `cache/redis` (or bring
-  a durable Store of their own). Consumers: `session`, `idempotency`, `otp`,
-  `lockout`, server-side `flash`. No package defines a private byte-KV store.
+  + atomic SetNX claim) is THE key-value seam. The shipped memory store is
+  LRU-evicting and unsuitable for sessions/idempotency, so those consumers
+  bring a durable Store implementation of their own (Redis is the usual
+  backend). Consumers: `session`, `idempotency`, `otp`, `lockout`,
+  server-side `flash`. No package defines a private byte-KV store.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.
@@ -165,11 +165,11 @@ and the driver leaves stays stdlib.
   seam; `scheduler`, `eventbus`, and `outbox` ride it unchanged. The
   **engine, not the driver, owns the hard semantics** — retry/backoff,
   delayed jobs, max-attempts → dead-letter, idempotency inbox — so app
-  behavior is identical across postgres/sqlite/redis/mongo/nats/kafka; the engine
-  uses a driver's native capability when declared. Transactional publish
-  (`PushTx`) is native on drivers whose store has real multi-document ACID
-  transactions (postgres, sqlite, mongo); drivers without them (redis, nats,
-  kafka) get it via `async/outbox`.
+  behavior is identical across every backend; the engine uses a driver's
+  native capability when declared. Drivers are consumer-side and must pass
+  `queue/brokertest`. Transactional publish (`PushTx`) is native on drivers
+  whose store has real multi-document ACID transactions; drivers without
+  them get it via `async/outbox`.
 - **Authorization decision seam** — `rbac`, `acl`, and `abac` are composable
   bricks feeding one shared Allow/Deny decision interface consumed by
   `guard` / `RequirePermission` middleware (401-vs-403 split). External
@@ -184,6 +184,12 @@ and the driver leaves stays stdlib.
 
 ## Anti-scope — what stays in consumer repos
 
+- **Persistent storage drivers** — no package ships a Postgres/Redis/Mongo
+  store implementation. Every Store/Broker/Bus/Sink seam ships the memory
+  implementation plus a conformance suite (`storetest`, `brokertest`);
+  consumers implement the seam in their repo and prove it with the suite.
+  `data/*` connection factories and `data/migration` stay — they open and
+  health-check connections, they never own schema or queries.
 - **gRPC transport** — consumers take google.golang.org/grpc directly; a
   `*grpc.Server` slots in via a ~30-LOC `supervisor.Service` adapter (recipe,
   never a wrapper). Transport-agnostic endpoint/middleware layers are
@@ -255,5 +261,4 @@ httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
 encryption / GDPR crypto-shred (kdf) · optimistic locking + audit columns
 (postgres docs) · Postgres tsvector search · usermanager flow · templ
 `Classes` toggle helper · click-capture pipeline (clientip/geoip/useragent
-enrichment → outbox → eventrouter) · ledger beside a Mongo-only stack (own
-Postgres, idempotent refs + reconcile sweep).
+enrichment → outbox → eventrouter).

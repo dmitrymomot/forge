@@ -1,8 +1,8 @@
 // Package outbox is the transactional outbox: job intent rows commit inside
 // the business database transaction, and a relay service forwards committed
-// rows into any queue.Broker — the bridge from a Postgres transaction to
-// redis/nats/kafka delivery. Brokers whose store has real multi-document
-// transactions (pgqueue, mongoqueue) implement queue.TxPusher natively and do
+// rows into any queue.Broker — the bridge from a business-database
+// transaction to broker delivery. Brokers whose store has real multi-document
+// transactions implement queue.TxPusher natively and do
 // not need this package unless the business data lives in a different
 // database than the queue.
 //
@@ -13,8 +13,8 @@
 //
 // # Usage
 //
-//	store, _ := pgoutbox.New(pool)           // business-DB outbox table
-//	broker := outbox.Wrap(store, redisBroker) // adds PushTx to a broker without it
+//	store := newOutboxStore(pool)            // your outbox.Store over the business DB
+//	broker := outbox.Wrap(store, baseBroker)  // adds PushTx to a broker without it
 //	client := queue.NewClient(broker)
 //
 //	tx, _ := pool.Begin(ctx)
@@ -22,7 +22,7 @@
 //	_ = queue.PushTx(ctx, client, tx, SendEmail, payload) // intent row, same tx
 //	_ = tx.Commit(ctx)                                    // job exists iff commit
 //
-//	relay, _ := outbox.NewRelay(store, redisBroker)       // run under ops/supervisor
+//	relay, _ := outbox.NewRelay(store, baseBroker)        // run under ops/supervisor
 //
 // The relay claims committed rows in batches under a lease, pushes them to
 // the broker, and deletes them on success. Rows are forwarded immediately
@@ -34,8 +34,8 @@
 // the queue engine's contract (idempotent handlers, eventbus inbox) already
 // absorbs duplicates.
 //
-// MemoryStore is the in-process test double; async/outbox/postgres ships the
-// transactional implementation. Multiple relay instances share one store
+// MemoryStore is the in-process test double; production supplies a
+// transactional Store implementation. Multiple relay instances share one store
 // safely: claims are leased, and the worst case of a contended row is a
 // duplicate push.
 //

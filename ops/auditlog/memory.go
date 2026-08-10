@@ -7,7 +7,8 @@ import (
 
 // MemorySink is an in-memory Sink for tests and development: it retains
 // every event unboundedly and implements ChainHead, so chained recorders
-// behave exactly as they do against pgsink. Not for production.
+// behave exactly as they do against a durable ChainHead-capable sink.
+// Not for production.
 type MemorySink struct {
 	heads  map[string]string
 	events []Event

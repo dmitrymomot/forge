@@ -4,7 +4,7 @@
 //
 //	var KindReleasePayout = approval.NewKind[ReleasePayout]("payout.release")
 //
-//	m := approval.New(approval.NewMemoryStore(), // pgstore.New(pool) in production
+//	m := approval.New(approval.NewMemoryStore(), // a durable Store in production
 //		approval.WithKind(KindReleasePayout, approval.Policy{Quorum: 2, TTL: 24 * time.Hour}))
 //
 //	req, err := approval.Submit(ctx, m, KindReleasePayout,
@@ -71,5 +71,6 @@
 //		approval.WithScope(tenantFromContext))
 //
 // State lives behind the Store interface. NewMemoryStore is for tests and
-// development; approval/pgstore persists to Postgres.
+// development; production deployments implement Store over their own
+// database.
 package approval

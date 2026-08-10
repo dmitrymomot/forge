@@ -13,7 +13,7 @@
 // immediately; already-issued JWTs remain valid until exp.
 //
 //	signer, _ := jwt.NewSigner(jwt.WithKeyset(jwtKeys))
-//	srv, err := oauthserver.New(signer, pgstore.New(pool),
+//	srv, err := oauthserver.New(signer, oauthserver.NewMemoryStore(),
 //	    oauthserver.WithConfig(cfg), // OAUTHSERVER_ISSUER / _AUDIENCE / _TOKEN_TTL
 //	)
 //	if err != nil { ... }

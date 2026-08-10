@@ -16,7 +16,7 @@
 // Construction — encryption is mandatory, the key is 32 bytes (use
 // ManagerFromKeyset for rotation):
 //
-//	store := totp.NewMemoryStore() // or pgstore.New(pool), or your own
+//	store := totp.NewMemoryStore() // or your own durable Store
 //	mgr, err := totp.NewManager(store, key, totp.WithIssuer("Acme"))
 //
 // Enrollment — show the QR, then prove the authenticator works with its

@@ -1,7 +1,7 @@
 // Package lock is a distributed mutex with TTL leases, monotonic fencing
 // tokens, and auto-refresh, plus cluster-singleton leader election. It has an
-// in-process memory store; real backends live in lock/pgstore (table lease) and
-// lock/redisstore (single-instance).
+// in-process memory store; for real mutual exclusion across processes the
+// caller supplies a durable Store (e.g. a lease table or a Redis instance).
 //
 // # Usage
 //

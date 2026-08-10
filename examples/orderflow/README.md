@@ -2,7 +2,7 @@
 
 An integration demo that wires **every `async/` package** — [`queue`](../../async/queue), [`eventbus`](../../async/eventbus), [`eventrouter`](../../async/eventrouter), [`outbox`](../../async/outbox), [`workflow`](../../async/workflow), [`scheduler`](../../async/scheduler), and [`collector`](../../async/collector) — into one coherent order-processing backend, to prove they compose. Each package plays its natural role and each stage's output is the next stage's input.
 
-Everything is in-memory in a single binary: no Docker, no external services. The memory constructors (`queue.NewMemoryBroker`, `outbox.NewMemoryStore`, `workflow.NewMemoryStore`, `eventbus.NewMemoryInbox`, the default scheduler store) are drop-in stand-ins for their postgres/redis siblings — swap the constructors and the wiring stays identical.
+Everything is in-memory in a single binary: no Docker, no external services. The memory constructors (`queue.NewMemoryBroker`, `outbox.NewMemoryStore`, `workflow.NewMemoryStore`, `eventbus.NewMemoryInbox`, the default scheduler store) are drop-in stand-ins for durable Store/Broker implementations — swap the constructors and the wiring stays identical.
 
 ## The scenario
 
@@ -116,12 +116,12 @@ Two items exist: `espresso` (stock 100, always fulfills) and `unicorn` (stock 0,
 
 | Package       | Role here                                                                                        | Production swap                                     |
 | ------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `queue`       | The engine under everything: durable jobs, leases, retry, dead-letter. Also runs the report job.  | `queue/postgres` or `queue/redis` broker            |
-| `outbox`      | Makes `PublishTx` transactional on a broker that lacks it: intent row now, relay pushes it later. | `outbox/postgres` over the business DB              |
-| `eventbus`    | Fans each order event out to independent subscriptions; the inbox dedups at-least-once delivery.  | same code; `eventbus/postgres` inbox                |
-| `workflow`    | The fulfillment saga: checkpointed steps, compensation on permanent failure.                      | `workflow/postgres` store                           |
+| `queue`       | The engine under everything: durable jobs, leases, retry, dead-letter. Also runs the report job.  | a durable `Broker` (proven by `queue/brokertest`)   |
+| `outbox`      | Makes `PublishTx` transactional on a broker that lacks it: intent row now, relay pushes it later. | a transactional `Store` over the business DB        |
+| `eventbus`    | Fans each order event out to independent subscriptions; the inbox dedups at-least-once delivery.  | same code; a transactional `Inbox`                  |
+| `workflow`    | The fulfillment saga: checkpointed steps, compensation on permanent failure.                      | a durable workflow `Store`                          |
 | `eventrouter` | Egress: batches both events to the analytics endpoint over real HTTP with queue-grade retry.      | point the deliverer at the real warehouse           |
-| `scheduler`   | Turns "every 15s" into a `shop.report` queue job; claim store fires once per fleet.               | `scheduler/postgres` store                          |
+| `scheduler`   | Turns "every 15s" into a `shop.report` queue job; claim store fires once per fleet.               | a durable claim `Store`                             |
 | `collector`   | Write-behind request telemetry: `Add` never blocks the request path, batches flush to a sink.     | a real sink (warehouse insert), `resilience/retry`  |
 
 All seven services run under [`ops/supervisor`](../../ops/supervisor):

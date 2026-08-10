@@ -11,7 +11,7 @@
 // service-account id for keys owned by the org itself — and Tenant
 // optionally pins the owning org.
 //
-//	store := apikey.NewMemoryStore() // pgstore.New(pool) in production
+//	store := apikey.NewMemoryStore() // bring a durable Store in production
 //	mgr := apikey.New(store, apikey.WithPrefix("sk_live"))
 //
 //	key, plaintext, err := mgr.Create(ctx, apikey.CreateParams{

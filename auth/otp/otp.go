@@ -30,8 +30,8 @@ type OTP struct {
 
 // New returns an OTP issuer/verifier. secret is the HMAC pepper for codes
 // at rest (min 32 bytes; load it from the environment, e.g. OTP_SECRET) and
-// store is the shared TTL-KV seam (cache.NewMemoryStore for tests/dev,
-// cache/redis in production). secret is copied, so a caller may reuse or zero
+// store is the shared TTL-KV seam (cache.NewMemoryStore for tests/dev, a
+// durable driver in production). secret is copied, so a caller may reuse or zero
 // its backing array afterward without affecting the returned OTP.
 func New(secret []byte, store cache.Store, opts ...Option) (*OTP, error) {
 	cfg := config{

@@ -2,8 +2,8 @@
 // per-subject, per-resource grant and deny entries — "this manager sees
 // exactly these assigned agents" — layered onto rbac's role decisions, with
 // deny winning. Entries live behind a storage-agnostic Store (in-memory built
-// in; acl/pgstore for Postgres), administered through a Manager scoped by an
-// optional WithScope tenancy hook that fails closed.
+// in; consumers supply a durable driver), administered through a Manager
+// scoped by an optional WithScope tenancy hook that fails closed.
 //
 // The Decider plugs into the auth/access seam: a matching deny entry → Deny,
 // a matching grant → Allow, otherwise Abstain — so placed before rbac in a

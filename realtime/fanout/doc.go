@@ -50,10 +50,10 @@
 // The Bus seam extends the hub across instances. With WithBus configured,
 // Publish routes through the bus only, and every instance — including the
 // publishing one — delivers to its local subscribers from the bus receive
-// path, so ordering and loss behavior are identical everywhere. Drivers:
-// fanout/pgbus (Postgres LISTEN/NOTIFY, zero new infrastructure) and
-// fanout/redisbus (Redis Pub/Sub on the caller's client). Both are
-// supervisor.Services; run them for the receive path to work.
+// path, so ordering and loss behavior are identical everywhere. Consumers
+// implement the Bus seam over their own transport — Postgres LISTEN/NOTIFY,
+// Redis Pub/Sub, or similar — and must keep the driver's receive loop
+// running for delivery to work.
 //
 // Multi-tenant apps configure WithScope; the returned tenant namespaces every
 // topic, so subscribers in one tenant can never observe another tenant's

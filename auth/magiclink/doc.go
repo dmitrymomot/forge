@@ -9,8 +9,8 @@
 // expires and may be redeemed repeatedly (fine for unsubscribe and verify
 // flows where replay is harmless). WithStore makes Redeem atomically
 // single-use. The bundled LRU memory store can evict live keys under
-// pressure; production single-use needs cache/redis or another durable
-// Store.
+// pressure; production single-use needs a durable Store the consumer
+// supplies.
 //
 // Email scanners (Outlook SafeLinks and friends) prefetch links before the
 // user clicks. Serve GET with Peek — it verifies without consuming — and

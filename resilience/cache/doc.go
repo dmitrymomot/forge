@@ -1,6 +1,7 @@
 // Package cache is a typed cache over a pluggable byte-level Store. Build a
-// Store (in-memory or, via cache/redis, Redis) and wrap it with a typed facade.
-// The facade never owns the Store's lifecycle.
+// Store (the bundled in-memory one, or a backend of your own — Redis is a
+// natural fit) and wrap it with a typed facade. The facade never owns the
+// Store's lifecycle.
 //
 // # Usage
 //

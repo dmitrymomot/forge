@@ -56,10 +56,9 @@
 // A Deliverer ships one batch and classifies the outcome: nil for accepted,
 // Permanent-wrapped for rejections retrying cannot fix, any other error for
 // transient failures. Deliver is called concurrently when batches overlap.
-// Three reference adapters ship in the package: NewHTTPDeliverer (generic
-// JSON-batch POST), NewWebhookDeliverer (HMAC-signed deliveries via
-// comms/webhook), and NewPostbackDeliverer (tracker macro-URL pings via
-// comms/postback). Destination configs — URLs, secrets, macro templates —
+// Two reference adapters ship in the package: NewHTTPDeliverer (generic
+// JSON-batch POST) and NewWebhookDeliverer (HMAC-signed deliveries via
+// comms/webhook). Destination configs — URLs, secrets, macro templates —
 // are consumer data; forge ships the engine, never a connector catalog.
 //
 // # Tenancy

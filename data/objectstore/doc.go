@@ -6,10 +6,10 @@
 //
 // Two backends ship in this package: Memory for tests and development, and
 // Disk — a path-traversal-safe adapter that confines all access to one
-// directory via os.Root and writes atomically. The objectstore/s3 driver
-// (aws-sdk-go-v2) adds S3-compatible storage with presigned GET/PUT URLs;
-// backends without presigning report ErrNotSupported from the signed-URL
-// methods.
+// directory via os.Root and writes atomically. Consumers implement Store for
+// other backends (an S3-compatible service, for example) and prove them with
+// the storetest conformance suite; backends without presigning report
+// ErrNotSupported from the signed-URL methods.
 //
 // Multi-tenant apps opt in with WithScope: keys are transparently stored
 // under "<tenant>/", List sees only the tenant's objects, and a missing or

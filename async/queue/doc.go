@@ -3,8 +3,8 @@
 // dispatches to registered handlers with retry, backoff, and dead-lettering.
 //
 // Storage is a pluggable, strictly-pull Broker: the built-in MemoryBroker
-// (tests, single-process apps), async/queue/postgres (SKIP LOCKED claiming,
-// transactional enqueue), and async/queue/redis (Streams + consumer groups).
+// covers tests and single-process apps; production supplies a durable Broker
+// implementation, verified against the async/queue/brokertest conformance suite.
 // The engine — not the driver — owns retry, delay, and dead-letter semantics,
 // so behavior is identical across backends.
 //

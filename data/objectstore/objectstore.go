@@ -24,12 +24,13 @@ type Info struct {
 	Size int64
 }
 
-// Store is the blob-backend seam. Implementations ship in this package
-// (Memory, Disk) and in driver subpackages (objectstore/s3). Keys are
-// slash-separated relative paths; every implementation rejects keys failing
-// ValidateKey with ErrInvalidKey, so stores are safe to use standalone —
-// the Bucket facade adds content validation and tenancy on top. The
-// storetest subpackage is the executable contract.
+// Store is the blob-backend seam. Memory and Disk ship in this package;
+// consumers implement Store for other backends (S3-compatible services,
+// for example). Keys are slash-separated relative paths; every
+// implementation rejects keys failing ValidateKey with ErrInvalidKey, so
+// stores are safe to use standalone — the Bucket facade adds content
+// validation and tenancy on top. The storetest subpackage is the
+// executable contract.
 //
 // Put streams r to the backend under key, recording contentType; it must not
 // leave a partial object behind when r fails mid-stream. Get returns the
@@ -45,9 +46,10 @@ type Store interface {
 	List(ctx context.Context, prefix string) iter.Seq2[Info, error]
 }
 
-// URLSigner is the optional presigning capability a Store may implement
-// (objectstore/s3 does). Bucket surfaces it via SignedGetURL/SignedPutURL and
-// reports ErrNotSupported when the backend lacks it.
+// URLSigner is the optional presigning capability a Store may implement (an
+// S3-backed store typically does). Bucket surfaces it via
+// SignedGetURL/SignedPutURL and reports ErrNotSupported when the backend
+// lacks it.
 type URLSigner interface {
 	// SignedGetURL returns a URL that grants a plain HTTP GET of key for ttl.
 	SignedGetURL(ctx context.Context, key string, ttl time.Duration) (string, error)

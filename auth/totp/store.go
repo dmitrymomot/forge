@@ -73,8 +73,8 @@ func NewMemoryStore() Store {
 }
 
 // cloneRecord deep-copies so callers and the store never share slices.
-// BackupHashes is always non-nil (empty when there are none), matching the
-// pgstore driver's read shape so the two stores are byte-for-byte comparable.
+// BackupHashes is always non-nil (empty when there are none) — the read
+// shape every Store must return so backends are byte-for-byte comparable.
 func cloneRecord(r *Record) *Record {
 	c := &Record{
 		Secret:       slices.Clone(r.Secret),

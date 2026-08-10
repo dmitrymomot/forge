@@ -9,8 +9,8 @@ import (
 
 // MemoryStore is the in-process Store: a mutex-guarded map. It survives
 // nothing — a restart loses every checkpoint — so it fits tests, dev, and
-// single-process apps whose runs are disposable; production consumers use
-// async/workflow/postgres or bring their own Store.
+// single-process apps whose runs are disposable; production consumers
+// bring their own durable Store.
 type MemoryStore struct {
 	runs map[string]Run
 	mu   sync.Mutex

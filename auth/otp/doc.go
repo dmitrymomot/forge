@@ -12,7 +12,7 @@
 // can never verify a password reset:
 //
 //	secret := []byte(os.Getenv("OTP_SECRET")) // min 32 bytes
-//	store := redis.NewStore(client)           // resilience/cache/redis; memory store for dev/tests
+//	store := cache.NewMemoryStore()           // dev/tests; bring a durable cache.Store in production
 //
 //	loginOTP, err := otp.New(secret, store, otp.WithPurpose("login"))
 //	if err != nil { ... }
@@ -80,7 +80,7 @@
 // identifier are hashed with length-prefixed domain separation); values are
 // 42-byte records holding a format-version byte, the attempt counter, expiry,
 // and the HMAC-SHA256(secret, code) digest. The in-memory store's LRU eviction
-// makes it unsuitable for production codes — use cache/redis or another durable
+// makes it unsuitable for production codes — supply your own durable
 // Store. A failed attempt rewrites the record with its remaining TTL, so
 // retries never extend a code's life. The attempt counter is
 // read-modify-write: concurrent wrong guesses can overshoot the limit by the

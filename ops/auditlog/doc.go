@@ -1,11 +1,11 @@
 // Package auditlog records append-only structured audit events — who
 // (Actor) did what (Action) to which target (Resource) with what result
 // (Outcome) — through a pluggable Sink. SlogSink (observability) and
-// JSONLSink (file trail) ship here; auditlog/pgsink persists events to
-// Postgres and adds the tenant-isolated, keyset-paginated queries an
+// JSONLSink (file trail) ship here; a database-backed Sink implemented by
+// the consumer adds the tenant-isolated, keyset-paginated queries an
 // audit-trail UI needs.
 //
-//	sink := auditlog.NewMemorySink() // pgsink.New(pool) in production
+//	sink := auditlog.NewMemorySink() // a durable Sink in production
 //	rec := auditlog.New(sink)
 //
 //	e, err := rec.Record(ctx, auditlog.Event{
@@ -31,12 +31,12 @@
 // WithChain links each event to its predecessor within a stream (stream =
 // tenant): Hash = SHA-256(PrevHash, payload). Rewriting, deleting, or
 // reordering any persisted event breaks every hash after it, which
-// VerifyChain (or pgsink's Verify) detects. The chain is unkeyed, so an
-// attacker who can rewrite the entire suffix after an edit — or truncate
-// the tail — defeats it; anchoring the verified head outside the database
-// closes that gap. Chained writes serialize per stream and require a
-// single writer per stream; sinks implementing ChainHead (pgsink,
-// MemorySink) let the chain resume across restarts.
+// VerifyChain detects. The chain is unkeyed, so an attacker who can
+// rewrite the entire suffix after an edit — or truncate the tail —
+// defeats it; anchoring the verified head outside the database closes
+// that gap. Chained writes serialize per stream and require a single
+// writer per stream; sinks implementing ChainHead (MemorySink, or a
+// database-backed sink) let the chain resume across restarts.
 //
 //	rec := auditlog.New(sink, auditlog.WithChain())
 //	head, err := auditlog.VerifyChain("", events) // events in id-ascending order

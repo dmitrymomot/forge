@@ -151,7 +151,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 
 	// Claims and pushes must commit during drain; the select below is the
-	// cancellation point (pgqueue precedent).
+	// cancellation point.
 	opCtx := context.WithoutCancel(ctx)
 
 	now := s.clk.Now()

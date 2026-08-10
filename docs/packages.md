@@ -2,7 +2,7 @@
 
 Forge is a batteries-included Go framework for SaaS applications: it ships
 the ~99% of boilerplate every SaaS repeats — tenancy, authentication,
-authorization, background jobs, webhooks/postbacks, audit logging, rate
+authorization, background jobs, webhooks, audit logging, rate
 limiting, idempotency — as small composable packages, alongside all the
 low-level bricks and helpers. This file is the roadmap of packages not yet
 built: the moment a package ships it is removed from this list — its `doc.go`
@@ -154,9 +154,9 @@ Deps: none (stdlib only).
 
 **data/comments**
 
-Generic threaded discussions `Store[T]`: subject-addressed threads (`Subject{Kind, ID}`, no FK into consumer tables), append/edit/soft-delete with edit history, visibility tiers (public/internal) enforced at the store, participants, cursor pagination. The body is a consumer struct marshaled at the storage seam and never interpreted — mixed timelines (comments + system events) ride an envelope `T`. Exports the `Threader[T]` seam so extensions decorate rather than grow the core, each seeing into the opaque body only through a consumer-supplied extractor: `comments/mentions` (`func(T) []string` lens, edit re-diffing, per-mention seen state, unseen inbox/count), `comments/reactions` (per-user emoji toggle + counts keyed by comment ID), `comments/attachments` (`func(T) []Ref` lens tracking objectstore keys in sidecar rows — per-thread file listing, delete/edit cascade with an opt-in blob-removal hook; upload itself stays consumer → `objectstore`). Reply-nesting only ever as an additive core option; thread-level read tracking is a product, never here. In-memory store built in; `comments/pgstore` driver.
+Generic threaded discussions `Store[T]`: subject-addressed threads (`Subject{Kind, ID}`, no FK into consumer tables), append/edit/soft-delete with edit history, visibility tiers (public/internal) enforced at the store, participants, cursor pagination. The body is a consumer struct marshaled at the storage seam and never interpreted — mixed timelines (comments + system events) ride an envelope `T`. Exports the `Threader[T]` seam so extensions decorate rather than grow the core, each seeing into the opaque body only through a consumer-supplied extractor: `comments/mentions` (`func(T) []string` lens, edit re-diffing, per-mention seen state, unseen inbox/count), `comments/reactions` (per-user emoji toggle + counts keyed by comment ID), `comments/attachments` (`func(T) []Ref` lens tracking objectstore keys in sidecar rows — per-thread file listing, delete/edit cascade with an opt-in blob-removal hook; upload itself stays consumer → `objectstore`). Reply-nesting only ever as an additive core option; thread-level read tracking is a product, never here. In-memory store built in; persistent drivers stay consumer-side.
 
-Deps: `data/postgres`, `web/pagination`.
+Deps: `web/pagination`.
 
 ---
 
@@ -167,24 +167,6 @@ Tenant-defined typed custom fields on consumer entities, in the `reportspec` mol
 Deps: `core/validate`.
 
 ## async/
-
----
-
-**async/queue/sqlite · async/queue/nats · async/queue/kafka**
-
-Additional `queue.Broker` drivers for the shipped `async/queue` engine
-(engine, in-memory broker, `queue/postgres`, `queue/redis`, and
-`queue/mongo` already ship — see their godoc): `queue/sqlite` (zero-infra single-node and
-dev/test), `queue/nats`, `queue/kafka`. The engine — not the driver —
-owns retry/backoff, delay, and max-attempts → dead-letter, so behavior is
-identical across backends; each driver only moves bytes behind the
-strictly-pull `Broker` seam. Brokers without real multi-document ACID
-transactions (redis, nats, kafka) get transactional enqueue via
-`async/outbox`; stores that have them implement `TxPusher` natively
-(`queue/postgres`, `queue/mongo`, `queue/sqlite`).
-
-Deps: `async/queue`; drivers: `data/sqlite`, `data/nats` (planned),
-`data/kafka` (planned).
 
 ## realtime/
 
@@ -213,11 +195,16 @@ Deps: `resilience/cache`; `realtime/fanout`.
 
 ---
 
-**auth/session**
+**auth/session/cookiestore · auth/session/kvstore**
 
-`Manager` owns lifecycle and storage (Start/Load/Save/Destroy/Rotate/Authenticate/Elevate/Rebind) behind a pluggable `Store` and knows nothing about HTTP; `Middleware` owns the request layer — extract credential, load, run policies, expose on context, commit exactly once at the first response byte, so a redirecting login handler still gets its cookie set. `Namespace[T]` gives each app or plugin an independently-owned typed slice of the payload, with unknown-namespace passthrough so one process never clobbers another's keys. Device metadata (IP/user agent/fingerprint) is pinned once at creation, never refreshed per request — `Rebind` is the deliberate re-pin after re-authentication. Sliding-plus-absolute expiry with a separate remember-me deadline pair; step-up re-auth via `RequireElevation`, an `auth/access.Decider`; a `guard` adapter (`Extractor`/`Verifier`) keeps authentication gating in `auth/guard` rather than duplicating it. Multi-device management (ListByUser/Revoke/LogoutOthers/DeleteByUser — "log out other devices", GDPR deletion) rides the optional `UserIndex` store capability. An optional `WithScope` hook adds tenant confinement — every save stamps the resolved tenant, every load and device-management call is confined to it, a hook error or empty scope fails closed — with zero ceremony for single-tenant apps that never configure it. In-memory store built in with a `storetest` conformance suite every driver must pass; drivers forthcoming: `session/pgstore` (user-indexed), `session/mongostore`, `session/cookiestore` (stateless-encrypted, no `UserIndex`), and a generic `session/kvstore` riding `cache.Store`.
+Storage-agnostic `session.Store` drivers for the shipped `auth/session`:
+`session/cookiestore` (stateless-encrypted, no `UserIndex`) and a generic
+`session/kvstore` riding `cache.Store`. Both must pass the
+`session/storetest` conformance suite. Database-backed drivers stay
+consumer-side.
 
-Deps: `auth/access`, `auth/guard`, `ops/supervisor`; `web/middleware`, `web/problem`.
+Deps: `auth/session`, `web/cookie` (cookiestore); `resilience/cache`
+(kvstore).
 
 ---
 
@@ -229,8 +216,7 @@ events on start/end and every action, optional `ops/approval` gate.
 Composes `session` and the `access` decision seam — the hand-rolled
 version is where privilege escalation lives.
 
-Deps: `auth/access`, `ops/approval`, `ops/auditlog`; `auth/session`
-(planned).
+Deps: `auth/access`, `ops/approval`, `ops/auditlog`, `auth/session`.
 
 ---
 
@@ -440,8 +426,7 @@ Deps: `data/postgres`, `testkit/pgtest`.
 Integration-tier provisioning helpers: each returns a DSN/addr/URI for a real
 backend, spun once per test process via testcontainers (Ryuk-reaped) or taken
 from a `FORGE_TEST_<BACKEND>_*` env override. Built only under the `integration`
-build tag. Consumed by every `//go:build integration` test across `data/*`,
-`auth/*/pgstore`, `resilience/*`, `gaming/rng/pgstore`, and `async/queue/*`.
+build tag. Consumed by the `//go:build integration` tests across `data/*`.
 
 Deps: none forge-internal (testcontainers external, test-only).
 

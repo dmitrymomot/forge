@@ -9,7 +9,7 @@
 //
 // # Usage
 //
-//	store := ratelimit.NewMemoryStore() // or ratelimit/redisstore, ratelimit/pgstore
+//	store := ratelimit.NewMemoryStore() // or a durable Store of your own
 //	m := quota.New(store, quota.Calendar(quota.Monthly, nil))
 //	lim := quota.Limit{Included: 10_000, Max: 12_000} // 10k included, 2k overage
 //	res, err := m.Allow(ctx, tenantID, tokens, lim)
@@ -18,8 +18,8 @@
 //	if res.Overage > 0 { billing.RecordOverage(tenantID, res.Overage) }
 //
 // Gauges need a durable store: the in-process memory store never expires a
-// no-expiry key but loses it on restart, so use ratelimit/pgstore for seats
-// and storage caps.
+// no-expiry key but loses it on restart, so back seats and storage caps with
+// a durable Store implementation.
 //
 // # Concurrency and durability
 //
@@ -33,5 +33,5 @@
 // If the compensating rollback increment itself fails (a flaky Store backend),
 // Allow returns that error and the forward increment stays applied — quota is
 // burned on a rejected call. The in-memory store never errors; this matters
-// only for remote backends (pg/redis).
+// only for remote backends.
 package quota

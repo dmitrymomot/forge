@@ -14,7 +14,7 @@ import (
 )
 
 // fakeBus is an in-memory fanout.Bus connecting any number of hubs, standing
-// in for pgbus/redisbus.
+// in for a real backplane driver.
 type fakeBus struct {
 	mu       sync.Mutex
 	handlers []func(topic string, payload []byte)

@@ -14,7 +14,7 @@ import (
 // MemoryStore is the in-process Store test double: the tx argument is
 // ignored, so Add commits immediately even if the caller's transaction rolls
 // back — no transactional semantics. Tests and throwaway dev only; production
-// uses a transactional store (async/outbox/postgres) or brings its own.
+// brings its own transactional Store implementation.
 type MemoryStore struct {
 	clk     clock.Clock
 	entries map[string]*memEntry

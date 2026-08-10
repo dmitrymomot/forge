@@ -52,7 +52,7 @@ func WithAuthenticator(fn func(w http.ResponseWriter, r *http.Request) (string, 
 
 // WithCodeStore sets the TTL-KV store that makes authorization codes
 // single-use (atomic SetNX claim on the code's jti). Memory store works
-// for a single instance; use cache/redis for a fleet.
+// for a single instance; a fleet needs a shared durable Store.
 func WithCodeStore(cs cache.Store) Option {
 	return func(c *serverConfig) { c.codeStore = cs }
 }

@@ -64,8 +64,8 @@ func newFulfillment(sh *shop, bus *eventbus.Bus, log *slog.Logger) *workflow.Wor
 // the receipt.
 func subscribeOrderLifecycle(bus *eventbus.Bus, eng *workflow.Engine, fulfill *workflow.Workflow[fulfillment], log *slog.Logger) {
 	// Deliveries are at-least-once; the inbox seam collapses duplicates so one
-	// order never starts two workflow runs (production:
-	// async/eventbus/postgres inside the handler's transaction).
+	// order never starts two workflow runs (production: a transactional
+	// Inbox inside the handler's transaction).
 	inbox := eventbus.NewMemoryInbox()
 	eventbus.Subscribe(bus, evtOrderPlaced, "fulfill", func(ctx context.Context, d eventbus.Delivery[orderEvent]) error {
 		seen, err := inbox.Seen(ctx, nil, d.ID)

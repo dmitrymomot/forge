@@ -21,8 +21,8 @@ type Store interface {
 }
 
 // MemoryStore is the in-process Store: correct for a single instance and for
-// tests, invisible to other instances — a fleet shares a durable store
-// (async/scheduler/postgres) instead.
+// tests, invisible to other instances — a fleet shares a durable Store
+// implementation instead.
 type MemoryStore struct {
 	claims map[memoryClaim]struct{}
 	mu     sync.Mutex
