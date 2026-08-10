@@ -40,7 +40,7 @@
 //     that ends in one Enqueue per endpoint.
 //   - No delivery-attempt log: persist Result consumer-side.
 //   - No unsigned deliveries: an endpoint without a secret is rejected —
-//     tracker-style unsigned pings are comms/postback.
+//     tracker-style unsigned pings are out of scope.
 //   - No tenant seam of its own: outbound scoping lives in the Resolver
 //     (the queue's scope context is on ctx), inbound in the per-request
 //     Secrets source.

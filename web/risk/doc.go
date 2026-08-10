@@ -32,9 +32,9 @@
 // Middleware adapts an Engine to net/http: buildInput assembles the scorer
 // input from the request, gate trips and scorer failures alike reject with
 // 403 (override with WithRejectHandler to divert to a decoy or render a
-// problem response). Off-request use — queue consumers, smartlink decision
-// decorators (a Decider wrapper calling Check and returning a decoy
-// Decision on fraud), OnHit shadow scoring — calls Check or Score directly.
+// problem response). Off-request use — queue consumers, decision decorators
+// (a wrapper calling Check and returning a decoy decision on fraud), OnHit
+// shadow scoring — calls Check or Score directly.
 //
 // Tenancy is a passed value, not a seam: the engine is pure compute with no
 // storage, so tenant identity travels inside the input type T for scorers to
