@@ -1,7 +1,7 @@
 // Command orderflow is an integration demo of every async package working
 // together as one order-processing backend. A single in-memory binary, no
-// external services: swap the memory constructors for the postgres/redis
-// siblings and the wiring stays identical.
+// external services: swap the memory constructors for durable Store/Broker
+// implementations and the wiring stays identical.
 //
 // The pipeline, end to end:
 //
@@ -46,8 +46,8 @@ func main() {
 
 	// Messaging fabric: one broker underneath everything. The outbox wrapper
 	// adds transactional push (queue.TxPusher) to a broker that lacks it — in
-	// production the store is pgoutbox over the business database and the
-	// broker is redis.
+	// production the store is a transactional outbox.Store over the business
+	// database and the broker is durable.
 	inner := queue.NewMemoryBroker()
 	outboxStore := outbox.NewMemoryStore()
 	broker := outbox.Wrap(outboxStore, inner)

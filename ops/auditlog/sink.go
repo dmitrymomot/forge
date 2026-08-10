@@ -29,8 +29,8 @@ type ChainHead interface {
 // SlogSink writes audit events to a slog.Logger as level-Info "audit"
 // records with structured attributes. It is an observability sink — logs
 // are typically rotated and unqueryable per tenant — so pair it with a
-// durable sink when the trail must be retained: pgsink, or JSONLSink for
-// unchained trails (see its restart caveat).
+// durable sink when the trail must be retained: a database-backed Sink,
+// or JSONLSink for unchained trails (see its restart caveat).
 type SlogSink struct {
 	log *slog.Logger
 }
@@ -78,7 +78,7 @@ func (s *SlogSink) Write(ctx context.Context, e Event) error {
 // does not implement ChainHead, so a chained recorder restarted onto an
 // existing file starts a new chain and a whole-file VerifyChain will
 // report ErrChainBroken at the restart boundary — chaining across
-// restarts needs a ChainHead-capable sink (pgsink).
+// restarts needs a ChainHead-capable sink.
 type JSONLSink struct {
 	enc *json.Encoder
 	mu  sync.Mutex

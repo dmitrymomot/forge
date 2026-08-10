@@ -12,7 +12,7 @@ import (
 type Option func(*Scheduler)
 
 // WithStore replaces the claim store (default NewMemoryStore). A multi-instance
-// fleet must share a durable store — async/scheduler/postgres — or every
+// fleet must share a durable Store implementation, or every
 // instance fires every tick.
 func WithStore(st Store) Option {
 	return func(s *Scheduler) { s.store = st }

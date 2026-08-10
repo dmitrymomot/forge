@@ -13,7 +13,7 @@ import (
 //
 // Contract details every implementation must honor:
 //   - Add inserts one row per job inside the caller's transaction; tx is
-//     driver-specific (the postgres store asserts pgx.Tx). An empty batch is
+//     driver-specific (a driver asserts its own tx type). An empty batch is
 //     a no-op. Rows become claimable only when the transaction commits.
 //   - Claim picks up to n committed rows that are due (not leased, not in
 //     retry backoff), most-overdue first — smallest (available time, id), so

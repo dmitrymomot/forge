@@ -11,8 +11,8 @@
 // handler that flushes the response stream opts out of caching: its response
 // is streamed through to the client uncached rather than replayed to retries.
 //
-// The in-memory cache.Store is LRU-evicting and unsuitable here; back it with
-// cache/redis or another durable Store in production.
+// The in-memory cache.Store is LRU-evicting and unsuitable here; back the
+// middleware with a durable Store implementation in production.
 //
 // The Idempotency-Key header is used verbatim as the store key, and the request
 // fingerprint (method, path, body) does not include the caller's identity. In a
@@ -24,7 +24,7 @@
 //
 // # Usage
 //
-//	store := redis.NewStore(rdb) // resilience/cache/redis
+//	store := cache.NewMemoryStore() // production: a durable cache.Store
 //	mux.Handle("/v1/charges", idempotency.New(store,
 //		idempotency.WithTTL(24*time.Hour),
 //	)(chargeHandler))

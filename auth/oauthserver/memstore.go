@@ -13,8 +13,8 @@ type memoryStore struct {
 	mu sync.Mutex
 }
 
-// NewMemoryStore returns an in-memory Store. Data is lost on restart; use
-// oauthserver/pgstore in production.
+// NewMemoryStore returns an in-memory Store. Data is lost on restart;
+// production supplies a durable Store implementation.
 func NewMemoryStore() Store {
 	return &memoryStore{m: map[string]Client{}}
 }
@@ -58,8 +58,8 @@ func (s *memoryStore) List(_ context.Context, tenantID string) ([]Client, error)
 			out = append(out, c.clone())
 		}
 	}
-	// Order matches pgstore's `ORDER BY created_at, id` so both backends are
-	// interchangeable.
+	// Order is the Store.List contract — CreatedAt ascending, ID breaking
+	// ties — so backends are interchangeable.
 	slices.SortFunc(out, func(a, b Client) int {
 		if d := a.CreatedAt.Compare(b.CreatedAt); d != 0 {
 			return d

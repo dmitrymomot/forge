@@ -25,9 +25,9 @@ type Store interface {
 }
 
 // SetOptions holds the resolved settings for one Set call. It is exported
-// because Store implementations in sibling packages (e.g. cache/redis) apply
-// SetOption values and read the result. The zero value means: never expire,
-// overwrite an existing key.
+// because Store implementations outside this package apply SetOption values
+// and read the result. The zero value means: never expire, overwrite an
+// existing key.
 type SetOptions struct {
 	// TTL expires the entry after the duration. A value <= 0 means no expiry.
 	TTL time.Duration

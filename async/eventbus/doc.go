@@ -33,17 +33,17 @@
 //
 // # Transactional publish and the idempotency inbox
 //
-// On brokers with real multi-document transactions (queue.TxPusher — pgqueue,
-// mongoqueue), PublishTx fans out inside the caller's own transaction: the
+// On brokers with real multi-document transactions (queue.TxPusher),
+// PublishTx fans out inside the caller's own transaction: the
 // event is published if and only if the business writes commit. Brokers
-// without it (redis) get transactional publish via async/outbox instead.
+// without it get transactional publish via async/outbox instead.
 //
 // Delivery is at-least-once, so HANDLERS MUST BE IDEMPOTENT. Every delivery
 // of one published event — across retries and across subscriptions — carries
 // the same Delivery.ID; the Inbox seam turns that into exactly-once side
 // effects: Seen(ctx, tx, d.ID) inside the handler's transaction claims the id
 // or reports it already processed. MemoryInbox is the test double;
-// async/eventbus/postgres ships the transactional implementation.
+// production consumers supply a transactional Inbox implementation.
 //
 // Multi-tenant apps configure eventbus.WithScope on the bus (captures the
 // tenant into every fanned-out job, fail-closed) and pass

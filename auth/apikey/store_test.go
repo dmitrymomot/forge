@@ -134,9 +134,9 @@ func TestMemoryStore_CloneIsolation(t *testing.T) {
 	assert.Equal(t, "read", got2.Scopes[0])
 }
 
-// TestMemoryStore_NilScopesMetaNormalized pins parity with the pgstore
-// driver: nil Scopes/Meta are stored and returned as non-nil empties, and a
-// List with no matches returns a non-nil empty slice — so callers see
+// TestMemoryStore_NilScopesMetaNormalized pins the read shape every Store
+// must return: nil Scopes/Meta are stored and returned as non-nil empties,
+// and a List with no matches returns a non-nil empty slice — so callers see
 // identical shapes whichever Store backs the Manager.
 func TestMemoryStore_NilScopesMetaNormalized(t *testing.T) {
 	t.Parallel()

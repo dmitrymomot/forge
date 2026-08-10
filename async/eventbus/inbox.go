@@ -17,8 +17,8 @@ import (
 //	if seen { return nil } // duplicate delivery, already committed
 //	// ... handler writes in the same tx ...
 //
-// tx is driver-specific, exactly as in queue.PushTx (the postgres inbox
-// asserts pgx.Tx). Seen marks the id and reports whether it was already
+// tx is driver-specific, exactly as in queue.PushTx (an implementation
+// asserts its own tx type). Seen marks the id and reports whether it was already
 // marked: false means this call claimed the first processing.
 type Inbox interface {
 	Seen(ctx context.Context, tx any, id string) (bool, error)
@@ -28,7 +28,7 @@ type Inbox interface {
 // It has no transactional semantics — a handler that marks an id and then
 // fails keeps the mark even though its real writes rolled back, so a retry
 // would skip the event. Tests and throwaway dev only; production consumers
-// use a transactional inbox (async/eventbus/postgres) or bring their own.
+// bring a transactional Inbox implementation over their own database.
 type MemoryInbox struct {
 	seen map[string]struct{}
 	mu   sync.Mutex

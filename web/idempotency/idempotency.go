@@ -30,7 +30,7 @@ func defaultMethods() map[string]bool {
 // (status < 500) is stored and replayed to later retries; a concurrent duplicate
 // gets 409; the same key with a different payload gets 422; a 5xx releases the
 // claim so a genuine retry re-executes. The memory cache.Store is LRU-evicting
-// and unsuitable in production — use cache/redis or another durable Store.
+// and unsuitable in production — supply a durable Store implementation.
 func New(store cache.Store, opts ...Option) middleware.Middleware {
 	cfg := config{
 		header:        "Idempotency-Key",

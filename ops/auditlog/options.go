@@ -32,7 +32,7 @@ func WithScope(fn func(context.Context) (string, error)) Option {
 //
 // The chain is unkeyed, so it detects tampering by anyone who cannot
 // rewrite every later event — to also catch a full suffix rewrite or
-// tail truncation, periodically anchor the head (pgsink Verify returns
+// tail truncation, periodically anchor the head (VerifyChain returns
 // it) outside the database.
 func WithChain() Option {
 	return func(c *config) { c.chain = true }

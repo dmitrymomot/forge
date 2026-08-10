@@ -65,9 +65,10 @@ func newShopAPI(sh *shop, bus *eventbus.Bus, telemetry *collector.Collector[requ
 }
 
 // placeOrderHandler records the order and publishes order.placed. PublishTx
-// writes an outbox intent row instead of touching the broker: with pgoutbox
-// the row commits or rolls back with the order insert (tx is the caller's
-// pgx.Tx; the memory store ignores it).
+// writes an outbox intent row instead of touching the broker: with a
+// transactional outbox.Store the row commits or rolls back with the order
+// insert (tx is the caller's database transaction; the memory store ignores
+// it).
 func placeOrderHandler(sh *shop, bus *eventbus.Bus) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

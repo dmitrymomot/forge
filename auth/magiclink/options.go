@@ -94,8 +94,8 @@ func WithEncrypt(box *secret.Box) Option {
 // and returns ErrUsed on replay. A nil store is rejected. The bundled memory
 // store can evict live keys, and reclaims expired one-time claims only when
 // built with cache.WithCleanupInterval (lazy expiry never revisits a
-// redeemed key); production single-use should use cache/redis or another
-// durable Store.
+// redeemed key); production single-use should use a durable Store the
+// consumer supplies.
 func WithStore(s cache.Store) Option {
 	return func(c *config) {
 		if s == nil {

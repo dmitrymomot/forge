@@ -78,7 +78,7 @@ type memoryStore struct {
 
 // NewMemoryStore returns an in-process counter Store. Lifecycle is the caller's
 // (Close). Suitable for single-instance use and tests; multi-instance limiting
-// needs ratelimit/redisstore.
+// needs a Store backed by shared state such as Redis.
 func NewMemoryStore(opts ...MemoryOption) Store {
 	c := memoryConfig{clk: clock.System(), shards: 1}
 	for _, o := range opts {

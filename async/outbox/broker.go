@@ -39,7 +39,7 @@ func Wrap(store Store, next queue.Broker) *Broker {
 
 // PushTx implements queue.TxPusher: the jobs become outbox rows inside the
 // caller's transaction and reach the wrapped broker via the Relay after
-// commit. tx must be what the Store expects (pgx.Tx for the postgres store).
+// commit. tx must be what the Store expects (a driver asserts its own tx type).
 // Note that wrapping shadows a native TxPusher on next — deliberate when the
 // business data and the queue live in different databases, pointless
 // otherwise.

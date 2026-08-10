@@ -166,7 +166,7 @@ func Publish[T any](ctx context.Context, bus *Bus, evt Event[T], payload T) erro
 
 // PublishTx emits an event inside a caller-owned database transaction: the
 // fan-out commits or rolls back with the caller's writes. tx is
-// driver-specific, exactly as in queue.PushTx (pgqueue asserts pgx.Tx).
+// driver-specific, exactly as in queue.PushTx (a driver asserts its own tx type).
 // Requires a durable bus whose broker implements queue.TxPusher; otherwise
 // ErrTxUnsupported.
 func PublishTx[T any](ctx context.Context, bus *Bus, tx any, evt Event[T], payload T) error {

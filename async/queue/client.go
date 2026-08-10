@@ -42,7 +42,7 @@ func Push[T any](ctx context.Context, c *Client, k Kind[T], payload T, opts ...P
 }
 
 // PushTx enqueues a typed job inside a caller-owned database transaction. The
-// broker must implement TxPusher (pgqueue does); otherwise ErrTxUnsupported.
+// broker must implement TxPusher; otherwise ErrTxUnsupported.
 func PushTx[T any](ctx context.Context, c *Client, tx any, k Kind[T], payload T, opts ...PushOption) error {
 	tp, ok := c.broker.(TxPusher)
 	if !ok {

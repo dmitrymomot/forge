@@ -46,8 +46,8 @@ type Run struct {
 }
 
 // Store persists run checkpoints. Implementations must be safe for concurrent
-// use. MemoryStore is the in-process test double; async/workflow/postgres
-// ships the durable implementation.
+// use. MemoryStore is the in-process test double; production supplies a
+// durable implementation.
 //
 // Update is guarded by optimistic locking: it persists run only when the
 // stored version equals run.Version, incrementing the stored version by one;

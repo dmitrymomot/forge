@@ -8,8 +8,8 @@
 // Failure counts ride the ratelimit counter seam; lock markers ride the
 // cache TTL-KV seam. Both bring their own backends, so no drivers ship here:
 //
-//	counters := ratelimit.NewMemoryStore() // or ratelimit/redisstore, ratelimit/pgstore
-//	locks := cache.NewMemoryStore()        // or cache/redis
+//	counters := ratelimit.NewMemoryStore() // or your own durable ratelimit.Store
+//	locks := cache.NewMemoryStore()        // or your own durable cache.Store
 //	lk, err := lockout.New(counters, locks,
 //		lockout.WithThreshold(5),
 //		lockout.WithBaseLock(time.Minute),

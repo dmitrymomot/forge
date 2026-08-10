@@ -8,7 +8,7 @@
 // deterministic (every instance computes the same tick times), and the Store
 // claim — a unique (name, scheduled_for) insert race — lets exactly one
 // instance enqueue each tick. The in-memory store covers single-instance
-// apps and tests; fleets share async/scheduler/postgres.
+// apps and tests; fleets share a durable Store implementation.
 //
 // # Usage
 //

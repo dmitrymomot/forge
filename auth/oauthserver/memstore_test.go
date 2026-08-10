@@ -58,9 +58,9 @@ func TestMemoryStoreListTenantFilter(t *testing.T) {
 	assert.Equal(t, "a", t1[0].ID)
 }
 
-// TestMemoryStoreListEmptyIsNonNil pins the Store.List contract (matching
-// pgstore, whose driver returns []T{} not nil on an empty result set): JSON
-// callers must see `[]`, never `null`.
+// TestMemoryStoreListEmptyIsNonNil pins the Store.List contract (every
+// implementation must return []Client{}, not nil, on an empty result set):
+// JSON callers must see `[]`, never `null`.
 func TestMemoryStoreListEmptyIsNonNil(t *testing.T) {
 	s := oauthserver.NewMemoryStore()
 	out, err := s.List(context.Background(), "no-such-tenant")
@@ -70,7 +70,7 @@ func TestMemoryStoreListEmptyIsNonNil(t *testing.T) {
 }
 
 // TestMemoryStoreListOrderedByCreatedAtThenID pins the Store.List order
-// contract (matching pgstore's `ORDER BY created_at, id`): clients are
+// contract (CreatedAt ascending, ties broken by ID): clients are
 // created out of chronological order to prove List sorts rather than
 // returning map-iteration order.
 func TestMemoryStoreListOrderedByCreatedAtThenID(t *testing.T) {

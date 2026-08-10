@@ -11,7 +11,7 @@
 // email, role} the token proves, and membership creation, seat limits,
 // and the email send itself (comms/email) stay consumer-side.
 //
-//	store := invite.NewMemoryStore() // pgstore.New(pool) in production
+//	store := invite.NewMemoryStore() // bring a durable Store in production
 //	mgr := invite.New(store, invite.WithTTL(72*time.Hour))
 //
 //	inv, plaintext, err := mgr.Create(ctx, invite.CreateParams{

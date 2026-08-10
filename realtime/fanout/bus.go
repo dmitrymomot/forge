@@ -15,9 +15,9 @@ import "context"
 // Delivery is at-most-once: messages published while an instance's receive
 // loop is down are lost to that instance.
 //
-// Drivers: fanout/pgbus (Postgres LISTEN/NOTIFY), fanout/redisbus (Redis
-// Pub/Sub). Both also implement supervisor.Service — their Run loop is the
-// receive path.
+// Consumers implement Bus over their own transport — Postgres LISTEN/NOTIFY,
+// Redis Pub/Sub, or similar. A driver typically also implements
+// supervisor.Service, with its Run loop as the receive path.
 type Bus interface {
 	Publish(ctx context.Context, topic string, payload []byte) error
 	Subscribe(fn func(topic string, payload []byte))

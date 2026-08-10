@@ -52,8 +52,8 @@ type Broker interface {
 }
 
 // TxPusher is an optional Broker capability: transactional enqueue inside a
-// caller-owned database transaction. tx is driver-specific (pgqueue asserts
-// pgx.Tx). Brokers without this capability make PushTx return
+// caller-owned database transaction. tx is driver-specific (a driver asserts
+// its own tx type). Brokers without this capability make PushTx return
 // ErrTxUnsupported.
 type TxPusher interface {
 	PushTx(ctx context.Context, tx any, jobs ...Job) error
