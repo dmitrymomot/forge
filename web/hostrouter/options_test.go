@@ -1,7 +1,7 @@
 package hostrouter
 
 import (
-	"fmt"
+	"context"
 	"net/http"
 	"testing"
 
@@ -13,64 +13,68 @@ func nopHandler() http.Handler {
 	return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 }
 
-// recoverErr runs fn and returns the error it panicked with (nil if no panic).
-// A non-error panic is wrapped so it still fails an errors.Is assertion loudly
-// rather than being silently reported as "no panic".
-func recoverErr(fn func()) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			if e, ok := r.(error); ok {
-				err = e
-			} else {
-				err = fmt.Errorf("non-error panic: %v", r)
-			}
-		}
-	}()
-	fn()
-	return nil
-}
-
-func TestWithHost_Panics(t *testing.T) {
+func TestNew_RejectsInvalidRegistrations(t *testing.T) {
 	tests := []struct {
 		name     string
-		build    func()
+		opts     []Option
 		sentinel error
 	}{
-		{"nil handler", func() { New(WithHost("x.com", nil)) }, ErrNilHandler},
-		{"empty pattern", func() { New(WithHost("", nopHandler())) }, ErrInvalidPattern},
-		{"bare wildcard", func() { New(WithHost("*.", nopHandler())) }, ErrInvalidPattern},
-		{"lone star", func() { New(WithHost("*", nopHandler())) }, ErrInvalidPattern},
-		{"double wildcard", func() { New(WithHost("*.*.com", nopHandler())) }, ErrInvalidPattern},
-		{"embedded star", func() { New(WithHost("fo*.com", nopHandler())) }, ErrInvalidPattern},
-		{"duplicate exact", func() {
-			New(WithHost("x.com", nopHandler()), WithHost("x.com", nopHandler()))
-		}, ErrDuplicateHost},
-		{"duplicate wildcard", func() {
-			New(WithHost("*.x.com", nopHandler()), WithHost("*.x.com", nopHandler()))
-		}, ErrDuplicateHost},
+		{"nil handler", []Option{WithHost("x.com", nil)}, ErrNilHandler},
+		{"empty pattern", []Option{WithHost("", nopHandler())}, ErrInvalidPattern},
+		{"bare wildcard", []Option{WithHost("*.", nopHandler())}, ErrInvalidPattern},
+		{"lone star", []Option{WithHost("*", nopHandler())}, ErrInvalidPattern},
+		{"double wildcard", []Option{WithHost("*.*.com", nopHandler())}, ErrInvalidPattern},
+		{"embedded star", []Option{WithHost("fo*.com", nopHandler())}, ErrInvalidPattern},
+		{
+			"duplicate exact",
+			[]Option{WithHost("x.com", nopHandler()), WithHost("x.com", nopHandler())},
+			ErrDuplicateHost,
+		},
+		{
+			"duplicate wildcard",
+			[]Option{WithHost("*.x.com", nopHandler()), WithHost("*.x.com", nopHandler())},
+			ErrDuplicateHost,
+		},
+		{"nil fallback", []Option{WithFallback(nil)}, ErrNilHandler},
+		{"nil lookup", []Option{WithLookup(nil)}, ErrNilLookup},
+		{"nil lookup error handler", []Option{WithLookupErrorHandler(nil)}, ErrNilHandler},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := recoverErr(tt.build)
+			r, err := New(tt.opts...)
 			require.Error(t, err)
+			assert.Nil(t, r)
 			assert.ErrorIs(t, err, tt.sentinel)
 		})
 	}
 }
 
-func TestWithFallback_NilPanics(t *testing.T) {
-	err := recoverErr(func() { New(WithFallback(nil)) })
+func TestNew_ReportsEveryInvalidRegistrationAtOnce(t *testing.T) {
+	r, err := New(
+		WithHost("a.com", nil),
+		WithHost("*.*.com", nopHandler()),
+		WithLookup(nil),
+	)
 	require.Error(t, err)
+	assert.Nil(t, r)
 	assert.ErrorIs(t, err, ErrNilHandler)
+	assert.ErrorIs(t, err, ErrInvalidPattern)
+	assert.ErrorIs(t, err, ErrNilLookup)
 }
 
-func TestWithHost_NoPanicCases(t *testing.T) {
-	// exact + wildcard with the same parent coexist (different maps).
-	assert.NotPanics(t, func() {
-		New(WithHost("x.com", nopHandler()), WithHost("*.x.com", nopHandler()))
+func TestNew_AcceptsValidRegistrations(t *testing.T) {
+	lookup := func(context.Context, string) (http.Handler, error) { return nil, ErrHostNotFound }
+
+	t.Run("exact and wildcard share a parent", func(t *testing.T) {
+		_, err := New(WithHost("x.com", nopHandler()), WithHost("*.x.com", nopHandler()))
+		require.NoError(t, err)
 	})
-	// repeated WithFallback: last wins, no panic.
-	assert.NotPanics(t, func() {
-		New(WithFallback(nopHandler()), WithFallback(nopHandler()))
+	t.Run("repeated fallback: last wins", func(t *testing.T) {
+		_, err := New(WithFallback(nopHandler()), WithFallback(nopHandler()))
+		require.NoError(t, err)
+	})
+	t.Run("repeated lookup: last wins", func(t *testing.T) {
+		_, err := New(WithLookup(lookup), WithLookup(lookup))
+		require.NoError(t, err)
 	})
 }
