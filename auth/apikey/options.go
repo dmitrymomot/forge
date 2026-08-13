@@ -11,6 +11,7 @@ type config struct {
 	prefix        string
 	errs          []error
 	touchInterval time.Duration
+	valid         bool
 }
 
 // Option configures New.

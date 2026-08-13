@@ -18,10 +18,11 @@ import (
 // WithTouchInterval(-1) does. Under guard.New every error collapses to an
 // opaque 401; the sentinels serve metrics and direct callers.
 func (m *Manager) Verify(ctx context.Context, credential string, load LoadByHashFunc, touch TouchFunc) (guard.Identity, error) {
-	if err := requireEffect("load", load == nil); err != nil {
+	cfg, err := m.settings("load", load == nil)
+	if err != nil {
 		return guard.Identity{}, err
 	}
-	if !validKey(m.cfg.prefix, credential) {
+	if !validKey(cfg.prefix, credential) {
 		return guard.Identity{}, ErrMalformedKey
 	}
 	h := hashKey(credential)
@@ -42,7 +43,7 @@ func (m *Manager) Verify(ctx context.Context, credential string, load LoadByHash
 	if !k.ExpiresAt.IsZero() && !k.ExpiresAt.After(now) {
 		return guard.Identity{}, ErrKeyExpired
 	}
-	if touch != nil && m.touchDue(k.LastUsedAt, now) {
+	if touch != nil && cfg.touchDue(k.LastUsedAt, now) {
 		_ = touch(ctx, k.ID, now)
 	}
 	return identityOf(k), nil
@@ -77,7 +78,7 @@ func identityOf(k Key) guard.Identity {
 // wiring needs no adapter type. It reports ErrNilEffect for a nil load; a
 // nil touch disables last-used tracking.
 func (m *Manager) Verifier(load LoadByHashFunc, touch TouchFunc) (guard.Verifier, error) {
-	if err := requireEffect("load", load == nil); err != nil {
+	if _, err := m.settings("load", load == nil); err != nil {
 		return nil, err
 	}
 	return guard.VerifierFunc(func(ctx context.Context, credential string) (guard.Identity, error) {

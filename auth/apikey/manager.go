@@ -25,28 +25,37 @@ func New(opts ...Option) (*Manager, error) {
 	if len(cfg.errs) > 0 {
 		return nil, errors.Join(cfg.errs...)
 	}
+	cfg.valid = true
 	return &Manager{cfg: cfg}, nil
 }
 
-// requireEffect reports a missing storage effect by name. A call site builds
-// its closures from request-scoped values, so a nil one is an error rather
-// than a panic.
-func requireEffect(name string, missing bool) error {
-	if missing {
-		return fmt.Errorf("%w: %s", ErrNilEffect, name)
+// settings returns the validated settings an operation runs under, or
+// reports why it cannot start. Manager is exported so
+// callers can hold one, which also makes the zero value constructible — a
+// Manager that did not come from New reports ErrConfig rather than issuing
+// keys under an empty prefix, and so does the nil one New returns beside an
+// error. A missing storage effect is named, because a call site builds its
+// closures from request-scoped values and a nil one is a wiring error, not
+// a panic.
+func (m *Manager) settings(effect string, missing bool) (config, error) {
+	if m == nil || !m.cfg.valid {
+		return config{}, ErrConfig
 	}
-	return nil
+	if missing {
+		return config{}, fmt.Errorf("%w: %s", ErrNilEffect, effect)
+	}
+	return m.cfg, nil
 }
 
 // scoped resolves the tenant a management operation is confined to. With
 // no WithScope hook it passes the requested tenant through. Fail-closed:
 // hook errors and empty scoped tenants abort the operation with ErrScope;
 // an explicit requested tenant must be empty or equal to the scoped one.
-func (m *Manager) scoped(ctx context.Context, requested string) (string, error) {
-	if m.cfg.scope == nil {
+func (c config) scoped(ctx context.Context, requested string) (string, error) {
+	if c.scope == nil {
 		return requested, nil
 	}
-	t, err := m.cfg.scope(ctx)
+	t, err := c.scope(ctx)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrScope, err)
 	}
@@ -61,9 +70,9 @@ func (m *Manager) scoped(ctx context.Context, requested string) (string, error) 
 
 // touchDue reports whether a record's last-used stamp is stale enough to
 // rewrite. A negative interval disables tracking.
-func (m *Manager) touchDue(lastUsed, now time.Time) bool {
-	if m.cfg.touchInterval < 0 {
+func (c config) touchDue(lastUsed, now time.Time) bool {
+	if c.touchInterval < 0 {
 		return false
 	}
-	return lastUsed.IsZero() || now.Sub(lastUsed) >= m.cfg.touchInterval
+	return lastUsed.IsZero() || now.Sub(lastUsed) >= c.touchInterval
 }

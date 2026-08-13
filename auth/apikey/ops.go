@@ -19,17 +19,18 @@ import (
 // also writes whatever the application stores alongside the key.
 func (m *Manager) Create(ctx context.Context, p CreateParams, save SaveFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if err := requireEffect("save", save == nil); err != nil {
+	cfg, err := m.settings("save", save == nil)
+	if err != nil {
 		return Key{}, noPlaintext, err
 	}
 	if p.Subject == "" {
 		return Key{}, noPlaintext, ErrSubjectRequired
 	}
-	tenant, err := m.scoped(ctx, p.Tenant)
+	tenant, err := cfg.scoped(ctx, p.Tenant)
 	if err != nil {
 		return Key{}, noPlaintext, err
 	}
-	k, plaintext := mint(m.cfg.prefix, p, tenant)
+	k, plaintext := mint(cfg.prefix, p, tenant)
 	if err := save(ctx, k); err != nil {
 		return Key{}, noPlaintext, fmt.Errorf("apikey: create: %w", err)
 	}
@@ -55,10 +56,11 @@ func mint(prefix string, p CreateParams, tenant string) (Key, string) {
 // Get returns one key record. With WithScope configured, other tenants'
 // keys read as ErrNotFound so existence cannot be probed across tenants.
 func (m *Manager) Get(ctx context.Context, keyID id.UUID, load LoadFunc) (Key, error) {
-	if err := requireEffect("load", load == nil); err != nil {
+	cfg, err := m.settings("load", load == nil)
+	if err != nil {
 		return Key{}, err
 	}
-	tenant, err := m.scoped(ctx, "")
+	tenant, err := cfg.scoped(ctx, "")
 	if err != nil {
 		return Key{}, err
 	}
@@ -66,7 +68,7 @@ func (m *Manager) Get(ctx context.Context, keyID id.UUID, load LoadFunc) (Key, e
 	if err != nil {
 		return Key{}, err
 	}
-	if m.cfg.scope != nil && k.Tenant != tenant {
+	if cfg.scope != nil && k.Tenant != tenant {
 		return Key{}, ErrNotFound
 	}
 	return k, nil
@@ -75,10 +77,11 @@ func (m *Manager) Get(ctx context.Context, keyID id.UUID, load LoadFunc) (Key, e
 // List returns keys matching f, newest first. With WithScope configured
 // the filter is confined to the scoped tenant.
 func (m *Manager) List(ctx context.Context, f Filter, list ListFunc) ([]Key, error) {
-	if err := requireEffect("list", list == nil); err != nil {
+	cfg, err := m.settings("list", list == nil)
+	if err != nil {
 		return nil, err
 	}
-	tenant, err := m.scoped(ctx, f.Tenant)
+	tenant, err := cfg.scoped(ctx, f.Tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +93,7 @@ func (m *Manager) List(ctx context.Context, f Filter, list ListFunc) ([]Key, err
 // key cannot be un-revoked or rotated. The load effect resolves the record
 // first so a scoped caller cannot revoke another tenant's key.
 func (m *Manager) Revoke(ctx context.Context, keyID id.UUID, load LoadFunc, revoke RevokeFunc) error {
-	if err := requireEffect("revoke", revoke == nil); err != nil {
+	if _, err := m.settings("revoke", revoke == nil); err != nil {
 		return err
 	}
 	if _, err := m.Get(ctx, keyID, load); err != nil {
@@ -107,7 +110,8 @@ func (m *Manager) Revoke(ctx context.Context, keyID id.UUID, load LoadFunc, revo
 // replacement's plaintext comes back wrapped, as Create's does.
 func (m *Manager) Rotate(ctx context.Context, keyID id.UUID, grace time.Duration, load LoadFunc, swap SwapFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if err := requireEffect("swap", swap == nil); err != nil {
+	cfg, err := m.settings("swap", swap == nil)
+	if err != nil {
 		return Key{}, noPlaintext, err
 	}
 	old, err := m.Get(ctx, keyID, load)
@@ -121,7 +125,7 @@ func (m *Manager) Rotate(ctx context.Context, keyID id.UUID, grace time.Duration
 	if !old.ExpiresAt.IsZero() && !old.ExpiresAt.After(now) {
 		return Key{}, noPlaintext, ErrKeyExpired
 	}
-	replacement, plaintext := mint(m.cfg.prefix, CreateParams{
+	replacement, plaintext := mint(cfg.prefix, CreateParams{
 		Name:    old.Name,
 		Subject: old.Subject,
 		Scopes:  old.Scopes,
