@@ -40,8 +40,8 @@
 // rollback on error, rollback-and-repanic on panic); WithTxRetry adds an automatic
 // retry loop for serialization failures and deadlocks (SQLSTATE 40001 / 40P01).
 //
-// Error classification: IsUniqueViolation, IsForeignKeyViolation, IsNotFound, and
-// IsSerializationFailure match the underlying *pgconn.PgError (or pgx.ErrNoRows) so
+// Error classification: IsUniqueViolation, IsForeignKeyViolation, IsCheckViolation,
+// IsNotFound, and IsSerializationFailure match the underlying *pgconn.PgError (or pgx.ErrNoRows) so
 // call sites branch without importing pgconn or matching SQLSTATE strings.
 //
 // Identifiers: Open installs RegisterIDTypes on every pooled connection, so an
