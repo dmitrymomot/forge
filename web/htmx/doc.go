@@ -40,5 +40,24 @@
 // (update other regions, swap nothing into the target), pair it with Reswap(w,
 // SwapNone) and render just the OOB fragment(s).
 //
+// # Answers htmx would drop
+//
+// htmx swaps nothing outside 2xx and follows no redirect, so a request that ends in a
+// 303, a 429, or a 500 does nothing at all on the page — and the reader clicks again.
+// NewAudible is middleware that fixes those answers where they are raised: inside the
+// panic recovery, inside the deadline, inside the token check, where no handler holds
+// a header any more.
+//
+//	audible := htmx.NewAudible(
+//		htmx.WithRewriter(http.StatusTooManyRequests, htmx.Toast(slowDownFragment)),
+//		htmx.WithRewriter(http.StatusInternalServerError, htmx.Toast(sorryFragment)),
+//	)
+//	handler := middleware.Wrap(mux, audible, requestlog.New(), recoverer.New())
+//
+// Redirects are rewritten by default; every other status needs a registered Rewriter,
+// because the body htmx swaps is a view concern this package does not own. It
+// buffers, so mount it only on routes that answer htmx, never around SSE or a
+// download, and put logging and metrics inside it to record the handler's real status.
+//
 // htmx depends only on the standard library; it does not import render.
 package htmx

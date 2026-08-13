@@ -158,6 +158,61 @@ func TestAsyncDropsOnFullBufferAndReportsTally(t *testing.T) {
 	assert.Contains(t, out, "dropped=2")
 }
 
+func TestAsyncDropHookReceivesTheSameTally(t *testing.T) {
+	var mu sync.Mutex
+	var total int64
+	w := newGatedWriter()
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(w),
+		logger.WithAsyncBufferSize(1),
+		logger.WithDropHook(func(n int64) {
+			mu.Lock()
+			defer mu.Unlock()
+			total += n
+		}),
+	)
+	require.NoError(t, err)
+
+	log.Info("first")
+	<-w.entered
+	log.Info("second")
+	log.Info("third")
+	log.Info("fourth")
+
+	w.open()
+	require.NoError(t, closeLog(closeCtx(t)))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, int64(2), total)
+	assert.Contains(t, w.String(), "dropped=2")
+}
+
+func TestAsyncDropHookSilentWithoutDrops(t *testing.T) {
+	called := false
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(io.Discard),
+		logger.WithDropHook(func(int64) { called = true }),
+	)
+	require.NoError(t, err)
+
+	log.Info("one")
+	require.NoError(t, closeLog(closeCtx(t)))
+	assert.False(t, called)
+}
+
+func TestNewRejectsWithDropHook(t *testing.T) {
+	_, err := logger.New(logger.WithDropHook(func(int64) {}))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, logger.ErrInvalidConfig)
+}
+
+func TestWithDropHookRejectsNil(t *testing.T) {
+	_, _, err := logger.NewAsync(logger.WithDropHook(nil))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, logger.ErrInvalidConfig)
+}
+
 func TestAsyncDropNeverBlocksCaller(t *testing.T) {
 	w := newGatedWriter() // never opened during logging: worker wedged on the first record
 	log, closeLog, err := logger.NewAsync(
@@ -314,4 +369,27 @@ func TestAsyncExtractorValuesCapturedAtCallTime(t *testing.T) {
 	sinkMu.Lock()
 	defer sinkMu.Unlock()
 	assert.Contains(t, sink.String(), "req done")
+}
+
+// TestAsyncDropHookPanicDoesNotKillTheWorker pins the recover around the hook: it is
+// consumer code on a library-owned goroutine, and the buffer only overflows under
+// load, so an unrecovered panic would take the process down in production alone.
+func TestAsyncDropHookPanicDoesNotKillTheWorker(t *testing.T) {
+	w := newGatedWriter()
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(w),
+		logger.WithAsyncBufferSize(1),
+		logger.WithDropHook(func(int64) { panic("hook blew up") }),
+	)
+	require.NoError(t, err)
+
+	log.Info("first")
+	<-w.entered
+	log.Info("second")
+	log.Info("third")
+
+	w.open()
+	require.NoError(t, closeLog(closeCtx(t)))
+	assert.Contains(t, w.String(), "first")
+	assert.Contains(t, w.String(), "dropped=1")
 }

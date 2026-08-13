@@ -1,9 +1,11 @@
 package metrics
 
 import (
+	"context"
 	"math"
 	"slices"
 	"strconv"
+	"time"
 )
 
 // DefaultBuckets are the default histogram bucket upper bounds, tuned for
@@ -28,6 +30,68 @@ type Recorder interface {
 	// strictly increasing (a trailing +Inf is stripped — the implicit overflow
 	// bucket always exists).
 	Histogram(name, help string, buckets []float64, labelNames ...string) Histogram
+	// GaugeFunc registers a gauge whose value fn produces at collection time.
+	// It is the pull counterpart of Gauge: use it when a live source already
+	// owns the number (pool depth, queue length, a row count) so nothing has to
+	// push updates on a timer. A nil fn panics.
+	GaugeFunc(name, help string, fn GaugeFunc)
+}
+
+// GaugeFunc reads one value at collection time — a /debug/vars render or a
+// prometheus scrape. The context is bounded by the recorder's collect timeout
+// (WithCollectTimeout, default DefaultCollectTimeout), so a query behind it can
+// never stall the endpoint. Returning an error (or a non-finite value) drops the
+// gauge from that collection and counts one failure under
+// CollectFailuresMetric; because the counter may already have been rendered,
+// the failure surfaces on the following collection.
+//
+// fn runs on the collecting goroutine and may run concurrently with itself when
+// two scrapers overlap, so it must be safe for concurrent use.
+type GaugeFunc func(ctx context.Context) (float64, error)
+
+const (
+	// DefaultCollectTimeout bounds a GaugeFunc call when WithCollectTimeout is unset.
+	DefaultCollectTimeout = 2 * time.Second
+
+	// CollectFailuresMetric counts GaugeFunc calls that failed, labeled by gauge name.
+	CollectFailuresMetric = "gauge_collect_failures_total"
+
+	collectFailuresHelp  = "GaugeFunc reads that failed or produced a non-finite value."
+	collectFailuresLabel = "gauge"
+)
+
+// CollectFailuresCounter returns the counter every Recorder increments when a
+// GaugeFunc read fails, so the metric's name, help, and label are defined once and
+// read identically on every backend. Call it before taking any registry lock: it
+// creates an ordinary instrument through rec.
+func CollectFailuresCounter(rec Recorder) Counter {
+	return rec.Counter(CollectFailuresMetric, collectFailuresHelp, collectFailuresLabel)
+}
+
+// ResolveCollectTimeout returns d, or DefaultCollectTimeout when d is not positive.
+// Every Recorder implementation runs its configured timeout through it so an
+// adapter swap never changes how long a stalled GaugeFunc blocks collection.
+func ResolveCollectTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return DefaultCollectTimeout
+	}
+	return d
+}
+
+// CollectGauge calls fn under a timeout-bounded context and reports whether the
+// result is usable. A failed or non-finite read counts one failure against
+// failures and returns ok=false, so both recorders drop the same reads and count
+// them identically.
+func CollectGauge(fn GaugeFunc, name string, timeout time.Duration, failures Counter) (float64, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	v, err := fn(ctx)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		failures.Inc(name)
+		return 0, false
+	}
+	return v, true
 }
 
 // Counter is a monotonically increasing value. labelValues must match the

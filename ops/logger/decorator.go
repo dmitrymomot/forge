@@ -9,6 +9,26 @@ import (
 // Callers supply funcs; the package owns the internal handler that applies them.
 type ContextExtractor func(ctx context.Context) (slog.Attr, bool)
 
+// ContextValue returns a ContextExtractor that reads the T stored under key and reports
+// it as an attribute named name. A context carrying no T under key adds nothing, so the
+// common "attach the request id when there is one" case needs no closure of its own:
+//
+//	logger.WithContextExtractors(
+//		logger.ContextValue[string](requestid.ContextKey, "request_id"),
+//	)
+//
+// Reach for a hand-written ContextExtractor when the value needs shaping first — a
+// struct field, a String() call, or a slog.LogValuer.
+func ContextValue[T any](key any, name string) ContextExtractor {
+	return func(ctx context.Context) (slog.Attr, bool) {
+		v, ok := ctx.Value(key).(T)
+		if !ok {
+			return slog.Attr{}, false
+		}
+		return slog.Any(name, v), true
+	}
+}
+
 // handlerOp records a WithAttrs or WithGroup call so the chain can be rebuilt with
 // context-extracted attributes injected at the root level. Exactly one field is set.
 type handlerOp struct {

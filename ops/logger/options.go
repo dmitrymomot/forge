@@ -18,6 +18,7 @@ type config struct {
 	formatOverride  *Format
 	extractors      []ContextExtractor
 	extraHandlers   []slog.Handler
+	dropHook        func(int64)
 	errs            []error
 	asyncBufferSize int // WithAsyncBufferSize; 0 means unset (NewAsync uses the default)
 }
@@ -102,6 +103,26 @@ func WithContextExtractors(ex ...ContextExtractor) Option {
 				c.extractors = append(c.extractors, e)
 			}
 		}
+	}
+}
+
+// WithDropHook registers a receiver for the async drop tally. The worker calls it with
+// the number of records the full buffer dropped, on the same pass that emits the Warn
+// record, so a metrics counter sees drops without parsing log output:
+//
+//	dropped := rec.Counter("log_dropped_total", "Records the full logger queue dropped.")
+//	logger.NewAsync(logger.WithDropHook(func(n int64) { dropped.Add(float64(n)) }))
+//
+// The hook runs on the worker goroutine, so it must return at once and must not log. A
+// nil hook is rejected. Only valid with NewAsync; New returns ErrInvalidConfig if it is
+// set. Last wins.
+func WithDropHook(fn func(dropped int64)) Option {
+	return func(c *config) {
+		if fn == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: WithDropHook received a nil func", ErrInvalidConfig))
+			return
+		}
+		c.dropHook = fn
 	}
 }
 

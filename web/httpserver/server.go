@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 )
 
 // Server is a single-use HTTP service that satisfies supervisor.Service. After Run
 // returns it must not be reused; construct a fresh Server per run.
 type Server struct {
-	cfg config
+	bound atomic.Pointer[string]
+	cfg   config
 }
 
 // New builds a Server. The handler is required and is the only positional argument.
@@ -42,6 +44,20 @@ func (s *Server) Name() string {
 		return "http " + s.cfg.listener.Addr().String()
 	}
 	return "http " + s.cfg.Addr
+}
+
+// Addr returns the address the server actually listens on, which is what a test that
+// configured ":0" needs: the kernel picks the port and only the bound listener knows
+// it. Before Run binds, it reports the injected listener's address, else the
+// configured Addr. It is safe to call while Run works.
+func (s *Server) Addr() string {
+	if bound := s.bound.Load(); bound != nil {
+		return *bound
+	}
+	if s.cfg.listener != nil {
+		return s.cfg.listener.Addr().String()
+	}
+	return s.cfg.Addr
 }
 
 // resolveLogger returns l, or a discard logger when l is nil.
@@ -104,7 +120,9 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	log.Info("http server listening", slog.String("addr", ln.Addr().String()))
+	addr := ln.Addr().String()
+	s.bound.Store(&addr)
+	log.Info("http server listening", slog.String("addr", addr))
 
 	serveErr := make(chan error, 1)
 	go func() {

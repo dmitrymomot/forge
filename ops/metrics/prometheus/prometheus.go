@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -14,8 +15,9 @@ import (
 )
 
 type config struct {
-	registry  *prom.Registry
-	namespace string
+	registry       *prom.Registry
+	namespace      string
+	collectTimeout time.Duration
 }
 
 // Option configures New.
@@ -34,6 +36,17 @@ func WithRegistry(reg *prom.Registry) Option {
 // WithNamespace prefixes every instrument name (rendered as "namespace_name").
 func WithNamespace(namespace string) Option {
 	return func(c *config) { c.namespace = namespace }
+}
+
+// WithCollectTimeout bounds every metrics.GaugeFunc call during a scrape
+// (default metrics.DefaultCollectTimeout), so one stalled read cannot hold the
+// scrape open. A non-positive duration is ignored.
+func WithCollectTimeout(d time.Duration) Option {
+	return func(c *config) {
+		if d > 0 {
+			c.collectTimeout = d
+		}
+	}
 }
 
 // New returns a prometheus-backed metrics.Recorder. Without WithRegistry it
@@ -55,9 +68,10 @@ func New(opts ...Option) *Recorder {
 		)
 	}
 	return &Recorder{
-		registry:    c.registry,
-		namespace:   c.namespace,
-		instruments: make(map[string]*entry),
+		registry:       c.registry,
+		namespace:      c.namespace,
+		instruments:    make(map[string]*entry),
+		collectTimeout: metrics.ResolveCollectTimeout(c.collectTimeout),
 	}
 }
 
@@ -66,6 +80,7 @@ type kind uint8
 const (
 	kindCounter kind = iota
 	kindGauge
+	kindGaugeFunc
 	kindHistogram
 )
 
@@ -75,6 +90,8 @@ func (k kind) String() string {
 		return "counter"
 	case kindGauge:
 		return "gauge"
+	case kindGaugeFunc:
+		return "gauge func"
 	default:
 		return "histogram"
 	}
@@ -91,10 +108,11 @@ type entry struct {
 // creation is idempotent per name; schema mismatches and invalid names panic
 // (the latter via the prometheus client itself), matching the expvar recorder.
 type Recorder struct {
-	registry    *prom.Registry
-	instruments map[string]*entry
-	namespace   string
-	mu          sync.Mutex
+	registry       *prom.Registry
+	instruments    map[string]*entry
+	namespace      string
+	collectTimeout time.Duration
+	mu             sync.Mutex
 }
 
 var _ metrics.Recorder = (*Recorder)(nil)
@@ -118,6 +136,64 @@ func (r *Recorder) Histogram(name, help string, buckets []float64, labelNames ..
 	// stripped) before storing and comparing, so bucket semantics and the
 	// schema-mismatch check match the expvar recorder exactly.
 	return r.instrument(kindHistogram, name, help, labelNames, metrics.NormalizeBuckets(buckets)).(metrics.Histogram)
+}
+
+// GaugeFunc registers a collector that reads fn during every scrape, so the value
+// never has to be pushed. The failure counter is created first, outside the
+// instrument lock, because instrument holds r.mu and Counter takes it.
+func (r *Recorder) GaugeFunc(name, help string, fn metrics.GaugeFunc) {
+	if fn == nil {
+		panic("metrics: GaugeFunc " + strconv.Quote(name) + " received a nil func")
+	}
+	failures := metrics.CollectFailuresCounter(r)
+	r.instrumentCollector(name, func() prom.Collector {
+		return &gaugeFuncCollector{
+			desc:     prom.NewDesc(prom.BuildFQName(r.namespace, "", name), help, nil, nil),
+			fn:       fn,
+			name:     name,
+			timeout:  r.collectTimeout,
+			failures: failures,
+		}
+	})
+}
+
+// instrumentCollector registers a pull-model collector under name, applying the same
+// idempotency and schema-mismatch rules the vec instruments get.
+func (r *Recorder) instrumentCollector(name string, build func() prom.Collector) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.instruments[name]; ok {
+		if e.kind != kindGaugeFunc {
+			panic("metrics: instrument " + strconv.Quote(name) + " already registered as a different " + e.kind.String())
+		}
+		return
+	}
+
+	metrics.MustValidNames(name)
+	coll := build()
+	r.registry.MustRegister(coll)
+	r.instruments[name] = &entry{kind: kindGaugeFunc, inst: coll}
+}
+
+// gaugeFuncCollector produces one sample per scrape. A failed read emits nothing —
+// prometheus treats a missing series as stale, which is the honest answer when the
+// source could not be read — and counts one failure.
+type gaugeFuncCollector struct {
+	desc     *prom.Desc
+	fn       metrics.GaugeFunc
+	failures metrics.Counter
+	name     string
+	timeout  time.Duration
+}
+
+func (c *gaugeFuncCollector) Describe(ch chan<- *prom.Desc) { ch <- c.desc }
+
+func (c *gaugeFuncCollector) Collect(ch chan<- prom.Metric) {
+	v, ok := metrics.CollectGauge(c.fn, c.name, c.timeout, c.failures)
+	if !ok {
+		return
+	}
+	ch <- prom.MustNewConstMetric(c.desc, prom.GaugeValue, v)
 }
 
 func (r *Recorder) instrument(k kind, name, help string, labelNames []string, buckets []float64) any {

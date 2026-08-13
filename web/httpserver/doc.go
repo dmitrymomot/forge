@@ -13,6 +13,9 @@
 //		// ...
 //	}
 //
+// Addr reports the address the server actually listens on. Configure ":0" in a test
+// and read it after Run binds to learn the port the kernel picked.
+//
 // On context cancellation the server stops accepting, drains in-flight requests
 // within ShutdownTimeout, then cancels the request base context and force-closes
 // any stragglers (returning ErrShutdownTimeout). All option and Config values are

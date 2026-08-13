@@ -7,38 +7,43 @@ import (
 	"strings"
 )
 
+// Header names are written in Go's canonical MIME form (Hx-, not HX-), so
+// Header.Get and Header.Set take their no-allocation fast path instead of
+// canonicalizing on every call. The bytes on the wire are identical either way,
+// and HTTP header names are case-insensitive.
+//
 // Request header names. hdrTrigger is reused by the response-side Trigger.
 const (
-	hdrRequest        = "HX-Request"
-	hdrBoosted        = "HX-Boosted"
-	hdrHistoryRestore = "HX-History-Restore-Request"
-	hdrCurrentURL     = "HX-Current-URL"
-	hdrPrompt         = "HX-Prompt"
-	hdrTarget         = "HX-Target"
-	hdrTrigger        = "HX-Trigger" // request: triggering element id; response: events
-	hdrTriggerName    = "HX-Trigger-Name"
+	hdrRequest        = "Hx-Request"
+	hdrBoosted        = "Hx-Boosted"
+	hdrHistoryRestore = "Hx-History-Restore-Request"
+	hdrCurrentURL     = "Hx-Current-URL"
+	hdrPrompt         = "Hx-Prompt"
+	hdrTarget         = "Hx-Target"
+	hdrTrigger        = "Hx-Trigger" // request: triggering element id; response: events
+	hdrTriggerName    = "Hx-Trigger-Name"
 )
 
 // Response header names: history, refresh, and swap controls.
 const (
-	hdrPushURL    = "HX-Push-Url"
-	hdrReplaceURL = "HX-Replace-Url"
-	hdrRefresh    = "HX-Refresh"
-	hdrReswap     = "HX-Reswap"
-	hdrRetarget   = "HX-Retarget"
-	hdrReselect   = "HX-Reselect"
+	hdrPushURL    = "Hx-Push-Url"
+	hdrReplaceURL = "Hx-Replace-Url"
+	hdrRefresh    = "Hx-Refresh"
+	hdrReswap     = "Hx-Reswap"
+	hdrRetarget   = "Hx-Retarget"
+	hdrReselect   = "Hx-Reselect"
 )
 
 // Response header names: client-side event triggers.
 const (
-	hdrTriggerAfterSettle = "HX-Trigger-After-Settle"
-	hdrTriggerAfterSwap   = "HX-Trigger-After-Swap"
+	hdrTriggerAfterSettle = "Hx-Trigger-After-Settle"
+	hdrTriggerAfterSwap   = "Hx-Trigger-After-Swap"
 )
 
 // Response header names: client-side redirects.
 const (
-	hdrRedirect = "HX-Redirect"
-	hdrLocation = "HX-Location"
+	hdrRedirect = "Hx-Redirect"
+	hdrLocation = "Hx-Location"
 )
 
 // setEventNames writes a bare comma-joined event-name list (the HX-Trigger

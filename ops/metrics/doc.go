@@ -18,6 +18,28 @@
 //	queueDepth.Set(17, "email")
 //	jobSeconds.Observe(0.42, "welcome_email")
 //
+// # Pull gauges
+//
+// GaugeFunc is the pull counterpart of Gauge: the value is read at collection time
+// (a /debug/vars render or a prometheus scrape) instead of being pushed, so a number
+// a live source already owns needs no goroutine to mirror it:
+//
+//	rec.GaugeFunc("db_pool_conns_idle", "Idle pool connections.",
+//		func(context.Context) (float64, error) {
+//			return float64(pool.Stat().IdleConns()), nil
+//		})
+//
+//	rec.GaugeFunc("jobs_pending", "Jobs ready to run.",
+//		func(ctx context.Context) (float64, error) {
+//			n, err := queries.CountPendingJobs(ctx)
+//			return float64(n), err
+//		})
+//
+// The call is bounded by WithCollectTimeout (default DefaultCollectTimeout), so a
+// stalled query cannot hold the endpoint open. A failed read drops the gauge from
+// that collection — stale beats wrong — and counts one CollectFailuresMetric under
+// the gauge's name. GaugeFunc takes no labels: register one name per series.
+//
 //	mux := http.NewServeMux()
 //	mux.Handle("GET /users/{id}", getUser)
 //	handler := middleware.Wrap(mux,

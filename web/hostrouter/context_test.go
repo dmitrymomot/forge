@@ -26,7 +26,7 @@ func doServe(r *Router, host string) {
 func TestFromContext_Wildcard(t *testing.T) {
 	var got Match
 	var ok bool
-	r := New(WithHost("*.example.com", captureMatch(&got, &ok)))
+	r := mustNew(t, WithHost("*.example.com", captureMatch(&got, &ok)))
 	doServe(r, "foo.example.com")
 
 	assert.True(t, ok)
@@ -36,7 +36,7 @@ func TestFromContext_Wildcard(t *testing.T) {
 func TestFromContext_Exact(t *testing.T) {
 	var got Match
 	var ok bool
-	r := New(WithHost("api.example.com", captureMatch(&got, &ok)))
+	r := mustNew(t, WithHost("api.example.com", captureMatch(&got, &ok)))
 	doServe(r, "api.example.com")
 
 	assert.True(t, ok)
@@ -46,7 +46,7 @@ func TestFromContext_Exact(t *testing.T) {
 func TestFromContext_FallbackHasNoMatch(t *testing.T) {
 	var got Match
 	var ok bool
-	r := New(WithFallback(captureMatch(&got, &ok)))
+	r := mustNew(t, WithFallback(captureMatch(&got, &ok)))
 	doServe(r, "unknown.com")
 
 	assert.False(t, ok)
@@ -59,7 +59,7 @@ func TestAccessors(t *testing.T) {
 		ctx := r.Context()
 		sub, pat, host = Subdomain(ctx), Pattern(ctx), Host(ctx)
 	})
-	r := New(WithHost("*.example.com", h))
+	r := mustNew(t, WithHost("*.example.com", h))
 	doServe(r, "tenant.example.com")
 
 	assert.Equal(t, "tenant", sub)
@@ -70,7 +70,7 @@ func TestAccessors(t *testing.T) {
 func TestWithoutMatchContext_NoInjection(t *testing.T) {
 	var got Match
 	var ok bool
-	r := New(
+	r := mustNew(t,
 		WithHost("*.example.com", captureMatch(&got, &ok)),
 		WithoutMatchContext(),
 	)
@@ -89,7 +89,7 @@ func TestMatch_SurvivesDownstreamContextWrap(t *testing.T) {
 		wrapped := context.WithValue(r.Context(), otherKey{}, "x")
 		got, ok = FromContext(wrapped)
 	})
-	r := New(WithHost("*.example.com", h))
+	r := mustNew(t, WithHost("*.example.com", h))
 	doServe(r, "foo.example.com")
 
 	assert.True(t, ok)
