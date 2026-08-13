@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type config struct {
-	name string
+	name           string
+	collectTimeout time.Duration
 }
 
 // Option configures the expvar recorder returned by New.
@@ -25,6 +27,17 @@ func WithName(name string) Option {
 	return func(c *config) {
 		if name != "" {
 			c.name = name
+		}
+	}
+}
+
+// WithCollectTimeout bounds every GaugeFunc call (default DefaultCollectTimeout),
+// so one stalled read cannot hold the /debug/vars render open. A non-positive
+// duration is ignored.
+func WithCollectTimeout(d time.Duration) Option {
+	return func(c *config) {
+		if d > 0 {
+			c.collectTimeout = d
 		}
 	}
 }
@@ -43,8 +56,9 @@ func New(opts ...Option) Recorder {
 		o(&c)
 	}
 	return &expvarRecorder{
-		root:        expvar.NewMap(c.name),
-		instruments: make(map[string]*entry),
+		root:           expvar.NewMap(c.name),
+		instruments:    make(map[string]*entry),
+		collectTimeout: ResolveCollectTimeout(c.collectTimeout),
 	}
 }
 
@@ -53,6 +67,7 @@ type kind uint8
 const (
 	kindCounter kind = iota
 	kindGauge
+	kindGaugeFunc
 	kindHistogram
 )
 
@@ -62,6 +77,8 @@ func (k kind) String() string {
 		return "counter"
 	case kindGauge:
 		return "gauge"
+	case kindGaugeFunc:
+		return "gauge func"
 	default:
 		return "histogram"
 	}
@@ -75,27 +92,44 @@ type entry struct {
 }
 
 type expvarRecorder struct {
-	root        *expvar.Map
-	instruments map[string]*entry
-	mu          sync.Mutex
+	root           *expvar.Map
+	instruments    map[string]*entry
+	collectTimeout time.Duration
+	mu             sync.Mutex
 }
 
 func (r *expvarRecorder) Counter(name, _ string, labelNames ...string) Counter {
-	return r.instrument(kindCounter, name, labelNames, nil).(Counter)
+	return r.instrument(kindCounter, name, labelNames, nil, nil).(Counter)
 }
 
 func (r *expvarRecorder) Gauge(name, _ string, labelNames ...string) Gauge {
-	return r.instrument(kindGauge, name, labelNames, nil).(Gauge)
+	return r.instrument(kindGauge, name, labelNames, nil, nil).(Gauge)
 }
 
 func (r *expvarRecorder) Histogram(name, _ string, buckets []float64, labelNames ...string) Histogram {
-	return r.instrument(kindHistogram, name, labelNames, NormalizeBuckets(buckets)).(Histogram)
+	return r.instrument(kindHistogram, name, labelNames, NormalizeBuckets(buckets), nil).(Histogram)
+}
+
+// GaugeFunc publishes a var whose String reads fn, so the value is produced by the
+// /debug/vars render rather than pushed. The failure counter is created first,
+// outside the instrument lock, because instrument holds r.mu and Counter takes it.
+func (r *expvarRecorder) GaugeFunc(name, _ string, fn GaugeFunc) {
+	if fn == nil {
+		panic("metrics: GaugeFunc " + strconv.Quote(name) + " received a nil func")
+	}
+	failures := CollectFailuresCounter(r)
+	r.instrument(kindGaugeFunc, name, nil, nil, &gaugeFuncVar{
+		fn:       fn,
+		name:     name,
+		timeout:  r.collectTimeout,
+		failures: failures,
+	})
 }
 
 // instrument returns the existing instrument under name or creates it. The
 // help text is accepted for adapter parity but not rendered: expvar output is
 // a bare JSON snapshot with no metadata section to carry it.
-func (r *expvarRecorder) instrument(k kind, name string, labelNames []string, buckets []float64) any {
+func (r *expvarRecorder) instrument(k kind, name string, labelNames []string, buckets []float64, pull expvar.Var) any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if e, ok := r.instruments[name]; ok {
@@ -112,6 +146,8 @@ func (r *expvarRecorder) instrument(k kind, name string, labelNames []string, bu
 	var inst any
 	var v expvar.Var
 	switch k {
+	case kindGaugeFunc:
+		v, inst = pull, pull
 	case kindCounter:
 		cv := &counterVec{labelNames: labelNames}
 		if len(labelNames) == 0 {
@@ -171,6 +207,25 @@ func checkLabelCount(names, values []string) {
 	if len(names) != len(values) {
 		panic("metrics: expected " + strconv.Itoa(len(names)) + " label values, got " + strconv.Itoa(len(values)))
 	}
+}
+
+// gaugeFuncVar is the expvar.Var behind GaugeFunc: the value is produced when the
+// var renders, not when something pushes it. A failed or non-finite read renders
+// null (the same shape floatVar uses, so the JSON document stays valid) and counts
+// one failure, which surfaces on the next render if the counter already rendered.
+type gaugeFuncVar struct {
+	fn       GaugeFunc
+	failures Counter
+	name     string
+	timeout  time.Duration
+}
+
+func (g *gaugeFuncVar) String() string {
+	v, ok := CollectGauge(g.fn, g.name, g.timeout, g.failures)
+	if !ok {
+		return "null"
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 // floatVar is the expvar.Var behind counters and gauges. Unlike expvar.Float,
