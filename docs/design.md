@@ -23,18 +23,40 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no
   service containers; values via params, not context (context only for
   request-scoped reads). Public methods never return unexported types.
-- **One of three idioms:** stateless **free-funcs** (`render`, `htmx`) ·
-  `New(...Option)` with an env-loadable `Config` + `DefaultConfig` +
-  `Validate` (`logger`, `httpserver`) · a `supervisor.Service`.
+- **One of three idioms:** stateless **free-funcs** (`render`, `htmx`,
+  `apikey`) · `New(...Option)` with an env-loadable `Config` +
+  `DefaultConfig` + `Validate` (`logger`, `httpserver`) · a
+  `supervisor.Service`.
 - **Anatomy:** `doc.go` (runnable example) · `config.go` · `options.go`
   (`type Option func(*config)`, **never** builders) · `errors.go`
   (`errors.Is`-matchable single-line sentinels) · impl.
 - **Minimal dependencies, not zero:** buy the wire, build the ergonomics;
   isolate every real dep behind a subpackage.
-- **Storage-agnostic state:** every stateful package defines its own small
-  `Store` interface, ships an in-memory implementation for tests/dev, and
-  puts every real backend in an isolated driver subpackage. Core never
-  imports a driver client.
+- **Storage-agnostic state — effects, not stores.** A package that persists
+  anything never owns a handle to storage. Split by who calls the operation:
+    - **The application calls it** (create, rotate, revoke, accept, approve):
+      free funcs taking a validated `Config` value plus the storage **effect
+      closures** that operation performs. The call site supplies each effect
+      inline, so a write rides the caller's transaction and carries columns the
+      package never models — the shape an sqlc-generated repository needs.
+    - **The framework calls it** (middleware, relays, `supervisor.Service`
+      loops, reapers): a construction-time seam, because a component built once
+      at wiring has no call site to pass a closure. Ship a `New<Seam>` factory
+      that curries the `Config` and effects into the consumer's seam type
+      (`apikey.NewVerifier` → `guard.Verifier`) so wiring needs no adapter.
+
+    Rules for the effect shape: name every effect type distinctly, even where
+    signatures match, so the compiler rejects a swapped argument. Cap an
+    operation at **two** effects — a third means one atomic write is hiding
+    (`apikey.SwapFunc` performs the whole rotation, which is why `Rotate` has
+    no compensation path). Missing effects return `ErrNilEffect`; the
+    zero-value `Config` returns `ErrConfig`. Core never imports a driver client.
+
+- **Secrets returned to callers are wrapped** in `redact.Secret[T]`
+  (one-time plaintexts, recovery codes). It redacts through `fmt`,
+  `encoding/json`, and `log/slog`, and `Expose` marks the single site where
+  the value is meant to escape. A named string type is not a substitute — it
+  still assigns freely to the plain `string` parameters a repository exposes.
 - **Composition seams:** `http.Handler`, `supervisor.Service`,
   `middleware.Middleware`, `ctxkey.Key[T]`, `logger.ContextExtractor`, and
   pluggable `Store`/`Broker`/`Sender` interfaces.
@@ -44,6 +66,11 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
   internal fast paths, decoder primitives).
 - **Test doubles live with the seam owner** (`clock.Mock`, cache's memory
   store, queue's in-memory broker) — there is no central fakes package.
+  Effect-based packages ship **no** double: an effect is a closure, so each
+  test states the one behaviour it exercises inline and holds any state it
+  needs in a local variable. Never write a test for a test fake — if the
+  fake is wrong, the real tests fail. One case per behaviour: a test that
+  needs three `require`s before its first assertion is testing a fixture.
 - **Two test tiers.** The default `go test ./...` is unit-only: fast, no
   Docker, no network. DB-backed tests carry `//go:build integration` and run
   via `just test-integration` (a dedicated CI job). They provision real
@@ -152,11 +179,11 @@ health checks only; everything else outside `data/*` stays stdlib.
 ## Framework-wide seams
 
 - **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete
-  + atomic SetNX claim) is THE key-value seam. The shipped memory store is
-  LRU-evicting and unsuitable for sessions/idempotency, so those consumers
-  bring a durable Store implementation of their own (Redis is the usual
-  backend). Consumers: `session`, `idempotency`, `otp`, `lockout`,
-  server-side `flash`. No package defines a private byte-KV store.
+    - atomic SetNX claim) is THE key-value seam. The shipped memory store is
+      LRU-evicting and unsuitable for sessions/idempotency, so those consumers
+      bring a durable Store implementation of their own (Redis is the usual
+      backend). Consumers: `session`, `idempotency`, `otp`, `lockout`,
+      server-side `flash`. No package defines a private byte-KV store.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.
@@ -205,8 +232,8 @@ health checks only; everything else outside `data/*` stays stdlib.
   stripe-go directly + forge webhook/httpclient/quota/money.
 - **User-account lifecycle (usermanager)** — consumer domain assembled from
   forge primitives; recipe in examples/, never a package.
-- **Third-party OIDC provider** — issuing tokens to *end users of other
-  companies' apps* (auth-code for third parties, consent screens, JWE) is a
+- **Third-party OIDC provider** — issuing tokens to _end users of other
+  companies' apps_ (auth-code for third parties, consent screens, JWE) is a
   product; run Hydra/Keycloak. Machine-to-machine issuance is in scope via
   `auth/oauthserver`; `auth/jwt` signs and verifies with pinned algs — alg
   negotiation and JWE stay out forever.
@@ -256,8 +283,7 @@ health checks only; everything else outside `data/*` stays stdlib.
 
 examples/ or doc.go entries committed so dropped capabilities aren't silently
 lost: grpc-server-as-supervisor.Service · reverse proxy (hostrouter +
-httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem
-413) · breadcrumb value type · notification-inbox pipeline · per-tenant
+httputil.ReverseProxy) · chain-wide body cap (http.MaxBytesHandler + problem 413) · breadcrumb value type · notification-inbox pipeline · per-tenant
 encryption / GDPR crypto-shred (kdf) · optimistic locking + audit columns
 (postgres docs) · Postgres tsvector search · usermanager flow · templ
 `Classes` toggle helper · click-capture pipeline (clientip/geoip/useragent
