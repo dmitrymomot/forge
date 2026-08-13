@@ -8,45 +8,84 @@ import (
 )
 
 func BenchmarkCreate(b *testing.B) {
-	mgr := apikey.New(apikey.NewMemoryStore(), apikey.WithPrefix("sk_live"))
+	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, err := mgr.Create(ctx, apikey.CreateParams{Subject: "u1"}); err != nil {
+		if _, _, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
+// BenchmarkVerifyHit measures the steady-state verify path with touching
+// disabled.
 func BenchmarkVerifyHit(b *testing.B) {
-	// Touch disabled: measures the steady-state verify path.
-	mgr := apikey.New(apikey.NewMemoryStore(), apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	if err != nil {
+		b.Fatal(err)
+	}
+	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
-	_, plaintext, err := mgr.Create(ctx, apikey.CreateParams{Subject: "u1"})
+	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := mgr.Verify(ctx, plaintext); err != nil {
+		if _, err := apikey.Verify(ctx, cfg, plaintext, mem.LoadByHash, mem.Touch); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkVerifyMalformedReject(b *testing.B) {
-	// The DoS-relevant path: checksum rejection without store access.
-	// Target: zero allocations.
-	mgr := apikey.New(apikey.NewMemoryStore(), apikey.WithPrefix("sk_live"))
+// BenchmarkVerifyHitCurried measures the same path through the curried
+// guard.Verifier, so the factory's closure cost is visible against
+// BenchmarkVerifyHit.
+func BenchmarkVerifyHitCurried(b *testing.B) {
+	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	if err != nil {
+		b.Fatal(err)
+	}
+	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
-	_, plaintext, err := mgr.Create(ctx, apikey.CreateParams{Subject: "u1"})
+	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
+	if err != nil {
+		b.Fatal(err)
+	}
+	verifier, err := apikey.NewVerifier(cfg, mem.LoadByHash, mem.Touch)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := verifier.Verify(ctx, plaintext); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkVerifyMalformedReject measures the DoS-relevant path: checksum
+// rejection with no storage access. Target: zero allocations.
+func BenchmarkVerifyMalformedReject(b *testing.B) {
+	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	mem := apikey.NewMemoryStore()
+	ctx := context.Background()
+	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	if err != nil {
 		b.Fatal(err)
 	}
 	bad := plaintext[:len(plaintext)-1] + "!"
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := mgr.Verify(ctx, bad); err == nil {
+		if _, err := apikey.Verify(ctx, cfg, bad, mem.LoadByHash, mem.Touch); err == nil {
 			b.Fatal("expected rejection")
 		}
 	}

@@ -35,4 +35,12 @@ var (
 	// ErrScope fails management operations closed when the WithScope hook
 	// errors or yields an empty tenant.
 	ErrScope = errors.New("apikey: tenant scope unavailable")
+
+	// ErrConfig rejects a Config that did not come from NewConfig, and is
+	// returned by NewConfig itself for an invalid prefix.
+	ErrConfig = errors.New("apikey: invalid config")
+
+	// ErrNilEffect rejects an operation called without one of the storage
+	// effects it performs. Only TouchFunc may be nil.
+	ErrNilEffect = errors.New("apikey: nil effect func")
 )

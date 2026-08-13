@@ -15,13 +15,17 @@ import (
 
 func TestGuardIntegration(t *testing.T) {
 	t.Parallel()
-	store := apikey.NewMemoryStore()
-	mgr := apikey.New(store, apikey.WithPrefix("sk_live"))
+	cfg := mustConfig(t, apikey.WithPrefix("sk_live"))
+	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
-	k, plaintext, err := mgr.Create(ctx, apikey.CreateParams{Subject: "user_42", Tenant: "org_7"})
+	k, plaintext, err := apikey.Create(ctx, cfg,
+		apikey.CreateParams{Subject: "user_42", Tenant: "org_7"}, mem.Save)
 	require.NoError(t, err)
 
-	authn := guard.New(mgr, guard.WithExtractors(guard.BearerHeader(), guard.Header("X-API-Key")))
+	verifier, err := apikey.NewVerifier(cfg, mem.LoadByHash, mem.Touch)
+	require.NoError(t, err)
+
+	authn := guard.New(verifier, guard.WithExtractors(guard.BearerHeader(), guard.Header("X-API-Key")))
 	handler := authn(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		identity := guard.MustFrom(r.Context())
 		w.Header().Set("X-Subject", identity.Subject)
@@ -58,7 +62,7 @@ func TestGuardIntegration(t *testing.T) {
 	})
 
 	t.Run("revoked 401", func(t *testing.T) {
-		require.NoError(t, mgr.Revoke(ctx, k.ID))
+		require.NoError(t, apikey.Revoke(ctx, cfg, k.ID, mem.Load, mem.Revoke))
 		rec := do(func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+plaintext) })
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})

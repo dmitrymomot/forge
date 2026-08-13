@@ -11,15 +11,19 @@ import (
 	"github.com/dmitrymomot/forge/core/id"
 )
 
-type memoryStore struct {
+// MemoryStore is an in-memory record set for tests and development. Its
+// methods have the effect signatures exactly, so a call site passes method
+// values — mem.Save, mem.LoadByHash — with no adapter in between. State
+// does not survive a restart.
+type MemoryStore struct {
 	byID   map[id.UUID]Key
 	byHash map[string]id.UUID
 	mu     sync.RWMutex
 }
 
-// NewMemoryStore returns an in-memory Store for tests and development.
-func NewMemoryStore() Store {
-	return &memoryStore{
+// NewMemoryStore returns an empty MemoryStore.
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
 		byID:   make(map[id.UUID]Key),
 		byHash: make(map[string]id.UUID),
 	}
@@ -27,9 +31,9 @@ func NewMemoryStore() Store {
 
 // cloneKey copies the record's reference fields so callers cannot mutate
 // stored state through shared slices/maps (and vice versa). Nil Scopes and
-// Meta are normalized to non-nil empty values — the read shape every Store
-// implementation must return, persisting them as empty collections: callers
-// see the same non-nil empties whichever Store backs the Manager.
+// Meta are normalized to non-nil empty values — the read shape every
+// backend should return, so callers see the same non-nil empties whichever
+// storage backs the effects.
 func cloneKey(k Key) Key {
 	k.Scopes = slices.Clone(k.Scopes)
 	if k.Scopes == nil {
@@ -42,9 +46,14 @@ func cloneKey(k Key) Key {
 	return k
 }
 
-func (s *memoryStore) Create(_ context.Context, k Key) error {
+// Save implements SaveFunc.
+func (s *MemoryStore) Save(_ context.Context, k Key) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.save(k)
+}
+
+func (s *MemoryStore) save(k Key) error {
 	if _, ok := s.byID[k.ID]; ok {
 		return ErrDuplicate
 	}
@@ -56,7 +65,8 @@ func (s *memoryStore) Create(_ context.Context, k Key) error {
 	return nil
 }
 
-func (s *memoryStore) Get(_ context.Context, keyID id.UUID) (Key, error) {
+// Load implements LoadFunc.
+func (s *MemoryStore) Load(_ context.Context, keyID id.UUID) (Key, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	k, ok := s.byID[keyID]
@@ -66,7 +76,8 @@ func (s *memoryStore) Get(_ context.Context, keyID id.UUID) (Key, error) {
 	return cloneKey(k), nil
 }
 
-func (s *memoryStore) GetByHash(_ context.Context, hash string) (Key, error) {
+// LoadByHash implements LoadByHashFunc.
+func (s *MemoryStore) LoadByHash(_ context.Context, hash string) (Key, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	keyID, ok := s.byHash[hash]
@@ -76,7 +87,8 @@ func (s *memoryStore) GetByHash(_ context.Context, hash string) (Key, error) {
 	return cloneKey(s.byID[keyID]), nil
 }
 
-func (s *memoryStore) List(_ context.Context, f Filter) ([]Key, error) {
+// List implements ListFunc.
+func (s *MemoryStore) List(_ context.Context, f Filter) ([]Key, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Key, 0, len(s.byID))
@@ -89,28 +101,56 @@ func (s *memoryStore) List(_ context.Context, f Filter) ([]Key, error) {
 		}
 		out = append(out, cloneKey(k))
 	}
-	// UUIDv7 ids are time-ordered, so byte-descending is newest first.
-	slices.SortFunc(out, func(a, b Key) int {
-		return bytes.Compare(b.ID[:], a.ID[:])
-	})
+	sortNewestFirst(out)
 	return out, nil
 }
 
-func (s *memoryStore) Revoke(_ context.Context, keyID id.UUID, at time.Time) error {
+// sortNewestFirst orders by descending id bytes; UUIDv7 ids are
+// time-ordered, so that is newest first.
+func sortNewestFirst(keys []Key) {
+	slices.SortFunc(keys, func(a, b Key) int {
+		return bytes.Compare(b.ID[:], a.ID[:])
+	})
+}
+
+// Revoke implements RevokeFunc.
+func (s *MemoryStore) Revoke(_ context.Context, keyID id.UUID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.update(keyID, func(k *Key) { k.RevokedAt = at })
 }
 
-func (s *memoryStore) Expire(_ context.Context, keyID id.UUID, at time.Time) error {
+// Expire sets a key's expiry. No operation needs it — Rotate expires the
+// old key through Swap — but a backend owns the column, so tests and
+// administrative tools can set it directly.
+func (s *MemoryStore) Expire(_ context.Context, keyID id.UUID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.update(keyID, func(k *Key) { k.ExpiresAt = at })
 }
 
-func (s *memoryStore) Touch(_ context.Context, keyID id.UUID, at time.Time) error {
+// Touch implements TouchFunc.
+func (s *MemoryStore) Touch(_ context.Context, keyID id.UUID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.update(keyID, func(k *Key) { k.LastUsedAt = at })
 }
 
-func (s *memoryStore) update(keyID id.UUID, fn func(*Key)) error {
+// Swap implements SwapFunc: both writes land under one lock, the in-memory
+// stand-in for the single transaction a durable backend uses.
+func (s *MemoryStore) Swap(_ context.Context, oldID id.UUID, oldExpiresAt time.Time, replacement Key) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.byID[oldID]; !ok {
+		return ErrNotFound
+	}
+	if err := s.save(replacement); err != nil {
+		return err
+	}
+	return s.update(oldID, func(k *Key) { k.ExpiresAt = oldExpiresAt })
+}
+
+func (s *MemoryStore) update(keyID id.UUID, fn func(*Key)) error {
 	k, ok := s.byID[keyID]
 	if !ok {
 		return ErrNotFound

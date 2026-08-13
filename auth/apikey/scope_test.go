@@ -23,75 +23,84 @@ func tenantCtx(tenant string) context.Context {
 	return context.WithValue(context.Background(), tenantCtxKey{}, tenant)
 }
 
-func newScoped(t *testing.T) *apikey.Manager {
+func newScoped(t *testing.T) (apikey.Config, *apikey.MemoryStore) {
 	t.Helper()
-	return apikey.New(apikey.NewMemoryStore(), apikey.WithScope(scopeHook))
+	return mustConfig(t, apikey.WithScope(scopeHook)), apikey.NewMemoryStore()
 }
 
 func TestScope_CreateStampsTenant(t *testing.T) {
 	t.Parallel()
-	mgr := newScoped(t)
+	cfg, mem := newScoped(t)
 
-	k, _, err := mgr.Create(tenantCtx("t1"), apikey.CreateParams{Subject: "u1"})
+	k, _, err := apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	require.NoError(t, err)
 	assert.Equal(t, "t1", k.Tenant)
 
-	// Matching explicit tenant is fine; conflicting one is not.
-	_, _, err = mgr.Create(tenantCtx("t1"), apikey.CreateParams{Subject: "u1", Tenant: "t1"})
+	_, _, err = apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1", Tenant: "t1"}, mem.Save)
 	assert.NoError(t, err)
-	_, _, err = mgr.Create(tenantCtx("t1"), apikey.CreateParams{Subject: "u1", Tenant: "t2"})
+	_, _, err = apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1", Tenant: "t2"}, mem.Save)
 	assert.ErrorIs(t, err, apikey.ErrTenantMismatch)
 }
 
 func TestScope_FailClosed(t *testing.T) {
 	t.Parallel()
-	// Empty tenant from the hook.
-	mgr := newScoped(t)
-	_, _, err := mgr.Create(context.Background(), apikey.CreateParams{Subject: "u1"})
+	cfg, mem := newScoped(t)
+
+	_, _, err := apikey.Create(context.Background(), cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	assert.ErrorIs(t, err, apikey.ErrScope)
-	_, err = mgr.List(context.Background(), apikey.Filter{})
+	_, err = apikey.List(context.Background(), cfg, apikey.Filter{}, mem.List)
 	assert.ErrorIs(t, err, apikey.ErrScope)
 
-	// Hook error.
 	boom := errors.New("boom")
-	failing := apikey.New(apikey.NewMemoryStore(), apikey.WithScope(
-		func(context.Context) (string, error) { return "", boom }))
-	_, _, err = failing.Create(context.Background(), apikey.CreateParams{Subject: "u1"})
+	failing := mustConfig(t, apikey.WithScope(func(context.Context) (string, error) { return "", boom }))
+	_, _, err = apikey.Create(context.Background(), failing, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	assert.ErrorIs(t, err, apikey.ErrScope)
 	assert.ErrorIs(t, err, boom)
 }
 
 func TestScope_CrossTenantReadsAsNotFound(t *testing.T) {
 	t.Parallel()
-	mgr := newScoped(t)
-	k, _, err := mgr.Create(tenantCtx("t1"), apikey.CreateParams{Subject: "u1"})
+	cfg, mem := newScoped(t)
+	k, _, err := apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	require.NoError(t, err)
 
-	_, err = mgr.Get(tenantCtx("t2"), k.ID)
+	_, err = apikey.Get(tenantCtx("t2"), cfg, k.ID, mem.Load)
 	assert.ErrorIs(t, err, apikey.ErrNotFound)
-	assert.ErrorIs(t, mgr.Revoke(tenantCtx("t2"), k.ID), apikey.ErrNotFound)
-	_, _, err = mgr.Rotate(tenantCtx("t2"), k.ID, time.Hour)
+	assert.ErrorIs(t, apikey.Revoke(tenantCtx("t2"), cfg, k.ID, mem.Load, mem.Revoke), apikey.ErrNotFound)
+	_, _, err = apikey.Rotate(tenantCtx("t2"), cfg, k.ID, time.Hour, mem.Load, mem.Swap)
 	assert.ErrorIs(t, err, apikey.ErrNotFound)
 
-	// Same tenant still works.
-	_, err = mgr.Get(tenantCtx("t1"), k.ID)
+	_, err = apikey.Get(tenantCtx("t1"), cfg, k.ID, mem.Load)
 	assert.NoError(t, err)
 }
 
 func TestScope_ListConfined(t *testing.T) {
 	t.Parallel()
-	mgr := newScoped(t)
-	_, _, err := mgr.Create(tenantCtx("t1"), apikey.CreateParams{Subject: "u1"})
+	cfg, mem := newScoped(t)
+	_, _, err := apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
 	require.NoError(t, err)
-	_, _, err = mgr.Create(tenantCtx("t2"), apikey.CreateParams{Subject: "u2"})
+	_, _, err = apikey.Create(tenantCtx("t2"), cfg, apikey.CreateParams{Subject: "u2"}, mem.Save)
 	require.NoError(t, err)
 
-	keys, err := mgr.List(tenantCtx("t1"), apikey.Filter{})
+	keys, err := apikey.List(tenantCtx("t1"), cfg, apikey.Filter{}, mem.List)
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
 	assert.Equal(t, "t1", keys[0].Tenant)
 
-	// A conflicting explicit filter tenant is rejected, not silently overridden.
-	_, err = mgr.List(tenantCtx("t1"), apikey.Filter{Tenant: "t2"})
+	_, err = apikey.List(tenantCtx("t1"), cfg, apikey.Filter{Tenant: "t2"}, mem.List)
 	assert.ErrorIs(t, err, apikey.ErrTenantMismatch)
+}
+
+// TestScope_RotateKeepsOwningTenant pins that a rotation performed under a
+// scoped Config re-stamps the replacement with the old key's tenant rather
+// than resolving the hook a second time.
+func TestScope_RotateKeepsOwningTenant(t *testing.T) {
+	t.Parallel()
+	cfg, mem := newScoped(t)
+	old, _, err := apikey.Create(tenantCtx("t1"), cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
+	require.NoError(t, err)
+
+	fresh, _, err := apikey.Rotate(tenantCtx("t1"), cfg, old.ID, time.Hour, mem.Load, mem.Swap)
+	require.NoError(t, err)
+	assert.Equal(t, "t1", fresh.Tenant)
 }
