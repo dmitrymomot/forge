@@ -26,6 +26,14 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
 - **One of three idioms:** stateless **free-funcs** (`render`, `htmx`) ·
   `New(...Option)` with an env-loadable `Config` + `DefaultConfig` +
   `Validate` (`logger`, `httpserver`) · a `supervisor.Service`.
+- **Invalid options are reported, never panicked.** An `Option` records the
+  problem on the config (`c.errs = append(...)`) instead of panicking, and the
+  constructor returns `errors.Join(c.errs...)`. Errors accumulate, so one call
+  names every bad value instead of stopping at the first. A `supervisor.Service`
+  is the one exception: its `New` cannot fail, so `Run` returns the joined
+  errors before doing any I/O. Panic only where a value is a schema mistake the
+  compiler could almost have caught — a metric registered twice under two
+  kinds, a label-count mismatch — never for a value a deployment supplies.
 - **Anatomy:** `doc.go` (runnable example) · `config.go` · `options.go`
   (`type Option func(*config)`, **never** builders) · `errors.go`
   (`errors.Is`-matchable single-line sentinels) · impl.
@@ -144,6 +152,13 @@ health checks only; everything else outside `data/*` stays stdlib.
   slice of a feature with a single consumer is never a package; it folds
   into its product as internal code. (This is why webhook signing lives
   inside `webhook`, not beside it.)
+- **The layout rules are enforced by `tests/architecture_test.go`**, which reads
+  `go list -json` and fails the build on a `core/` package that names another
+  domain or an unlisted third party, a `crypto/` package above `core/`, a
+  `data/` package that names a product domain, a third path level outside the
+  sanctioned isolator/suite/codegen set, a leaf directory that disagrees with
+  its package name, a duplicated leaf name, or a `testkit/` import outside a
+  test file. Adding a rule to prose means adding it there too.
 - **The roadmap lists only unbuilt packages.** `packages.md` is the backlog;
   the moment a package ships, delete its entry — a shipped package's `doc.go`
   / godoc is its reference, not the roadmap. The catalog carries no shipped
