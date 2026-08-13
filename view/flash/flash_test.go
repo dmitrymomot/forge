@@ -307,3 +307,15 @@ func TestLevel_Valid(t *testing.T) {
 	assert.False(t, flash.Level("script").Valid())
 	assert.False(t, flash.Level("").Valid())
 }
+
+// TestCookieStore_OversizeAfterEncodingStillReportsErrTooLarge covers the band where
+// base64 and the signature push a payload under MaxCookieBytes past the codec's
+// 4096-byte encoded limit: one errors.Is must catch both caps.
+func TestCookieStore_OversizeAfterEncodingStillReportsErrTooLarge(t *testing.T) {
+	s := newCookieStore(t)
+	err := s.Set(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil),
+		flash.Info(strings.Repeat("x", 3000)))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, flash.ErrTooLarge)
+}

@@ -158,3 +158,20 @@ func TestAudibleEmptyBodyStatusRewrite(t *testing.T) {
 	assert.Equal(t, "expired", rec.Body.String())
 	assert.Equal(t, "7", rec.Header().Get("Content-Length"))
 }
+
+// TestAudibleKeepsTheResponseControllerChain pins the Unwrap method: without it
+// http.ResponseController cannot reach Flush, SetWriteDeadline, or Hijack, and any
+// streaming handler under an htmx request loses the capability silently.
+func TestAudibleKeepsTheResponseControllerChain(t *testing.T) {
+	var isFlusher bool
+	var flushErr error
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, isFlusher = w.(http.Flusher)
+		w.WriteHeader(http.StatusOK)
+		flushErr = http.NewResponseController(w).Flush()
+	})
+
+	runAudible(t, h, true)
+	assert.NoError(t, flushErr)
+	assert.False(t, isFlusher, "the buffer must not satisfy Flusher directly; the controller resolves it via Unwrap")
+}

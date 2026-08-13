@@ -138,3 +138,22 @@ func TestStatusOf(t *testing.T) {
 	assert.Equal(t, 0, respond.StatusOf(errors.New("other")))
 	assert.Equal(t, 0, respond.StatusOf(nil))
 }
+
+// TestWithAddedHeaderJoinsWhatIsAlreadySet pins the difference from WithHeader: an
+// added value must not drop what an outer middleware already put on the response.
+func TestWithAddedHeaderJoinsWhatIsAlreadySet(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Add("Vary", "Accept-Encoding")
+	require.NoError(t, respond.Text("ok", respond.WithAddedHeader("Vary", "HX-Request")).Respond(rec, get()))
+
+	assert.Equal(t, []string{"Accept-Encoding", "HX-Request"}, rec.Header().Values("Vary"))
+}
+
+// TestWithHeaderReplacesWhatIsAlreadySet is the other half of the pair: Set means set.
+func TestWithHeaderReplacesWhatIsAlreadySet(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Add("Vary", "Accept-Encoding")
+	require.NoError(t, respond.Text("ok", respond.WithHeader("Vary", "HX-Request")).Respond(rec, get()))
+
+	assert.Equal(t, []string{"HX-Request"}, rec.Header().Values("Vary"))
+}

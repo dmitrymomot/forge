@@ -169,9 +169,19 @@ func (c *asyncCore) reportDrops() {
 	for _, d := range c.dests {
 		_ = d.Handle(context.Background(), rec.Clone())
 	}
-	if c.dropHook != nil {
-		c.dropHook(n)
+	c.callDropHook(n)
+}
+
+// callDropHook runs the WithDropHook receiver, absorbing a panic. The hook is
+// consumer code on a library-owned goroutine, so a panic there would be unrecovered
+// and take the process down — and the buffer only overflows under load, so it would
+// happen in production and never in a test.
+func (c *asyncCore) callDropHook(n int64) {
+	if c.dropHook == nil {
+		return
 	}
+	defer func() { _ = recover() }()
+	c.dropHook(n)
 }
 
 // close implements CloseFunc; NewAsync hands it out as a method value. Records enqueued by

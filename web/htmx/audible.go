@@ -121,6 +121,10 @@ type bufferedWriter struct {
 	wrote  bool
 }
 
+// Unwrap exposes the real writer so http.ResponseController can reach Flush,
+// SetWriteDeadline, and Hijack through the buffer.
+func (b *bufferedWriter) Unwrap() http.ResponseWriter { return b.ResponseWriter }
+
 func (b *bufferedWriter) WriteHeader(status int) {
 	if !b.wrote {
 		b.status = status

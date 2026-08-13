@@ -1,7 +1,11 @@
 package postgres
 
 import (
+	"context"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmitrymomot/forge/core/id"
 )
@@ -29,6 +33,40 @@ func RegisterIDTypes(m *pgtype.Map) {
 		[]pgtype.TryWrapEncodePlanFunc{tryWrapIDEncodePlan},
 		m.TryWrapEncodePlanFuncs...,
 	)
+}
+
+// afterConnectHook is pgxpool's per-connection callback.
+type afterConnectHook = func(context.Context, *pgx.Conn) error
+
+func registerIDTypesHook(_ context.Context, conn *pgx.Conn) error {
+	if conn == nil {
+		return nil
+	}
+	RegisterIDTypes(conn.TypeMap())
+	return nil
+}
+
+// chainAfterConnect returns a hook running first and then prev. A nil prev yields
+// first alone; a failing first skips prev.
+func chainAfterConnect(first, prev afterConnectHook) afterConnectHook {
+	if prev == nil {
+		return first
+	}
+	return func(ctx context.Context, conn *pgx.Conn) error {
+		if err := first(ctx, conn); err != nil {
+			return err
+		}
+		return prev(ctx, conn)
+	}
+}
+
+// chainIDTypeRegistration installs RegisterIDTypes on every new connection, keeping
+// whatever AfterConnect hook is already set. It runs after the WithPoolConfig escape
+// hatch, whose documented purpose includes setting an AfterConnect hook: assigning
+// the field there would otherwise drop the registration and silently return every
+// id.UUID bind to the canonical-string path.
+func chainIDTypeRegistration(poolCfg *pgxpool.Config) {
+	poolCfg.AfterConnect = chainAfterConnect(registerIDTypesHook, poolCfg.AfterConnect)
 }
 
 // tryWrapIDEncodePlan converts an id.UUID value to the [16]byte pgx's uuid codec

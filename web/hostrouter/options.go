@@ -76,6 +76,13 @@ type LookupFunc func(ctx context.Context, host string) (http.Handler, error)
 // customer domain. An unknown host reaches the fallback; a failed lookup reaches
 // WithLookupErrorHandler. New reports a nil lookup as ErrNilLookup. Last wins.
 //
+// Put a cache in front of the store. The Router calls the lookup for every request
+// whose Host matches no pattern, and a Host header is attacker-controlled and
+// unauthenticated, so a scanner sweeping random hosts otherwise becomes one store
+// round-trip per request. Read through resilience/cache — caching the misses too —
+// and wrap the fill in resilience/singleflight so a burst on one cold host makes one
+// query rather than one per request.
+//
 //	router, err := hostrouter.New(
 //		hostrouter.WithHost("*.example.com", tenantMux),
 //		hostrouter.WithLookup(func(ctx context.Context, host string) (http.Handler, error) {

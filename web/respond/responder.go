@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/dmitrymomot/forge/ops/logger"
+	"github.com/dmitrymomot/forge/web/middleware"
 	"github.com/dmitrymomot/forge/web/problem"
 )
 
@@ -55,6 +56,12 @@ func New(opts ...ResponderOption) *Responder {
 // Wrap turns a Handler into an http.Handler: it calls h, runs the response's
 // WithBefore side effects, then writes the response. An error at any of those steps
 // reaches Fail instead, so nothing is half-written.
+//
+// A Respond that fails is split by whether the status was already committed. The
+// transactional writers (JSON, HTML, Templ) encode into a buffer first and write
+// nothing on failure, so that error still reaches Fail and the client gets a real
+// status instead of a bare 200 with an empty body. A streaming writer that failed
+// mid-body has already committed, so the error is only logged.
 func (rs *Responder) Wrap(h Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response, err := h(r)
@@ -66,13 +73,18 @@ func (rs *Responder) Wrap(h Handler) http.Handler {
 			rs.Fail(w, r, ErrNoResponse)
 			return
 		}
+		rw := middleware.WrapWriter(w)
 		if runner, ok := response.(beforeRunner); ok {
-			if err := runner.runBefore(w); err != nil {
-				rs.Fail(w, r, fmt.Errorf("respond: side effect failed: %w", err))
+			if err := runner.runBefore(rw); err != nil {
+				rs.Fail(rw, r, fmt.Errorf("respond: side effect failed: %w", err))
 				return
 			}
 		}
-		if err := response.Respond(w, r); err != nil {
+		if err := response.Respond(rw, r); err != nil {
+			if !rw.Wrote() {
+				rs.Fail(rw, r, fmt.Errorf("respond: writing the response failed: %w", err))
+				return
+			}
 			rs.logger.ErrorContext(r.Context(), "response failed after it started",
 				slog.String("path", r.URL.Path),
 				slog.String("error", err.Error()))

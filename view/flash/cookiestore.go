@@ -1,6 +1,7 @@
 package flash
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -50,6 +51,10 @@ func NewCookieStore(codec *cookie.Codec, opts ...Option) (*CookieStore, error) {
 // Set stages msgs for the next request. Calling it twice on one response replaces
 // rather than appends — pass every message in one call. Messages with empty text are
 // dropped, and a call left with nothing to say writes no cookie.
+//
+// A payload too large for a cookie always reports ErrTooLarge, whichever cap catches
+// it: base64 and the signature expand the message, so one that clears MaxCookieBytes
+// can still overflow the codec's 4096-byte encoded limit.
 func (s *CookieStore) Set(w http.ResponseWriter, _ *http.Request, msgs ...Message) error {
 	msgs = withText(msgs)
 	if len(msgs) == 0 {
@@ -59,7 +64,11 @@ func (s *CookieStore) Set(w http.ResponseWriter, _ *http.Request, msgs ...Messag
 	if len(raw) > MaxCookieBytes {
 		return fmt.Errorf("%w: %d bytes exceeds the %d-byte flash cookie cap", ErrTooLarge, len(raw), MaxCookieBytes)
 	}
-	return s.codec.SetSigned(w, s.name, raw, cookie.WithWriteMaxAge(s.lifetime))
+	err := s.codec.SetSigned(w, s.name, raw, cookie.WithWriteMaxAge(s.lifetime))
+	if errors.Is(err, cookie.ErrTooLarge) {
+		return fmt.Errorf("%w: %v", ErrTooLarge, err)
+	}
+	return err
 }
 
 // Take returns the messages the previous response staged and deletes the cookie. A

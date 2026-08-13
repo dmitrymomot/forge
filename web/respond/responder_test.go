@@ -209,3 +209,36 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 	rs := respond.New(respond.WithProblem(nil), respond.WithLogger(nil))
 	assert.NotPanics(t, func() { call(t, rs.NotFound(), get()) })
 }
+
+// TestRespondFailureBeforeCommitReachesFail covers the transactional writers: JSON,
+// HTML, and Templ encode into a buffer and write nothing on failure, so the client
+// must get a real status rather than the bare 200 net/http commits on return.
+func TestRespondFailureBeforeCommitReachesFail(t *testing.T) {
+	rs := respond.New(respond.WithProblem(problem.JSON(problem.WithStatus(http.StatusInternalServerError))))
+	h := rs.Wrap(func(*http.Request) (respond.Response, error) {
+		return respond.JSON(map[string]any{"c": make(chan int)}), nil
+	})
+
+	rec := call(t, h, get())
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "application/problem+json")
+}
+
+// TestRespondFailureAfterCommitOnlyLogs is the other half: once the status is on the
+// wire there is nothing left to answer with, so the error is logged and not re-sent.
+func TestRespondFailureAfterCommitOnlyLogs(t *testing.T) {
+	var buf bytes.Buffer
+	rs := newResponder(t, respond.WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+	h := rs.Wrap(func(*http.Request) (respond.Response, error) {
+		return respond.Raw(func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusTeapot)
+			_, _ = w.Write([]byte("partial"))
+			return errBoom
+		}), nil
+	})
+
+	rec := call(t, h, get())
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	assert.Equal(t, "partial", rec.Body.String())
+	assert.Contains(t, buf.String(), "response failed after it started")
+}

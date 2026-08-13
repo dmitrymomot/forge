@@ -9,6 +9,7 @@ import (
 // the body, and the side effects that must land before the status is committed.
 type config struct {
 	header http.Header
+	added  http.Header
 	before []func(http.ResponseWriter) error
 	status int
 }
@@ -40,13 +41,15 @@ func WithHeader(name, value string) Option {
 	}
 }
 
-// WithAddedHeader appends a value for name rather than replacing it.
+// WithAddedHeader appends a value for name rather than replacing it, including any
+// value an outer middleware already set — a Vary added here joins the existing Vary
+// instead of dropping it.
 func WithAddedHeader(name, value string) Option {
 	return func(c *config) {
-		if c.header == nil {
-			c.header = http.Header{}
+		if c.added == nil {
+			c.added = http.Header{}
 		}
-		c.header.Add(name, value)
+		c.added.Add(name, value)
 	}
 }
 
@@ -69,12 +72,16 @@ func WithBefore(fn func(w http.ResponseWriter) error) Option {
 }
 
 // applyHeaders writes the configured headers. It runs inside Respond, before the
-// underlying render call sets Content-Type and commits the status.
+// underlying render call sets Content-Type and commits the status. WithHeader
+// replaces what is already there, WithAddedHeader joins it.
 func (c config) applyHeaders(w http.ResponseWriter) {
-	if c.header == nil {
-		return
+	dst := w.Header()
+	maps.Copy(dst, c.header)
+	for name, values := range c.added {
+		for _, v := range values {
+			dst.Add(name, v)
+		}
 	}
-	maps.Copy(w.Header(), c.header)
 }
 
 // runBefore executes the registered side effects, stopping at the first failure.

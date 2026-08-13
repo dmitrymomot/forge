@@ -370,3 +370,26 @@ func TestAsyncExtractorValuesCapturedAtCallTime(t *testing.T) {
 	defer sinkMu.Unlock()
 	assert.Contains(t, sink.String(), "req done")
 }
+
+// TestAsyncDropHookPanicDoesNotKillTheWorker pins the recover around the hook: it is
+// consumer code on a library-owned goroutine, and the buffer only overflows under
+// load, so an unrecovered panic would take the process down in production alone.
+func TestAsyncDropHookPanicDoesNotKillTheWorker(t *testing.T) {
+	w := newGatedWriter()
+	log, closeLog, err := logger.NewAsync(
+		logger.WithOutput(w),
+		logger.WithAsyncBufferSize(1),
+		logger.WithDropHook(func(int64) { panic("hook blew up") }),
+	)
+	require.NoError(t, err)
+
+	log.Info("first")
+	<-w.entered
+	log.Info("second")
+	log.Info("third")
+
+	w.open()
+	require.NoError(t, closeLog(closeCtx(t)))
+	assert.Contains(t, w.String(), "first")
+	assert.Contains(t, w.String(), "dropped=1")
+}
