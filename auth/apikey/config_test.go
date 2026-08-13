@@ -68,6 +68,12 @@ func TestZeroConfig_RejectedByEveryOperation(t *testing.T) {
 		assert.ErrorIs(t, err, apikey.ErrConfig)
 	})
 
+	t.Run("Rotate", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := expose(apikey.Rotate(ctx, zero, someID, 0, loadsKey(apikey.Key{}), discardSwap))
+		assert.ErrorIs(t, err, apikey.ErrConfig)
+	})
+
 	t.Run("Verify", func(t *testing.T) {
 		t.Parallel()
 		_, err := apikey.Verify(ctx, zero, "key_whatever", loadsKeyByHash(apikey.Key{}), nil)

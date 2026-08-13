@@ -18,11 +18,8 @@ import (
 // WithTouchInterval(-1) does. Under guard.New every error collapses to an
 // opaque 401; the sentinels serve metrics and direct callers.
 func Verify(ctx context.Context, cfg Config, credential string, load LoadByHashFunc, touch TouchFunc) (guard.Identity, error) {
-	if err := cfg.check(); err != nil {
+	if err := cfg.ready("load", load == nil); err != nil {
 		return guard.Identity{}, err
-	}
-	if load == nil {
-		return guard.Identity{}, fmt.Errorf("%w: load", ErrNilEffect)
 	}
 	if !validKey(cfg.prefix, credential) {
 		return guard.Identity{}, ErrMalformedKey
@@ -45,7 +42,7 @@ func Verify(ctx context.Context, cfg Config, credential string, load LoadByHashF
 	if !k.ExpiresAt.IsZero() && !k.ExpiresAt.After(now) {
 		return guard.Identity{}, ErrKeyExpired
 	}
-	if touch != nil && cfg.touchDue(k, now) {
+	if touch != nil && cfg.touchDue(k.LastUsedAt, now) {
 		_ = touch(ctx, k.ID, now)
 	}
 	return identityOf(k), nil
@@ -60,11 +57,11 @@ func loadedRecordAuthenticates(k Key, hash string) bool {
 
 // touchDue reports whether the record's last-used stamp is stale enough to
 // rewrite. A negative interval disables tracking.
-func (c Config) touchDue(k Key, now time.Time) bool {
+func (c Config) touchDue(lastUsed, now time.Time) bool {
 	if c.touchInterval < 0 {
 		return false
 	}
-	return k.LastUsedAt.IsZero() || now.Sub(k.LastUsedAt) >= c.touchInterval
+	return lastUsed.IsZero() || now.Sub(lastUsed) >= c.touchInterval
 }
 
 func identityOf(k Key) guard.Identity {
@@ -90,11 +87,8 @@ func identityOf(k Key) guard.Identity {
 // unvalidated cfg and ErrNilEffect for a nil load; a nil touch disables
 // last-used tracking.
 func NewVerifier(cfg Config, load LoadByHashFunc, touch TouchFunc) (guard.Verifier, error) {
-	if err := cfg.check(); err != nil {
+	if err := cfg.ready("load", load == nil); err != nil {
 		return nil, err
-	}
-	if load == nil {
-		return nil, fmt.Errorf("%w: load", ErrNilEffect)
 	}
 	return guard.VerifierFunc(func(ctx context.Context, credential string) (guard.Identity, error) {
 		return Verify(ctx, cfg, credential, load, touch)

@@ -3,13 +3,13 @@ package apikey
 import "errors"
 
 var (
-	// ErrNotFound is returned by a Store when no record matches, and by
-	// management operations for other tenants' keys under WithScope (so
+	// ErrNotFound is reported by a load effect when no record matches, and
+	// by management operations for other tenants' keys under WithScope (so
 	// cross-tenant existence cannot be probed).
 	ErrNotFound = errors.New("apikey: record not found")
 
-	// ErrDuplicate is returned by Store.Create when a record with the same
-	// ID or Hash already exists.
+	// ErrDuplicate is reported by a SaveFunc when a record with the same ID
+	// or Hash already exists.
 	ErrDuplicate = errors.New("apikey: duplicate record")
 
 	// ErrMalformedKey rejects credentials failing prefix/length/checksum

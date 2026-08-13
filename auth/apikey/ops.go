@@ -19,11 +19,8 @@ import (
 // also writes whatever the application stores alongside the key.
 func Create(ctx context.Context, cfg Config, p CreateParams, save SaveFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if err := cfg.check(); err != nil {
+	if err := cfg.ready("save", save == nil); err != nil {
 		return Key{}, noPlaintext, err
-	}
-	if save == nil {
-		return Key{}, noPlaintext, fmt.Errorf("%w: save", ErrNilEffect)
 	}
 	if p.Subject == "" {
 		return Key{}, noPlaintext, ErrSubjectRequired
@@ -58,11 +55,8 @@ func mint(prefix string, p CreateParams, tenant string) (Key, string) {
 // Get returns one key record. With WithScope configured, other tenants'
 // keys read as ErrNotFound so existence cannot be probed across tenants.
 func Get(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc) (Key, error) {
-	if err := cfg.check(); err != nil {
+	if err := cfg.ready("load", load == nil); err != nil {
 		return Key{}, err
-	}
-	if load == nil {
-		return Key{}, fmt.Errorf("%w: load", ErrNilEffect)
 	}
 	tenant, err := cfg.scoped(ctx, "")
 	if err != nil {
@@ -81,11 +75,8 @@ func Get(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc) (Key, er
 // List returns keys matching f, newest first. With WithScope configured
 // the filter is confined to the scoped tenant.
 func List(ctx context.Context, cfg Config, f Filter, list ListFunc) ([]Key, error) {
-	if err := cfg.check(); err != nil {
+	if err := cfg.ready("list", list == nil); err != nil {
 		return nil, err
-	}
-	if list == nil {
-		return nil, fmt.Errorf("%w: list", ErrNilEffect)
 	}
 	tenant, err := cfg.scoped(ctx, f.Tenant)
 	if err != nil {
@@ -99,8 +90,8 @@ func List(ctx context.Context, cfg Config, f Filter, list ListFunc) ([]Key, erro
 // key cannot be un-revoked or rotated. The load effect resolves the record
 // first so a scoped caller cannot revoke another tenant's key.
 func Revoke(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc, revoke RevokeFunc) error {
-	if revoke == nil {
-		return fmt.Errorf("%w: revoke", ErrNilEffect)
+	if err := cfg.ready("revoke", revoke == nil); err != nil {
+		return err
 	}
 	if _, err := Get(ctx, cfg, keyID, load); err != nil {
 		return err
@@ -116,8 +107,8 @@ func Revoke(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc, revok
 // replacement's plaintext comes back wrapped, as Create's does.
 func Rotate(ctx context.Context, cfg Config, keyID id.UUID, grace time.Duration, load LoadFunc, swap SwapFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if swap == nil {
-		return Key{}, noPlaintext, fmt.Errorf("%w: swap", ErrNilEffect)
+	if err := cfg.ready("swap", swap == nil); err != nil {
+		return Key{}, noPlaintext, err
 	}
 	old, err := Get(ctx, cfg, keyID, load)
 	if err != nil {

@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/forge/auth/apikey"
+	"github.com/dmitrymomot/forge/core/random"
 )
-
-const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 func TestCreate_PlaintextLength(t *testing.T) {
 	t.Parallel()
@@ -31,7 +30,7 @@ func TestCreate_PlaintextBodyIsBase62(t *testing.T) {
 	t.Parallel()
 	_, plaintext := issueKey(t, mustConfig(t, apikey.WithPrefix("sk_live")), apikey.CreateParams{Subject: "u1"})
 	for _, c := range plaintext[len("sk_live_"):] {
-		assert.Contains(t, base62Alphabet, string(c))
+		assert.Contains(t, random.Alphanumeric, string(c))
 	}
 }
 
@@ -50,16 +49,23 @@ func TestCreate_PreviewIsPlaintextPrefix(t *testing.T) {
 }
 
 // TestCreate_RecordCarriesHashNotPlaintext pins the at-rest rule: the
-// record handed to the save effect never contains the secret.
+// record handed to the save effect never contains the secret, and the
+// hash it does carry is the one that resolves the credential.
 func TestCreate_RecordCarriesHashNotPlaintext(t *testing.T) {
 	t.Parallel()
+	cfg := mustConfig(t)
 	var stored apikey.Key
-	_, plaintext, err := expose(apikey.Create(context.Background(), mustConfig(t),
+	_, plaintext, err := expose(apikey.Create(context.Background(), cfg,
 		apikey.CreateParams{Subject: "u1"}, captureKey(&stored)))
 	require.NoError(t, err)
 
-	assert.NotContains(t, stored.Hash, plaintext[8:20])
+	assert.NotEqual(t, plaintext, stored.Hash)
+	assert.NotContains(t, stored.Hash, plaintext)
 	assert.Len(t, stored.Hash, 64)
+
+	identity, err := apikey.Verify(context.Background(), cfg, plaintext, loadsKeyByHash(stored), nil)
+	require.NoError(t, err)
+	assert.Equal(t, "u1", identity.Subject)
 }
 
 func TestCreate_StampsIDAndCreatedAt(t *testing.T) {

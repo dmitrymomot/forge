@@ -13,10 +13,10 @@ import (
 )
 
 // mustConfig builds a validated Config or fails the test.
-func mustConfig(t *testing.T, opts ...apikey.Option) apikey.Config {
-	t.Helper()
+func mustConfig(tb testing.TB, opts ...apikey.Option) apikey.Config {
+	tb.Helper()
 	cfg, err := apikey.NewConfig(opts...)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	return cfg
 }
 
@@ -43,7 +43,7 @@ func listsNothing(context.Context, apikey.Filter) ([]apikey.Key, error) {
 	return []apikey.Key{}, nil
 }
 
-// discardStamp is a RevokeFunc or TouchFunc that accepts every stamp.
+// discardStamp is a RevokeFunc that accepts every stamp.
 func discardStamp(context.Context, id.UUID, time.Time) error { return nil }
 
 // loadsKey returns a LoadFunc that answers every id with k.
@@ -63,12 +63,10 @@ func loadsKeyByHash(k apikey.Key) apikey.LoadByHashFunc {
 }
 
 // issueKey mints one real key so tests that need a valid credential do not
-// hand-build a checksum. The record never leaves the closure.
-func issueKey(t *testing.T, cfg apikey.Config, p apikey.CreateParams) (apikey.Key, string) {
-	t.Helper()
-	var stored apikey.Key
-	k, plaintext, err := expose(apikey.Create(context.Background(), cfg, p, captureKey(&stored)))
-	require.NoError(t, err)
-	require.Equal(t, k.ID, stored.ID)
+// hand-build a checksum.
+func issueKey(tb testing.TB, cfg apikey.Config, p apikey.CreateParams) (apikey.Key, string) {
+	tb.Helper()
+	k, plaintext, err := expose(apikey.Create(context.Background(), cfg, p, discardKey))
+	require.NoError(tb, err)
 	return k, plaintext
 }

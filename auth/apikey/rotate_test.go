@@ -17,19 +17,18 @@ import (
 func discardSwap(context.Context, id.UUID, time.Time, apikey.Key) error { return nil }
 
 // rotatable returns a live key suitable as the old side of a rotation.
-func rotatable(t *testing.T, cfg apikey.Config) apikey.Key {
-	t.Helper()
-	k, _ := issueKey(t, cfg, apikey.CreateParams{
-		Subject: "u1", Tenant: "t1", Name: "prod",
+// Rotate reads only these fields, so no credential needs minting.
+func rotatable() apikey.Key {
+	return apikey.Key{
+		ID: id.UUID{15: 1}, Subject: "u1", Tenant: "t1", Name: "prod",
 		Scopes: []string{"a"}, Meta: map[string]string{"m": "1"},
-	})
-	return k
+	}
 }
 
 func TestRotate_ReplacementInheritsIdentityFields(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 
 	fresh, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
 	require.NoError(t, err)
@@ -46,7 +45,7 @@ func TestRotate_ReplacementInheritsIdentityFields(t *testing.T) {
 func TestRotate_ReplacementDoesNotInheritExpiry(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	old.ExpiresAt = time.Now().UTC().Add(time.Hour)
 
 	fresh, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
@@ -70,7 +69,7 @@ func TestRotate_ReplacementIsADistinctCredential(t *testing.T) {
 func TestRotate_HandsBothWritesToSwap(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	grace := time.Hour
 	before := time.Now().UTC()
 
@@ -93,7 +92,7 @@ func TestRotate_HandsBothWritesToSwap(t *testing.T) {
 func TestRotate_ZeroGraceExpiresOldKeyImmediately(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	before := time.Now().UTC()
 
 	var swappedExpiry time.Time
@@ -109,7 +108,7 @@ func TestRotate_ZeroGraceExpiresOldKeyImmediately(t *testing.T) {
 func TestRotate_RejectsRevokedKey(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	old.RevokedAt = time.Now().UTC()
 
 	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
@@ -119,7 +118,7 @@ func TestRotate_RejectsRevokedKey(t *testing.T) {
 func TestRotate_RejectsExpiredKey(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	old.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 
 	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
@@ -131,7 +130,7 @@ func TestRotate_RejectsExpiredKey(t *testing.T) {
 func TestRotate_RejectsDeadKeyBeforeSwapping(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	old.RevokedAt = time.Now().UTC()
 	swapped := false
 
@@ -150,7 +149,7 @@ func TestRotate_RejectsDeadKeyBeforeSwapping(t *testing.T) {
 func TestRotate_FailedSwapReturnsNoPlaintext(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)
-	old := rotatable(t, cfg)
+	old := rotatable()
 	errSwap := errors.New("swap failed")
 
 	fresh, freshPlain, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old),

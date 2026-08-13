@@ -160,7 +160,7 @@ func TestScope_ListRejectsConflictingFilterTenant(t *testing.T) {
 // old key's tenant instead of resolving the hook a second time.
 func TestScope_RotateKeepsOwningTenant(t *testing.T) {
 	t.Parallel()
-	old, _ := issueKey(t, mustConfig(t), apikey.CreateParams{Subject: "u1", Tenant: "t1"})
+	old := rotatable()
 
 	fresh, _, err := expose(apikey.Rotate(tenantCtx("t1"), scopedConfig(t), old.ID, time.Hour,
 		loadsKey(old), discardSwap))

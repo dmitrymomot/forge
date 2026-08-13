@@ -8,15 +8,14 @@ import (
 
 // Config is the validated, stateless settings value every operation takes.
 // Build it once at wiring with NewConfig and pass it by value — it holds no
-// storage and no mutable state, so one Config serves every goroutine.
-//
-// The zero Config is invalid: its fields are unexported, so a Config that
-// did not come from NewConfig has an empty prefix and every operation
-// rejects it with ErrConfig.
+// storage and no mutable state, so one Config serves every goroutine. Only
+// NewConfig marks a Config valid, so a value from anywhere else (the zero
+// value included) is rejected with ErrConfig by every operation.
 type Config struct {
 	scope         func(context.Context) (string, error)
 	prefix        string
 	touchInterval time.Duration
+	valid         bool
 }
 
 // Option configures NewConfig.
@@ -32,6 +31,7 @@ func NewConfig(opts ...Option) (Config, error) {
 	if !validPrefix(cfg.prefix) {
 		return Config{}, fmt.Errorf("%w: invalid prefix %q", ErrConfig, cfg.prefix)
 	}
+	cfg.valid = true
 	return cfg, nil
 }
 
@@ -60,9 +60,15 @@ func WithTouchInterval(d time.Duration) Option {
 	return func(c *Config) { c.touchInterval = d }
 }
 
-func (c Config) check() error {
-	if c.prefix == "" {
+// ready reports why an operation cannot start: an unvalidated Config, or a
+// missing storage effect named by effect. One guard per operation keeps the
+// two checks in a fixed order everywhere.
+func (c Config) ready(effect string, missing bool) error {
+	if !c.valid {
 		return ErrConfig
+	}
+	if missing {
+		return fmt.Errorf("%w: %s", ErrNilEffect, effect)
 	}
 	return nil
 }

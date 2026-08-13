@@ -12,24 +12,13 @@ import (
 // map and mutex.
 func benchKey(b *testing.B) (apikey.Config, apikey.Key, string) {
 	b.Helper()
-	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
-	if err != nil {
-		b.Fatal(err)
-	}
-	var stored apikey.Key
-	_, secret, err := apikey.Create(context.Background(), cfg,
-		apikey.CreateParams{Subject: "u1"}, captureKey(&stored))
-	if err != nil {
-		b.Fatal(err)
-	}
-	return cfg, stored, secret.Expose()
+	cfg := mustConfig(b, apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	k, plaintext := issueKey(b, cfg, apikey.CreateParams{Subject: "u1"})
+	return cfg, k, plaintext
 }
 
 func BenchmarkCreate(b *testing.B) {
-	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
-	if err != nil {
-		b.Fatal(err)
-	}
+	cfg := mustConfig(b, apikey.WithPrefix("sk_live"))
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {

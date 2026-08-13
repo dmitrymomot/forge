@@ -41,24 +41,23 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
 - **Minimal dependencies, not zero:** buy the wire, build the ergonomics;
   isolate every real dep behind a subpackage.
 - **Storage-agnostic state — effects, not stores.** A package that persists
-  anything never owns a handle to storage. Split by who calls the operation:
-    - **The application calls it** (create, rotate, revoke, accept, approve):
-      free funcs taking a validated `Config` value plus the storage **effect
-      closures** that operation performs. The call site supplies each effect
-      inline, so a write rides the caller's transaction and carries columns the
-      package never models — the shape an sqlc-generated repository needs.
-    - **The framework calls it** (middleware, relays, `supervisor.Service`
-      loops, reapers): a construction-time seam, because a component built once
-      at wiring has no call site to pass a closure. Ship a `New<Seam>` factory
-      that curries the `Config` and effects into the consumer's seam type
-      (`apikey.NewVerifier` → `guard.Verifier`) so wiring needs no adapter.
-
-    Rules for the effect shape: name every effect type distinctly, even where
-    signatures match, so the compiler rejects a swapped argument. Cap an
-    operation at **two** effects — a third means one atomic write is hiding
-    (`apikey.SwapFunc` performs the whole rotation, which is why `Rotate` has
-    no compensation path). Missing effects return `ErrNilEffect`; the
-    zero-value `Config` returns `ErrConfig`. Core never imports a driver client.
+  anything never owns a handle to storage. Split by who calls the operation.
+  **The application calls it** (create, rotate, revoke, accept, approve): free
+  funcs taking a validated `Config` value plus the storage **effect closures**
+  that operation performs, supplied inline at the call site, so a write rides
+  the caller's transaction and carries columns the package never models — the
+  shape an sqlc-generated repository needs. **The framework calls it**
+  (middleware, relays, `supervisor.Service` loops, reapers): a
+  construction-time seam, because a component built once at wiring has no call
+  site to pass a closure — ship a `New<Seam>` factory currying the `Config` and
+  effects into the consumer's seam type (`apikey.NewVerifier` →
+  `guard.Verifier`) so wiring needs no adapter. Name every effect type
+  distinctly, even where signatures match, so the compiler rejects a swapped
+  argument. An operation needing three effects usually has one atomic write
+  hiding — check before adding the third (`apikey.SwapFunc` performs a whole
+  rotation, which is why `Rotate` needs no compensation path). Missing effects
+  return `ErrNilEffect`; the zero-value `Config` returns `ErrConfig`. Core
+  never imports a driver client.
 
 - **Secrets returned to callers are wrapped** in `redact.Secret[T]`
   (one-time plaintexts, recovery codes). It redacts through `fmt`,
@@ -193,12 +192,12 @@ health checks only; everything else outside `data/*` stays stdlib.
 
 ## Framework-wide seams
 
-- **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete
-    - atomic SetNX claim) is THE key-value seam. The shipped memory store is
-      LRU-evicting and unsuitable for sessions/idempotency, so those consumers
-      bring a durable Store implementation of their own (Redis is the usual
-      backend). Consumers: `session`, `idempotency`, `otp`, `lockout`,
-      server-side `flash`. No package defines a private byte-KV store.
+- **TTL-KV seam** — `resilience/cache.Store` (byte-level Get/Set-TTL/Delete +
+  atomic SetNX claim) is THE key-value seam. The shipped memory store is
+  LRU-evicting and unsuitable for sessions/idempotency, so those consumers
+  bring a durable Store implementation of their own (Redis is the usual
+  backend). Consumers: `session`, `idempotency`, `otp`, `lockout`,
+  server-side `flash`. No package defines a private byte-KV store.
 - **Counter seam** — windowed atomic counters (Incr-within-window) can't ride
   Get/Set KV without races. `ratelimit` owns the counter `Store` contract;
   `quota` and `lockout` share it. Two store seams total — byte-KV + counter.

@@ -66,11 +66,10 @@
 //
 // Multi-tenant applications confine management operations with WithScope;
 // verification needs no hook because the key record itself resolves the
-// tenant:
+// tenant. web/tenant carries the id and its Scope hook plugs straight in,
+// failing closed when no tenant is resolved:
 //
-//	cfg, err := apikey.NewConfig(apikey.WithScope(func(ctx context.Context) (string, error) {
-//		return tenantFromCtx(ctx), nil // fail-closed: empty or error aborts
-//	}))
+//	cfg, err := apikey.NewConfig(apikey.WithScope(tenant.Scope))
 //
 // Rotation overlaps old and new keys so consumers can deploy the new
 // plaintext before the old one dies. SwapFunc performs both writes as one
