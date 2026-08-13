@@ -7,37 +7,45 @@ import (
 	"github.com/dmitrymomot/forge/auth/apikey"
 )
 
+// benchKey mints one key outside the measured loop. The effects stay
+// trivial closures so the numbers measure this package, not a fixture's
+// map and mutex.
+func benchKey(b *testing.B) (apikey.Config, apikey.Key, string) {
+	b.Helper()
+	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	if err != nil {
+		b.Fatal(err)
+	}
+	var stored apikey.Key
+	_, secret, err := apikey.Create(context.Background(), cfg,
+		apikey.CreateParams{Subject: "u1"}, captureKey(&stored))
+	if err != nil {
+		b.Fatal(err)
+	}
+	return cfg, stored, secret.Expose()
+}
+
 func BenchmarkCreate(b *testing.B) {
 	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
 	if err != nil {
 		b.Fatal(err)
 	}
-	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save); err != nil {
+		if _, _, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, discardKey); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-// BenchmarkVerifyHit measures the steady-state verify path with touching
-// disabled.
 func BenchmarkVerifyHit(b *testing.B) {
-	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
-	if err != nil {
-		b.Fatal(err)
-	}
-	mem := apikey.NewMemoryStore()
+	cfg, k, plaintext := benchKey(b)
+	load := loadsKeyByHash(k)
 	ctx := context.Background()
-	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
-	if err != nil {
-		b.Fatal(err)
-	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := apikey.Verify(ctx, cfg, plaintext, mem.LoadByHash, mem.Touch); err != nil {
+		if _, err := apikey.Verify(ctx, cfg, plaintext, load, nil); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -47,20 +55,12 @@ func BenchmarkVerifyHit(b *testing.B) {
 // guard.Verifier, so the factory's closure cost is visible against
 // BenchmarkVerifyHit.
 func BenchmarkVerifyHitCurried(b *testing.B) {
-	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	cfg, k, plaintext := benchKey(b)
+	verifier, err := apikey.NewVerifier(cfg, loadsKeyByHash(k), nil)
 	if err != nil {
 		b.Fatal(err)
 	}
-	mem := apikey.NewMemoryStore()
 	ctx := context.Background()
-	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
-	if err != nil {
-		b.Fatal(err)
-	}
-	verifier, err := apikey.NewVerifier(cfg, mem.LoadByHash, mem.Touch)
-	if err != nil {
-		b.Fatal(err)
-	}
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := verifier.Verify(ctx, plaintext); err != nil {
@@ -72,20 +72,13 @@ func BenchmarkVerifyHitCurried(b *testing.B) {
 // BenchmarkVerifyMalformedReject measures the DoS-relevant path: checksum
 // rejection with no storage access. Target: zero allocations.
 func BenchmarkVerifyMalformedReject(b *testing.B) {
-	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
-	if err != nil {
-		b.Fatal(err)
-	}
-	mem := apikey.NewMemoryStore()
-	ctx := context.Background()
-	_, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, mem.Save)
-	if err != nil {
-		b.Fatal(err)
-	}
+	cfg, k, plaintext := benchKey(b)
+	load := loadsKeyByHash(k)
 	bad := plaintext[:len(plaintext)-1] + "!"
+	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := apikey.Verify(ctx, cfg, bad, mem.LoadByHash, mem.Touch); err == nil {
+		if _, err := apikey.Verify(ctx, cfg, bad, load, nil); err == nil {
 			b.Fatal("expected rejection")
 		}
 	}

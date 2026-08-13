@@ -3,13 +3,14 @@
 // malformed credentials before any storage access, SHA-256 hashes at rest,
 // and the plaintext returned exactly once at creation.
 //
-// The package is stateless. Every operation is a free function over a
-// validated Config plus the storage effects it performs — SaveFunc,
-// LoadFunc, LoadByHashFunc, ListFunc, RevokeFunc, TouchFunc, SwapFunc. The
-// caller supplies each effect as a closure at the call site, so a write can
-// ride the caller's transaction and carry columns this package never sees.
-// The effects are distinct named types even where signatures match, so the
-// compiler rejects a swapped argument.
+// The package is stateless and ships no storage of any kind. Every
+// operation is a free function over a validated Config plus the storage
+// effects it performs — SaveFunc, LoadFunc, LoadByHashFunc, ListFunc,
+// RevokeFunc, TouchFunc, SwapFunc. The caller supplies each effect as a
+// closure at the call site, so a write can ride the caller's transaction
+// and carry columns this package never sees. The effects are distinct
+// named types even where signatures match, so the compiler rejects a
+// swapped argument.
 //
 // Personal and tenant-wide keys share one model: Subject is the principal
 // the key acts as — a user id for personal keys, or a tenant or
@@ -37,8 +38,15 @@
 //		...
 //	})
 //
-// Show plaintext once; key.Preview ("sk_live_x7Kp") is what dashboards
-// keep. Only the SHA-256 of the plaintext is stored.
+// Create returns the plaintext wrapped in redact.Secret: it renders as
+// "REDACTED" through fmt, encoding/json, and log/slog, so it cannot reach
+// a log line or an error body by accident. Expose is the only way to read
+// it, and the caller shows it exactly once:
+//
+//	render(w, plaintext.Expose())
+//
+// Afterwards only key.Preview ("sk_live_x7Kp") remains for dashboards, and
+// only the SHA-256 of the plaintext is stored.
 //
 // Middleware wiring curries the same logic into the guard.Verifier seam:
 //
@@ -46,12 +54,12 @@
 //	authn := guard.New(verifier, guard.WithExtractors(guard.BearerHeader(), guard.Header("X-API-Key")))
 //	mux.Handle("POST /api/deploy", authn(deployHandler))
 //
-// MemoryStore backs tests and development; its methods have the effect
-// signatures, so they pass as method values:
+// Tests need no fixture from this package: an effect is a closure, so a
+// test states the one behaviour it needs inline, and a test that needs
+// state across calls brings its own map.
 //
-//	mem := apikey.NewMemoryStore()
-//	key, plaintext, err := apikey.Create(ctx, cfg, params, mem.Save)
-//	identity, err := apikey.Verify(ctx, cfg, plaintext, mem.LoadByHash, mem.Touch)
+//	_, _, err := apikey.Create(ctx, cfg, params,
+//		func(context.Context, apikey.Key) error { return apikey.ErrDuplicate })
 //
 // Scopes are carried into guard.Identity.Scopes but never enforced here —
 // enforcement belongs to the authorization seam (auth/rbac).
@@ -68,5 +76,5 @@
 // plaintext before the old one dies. SwapFunc performs both writes as one
 // transaction, so a failed rotation leaves no orphan replacement:
 //
-//	fresh, plaintext, err := apikey.Rotate(ctx, cfg, key.ID, 24*time.Hour, mem.Load, mem.Swap)
+//	fresh, plaintext, err := apikey.Rotate(ctx, cfg, key.ID, 24*time.Hour, repo.GetAPIKey, repo.RotateAPIKey)
 package apikey
