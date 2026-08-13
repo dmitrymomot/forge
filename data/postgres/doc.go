@@ -44,6 +44,11 @@
 // IsSerializationFailure match the underlying *pgconn.PgError (or pgx.ErrNoRows) so
 // call sites branch without importing pgconn or matching SQLSTATE strings.
 //
+// Identifiers: Open installs RegisterIDTypes on every pooled connection, so an
+// id.UUID binds as its raw 16 bytes instead of being formatted to the canonical
+// string and parsed back on every query. Call it yourself only for a *pgx.Conn you
+// built outside this package.
+//
 // Sentinel errors returned by this package — ErrInvalidConfig, ErrConnect,
 // ErrHealthcheck — are single-line and matchable with errors.Is.
 //

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 )
@@ -65,7 +66,11 @@ func Open(ctx context.Context, opts ...Option) (*pgxpool.Pool, error) {
 		poolCfg.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
 	}
 
-	// Escape hatch runs last, after the Config overlay.
+	poolCfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		RegisterIDTypes(conn.TypeMap())
+		return nil
+	}
+
 	if cfg.poolConfig != nil {
 		cfg.poolConfig(poolCfg)
 	}
