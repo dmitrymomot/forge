@@ -44,7 +44,7 @@ func NewAsync(opts ...Option) (*slog.Logger, CloseFunc, error) {
 	if bufSize == 0 {
 		bufSize = defaultAsyncBufferSize
 	}
-	ah := newAsyncHandler(combine(dests), dests, bufSize)
+	ah := newAsyncHandler(combine(dests), dests, bufSize, c.dropHook)
 	var top slog.Handler = ah
 	if len(c.extractors) > 0 {
 		top = newContextHandler(top, c.extractors...)
@@ -63,13 +63,14 @@ type asyncItem struct {
 // asyncCore is the state shared by an asyncHandler and every handler derived from it via
 // WithAttrs/WithGroup: one queue, one worker, one drop counter, one lifecycle.
 type asyncCore struct {
-	ch      chan asyncItem
-	stop    chan struct{}
-	done    chan struct{}
-	dests   []slog.Handler // construction-time destinations; each receives drop reports
-	dropped atomic.Int64
-	closed  atomic.Bool
-	once    sync.Once
+	ch       chan asyncItem
+	stop     chan struct{}
+	done     chan struct{}
+	dropHook func(int64)
+	dests    []slog.Handler
+	dropped  atomic.Int64
+	once     sync.Once
+	closed   atomic.Bool
 }
 
 // asyncHandler enqueues records for the shared worker. Enabled delegates to the wrapped
@@ -80,12 +81,13 @@ type asyncHandler struct {
 }
 
 // newAsyncHandler builds the handler and starts the single worker goroutine.
-func newAsyncHandler(base slog.Handler, dests []slog.Handler, bufSize int) *asyncHandler {
+func newAsyncHandler(base slog.Handler, dests []slog.Handler, bufSize int, dropHook func(int64)) *asyncHandler {
 	core := &asyncCore{
-		ch:    make(chan asyncItem, bufSize),
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
-		dests: dests,
+		ch:       make(chan asyncItem, bufSize),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		dests:    dests,
+		dropHook: dropHook,
 	}
 	go core.run()
 	return &asyncHandler{core: core, base: base}
@@ -154,7 +156,9 @@ func (c *asyncCore) process(item asyncItem) {
 // reportDrops emits the accumulated drop tally as a Warn record to every construction-time
 // destination directly, bypassing per-destination level gating: a dropped-records warning is a
 // system-health signal, so it stays visible even when every destination is configured above
-// Warn. Runs on the worker goroutine when it catches up.
+// Warn. The WithDropHook receiver, when registered, is called with the same tally so a
+// metrics counter sees drops without parsing log records. Runs on the worker goroutine when
+// it catches up.
 func (c *asyncCore) reportDrops() {
 	n := c.dropped.Swap(0)
 	if n == 0 {
@@ -164,6 +168,9 @@ func (c *asyncCore) reportDrops() {
 	rec.AddAttrs(slog.Int64("dropped", n))
 	for _, d := range c.dests {
 		_ = d.Handle(context.Background(), rec.Clone())
+	}
+	if c.dropHook != nil {
+		c.dropHook(n)
 	}
 }
 

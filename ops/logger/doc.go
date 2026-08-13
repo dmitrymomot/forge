@@ -9,14 +9,20 @@
 //
 //	log, err := logger.New(
 //		logger.WithFormat(logger.FormatJSON),
-//		logger.WithContextExtractors(reqIDExtractor),
+//		logger.WithContextExtractors(
+//			logger.ContextValue[string](requestIDKey, "request_id"),
+//		),
 //	)
+//
+// ContextValue covers the common "read one typed value under one key" extractor; write
+// a ContextExtractor by hand when the value needs shaping first.
 //
 // NewAsync is New with a buffered async core: log calls never block on the sink — they
 // extract context attributes, clone the record, and enqueue; a single worker goroutine
 // formats and writes to every destination. When the buffer (default 8192 records,
 // WithAsyncBufferSize) is full, new records are dropped, counted, and later reported as
-// a Warn record ("logger: dropped log records", dropped=N). The single worker goroutine
+// a Warn record ("logger: dropped log records", dropped=N); WithDropHook delivers the
+// same tally to a func, which is how a metrics counter sees drops. The single worker goroutine
 // runs until the returned CloseFunc is called; CloseFunc drains the buffer and must run on
 // shutdown, before flushing downstream sinks, or the goroutine leaks. Records logged after
 // Close are silently dropped, and records buffered at crash/os.Exit are lost. Keep the
