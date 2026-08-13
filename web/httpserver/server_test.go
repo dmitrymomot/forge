@@ -31,6 +31,44 @@ func TestName_Derivation(t *testing.T) {
 	assert.Equal(t, "http "+ln.Addr().String(), s.Name())
 }
 
+func TestAddr_BeforeRun(t *testing.T) {
+	assert.Equal(t, ":8080", httpserver.New(noopHandler()).Addr())
+	assert.Equal(t, ":9090", httpserver.New(noopHandler(), httpserver.WithAddr(":9090")).Addr())
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+	s := httpserver.New(noopHandler(), httpserver.WithListener(ln))
+	assert.Equal(t, ln.Addr().String(), s.Addr())
+}
+
+// TestAddr_ReportsTheKernelChosenPort is the reason Addr exists: with ":0" the port
+// is unknown until the listener binds, so a caller cannot build a URL from Config.
+func TestAddr_ReportsTheKernelChosenPort(t *testing.T) {
+	s := httpserver.New(noopHandler(), httpserver.WithAddr("127.0.0.1:0"))
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return s.Addr() != "127.0.0.1:0"
+	}, time.Second, 5*time.Millisecond)
+
+	host, port, err := net.SplitHostPort(s.Addr())
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1", host)
+	assert.NotEqual(t, "0", port)
+
+	resp, err := http.Get("http://" + s.Addr())
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 // startServed runs s.Run in a goroutine on a 127.0.0.1:0 listener and returns the
 // bound base URL, the channel carrying Run's result, and a cancel func. cancel is
 // also registered with t.Cleanup so a failing test never leaks the server goroutine.
