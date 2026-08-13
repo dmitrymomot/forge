@@ -43,16 +43,6 @@ Deps: `web/httpserver`.
 
 ---
 
-**view/flash**
-
-One-shot messages surviving a redirect over a pluggable Store:
-signed-cookie store built in (composes `cookie`); server-side store rides
-`cache.Store`. For PRG and htmx flows.
-
-Deps: `web/cookie`, `resilience/cache`.
-
----
-
 **view/form**
 
 Whole-form decode into structs (reflection confined to `structfields`),
