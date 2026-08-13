@@ -56,7 +56,16 @@ func (p listedPackage) allImports() []string {
 
 func (p listedPackage) rel() string { return strings.TrimPrefix(p.ImportPath, modulePath) }
 
-func (p listedPackage) domain() string { return strings.Split(p.rel(), "/")[0] }
+func (p listedPackage) domain() string {
+	dom, _, _ := strings.Cut(p.rel(), "/")
+	return dom
+}
+
+// importDomain reports the forge domain an import path belongs to.
+func importDomain(importPath string) string {
+	dom, _, _ := strings.Cut(strings.TrimPrefix(importPath, modulePath), "/")
+	return dom
+}
 
 // packages lists every package of the module once per test run.
 func packages(t *testing.T) []listedPackage {
@@ -92,7 +101,8 @@ func isThirdParty(importPath string) bool {
 	if isForge(importPath) {
 		return false
 	}
-	return strings.Contains(strings.Split(importPath, "/")[0], ".")
+	first, _, _ := strings.Cut(importPath, "/")
+	return strings.Contains(first, ".")
 }
 
 func TestCoreCarriesNoFrameworkAndNoDriver(t *testing.T) {
@@ -103,7 +113,7 @@ func TestCoreCarriesNoFrameworkAndNoDriver(t *testing.T) {
 		for _, imported := range pkg.allImports() {
 			switch {
 			case isForge(imported):
-				dom := strings.Split(strings.TrimPrefix(imported, modulePath), "/")[0]
+				dom := importDomain(imported)
 				if dom != "core" {
 					t.Errorf("%s imports %s: core names no other domain", pkg.rel(), imported)
 				}
@@ -128,7 +138,7 @@ func TestCryptoNamesOnlyCoreAndItself(t *testing.T) {
 			if !isForge(imported) {
 				continue
 			}
-			dom := strings.Split(strings.TrimPrefix(imported, modulePath), "/")[0]
+			dom := importDomain(imported)
 			if dom != "crypto" && dom != "core" {
 				t.Errorf("%s imports %s: crypto sits below every product domain", pkg.rel(), imported)
 			}
@@ -147,7 +157,7 @@ func TestDataNamesNoProductDomain(t *testing.T) {
 			if !isForge(imported) {
 				continue
 			}
-			dom := strings.Split(strings.TrimPrefix(imported, modulePath), "/")[0]
+			dom := importDomain(imported)
 			if slices.Contains(productDomains, dom) {
 				t.Errorf("%s imports %s: data provides connections, never features", pkg.rel(), imported)
 			}

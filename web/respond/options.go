@@ -1,6 +1,7 @@
 package respond
 
 import (
+	"maps"
 	"net/http"
 )
 
@@ -73,10 +74,7 @@ func (c config) applyHeaders(w http.ResponseWriter) {
 	if c.header == nil {
 		return
 	}
-	dst := w.Header()
-	for name, values := range c.header {
-		dst[name] = values
-	}
+	maps.Copy(w.Header(), c.header)
 }
 
 // runBefore executes the registered side effects, stopping at the first failure.

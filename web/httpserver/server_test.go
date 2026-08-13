@@ -63,6 +63,7 @@ func TestAddr_ReportsTheKernelChosenPort(t *testing.T) {
 
 	resp, err := http.Get("http://" + s.Addr())
 	require.NoError(t, err)
+	require.NotNil(t, resp)
 	_ = resp.Body.Close()
 
 	cancel()

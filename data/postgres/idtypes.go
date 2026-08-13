@@ -65,6 +65,9 @@ func (p *idEncodePlan) Encode(value any, buf []byte) ([]byte, error) {
 	case id.UUID:
 		return p.next.Encode([16]byte(v), buf)
 	case *id.UUID:
+		if v == nil {
+			return p.next.Encode(value, buf)
+		}
 		return p.next.Encode([16]byte(*v), buf)
 	case id.NullUUID:
 		return p.next.Encode([16]byte(v.UUID), buf)

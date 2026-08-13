@@ -90,7 +90,9 @@ func TestNullUUID_PtrRoundTrip(t *testing.T) {
 	assert.Equal(t, id.NullUUID{}, id.NullFromPtr(nil))
 
 	u := id.NewUUID()
-	assert.Equal(t, u, *id.NullOf(u).Ptr())
+	ptr := id.NullOf(u).Ptr()
+	require.NotNil(t, ptr)
+	assert.Equal(t, u, *ptr)
 	assert.Equal(t, id.NullOf(u), id.NullFromPtr(&u))
 }
 
