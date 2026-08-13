@@ -17,11 +17,11 @@ import (
 // rejected before load runs. A nil touch disables last-used tracking, as
 // WithTouchInterval(-1) does. Under guard.New every error collapses to an
 // opaque 401; the sentinels serve metrics and direct callers.
-func Verify(ctx context.Context, cfg Config, credential string, load LoadByHashFunc, touch TouchFunc) (guard.Identity, error) {
-	if err := cfg.ready("load", load == nil); err != nil {
+func (m *Manager) Verify(ctx context.Context, credential string, load LoadByHashFunc, touch TouchFunc) (guard.Identity, error) {
+	if err := requireEffect("load", load == nil); err != nil {
 		return guard.Identity{}, err
 	}
-	if !validKey(cfg.prefix, credential) {
+	if !validKey(m.cfg.prefix, credential) {
 		return guard.Identity{}, ErrMalformedKey
 	}
 	h := hashKey(credential)
@@ -42,7 +42,7 @@ func Verify(ctx context.Context, cfg Config, credential string, load LoadByHashF
 	if !k.ExpiresAt.IsZero() && !k.ExpiresAt.After(now) {
 		return guard.Identity{}, ErrKeyExpired
 	}
-	if touch != nil && cfg.touchDue(k.LastUsedAt, now) {
+	if touch != nil && m.touchDue(k.LastUsedAt, now) {
 		_ = touch(ctx, k.ID, now)
 	}
 	return identityOf(k), nil
@@ -53,15 +53,6 @@ func Verify(ctx context.Context, cfg Config, credential string, load LoadByHashF
 // subject to authenticate as.
 func loadedRecordAuthenticates(k Key, hash string) bool {
 	return consttime.StringEqual(k.Hash, hash) && k.Subject != ""
-}
-
-// touchDue reports whether the record's last-used stamp is stale enough to
-// rewrite. A negative interval disables tracking.
-func (c Config) touchDue(lastUsed, now time.Time) bool {
-	if c.touchInterval < 0 {
-		return false
-	}
-	return lastUsed.IsZero() || now.Sub(lastUsed) >= c.touchInterval
 }
 
 func identityOf(k Key) guard.Identity {
@@ -82,15 +73,14 @@ func identityOf(k Key) guard.Identity {
 	}
 }
 
-// NewVerifier curries cfg and the effects into the guard.Verifier seam, so
-// middleware wiring needs no adapter type. It reports ErrConfig for an
-// unvalidated cfg and ErrNilEffect for a nil load; a nil touch disables
-// last-used tracking.
-func NewVerifier(cfg Config, load LoadByHashFunc, touch TouchFunc) (guard.Verifier, error) {
-	if err := cfg.ready("load", load == nil); err != nil {
+// Verifier curries the effects into the guard.Verifier seam, so middleware
+// wiring needs no adapter type. It reports ErrNilEffect for a nil load; a
+// nil touch disables last-used tracking.
+func (m *Manager) Verifier(load LoadByHashFunc, touch TouchFunc) (guard.Verifier, error) {
+	if err := requireEffect("load", load == nil); err != nil {
 		return nil, err
 	}
 	return guard.VerifierFunc(func(ctx context.Context, credential string) (guard.Identity, error) {
-		return Verify(ctx, cfg, credential, load, touch)
+		return m.Verify(ctx, credential, load, touch)
 	}), nil
 }

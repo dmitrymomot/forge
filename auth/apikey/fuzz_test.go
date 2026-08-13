@@ -11,8 +11,8 @@ import (
 // FuzzVerify asserts the core property: no input other than the real
 // plaintext ever authenticates, and no input panics the parser.
 func FuzzVerify(f *testing.F) {
-	cfg := mustConfig(f, apikey.WithPrefix("sk"))
-	k, plaintext := issueKey(f, cfg, apikey.CreateParams{Subject: "u1"})
+	mgr := mustManager(f, apikey.WithPrefix("sk"))
+	k, plaintext := issueKey(f, mgr, apikey.CreateParams{Subject: "u1"})
 	load := loadsKeyByHash(k)
 
 	f.Add(plaintext)
@@ -22,7 +22,7 @@ func FuzzVerify(f *testing.F) {
 	f.Add(plaintext[:len(plaintext)-1] + "!")
 
 	f.Fuzz(func(t *testing.T, credential string) {
-		identity, err := apikey.Verify(context.Background(), cfg, credential, load, nil)
+		identity, err := mgr.Verify(context.Background(), credential, load, nil)
 		if err == nil {
 			if credential != plaintext {
 				t.Fatalf("accepted forged credential %q", credential)

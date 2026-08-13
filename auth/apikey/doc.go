@@ -3,9 +3,9 @@
 // malformed credentials before any storage access, SHA-256 hashes at rest,
 // and the plaintext returned exactly once at creation.
 //
-// The package is stateless and ships no storage of any kind. Every
-// operation is a free function over a validated Config plus the storage
-// effects it performs — SaveFunc, LoadFunc, LoadByHashFunc, ListFunc,
+// The package ships no storage of any kind. A Manager holds validated
+// settings and nothing else, and every operation takes the storage effects
+// it performs as arguments — SaveFunc, LoadFunc, LoadByHashFunc, ListFunc,
 // RevokeFunc, TouchFunc, SwapFunc. The caller supplies each effect as a
 // closure at the call site, so a write can ride the caller's transaction
 // and carry columns this package never sees. The effects are distinct
@@ -17,16 +17,16 @@
 // service-account id for keys owned by the org itself — and Tenant
 // optionally pins the owning org.
 //
-// Build the Config once at wiring; it holds no storage and no mutable
+// Build the Manager once at wiring; it holds no storage and no mutable
 // state, so one value serves every goroutine:
 //
-//	cfg, err := apikey.NewConfig(apikey.WithPrefix("sk_live"))
+//	mgr, err := apikey.New(apikey.WithPrefix("sk_live"))
 //
 // A write closes over the request's transaction and repository:
 //
 //	err := pg.InTx(ctx, func(tx pgx.Tx) error {
 //		q := repo.WithTx(tx)
-//		key, plaintext, err := apikey.Create(ctx, cfg, apikey.CreateParams{
+//		key, plaintext, err := mgr.Create(ctx, apikey.CreateParams{
 //			Subject: "user_42", Tenant: "org_7", Name: "CI deploy",
 //			Scopes:  []string{"deploy:write"},
 //		}, func(ctx context.Context, k apikey.Key) error {
@@ -50,7 +50,7 @@
 //
 // Middleware wiring curries the same logic into the guard.Verifier seam:
 //
-//	verifier, err := apikey.NewVerifier(cfg, repo.GetAPIKeyByHash, repo.TouchAPIKey)
+//	verifier, err := mgr.Verifier(repo.GetAPIKeyByHash, repo.TouchAPIKey)
 //	authn := guard.New(verifier, guard.WithExtractors(guard.BearerHeader(), guard.Header("X-API-Key")))
 //	mux.Handle("POST /api/deploy", authn(deployHandler))
 //
@@ -58,7 +58,7 @@
 // test states the one behaviour it needs inline, and a test that needs
 // state across calls brings its own map.
 //
-//	_, _, err := apikey.Create(ctx, cfg, params,
+//	_, _, err := mgr.Create(ctx, params,
 //		func(context.Context, apikey.Key) error { return apikey.ErrDuplicate })
 //
 // Scopes are carried into guard.Identity.Scopes but never enforced here —
@@ -69,11 +69,11 @@
 // tenant. web/tenant carries the id and its Scope hook plugs straight in,
 // failing closed when no tenant is resolved:
 //
-//	cfg, err := apikey.NewConfig(apikey.WithScope(tenant.Scope))
+//	mgr, err := apikey.New(apikey.WithScope(tenant.Scope))
 //
 // Rotation overlaps old and new keys so consumers can deploy the new
 // plaintext before the old one dies. SwapFunc performs both writes as one
 // transaction, so a failed rotation leaves no orphan replacement:
 //
-//	fresh, plaintext, err := apikey.Rotate(ctx, cfg, key.ID, 24*time.Hour, repo.GetAPIKey, repo.RotateAPIKey)
+//	fresh, plaintext, err := mgr.Rotate(ctx, key.ID, 24*time.Hour, repo.GetAPIKey, repo.RotateAPIKey)
 package apikey

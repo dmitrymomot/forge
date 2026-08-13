@@ -16,7 +16,7 @@ import (
 
 func TestPlaintext_RedactsThroughFmt(t *testing.T) {
 	t.Parallel()
-	_, secret, err := apikey.Create(context.Background(), mustConfig(t),
+	_, secret, err := mustManager(t).Create(context.Background(),
 		apikey.CreateParams{Subject: "u1"}, discardKey)
 	require.NoError(t, err)
 
@@ -30,7 +30,7 @@ func TestPlaintext_RedactsThroughFmt(t *testing.T) {
 
 func TestPlaintext_RedactsThroughJSON(t *testing.T) {
 	t.Parallel()
-	_, secret, err := apikey.Create(context.Background(), mustConfig(t),
+	_, secret, err := mustManager(t).Create(context.Background(),
 		apikey.CreateParams{Subject: "u1"}, discardKey)
 	require.NoError(t, err)
 
@@ -41,7 +41,7 @@ func TestPlaintext_RedactsThroughJSON(t *testing.T) {
 
 func TestPlaintext_RedactsThroughSlog(t *testing.T) {
 	t.Parallel()
-	_, secret, err := apikey.Create(context.Background(), mustConfig(t),
+	_, secret, err := mustManager(t).Create(context.Background(),
 		apikey.CreateParams{Subject: "u1"}, discardKey)
 	require.NoError(t, err)
 
@@ -54,13 +54,13 @@ func TestPlaintext_RedactsThroughSlog(t *testing.T) {
 
 func TestPlaintext_ExposeReturnsTheCredential(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t, apikey.WithPrefix("sk_live"))
+	mgr := mustManager(t, apikey.WithPrefix("sk_live"))
 	var stored apikey.Key
-	_, secret, err := apikey.Create(context.Background(), cfg,
+	_, secret, err := mgr.Create(context.Background(),
 		apikey.CreateParams{Subject: "u1"}, captureKey(&stored))
 	require.NoError(t, err)
 
-	identity, err := apikey.Verify(context.Background(), cfg, secret.Expose(), loadsKeyByHash(stored), nil)
+	identity, err := mgr.Verify(context.Background(), secret.Expose(), loadsKeyByHash(stored), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "u1", identity.Subject)
 }

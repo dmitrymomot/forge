@@ -12,12 +12,12 @@ import (
 	"github.com/dmitrymomot/forge/crypto/redact"
 )
 
-// mustConfig builds a validated Config or fails the test.
-func mustConfig(tb testing.TB, opts ...apikey.Option) apikey.Config {
+// mustManager builds a validated Manager or fails the test.
+func mustManager(tb testing.TB, opts ...apikey.Option) *apikey.Manager {
 	tb.Helper()
-	cfg, err := apikey.NewConfig(opts...)
+	mgr, err := apikey.New(opts...)
 	require.NoError(tb, err)
-	return cfg
+	return mgr
 }
 
 // expose unwraps a Create or Rotate result so a test body can use the
@@ -64,9 +64,9 @@ func loadsKeyByHash(k apikey.Key) apikey.LoadByHashFunc {
 
 // issueKey mints one real key so tests that need a valid credential do not
 // hand-build a checksum.
-func issueKey(tb testing.TB, cfg apikey.Config, p apikey.CreateParams) (apikey.Key, string) {
+func issueKey(tb testing.TB, mgr *apikey.Manager, p apikey.CreateParams) (apikey.Key, string) {
 	tb.Helper()
-	k, plaintext, err := expose(apikey.Create(context.Background(), cfg, p, discardKey))
+	k, plaintext, err := expose(mgr.Create(context.Background(), p, discardKey))
 	require.NoError(tb, err)
 	return k, plaintext
 }

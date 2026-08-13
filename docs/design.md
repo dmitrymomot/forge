@@ -23,10 +23,9 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
 - **No magic:** no reflection (one sanctioned helper, `structfields`), no
   service containers; values via params, not context (context only for
   request-scoped reads). Public methods never return unexported types.
-- **One of three idioms:** stateless **free-funcs** (`render`, `htmx`,
-  `apikey`) · `New(...Option)` with an env-loadable `Config` +
-  `DefaultConfig` + `Validate` (`logger`, `httpserver`) · a
-  `supervisor.Service`.
+- **One of three idioms:** stateless **free-funcs** (`render`, `htmx`) ·
+  `New(...Option)` with an env-loadable `Config` + `DefaultConfig` +
+  `Validate` (`logger`, `httpserver`) · a `supervisor.Service`.
 - **Invalid options are reported, never panicked.** An `Option` records the
   problem on the config (`c.errs = append(...)`) instead of panicking, and the
   constructor returns `errors.Join(c.errs...)`. Errors accumulate, so one call
@@ -41,23 +40,21 @@ When priorities collide, the higher one wins — e.g. a slightly less "clean" in
 - **Minimal dependencies, not zero:** buy the wire, build the ergonomics;
   isolate every real dep behind a subpackage.
 - **Storage-agnostic state — effects, not stores.** A package that persists
-  anything never owns a handle to storage. Split by who calls the operation.
-  **The application calls it** (create, rotate, revoke, accept, approve): free
-  funcs taking a validated `Config` value plus the storage **effect closures**
-  that operation performs, supplied inline at the call site, so a write rides
-  the caller's transaction and carries columns the package never models — the
-  shape an sqlc-generated repository needs. **The framework calls it**
-  (middleware, relays, `supervisor.Service` loops, reapers): a
-  construction-time seam, because a component built once at wiring has no call
-  site to pass a closure — ship a `New<Seam>` factory currying the `Config` and
-  effects into the consumer's seam type (`apikey.NewVerifier` →
-  `guard.Verifier`) so wiring needs no adapter. Name every effect type
-  distinctly, even where signatures match, so the compiler rejects a swapped
-  argument. An operation needing three effects usually has one atomic write
-  hiding — check before adding the third (`apikey.SwapFunc` performs a whole
-  rotation, which is why `Rotate` needs no compensation path). Missing effects
-  return `ErrNilEffect`; the zero-value `Config` returns `ErrConfig`. Core
-  never imports a driver client.
+  anything never owns a handle to storage. `New(...Option)` returns a
+  `Manager` holding validated settings and nothing else, and every operation
+  takes the storage **effect closures** it performs as arguments, supplied
+  inline at the call site — so a write rides the caller's transaction and
+  carries columns the package never models, the shape an sqlc-generated
+  repository needs. A component the framework constructs (middleware, relays,
+  `supervisor.Service` loops, reapers) has no call site to pass a closure, so
+  the `Manager` ships a factory currying the effects into the consumer's seam
+  type (`mgr.Verifier(load, touch)` → `guard.Verifier`) and wiring needs no
+  adapter. Name every effect type distinctly, even where signatures match, so
+  the compiler rejects a swapped argument. An operation needing three effects
+  usually has one atomic write hiding — check before adding the third
+  (`apikey.SwapFunc` performs a whole rotation, which is why `Rotate` needs no
+  compensation path). Missing effects return `ErrNilEffect`. Core never
+  imports a driver client. `auth/apikey` is the reference.
 
 - **Secrets returned to callers are wrapped** in `redact.Secret[T]`
   (one-time plaintexts, recovery codes). It redacts through `fmt`,

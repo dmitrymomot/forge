@@ -10,31 +10,31 @@ import (
 // benchKey mints one key outside the measured loop. The effects stay
 // trivial closures so the numbers measure this package, not a fixture's
 // map and mutex.
-func benchKey(b *testing.B) (apikey.Config, apikey.Key, string) {
+func benchKey(b *testing.B) (*apikey.Manager, apikey.Key, string) {
 	b.Helper()
-	cfg := mustConfig(b, apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
-	k, plaintext := issueKey(b, cfg, apikey.CreateParams{Subject: "u1"})
-	return cfg, k, plaintext
+	mgr := mustManager(b, apikey.WithPrefix("sk_live"), apikey.WithTouchInterval(-1))
+	k, plaintext := issueKey(b, mgr, apikey.CreateParams{Subject: "u1"})
+	return mgr, k, plaintext
 }
 
 func BenchmarkCreate(b *testing.B) {
-	cfg := mustConfig(b, apikey.WithPrefix("sk_live"))
+	mgr := mustManager(b, apikey.WithPrefix("sk_live"))
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, err := apikey.Create(ctx, cfg, apikey.CreateParams{Subject: "u1"}, discardKey); err != nil {
+		if _, _, err := mgr.Create(ctx, apikey.CreateParams{Subject: "u1"}, discardKey); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkVerifyHit(b *testing.B) {
-	cfg, k, plaintext := benchKey(b)
+	mgr, k, plaintext := benchKey(b)
 	load := loadsKeyByHash(k)
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := apikey.Verify(ctx, cfg, plaintext, load, nil); err != nil {
+		if _, err := mgr.Verify(ctx, plaintext, load, nil); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -44,8 +44,8 @@ func BenchmarkVerifyHit(b *testing.B) {
 // guard.Verifier, so the factory's closure cost is visible against
 // BenchmarkVerifyHit.
 func BenchmarkVerifyHitCurried(b *testing.B) {
-	cfg, k, plaintext := benchKey(b)
-	verifier, err := apikey.NewVerifier(cfg, loadsKeyByHash(k), nil)
+	mgr, k, plaintext := benchKey(b)
+	verifier, err := mgr.Verifier(loadsKeyByHash(k), nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -61,13 +61,13 @@ func BenchmarkVerifyHitCurried(b *testing.B) {
 // BenchmarkVerifyMalformedReject measures the DoS-relevant path: checksum
 // rejection with no storage access. Target: zero allocations.
 func BenchmarkVerifyMalformedReject(b *testing.B) {
-	cfg, k, plaintext := benchKey(b)
+	mgr, k, plaintext := benchKey(b)
 	load := loadsKeyByHash(k)
 	bad := plaintext[:len(plaintext)-1] + "!"
 	ctx := context.Background()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := apikey.Verify(ctx, cfg, bad, load, nil); err == nil {
+		if _, err := mgr.Verify(ctx, bad, load, nil); err == nil {
 			b.Fatal("expected rejection")
 		}
 	}

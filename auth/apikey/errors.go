@@ -36,8 +36,8 @@ var (
 	// errors or yields an empty tenant.
 	ErrScope = errors.New("apikey: tenant scope unavailable")
 
-	// ErrConfig rejects a Config that did not come from NewConfig, and is
-	// returned by NewConfig itself for an invalid prefix.
+	// ErrConfig is reported by New for an invalid option value. Options
+	// accumulate, so New's error may join several.
 	ErrConfig = errors.New("apikey: invalid config")
 
 	// ErrNilEffect rejects an operation called without one of the storage

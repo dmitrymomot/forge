@@ -17,19 +17,19 @@ import (
 // "REDACTED" through fmt, encoding/json, and log/slog, and Expose is the
 // only way to read it. Supply a save closure over the transaction that
 // also writes whatever the application stores alongside the key.
-func Create(ctx context.Context, cfg Config, p CreateParams, save SaveFunc) (Key, redact.Secret[string], error) {
+func (m *Manager) Create(ctx context.Context, p CreateParams, save SaveFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if err := cfg.ready("save", save == nil); err != nil {
+	if err := requireEffect("save", save == nil); err != nil {
 		return Key{}, noPlaintext, err
 	}
 	if p.Subject == "" {
 		return Key{}, noPlaintext, ErrSubjectRequired
 	}
-	tenant, err := cfg.scoped(ctx, p.Tenant)
+	tenant, err := m.scoped(ctx, p.Tenant)
 	if err != nil {
 		return Key{}, noPlaintext, err
 	}
-	k, plaintext := mint(cfg.prefix, p, tenant)
+	k, plaintext := mint(m.cfg.prefix, p, tenant)
 	if err := save(ctx, k); err != nil {
 		return Key{}, noPlaintext, fmt.Errorf("apikey: create: %w", err)
 	}
@@ -54,11 +54,11 @@ func mint(prefix string, p CreateParams, tenant string) (Key, string) {
 
 // Get returns one key record. With WithScope configured, other tenants'
 // keys read as ErrNotFound so existence cannot be probed across tenants.
-func Get(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc) (Key, error) {
-	if err := cfg.ready("load", load == nil); err != nil {
+func (m *Manager) Get(ctx context.Context, keyID id.UUID, load LoadFunc) (Key, error) {
+	if err := requireEffect("load", load == nil); err != nil {
 		return Key{}, err
 	}
-	tenant, err := cfg.scoped(ctx, "")
+	tenant, err := m.scoped(ctx, "")
 	if err != nil {
 		return Key{}, err
 	}
@@ -66,7 +66,7 @@ func Get(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc) (Key, er
 	if err != nil {
 		return Key{}, err
 	}
-	if cfg.scope != nil && k.Tenant != tenant {
+	if m.cfg.scope != nil && k.Tenant != tenant {
 		return Key{}, ErrNotFound
 	}
 	return k, nil
@@ -74,11 +74,11 @@ func Get(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc) (Key, er
 
 // List returns keys matching f, newest first. With WithScope configured
 // the filter is confined to the scoped tenant.
-func List(ctx context.Context, cfg Config, f Filter, list ListFunc) ([]Key, error) {
-	if err := cfg.ready("list", list == nil); err != nil {
+func (m *Manager) List(ctx context.Context, f Filter, list ListFunc) ([]Key, error) {
+	if err := requireEffect("list", list == nil); err != nil {
 		return nil, err
 	}
-	tenant, err := cfg.scoped(ctx, f.Tenant)
+	tenant, err := m.scoped(ctx, f.Tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -89,11 +89,11 @@ func List(ctx context.Context, cfg Config, f Filter, list ListFunc) ([]Key, erro
 // Revoke permanently disables a key. Revocation is terminal — a revoked
 // key cannot be un-revoked or rotated. The load effect resolves the record
 // first so a scoped caller cannot revoke another tenant's key.
-func Revoke(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc, revoke RevokeFunc) error {
-	if err := cfg.ready("revoke", revoke == nil); err != nil {
+func (m *Manager) Revoke(ctx context.Context, keyID id.UUID, load LoadFunc, revoke RevokeFunc) error {
+	if err := requireEffect("revoke", revoke == nil); err != nil {
 		return err
 	}
-	if _, err := Get(ctx, cfg, keyID, load); err != nil {
+	if _, err := m.Get(ctx, keyID, load); err != nil {
 		return err
 	}
 	return revoke(ctx, keyID, time.Now().UTC())
@@ -105,12 +105,12 @@ func Revoke(ctx context.Context, cfg Config, keyID id.UUID, load LoadFunc, revok
 // immediate cutover). Both keys verify during the grace window. swap runs
 // as one transaction, so a failed rotation changes nothing. The
 // replacement's plaintext comes back wrapped, as Create's does.
-func Rotate(ctx context.Context, cfg Config, keyID id.UUID, grace time.Duration, load LoadFunc, swap SwapFunc) (Key, redact.Secret[string], error) {
+func (m *Manager) Rotate(ctx context.Context, keyID id.UUID, grace time.Duration, load LoadFunc, swap SwapFunc) (Key, redact.Secret[string], error) {
 	var noPlaintext redact.Secret[string]
-	if err := cfg.ready("swap", swap == nil); err != nil {
+	if err := requireEffect("swap", swap == nil); err != nil {
 		return Key{}, noPlaintext, err
 	}
-	old, err := Get(ctx, cfg, keyID, load)
+	old, err := m.Get(ctx, keyID, load)
 	if err != nil {
 		return Key{}, noPlaintext, err
 	}
@@ -121,7 +121,7 @@ func Rotate(ctx context.Context, cfg Config, keyID id.UUID, grace time.Duration,
 	if !old.ExpiresAt.IsZero() && !old.ExpiresAt.After(now) {
 		return Key{}, noPlaintext, ErrKeyExpired
 	}
-	replacement, plaintext := mint(cfg.prefix, CreateParams{
+	replacement, plaintext := mint(m.cfg.prefix, CreateParams{
 		Name:    old.Name,
 		Subject: old.Subject,
 		Scopes:  old.Scopes,

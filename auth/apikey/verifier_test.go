@@ -13,23 +13,23 @@ import (
 
 func TestNewVerifier_SatisfiesGuardSeam(t *testing.T) {
 	t.Parallel()
-	cfg, k, _ := verifiable(t)
+	mgr, k, _ := verifiable(t)
 
-	verifier, err := apikey.NewVerifier(cfg, loadsKeyByHash(k), nil)
+	verifier, err := mgr.Verifier(loadsKeyByHash(k), nil)
 	require.NoError(t, err)
 	assert.Implements(t, (*guard.Verifier)(nil), verifier)
 }
 
 func TestNewVerifier_ResolvesTheSameIdentityAsVerify(t *testing.T) {
 	t.Parallel()
-	cfg, k, plaintext := verifiable(t)
+	mgr, k, plaintext := verifiable(t)
 
-	verifier, err := apikey.NewVerifier(cfg, loadsKeyByHash(k), nil)
+	verifier, err := mgr.Verifier(loadsKeyByHash(k), nil)
 	require.NoError(t, err)
 
 	curried, err := verifier.Verify(context.Background(), plaintext)
 	require.NoError(t, err)
-	direct, err := apikey.Verify(context.Background(), cfg, plaintext, loadsKeyByHash(k), nil)
+	direct, err := mgr.Verify(context.Background(), plaintext, loadsKeyByHash(k), nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, direct, curried)
@@ -37,9 +37,9 @@ func TestNewVerifier_ResolvesTheSameIdentityAsVerify(t *testing.T) {
 
 func TestNewVerifier_PropagatesRejections(t *testing.T) {
 	t.Parallel()
-	cfg, k, plaintext := verifiable(t)
+	mgr, k, plaintext := verifiable(t)
 
-	verifier, err := apikey.NewVerifier(cfg, loadsKeyByHash(k), nil)
+	verifier, err := mgr.Verifier(loadsKeyByHash(k), nil)
 	require.NoError(t, err)
 
 	_, err = verifier.Verify(context.Background(), tamper(plaintext))

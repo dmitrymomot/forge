@@ -27,10 +27,10 @@ func rotatable() apikey.Key {
 
 func TestRotate_ReplacementInheritsIdentityFields(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 
-	fresh, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
+	fresh, _, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old), discardSwap))
 	require.NoError(t, err)
 
 	assert.Equal(t, old.Subject, fresh.Subject)
@@ -44,21 +44,21 @@ func TestRotate_ReplacementInheritsIdentityFields(t *testing.T) {
 // the lifetime instead of copying the old key's deadline.
 func TestRotate_ReplacementDoesNotInheritExpiry(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	old.ExpiresAt = time.Now().UTC().Add(time.Hour)
 
-	fresh, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
+	fresh, _, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old), discardSwap))
 	require.NoError(t, err)
 	assert.True(t, fresh.ExpiresAt.IsZero())
 }
 
 func TestRotate_ReplacementIsADistinctCredential(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
-	old, oldPlain := issueKey(t, cfg, apikey.CreateParams{Subject: "u1"})
+	mgr := mustManager(t)
+	old, oldPlain := issueKey(t, mgr, apikey.CreateParams{Subject: "u1"})
 
-	fresh, freshPlain, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
+	fresh, freshPlain, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old), discardSwap))
 	require.NoError(t, err)
 
 	assert.NotEqual(t, old.ID, fresh.ID)
@@ -68,7 +68,7 @@ func TestRotate_ReplacementIsADistinctCredential(t *testing.T) {
 
 func TestRotate_HandsBothWritesToSwap(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	grace := time.Hour
 	before := time.Now().UTC()
@@ -77,7 +77,7 @@ func TestRotate_HandsBothWritesToSwap(t *testing.T) {
 	var swappedExpiry time.Time
 	var swappedReplacement apikey.Key
 
-	fresh, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, grace, loadsKey(old),
+	fresh, _, err := expose(mgr.Rotate(context.Background(), old.ID, grace, loadsKey(old),
 		func(_ context.Context, oldID id.UUID, oldExpiresAt time.Time, replacement apikey.Key) error {
 			swappedID, swappedExpiry, swappedReplacement = oldID, oldExpiresAt, replacement
 			return nil
@@ -91,12 +91,12 @@ func TestRotate_HandsBothWritesToSwap(t *testing.T) {
 
 func TestRotate_ZeroGraceExpiresOldKeyImmediately(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	before := time.Now().UTC()
 
 	var swappedExpiry time.Time
-	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, 0, loadsKey(old),
+	_, _, err := expose(mgr.Rotate(context.Background(), old.ID, 0, loadsKey(old),
 		func(_ context.Context, _ id.UUID, oldExpiresAt time.Time, _ apikey.Key) error {
 			swappedExpiry = oldExpiresAt
 			return nil
@@ -107,21 +107,21 @@ func TestRotate_ZeroGraceExpiresOldKeyImmediately(t *testing.T) {
 
 func TestRotate_RejectsRevokedKey(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	old.RevokedAt = time.Now().UTC()
 
-	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
+	_, _, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old), discardSwap))
 	assert.ErrorIs(t, err, apikey.ErrKeyRevoked)
 }
 
 func TestRotate_RejectsExpiredKey(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	old.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 
-	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old), discardSwap))
+	_, _, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old), discardSwap))
 	assert.ErrorIs(t, err, apikey.ErrKeyExpired)
 }
 
@@ -129,12 +129,12 @@ func TestRotate_RejectsExpiredKey(t *testing.T) {
 // never reaches the write.
 func TestRotate_RejectsDeadKeyBeforeSwapping(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	old.RevokedAt = time.Now().UTC()
 	swapped := false
 
-	_, _, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old),
+	_, _, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old),
 		func(context.Context, id.UUID, time.Time, apikey.Key) error {
 			swapped = true
 			return nil
@@ -148,11 +148,11 @@ func TestRotate_RejectsDeadKeyBeforeSwapping(t *testing.T) {
 // nothing to compensate for.
 func TestRotate_FailedSwapReturnsNoPlaintext(t *testing.T) {
 	t.Parallel()
-	cfg := mustConfig(t)
+	mgr := mustManager(t)
 	old := rotatable()
 	errSwap := errors.New("swap failed")
 
-	fresh, freshPlain, err := expose(apikey.Rotate(context.Background(), cfg, old.ID, time.Hour, loadsKey(old),
+	fresh, freshPlain, err := expose(mgr.Rotate(context.Background(), old.ID, time.Hour, loadsKey(old),
 		func(context.Context, id.UUID, time.Time, apikey.Key) error { return errSwap }))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errSwap)
@@ -162,7 +162,7 @@ func TestRotate_FailedSwapReturnsNoPlaintext(t *testing.T) {
 
 func TestRotate_PropagatesLoadError(t *testing.T) {
 	t.Parallel()
-	_, _, err := expose(apikey.Rotate(context.Background(), mustConfig(t), id.UUID{15: 9}, time.Hour,
+	_, _, err := expose(mustManager(t).Rotate(context.Background(), id.UUID{15: 9}, time.Hour,
 		func(context.Context, id.UUID) (apikey.Key, error) { return apikey.Key{}, apikey.ErrNotFound },
 		discardSwap))
 	assert.ErrorIs(t, err, apikey.ErrNotFound)
