@@ -26,7 +26,7 @@ func FromContext(ctx context.Context) (string, bool) {
 // absent or empty. Its signature matches the WithScope option of every other
 // forge package, so it plugs in directly:
 //
-//	cfg, err := apikey.NewConfig(apikey.WithScope(tenant.Scope))
+//	mgr, err := apikey.New(apikey.WithScope(tenant.Scope))
 func Scope(ctx context.Context) (string, error) {
 	id, ok := FromContext(ctx)
 	if !ok {
