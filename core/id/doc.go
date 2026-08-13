@@ -21,6 +21,10 @@
 // unrecoverable condition. Parsing and Scan are case-insensitive; the Parse
 // functions and Scan return ErrMalformed (via errors.Is) on invalid input.
 //
+// NullUUID covers a nullable uuid column. It is a concrete named type rather than
+// core/null.Null[UUID] because codegen (sqlc's `go_type` override) must be able to
+// name it in that position.
+//
 // # Usage
 //
 //	u := id.NewUUID()

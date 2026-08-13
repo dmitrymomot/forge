@@ -1,56 +1,136 @@
 package hostrouter
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 )
 
-// Option configures a Router. Options apply in order and panic on invalid input.
-type Option func(*Router)
+// config accumulates the registrations and the errors New reports.
+type config struct {
+	exact     map[string]http.Handler
+	wildcard  map[string]wildcardEntry
+	lookup    LookupFunc
+	lookupErr LookupErrorHandler
+	fallback  http.Handler
+	errs      []error
+	injectCtx bool
+}
+
+// Option configures a Router. Options apply in order; invalid values accumulate and
+// are returned by New.
+type Option func(*config)
 
 // WithHost registers handler h for pattern, an exact host ("api.example.com") or a
 // single-label wildcard ("*.example.com"). The pattern is normalized identically to
-// incoming hosts, so casing/port/trailing-dot never cause a mismatch. It panics
-// (ErrNilHandler / ErrInvalidPattern / ErrDuplicateHost) on invalid input.
+// incoming hosts, so casing/port/trailing-dot never cause a mismatch. New reports
+// ErrNilHandler, ErrInvalidPattern, or ErrDuplicateHost for invalid input.
 func WithHost(pattern string, h http.Handler) Option {
-	return func(r *Router) {
+	return func(c *config) {
 		if h == nil {
-			panic(fmt.Errorf("%w: %q", ErrNilHandler, pattern))
+			c.errs = append(c.errs, fmt.Errorf("%w: %q", ErrNilHandler, pattern))
+			return
 		}
 		if strings.HasPrefix(pattern, "*.") {
-			parent := normalizeHost(pattern[2:])
-			if parent == "" || strings.ContainsRune(parent, '*') {
-				panic(fmt.Errorf("%w: %q", ErrInvalidPattern, pattern))
-			}
-			if _, dup := r.wildcard[parent]; dup {
-				panic(fmt.Errorf("%w: %q", ErrDuplicateHost, pattern))
-			}
-			r.wildcard[parent] = wildcardEntry{handler: h, pattern: "*." + parent}
+			c.registerWildcard(pattern, h)
 			return
 		}
 		host := normalizeHost(pattern)
 		if host == "" || strings.ContainsRune(host, '*') {
-			panic(fmt.Errorf("%w: %q", ErrInvalidPattern, pattern))
+			c.errs = append(c.errs, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern))
+			return
 		}
-		if _, dup := r.exact[host]; dup {
-			panic(fmt.Errorf("%w: %q", ErrDuplicateHost, pattern))
+		if _, dup := c.exact[host]; dup {
+			c.errs = append(c.errs, fmt.Errorf("%w: %q", ErrDuplicateHost, pattern))
+			return
 		}
-		r.exact[host] = h
+		c.exact[host] = h
+	}
+}
+
+func (c *config) registerWildcard(pattern string, h http.Handler) {
+	parent := normalizeHost(pattern[2:])
+	if parent == "" || strings.ContainsRune(parent, '*') {
+		c.errs = append(c.errs, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern))
+		return
+	}
+	if _, dup := c.wildcard[parent]; dup {
+		c.errs = append(c.errs, fmt.Errorf("%w: %q", ErrDuplicateHost, pattern))
+		return
+	}
+	c.wildcard[parent] = wildcardEntry{handler: h, pattern: "*." + parent}
+}
+
+// LookupFunc resolves a host that no registered pattern matches, which is how a
+// customer domain reaches its handler. The Router calls it with the request context
+// and the normalized host, and skips it for an empty host. Return the handler for a
+// known host, ErrHostNotFound or a nil handler for an unknown one, and any other
+// error for a store that failed.
+type LookupFunc func(ctx context.Context, host string) (http.Handler, error)
+
+// WithLookup sets the resolver for a host that no registered pattern matches. The
+// Router tries the exact hosts first, the wildcard parents second, and the lookup
+// third, so a customer domain never shadows a platform pattern. A hit carries a Match
+// with the host and no pattern, which tells a handler the request arrived on a
+// customer domain. An unknown host reaches the fallback; a failed lookup reaches
+// WithLookupErrorHandler. New reports a nil lookup as ErrNilLookup. Last wins.
+//
+// Put a cache in front of the store. The Router calls the lookup for every request
+// whose Host matches no pattern, and a Host header is attacker-controlled and
+// unauthenticated, so a scanner sweeping random hosts otherwise becomes one store
+// round-trip per request. Read through resilience/cache — caching the misses too —
+// and wrap the fill in resilience/singleflight so a burst on one cold host makes one
+// query rather than one per request.
+//
+//	router, err := hostrouter.New(
+//		hostrouter.WithHost("*.example.com", tenantMux),
+//		hostrouter.WithLookup(func(ctx context.Context, host string) (http.Handler, error) {
+//			if _, err := domains.Get(ctx, host); err != nil {
+//				if errors.Is(err, sql.ErrNoRows) {
+//					return nil, hostrouter.ErrHostNotFound
+//				}
+//				return nil, err
+//			}
+//			return tenantMux, nil
+//		}),
+//	)
+func WithLookup(lookup LookupFunc) Option {
+	return func(c *config) {
+		if lookup == nil {
+			c.errs = append(c.errs, ErrNilLookup)
+			return
+		}
+		c.lookup = lookup
+	}
+}
+
+// WithLookupErrorHandler sets the handler for a lookup that failed. The default
+// answers 503 and writes no detail of the error. A failed lookup must never read as
+// an unknown host: a store that is down would then 404 every customer domain off the
+// platform. New reports a nil handler as ErrNilHandler. Last wins.
+func WithLookupErrorHandler(h LookupErrorHandler) Option {
+	return func(c *config) {
+		if h == nil {
+			c.errs = append(c.errs, fmt.Errorf("%w: lookup error handler", ErrNilHandler))
+			return
+		}
+		c.lookupErr = h
 	}
 }
 
 // WithFallback sets the handler for unmatched hosts. The default is
 // http.NotFoundHandler() (404), a default-deny that guards against DNS rebinding;
-// overriding it to serve real content means unmatched (possibly rebound) hosts
-// reach h, so validate the Host inside h if it exposes anything sensitive. It
-// panics (ErrNilHandler) if h is nil. Last wins.
+// overriding it to serve real content means unmatched (possibly rebound) hosts reach
+// h, so validate the Host inside h if it exposes anything sensitive. New reports a
+// nil handler as ErrNilHandler. Last wins.
 func WithFallback(h http.Handler) Option {
-	return func(r *Router) {
+	return func(c *config) {
 		if h == nil {
-			panic(fmt.Errorf("%w: fallback handler", ErrNilHandler))
+			c.errs = append(c.errs, fmt.Errorf("%w: fallback handler", ErrNilHandler))
+			return
 		}
-		r.fallback = h
+		c.fallback = h
 	}
 }
 
@@ -58,5 +138,5 @@ func WithFallback(h http.Handler) Option {
 // matched path zero-allocation (no http.Request copy). FromContext and the
 // Subdomain/Pattern/Host accessors then return zero values.
 func WithoutMatchContext() Option {
-	return func(r *Router) { r.injectCtx = false }
+	return func(c *config) { c.injectCtx = false }
 }

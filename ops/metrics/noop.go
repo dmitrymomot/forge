@@ -14,6 +14,10 @@ func (noopRecorder) Histogram(string, string, []float64, ...string) Histogram {
 	return noopInstrument{}
 }
 
+// GaugeFunc drops the func without ever calling it, so a read behind it costs
+// nothing when metrics are switched off.
+func (noopRecorder) GaugeFunc(string, string, GaugeFunc) {}
+
 type noopInstrument struct{}
 
 func (noopInstrument) Add(float64, ...string)     {}

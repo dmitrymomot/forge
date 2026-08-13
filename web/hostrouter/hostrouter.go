@@ -1,6 +1,7 @@
 package hostrouter
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -17,30 +18,53 @@ type wildcardEntry struct {
 type Router struct {
 	exact     map[string]http.Handler
 	wildcard  map[string]wildcardEntry
+	lookup    LookupFunc
+	lookupErr LookupErrorHandler
 	fallback  http.Handler
 	injectCtx bool
+}
+
+// LookupErrorHandler answers a request whose LookupFunc failed. WithLookupErrorHandler
+// replaces the default, which answers 503 and writes no detail of the error.
+type LookupErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
+
+func serviceUnavailable(w http.ResponseWriter, _ *http.Request, _ error) {
+	http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 }
 
 // New builds a Router from options applied in order. With no WithHost options every
 // request is served by the fallback (HTTP 404 unless WithFallback overrides it).
 // The default 404-for-unmatched-hosts is a deliberate default-deny that protects
-// against DNS rebinding. New panics on any invalid registration. It does no I/O.
-func New(opts ...Option) *Router {
-	r := &Router{
+// against DNS rebinding. New reports every invalid registration as a joined error
+// (ErrNilHandler, ErrInvalidPattern, ErrDuplicateHost, ErrNilLookup). It does no I/O.
+func New(opts ...Option) (*Router, error) {
+	c := config{
 		exact:     make(map[string]http.Handler),
 		wildcard:  make(map[string]wildcardEntry),
 		fallback:  http.NotFoundHandler(),
+		lookupErr: serviceUnavailable,
 		injectCtx: true,
 	}
 	for _, opt := range opts {
-		opt(r)
+		opt(&c)
 	}
-	return r
+	if err := errors.Join(c.errs...); err != nil {
+		return nil, err
+	}
+	return &Router{
+		exact:     c.exact,
+		wildcard:  c.wildcard,
+		lookup:    c.lookup,
+		lookupErr: c.lookupErr,
+		fallback:  c.fallback,
+		injectCtx: c.injectCtx,
+	}, nil
 }
 
-// ServeHTTP routes by Host: exact match first, then a single-label wildcard, then
-// the fallback. Matched routes carry a Match in the request context unless the
-// Router was built with WithoutMatchContext.
+// ServeHTTP routes by Host: exact match first, then a single-label wildcard, then the
+// WithLookup resolver, then the fallback. An unmatched host reaches the fallback with
+// its original request and no injected context. Matched routes carry a Match in the
+// request context unless the Router was built with WithoutMatchContext.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := normalizeHost(req.Host)
 	if h, ok := r.exact[host]; ok {
@@ -53,7 +77,18 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	r.fallback.ServeHTTP(w, req) // no match: no context injected, original request
+	if r.lookup != nil && host != "" {
+		h, err := r.lookup(req.Context(), host)
+		if err != nil && !errors.Is(err, ErrHostNotFound) {
+			r.lookupErr(w, req, err)
+			return
+		}
+		if err == nil && h != nil {
+			r.serve(w, req, h, Match{Host: host})
+			return
+		}
+	}
+	r.fallback.ServeHTTP(w, req)
 }
 
 // serve dispatches to h, injecting m into the request context unless the Router was
@@ -75,18 +110,24 @@ func normalizeHost(host string) string {
 	if host == "" {
 		return ""
 	}
-	if host[0] == '[' { // IPv6 literal: "[::1]" or "[::1]:8080"
-		i := strings.IndexByte(host, ']')
-		if i < 0 {
-			return "" // malformed: opening '[' with no closing ']'
-		}
-		host = host[1:i] // inside brackets; drops "]" and any ":port" after it
-	} else if i := strings.LastIndexByte(host, ':'); i >= 0 &&
-		strings.IndexByte(host, ':') == i {
-		host = host[:i] // exactly one colon => host:port (not bracketless IPv6)
+	if host[0] == '[' {
+		return trimIPv6Brackets(host)
 	}
-	host = strings.TrimSuffix(host, ".") // rooted FQDN "example.com."
-	return strings.ToLower(host)
+	if i := strings.LastIndexByte(host, ':'); i >= 0 && strings.IndexByte(host, ':') == i {
+		host = host[:i]
+	}
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+// trimIPv6Brackets returns the address inside a bracketed IPv6 literal such as
+// "[::1]" or "[::1]:8080", dropping the closing bracket and any port after it. A
+// literal with no closing bracket is malformed and returns "".
+func trimIPv6Brackets(host string) string {
+	i := strings.IndexByte(host, ']')
+	if i < 0 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSuffix(host[1:i], "."))
 }
 
 // splitFirstLabel splits "foo.example.com" into ("foo", "example.com", true).

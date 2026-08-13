@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeHost(t *testing.T) {
@@ -29,6 +30,14 @@ func TestNormalizeHost(t *testing.T) {
 	}
 }
 
+// mustNew builds a Router and fails the test when any registration is invalid.
+func mustNew(tb testing.TB, opts ...Option) *Router {
+	tb.Helper()
+	r, err := New(opts...)
+	require.NoError(tb, err)
+	return r
+}
+
 // handlerWriting returns a handler that writes id to the response body.
 func handlerWriting(id string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -37,7 +46,7 @@ func handlerWriting(id string) http.Handler {
 }
 
 func TestRouter_Routing(t *testing.T) {
-	r := New(
+	r := mustNew(t,
 		WithHost("api.example.com", handlerWriting("api")),
 		WithHost("example.com", handlerWriting("apex")),
 		WithHost("*.example.com", handlerWriting("wild")),
@@ -64,7 +73,7 @@ func TestRouter_Routing(t *testing.T) {
 }
 
 func TestRouter_DefaultFallbackIs404(t *testing.T) {
-	r := New(WithHost("api.example.com", handlerWriting("api")))
+	r := mustNew(t, WithHost("api.example.com", handlerWriting("api")))
 	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
 	req.Host = "unknown.com"
 	rec := httptest.NewRecorder()
@@ -73,7 +82,7 @@ func TestRouter_DefaultFallbackIs404(t *testing.T) {
 }
 
 func TestRouter_NoRoutesAllFallback(t *testing.T) {
-	r := New()
+	r := mustNew(t)
 	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
 	req.Host = "anything.com"
 	rec := httptest.NewRecorder()

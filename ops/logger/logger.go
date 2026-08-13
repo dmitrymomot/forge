@@ -29,6 +29,9 @@ func New(opts ...Option) (*slog.Logger, error) {
 	if c.asyncBufferSize != 0 {
 		return nil, fmt.Errorf("%w: WithAsyncBufferSize is only valid with NewAsync", ErrInvalidConfig)
 	}
+	if c.dropHook != nil {
+		return nil, fmt.Errorf("%w: WithDropHook is only valid with NewAsync", ErrInvalidConfig)
+	}
 
 	dests, err := buildDests(c)
 	if err != nil {

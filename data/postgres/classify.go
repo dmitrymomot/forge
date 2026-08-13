@@ -11,6 +11,7 @@ import (
 const (
 	sqlstateUniqueViolation     = "23505"
 	sqlstateForeignKeyViolation = "23503"
+	sqlstateCheckViolation      = "23514"
 	sqlstateSerializationFail   = "40001"
 	sqlstateDeadlockDetected    = "40P01"
 )
@@ -34,6 +35,13 @@ func IsUniqueViolation(err error) bool {
 // 23503).
 func IsForeignKeyViolation(err error) bool {
 	return sqlState(err) == sqlstateForeignKeyViolation
+}
+
+// IsCheckViolation reports whether err broke a CHECK constraint or a domain
+// constraint (SQLSTATE 23514). A check violation is a rejected value, so it maps to a
+// 422 where a unique violation maps to a 409.
+func IsCheckViolation(err error) bool {
+	return sqlState(err) == sqlstateCheckViolation
 }
 
 // IsNotFound reports whether err is pgx.ErrNoRows — a missing row, not a failure.

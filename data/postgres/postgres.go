@@ -40,34 +40,9 @@ func Open(ctx context.Context, opts ...Option) (*pgxpool.Pool, error) {
 		logger = slog.Default()
 	}
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.URL)
+	poolCfg, err := buildPoolConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse url: %v", ErrConnect, err)
-	}
-
-	// Overlay the serializable Config onto the parsed pool config.
-	if cfg.MaxConns > 0 {
-		poolCfg.MaxConns = cfg.MaxConns
-	}
-	if cfg.MinConns > 0 {
-		poolCfg.MinConns = cfg.MinConns
-	}
-	if cfg.MaxConnLifetime > 0 {
-		poolCfg.MaxConnLifetime = cfg.MaxConnLifetime
-	}
-	if cfg.MaxConnIdleTime > 0 {
-		poolCfg.MaxConnIdleTime = cfg.MaxConnIdleTime
-	}
-	if cfg.HealthCheckPeriod > 0 {
-		poolCfg.HealthCheckPeriod = cfg.HealthCheckPeriod
-	}
-	if cfg.ConnectTimeout > 0 {
-		poolCfg.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
-	}
-
-	// Escape hatch runs last, after the Config overlay.
-	if cfg.poolConfig != nil {
-		cfg.poolConfig(poolCfg)
+		return nil, err
 	}
 
 	pool, err := connectWithRetry(ctx, poolCfg, cfg.RetryAttempts, cfg.RetryInterval, logger)
@@ -87,6 +62,39 @@ func Open(ctx context.Context, opts ...Option) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// buildPoolConfig parses the URL, overlays the serializable Config, runs the
+// WithPoolConfig escape hatch, and installs the id-type registration last so a
+// consumer hook assigned to AfterConnect cannot drop it.
+func buildPoolConfig(cfg config) (*pgxpool.Config, error) {
+	poolCfg, err := pgxpool.ParseConfig(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse url: %v", ErrConnect, err)
+	}
+	if cfg.MaxConns > 0 {
+		poolCfg.MaxConns = cfg.MaxConns
+	}
+	if cfg.MinConns > 0 {
+		poolCfg.MinConns = cfg.MinConns
+	}
+	if cfg.MaxConnLifetime > 0 {
+		poolCfg.MaxConnLifetime = cfg.MaxConnLifetime
+	}
+	if cfg.MaxConnIdleTime > 0 {
+		poolCfg.MaxConnIdleTime = cfg.MaxConnIdleTime
+	}
+	if cfg.HealthCheckPeriod > 0 {
+		poolCfg.HealthCheckPeriod = cfg.HealthCheckPeriod
+	}
+	if cfg.ConnectTimeout > 0 {
+		poolCfg.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
+	}
+	if cfg.poolConfig != nil {
+		cfg.poolConfig(poolCfg)
+	}
+	chainIDTypeRegistration(poolCfg)
+	return poolCfg, nil
 }
 
 // connectWithRetry builds the pool and pings it, retrying on failure with

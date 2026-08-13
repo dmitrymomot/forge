@@ -1,6 +1,8 @@
 package metrics_test
 
 import (
+	"context"
+	"expvar"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -83,5 +85,27 @@ func BenchmarkNoopCounter(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		c.Inc("GET")
+	}
+}
+
+// BenchmarkGaugeFuncCollect measures one pull read, which is what a scrape pays per
+// registered GaugeFunc. The context with a deadline dominates: a push Gauge.Set costs
+// nothing at collection time but needs a source that pushes.
+func BenchmarkGaugeFuncCollect(b *testing.B) {
+	name := "bench_" + b.Name() + "_" + strconv.FormatInt(benchSeq.Add(1), 10)
+	rec := metrics.New(metrics.WithName(name))
+	rec.GaugeFunc("queue_depth", "b.", func(context.Context) (float64, error) { return 42, nil })
+	v := expvar.Get(name)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = v.String()
+	}
+}
+
+func BenchmarkGaugeSetForComparison(b *testing.B) {
+	g := benchRecorder(b).Gauge("queue_depth", "b.")
+	b.ReportAllocs()
+	for b.Loop() {
+		g.Set(42)
 	}
 }

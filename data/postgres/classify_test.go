@@ -24,9 +24,17 @@ func TestIsUniqueViolation(t *testing.T) {
 	assert.False(t, postgres.IsUniqueViolation(nil))
 }
 
+func TestIsCheckViolation(t *testing.T) {
+	assert.True(t, postgres.IsCheckViolation(pgErr("23514")))
+	assert.False(t, postgres.IsCheckViolation(pgErr("23505")))
+	assert.False(t, postgres.IsCheckViolation(errors.New("plain")))
+	assert.False(t, postgres.IsCheckViolation(nil))
+}
+
 func TestIsForeignKeyViolation(t *testing.T) {
 	assert.True(t, postgres.IsForeignKeyViolation(pgErr("23503")))
 	assert.False(t, postgres.IsForeignKeyViolation(pgErr("23505")))
+	assert.False(t, postgres.IsForeignKeyViolation(pgErr("23514")))
 	assert.False(t, postgres.IsForeignKeyViolation(nil))
 }
 
