@@ -3,13 +3,13 @@ package apikey
 import "errors"
 
 var (
-	// ErrNotFound is returned by a Store when no record matches, and by
-	// management operations for other tenants' keys under WithScope (so
+	// ErrNotFound is reported by a load effect when no record matches, and
+	// by management operations for other tenants' keys under WithScope (so
 	// cross-tenant existence cannot be probed).
 	ErrNotFound = errors.New("apikey: record not found")
 
-	// ErrDuplicate is returned by Store.Create when a record with the same
-	// ID or Hash already exists.
+	// ErrDuplicate is reported by a SaveFunc when a record with the same ID
+	// or Hash already exists.
 	ErrDuplicate = errors.New("apikey: duplicate record")
 
 	// ErrMalformedKey rejects credentials failing prefix/length/checksum
@@ -35,4 +35,12 @@ var (
 	// ErrScope fails management operations closed when the WithScope hook
 	// errors or yields an empty tenant.
 	ErrScope = errors.New("apikey: tenant scope unavailable")
+
+	// ErrConfig is reported by New for an invalid option value. Options
+	// accumulate, so New's error may join several.
+	ErrConfig = errors.New("apikey: invalid config")
+
+	// ErrNilEffect rejects an operation called without one of the storage
+	// effects it performs. Only TouchFunc may be nil.
+	ErrNilEffect = errors.New("apikey: nil effect func")
 )

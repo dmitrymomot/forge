@@ -18,7 +18,7 @@ type Manager struct {
 }
 
 // New builds a Manager. It panics on a nil store or a non-positive TTL —
-// wiring bugs caught at startup, like apikey.New's nil-store panic.
+// wiring bugs caught at startup, rather than on the first invitation.
 func New(store Store, opts ...Option) *Manager {
 	if store == nil {
 		panic("invite: nil store")

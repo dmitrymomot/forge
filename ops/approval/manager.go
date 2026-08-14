@@ -23,7 +23,7 @@ type Manager struct {
 //
 // It panics on a nil store, on a Manager with no registered kinds, and on
 // any invalid policy — wiring bugs caught at startup rather than on the
-// first payout, matching apikey.New's nil-store panic.
+// first payout.
 func New(store Store, opts ...Option) *Manager {
 	if store == nil {
 		panic("approval: nil store")
