@@ -62,6 +62,25 @@ func (s *recordSink[T]) waitFlush(t *testing.T) {
 	}
 }
 
+// waitStats polls c.Stats until cond holds. The sink signals a flush before it
+// returns, and the collector tallies the batch only after that return, so an
+// assertion made straight after waitFlush races the tally. want describes the
+// expected stats for the failure message.
+func waitStats[T any](t *testing.T, c *collector.Collector[T], want string, cond func(collector.Stats) bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		st := c.Stats()
+		if cond(st) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stats %+v, want %s", st, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // runCollector starts c.Run in a goroutine and returns a stop func that
 // cancels it and waits for Run to return.
 func runCollector[T any](t *testing.T, c *collector.Collector[T]) (stop func()) {
@@ -166,10 +185,9 @@ func TestFlushBySize(t *testing.T) {
 	if batches[0][0] != 0 || batches[0][1] != 1 || batches[1][0] != 2 || batches[1][1] != 3 {
 		t.Fatalf("batches %v, want ordered [0 1] [2 3]", batches)
 	}
-	st := c.Stats()
-	if st.Added != 4 || st.Flushed != 4 || st.Dropped != 0 || st.Lost != 0 {
-		t.Fatalf("stats %+v", st)
-	}
+	waitStats(t, c, "Added=4 Flushed=4 Dropped=0 Lost=0", func(st collector.Stats) bool {
+		return st.Added == 4 && st.Flushed == 4 && st.Dropped == 0 && st.Lost == 0
+	})
 }
 
 func TestFlushByAge(t *testing.T) {
@@ -310,9 +328,9 @@ func TestSinkErrorLosesBatchAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink.waitFlush(t)
-	if st := c.Stats(); st.Lost != 2 || st.Flushed != 0 {
-		t.Fatalf("stats %+v, want Lost=2 Flushed=0", st)
-	}
+	waitStats(t, c, "Lost=2 Flushed=0", func(st collector.Stats) bool {
+		return st.Lost == 2 && st.Flushed == 0
+	})
 
 	// The flusher keeps running after a sink failure.
 	sink.setErr(nil)
@@ -323,9 +341,9 @@ func TestSinkErrorLosesBatchAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink.waitFlush(t)
-	if st := c.Stats(); st.Lost != 2 || st.Flushed != 2 {
-		t.Fatalf("stats %+v, want Lost=2 Flushed=2", st)
-	}
+	waitStats(t, c, "Lost=2 Flushed=2", func(st collector.Stats) bool {
+		return st.Lost == 2 && st.Flushed == 2
+	})
 }
 
 func TestFlushTimeoutBoundsSink(t *testing.T) {
