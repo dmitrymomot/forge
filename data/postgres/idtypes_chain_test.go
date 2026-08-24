@@ -66,9 +66,11 @@ func TestChainIDTypeRegistration_AlwaysSetsAHook(t *testing.T) {
 // registration has to be chained on after that hook runs, not before it.
 func TestBuildPoolConfig_RegistrationSurvivesTheEscapeHatch(t *testing.T) {
 	var log []string
-	cfg := config{URL: "postgres://u:p@localhost:5432/db"}
-	cfg.poolConfig = func(pc *pgxpool.Config) {
-		pc.AfterConnect = recordingHook(&log, "consumer", nil)
+	cfg := config{
+		URL: "postgres://u:p@localhost:5432/db",
+		poolConfig: func(pc *pgxpool.Config) {
+			pc.AfterConnect = recordingHook(&log, "consumer", nil)
+		},
 	}
 
 	poolCfg, err := buildPoolConfig(cfg)
