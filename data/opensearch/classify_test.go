@@ -20,8 +20,13 @@ func TestIsNotFound(t *testing.T) {
 
 	assert.True(t, forgeos.IsNotFound(structErr))
 	assert.True(t, forgeos.IsNotFound(stringErr))
-	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", structErr)))
-	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", stringErr)))
+
+	// Wrap through an error variable: opensearch-go declares Error() on the value type
+	// but returns the pointer, so vet's %w check flags the pointer even though the
+	// errors.As lookup IsNotFound performs resolves it.
+	var wrappedStruct, wrappedString error = structErr, stringErr
+	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", wrappedStruct)))
+	assert.True(t, forgeos.IsNotFound(fmt.Errorf("setup: %w", wrappedString)))
 
 	// Non-404 statuses and unrelated errors are not not-found.
 	assert.False(t, forgeos.IsNotFound(&osgo.StructError{Status: 500}))

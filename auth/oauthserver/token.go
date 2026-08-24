@@ -124,16 +124,14 @@ func (s *Server) signAccessToken(sub string, cl Client, scope string) (string, t
 	}
 	now := s.clk.Now()
 	claims := accessClaims{
-		Claims: jwt.Claims{
-			Issuer:    s.cfg.Issuer,
-			Subject:   sub,
-			ID:        id.NewULID().String(),
-			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
-		Scope:    scope,
-		ClientID: cl.ID,
-		Tenant:   cl.TenantID,
+		Issuer:    s.cfg.Issuer,
+		Subject:   sub,
+		ID:        id.NewULID().String(),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		Scope:     scope,
+		ClientID:  cl.ID,
+		Tenant:    cl.TenantID,
 	}
 	if s.cfg.Audience != "" {
 		claims.Audience = jwt.Audience{s.cfg.Audience}

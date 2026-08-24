@@ -123,14 +123,12 @@ func TestClaimsEmbedding(t *testing.T) {
 		TenantID string `json:"tid"`
 	}
 	in := access{
-		Claims: jwt.Claims{
-			Issuer:    "https://api.example.com",
-			Subject:   "user-1",
-			Audience:  jwt.Audience{"my-app"},
-			ExpiresAt: jwt.NewNumericDate(time.Unix(1300819380, 0)),
-			ID:        "jti-1",
-		},
-		TenantID: "t-42",
+		Issuer:    "https://api.example.com",
+		Subject:   "user-1",
+		Audience:  jwt.Audience{"my-app"},
+		ExpiresAt: jwt.NewNumericDate(time.Unix(1300819380, 0)),
+		ID:        "jti-1",
+		TenantID:  "t-42",
 	}
 	b, err := json.Marshal(in)
 	if err != nil {

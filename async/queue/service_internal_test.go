@@ -106,7 +106,7 @@ func TestPollOnce_SweepClaimsUnpickedQueueWithBacklog(t *testing.T) {
 
 	fb := &fakeQueueBroker{claim: func(queue string, n int) ([]ClaimedJob, error) {
 		if queue == "cold" {
-			return []ClaimedJob{{Token: "t", Job: Job{ID: "cold-1", Queue: "cold", Type: "test.kind"}}}, nil
+			return []ClaimedJob{{Token: "t", ID: "cold-1", Queue: "cold", Type: "test.kind"}}, nil
 		}
 		return nil, nil // hot: transiently empty this poll
 	}}

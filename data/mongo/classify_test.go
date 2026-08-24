@@ -22,7 +22,7 @@ func TestIsDuplicateKey(t *testing.T) {
 	}
 	bulkExc := mongodriver.BulkWriteException{
 		WriteErrors: []mongodriver.BulkWriteError{
-			{WriteError: mongodriver.WriteError{Code: 11000, Message: "E11000 duplicate key"}},
+			{Code: 11000, Message: "E11000 duplicate key"},
 		},
 	}
 
