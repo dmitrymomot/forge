@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"testing"
@@ -84,6 +85,13 @@ func runServer(t *testing.T, srv *debug.Server) (stop func() error) {
 	}
 }
 
+// drain reads the body to EOF and closes it, so the server-side connection
+// returns to idle and Shutdown can close it instead of waiting out the timeout.
+func drain(resp *http.Response) {
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+}
+
 func waitReady(t *testing.T, url string) *http.Response {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -109,7 +117,7 @@ func TestServerServesOnLoopbackWithoutAuth(t *testing.T) {
 	stop := runServer(t, srv)
 
 	resp := waitReady(t, fmt.Sprintf("http://%s/debug/stats", ln.Addr()))
-	defer func() { _ = resp.Body.Close() }()
+	drain(resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -132,7 +140,7 @@ func TestServerBasicAuthEndToEnd(t *testing.T) {
 
 	url := fmt.Sprintf("http://%s/debug/stats", ln.Addr())
 	resp := waitReady(t, url)
-	_ = resp.Body.Close()
+	drain(resp)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d, want 401", resp.StatusCode)
 	}
@@ -146,7 +154,7 @@ func TestServerBasicAuthEndToEnd(t *testing.T) {
 	if err != nil || authed == nil {
 		t.Fatalf("authenticated request: %v", err)
 	}
-	defer func() { _ = authed.Body.Close() }()
+	drain(authed)
 	if authed.StatusCode != http.StatusOK {
 		t.Fatalf("authenticated status = %d, want 200", authed.StatusCode)
 	}
@@ -164,7 +172,7 @@ func TestServerWithoutAuthAllowsNonLoopback(t *testing.T) {
 	srv := debug.NewServer(debug.WithListener(ln), debug.WithoutAuth())
 	stop := runServer(t, srv)
 	resp := waitReady(t, fmt.Sprintf("http://127.0.0.1:%d/debug/stats", ln.Addr().(*net.TCPAddr).Port))
-	_ = resp.Body.Close()
+	drain(resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
